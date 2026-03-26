@@ -73,5 +73,7 @@ Workflow por fases: `lead_intake -> discovery -> build -> review -> qa -> lead_c
 - Variables de entorno en `.env` (copiar de `.env.example`). Nunca commitear `.env` ni API keys.
 - Templates de configuracion usan sufijo `.example` (ej. `adapters.example.json`).
 - Estado de runtime va en directorios `runtime/` o `runtime_<entorno>/`.
-- Entorno de desarrollo: Windows 11, shell bash, venv en `venv/`.
-- Raiz de herramientas compartidas: `C:\Users\Max\Antigravity Projects`.
+- Entorno de desarrollo: Windows 11, shell bash, venv en `venv/` (Python 3.12).
+- Raiz de herramientas compartidas: `C:\Users\she__\Documents\Antigravity Projects`.
+- Activar venv: `source venv/Scripts/activate` (bash). Tests: `venv/Scripts/python.exe -m pytest tests/ -q --tb=short`.
+- Tests actuales: **271 passing** (2026-03-26). Antes de cualquier cambio verificar que pasan.
