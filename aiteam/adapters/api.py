@@ -63,7 +63,13 @@ class ApiAdapter(ModelAdapter):
             return live
 
         input_tokens = max(1, len(prompt) // 4)
-        content = f"[{self.provider}:{self.model}:api] Processed prompt ({len(prompt)} chars)."
+        first_line = prompt.splitlines()[0][:80] if prompt.strip() else "tarea"
+        content = (
+            f"[SIMULADO | {self.provider}:{self.model}:api] "
+            f"Respuesta mock para: {first_line!r}. "
+            f"Para llamadas reales, configura AITEAM_ENABLE_LIVE_API=1 "
+            f"y {self.provider.upper()}_API_KEY en .env."
+        )
         return AdapterResponse(
             success=True,
             content=content,

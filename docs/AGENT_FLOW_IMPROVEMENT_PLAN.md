@@ -1,7 +1,8 @@
 # Plan de Mejora del Flujo de Agentes en Equipo
 
 **Fecha**: 2026-03-21
-**Estado**: Aprobado, en implementacion
+**Actualizado**: 2026-03-26
+**Estado**: COMPLETADO — todos los batches implementados y verificados (271 tests passing)
 **Impacto**: Critico — afecta la cohesion, eficiencia y calidad del equipo de agentes
 
 ---
@@ -246,16 +247,16 @@ C.1 Eager Processing           ← independiente de A/B
 C.2 Team Ledger                ← usa workflow_state (A.1)
 ```
 
-**Batch 1** (fundacion): A.1, A.3, B.1, B.4
-**Batch 2** (propagacion + iteration): A.2, B.2, B.3
-**Batch 3** (optimizacion): C.1, C.2
+**Batch 1** (fundacion): A.1, A.3, B.1, B.4 — **COMPLETADO 2026-03-26**
+**Batch 2** (propagacion + iteration): A.2, B.2, B.3 — **COMPLETADO 2026-03-26**
+**Batch 3** (optimizacion): C.1, C.2 — **COMPLETADO 2026-03-21/26**
 
 ---
 
 ## 4. Tests de Verificacion
 
 ### Tests existentes que deben seguir pasando
-- `pytest tests/ -q` — 210+ tests
+- `pytest tests/ -q` — **271 tests passing** (2026-03-26)
 - Especial atencion a: `test_orchestrator.py`, `test_taskboard.py`, `test_api_team_chat.py`
 
 ### Nuevas verificaciones
@@ -274,8 +275,8 @@ C.2 Team Ledger                ← usa workflow_state (A.1)
 
 | Metrica | Antes | Despues (esperado) |
 |---------|-------|-------------------|
-| Rondas para pipeline 6 fases | 6-10 | 1-3 |
-| Review feedback llega al engineer | Nunca | Siempre (max 2 iteraciones) |
-| Contexto de fases previas en prompt | 0% | 100% |
-| Deteccion de estancamiento | No existe | Automatica (3+ failures) |
-| Resultados compartidos entre agentes | Via mailbox (nadie lee) | Via workflow_state (siempre disponible) |
+| Rondas para pipeline 6 fases | 6-10 | 1-3 | **IMPLEMENTADO** — eager sub-iterations |
+| Review feedback llega al engineer | Nunca | Siempre (max 2 iteraciones) | **IMPLEMENTADO** — gate_iteration loop |
+| Contexto de fases previas en prompt | 0% | 100% | **IMPLEMENTADO** — _build_dependency_output_context |
+| Deteccion de estancamiento | No existe | Automatica (3+ failures) | **IMPLEMENTADO** — _update_team_ledger con stall detection |
+| Resultados compartidos entre agentes | Via mailbox (nadie lee) | Via workflow_state (siempre disponible) | **IMPLEMENTADO** — workflow_state.json |

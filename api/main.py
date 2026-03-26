@@ -1256,11 +1256,15 @@ def _is_placeholder_output_text(value: str) -> bool:
     text = str(value or "").strip().lower()
     if not text:
         return False
+    # Formato legacy: "[provider:model:api] Processed prompt ..."
     if "processed prompt" in text:
+        return True
+    # Formato actual: "[SIMULADO | provider:model] Respuesta mock ..."
+    if "simulado |" in text or "respuesta mock" in text:
         return True
     patterns = [
         r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]",
-        r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]\s*processed",
+        r"^\[simulado\s*\|",
     ]
     return any(re.search(pattern, text) is not None for pattern in patterns)
 
@@ -1365,7 +1369,7 @@ def _compose_user_facing_run_summary(
     placeholder_outputs: int,
 ) -> str:
     decision_text = str(decision_compact or "").strip()
-    if not decision_text or "Processed prompt" in decision_text:
+    if not decision_text or "Processed prompt" in decision_text or "SIMULADO |" in decision_text:
         decision_text = (
             "Se priorizo completar el slice de mayor impacto de esta ronda y cerrar con review + QA."
         )

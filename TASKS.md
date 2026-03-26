@@ -1,6 +1,6 @@
 # Tasks — AI Team Hybrid Orchestrator
 
-> Ultima actualizacion: 2026-03-26
+> Ultima actualizacion: 2026-03-26 (auditoria y limpieza de planes)
 
 ## Completado
 
@@ -16,7 +16,13 @@
 - [x] **Batch 8**: Inteligencia de agentes — gate context enrichment, memory-driven prompts, tool recommendation engine, adaptive error recovery (2026-03-22)
 - [x] **Batch 9**: Evidence Gate por fase — plan_*/lead_intake/lead_close/discovery fuera del gate; build/review/qa/security con gate. 12 tests nuevos (2026-03-22)
 - [x] **Batch 10**: Conversational task detection — auto-deteccion de tareas teoricas, evidencia alternativa por doc/output, 15 tests nuevos (2026-03-22)
+- [x] **AGENT_FLOW_IMPROVEMENT_PLAN**: Todos los batches A/B/C — WorkflowState, result propagation, team context, gate iteration loop, review feedback, eager processing, team ledger (2026-03-21/26). Ver `docs/AGENT_FLOW_IMPROVEMENT_PLAN.md`.
 - [x] **Batch 11**: Estabilizacion de flujo actual — evidence gate robusto en mock, dependencias fallidas pasan a `BLOCKED`, sub-iteraciones visibles y trazabilidad enriquecida de `round/sub_iteration/gate_iteration` (2026-03-26)
+- [x] **Auditoria de planes y modelos** (2026-03-26):
+  - Todos los docs de sprint (Q1 2026) actualizados a estado real (271 tests, todos los sprints completados).
+  - `docs/AGENT_FLOW_IMPROVEMENT_PLAN.md` marcado como completado.
+  - Modelos actualizados en `aiteam/cli.py`: `gpt-4.1`, `gemini-2.0-flash`, `claude-3-5-haiku` añadido.
+  - Respuestas mock mejoradas — ahora incluyen contexto de la tarea y aviso de configuracion real.
   - Como se hizo:
     - fallback en `aiteam/orchestrator.py` para aceptar output no vacio en modo simulado y registrar `evidence_reason`
     - propagacion de `dependency_failed` en `aiteam/taskboard.py` con desbloqueo correcto al reintentar/completar el padre

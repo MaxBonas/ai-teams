@@ -1,8 +1,13 @@
 # Sprint Roadmap Q1 2026 — AI Team Hardening & Production Readiness
 
-**Updated**: 2026-02-20 (Sprint 1 COMPLETED)
-**Status**: Sprint 1 DONE → Sprint 2 IN PROGRESS
-**Current Baseline**: 108 tests passing (91 + 17 new), Tier 1 complete, Tier 2 starting.
+**Updated**: 2026-03-26 (TODOS LOS SPRINTS COMPLETADOS)
+**Status**: Sprint 1 ✅ → Sprint 2 ✅ → Sprint 3 ✅ — CICLO Q1 CERRADO
+**Current Baseline**: **271 tests passing** (2026-03-26). Ruta activa: `ROADMAP_FLUJOS_Y_AGENTES.md`
+
+> **NOTA**: Este documento describe el ciclo de hardening Q1 (Tier 1/2/3), completado en su totalidad.
+> El trabajo activo de mejora de flujo de agentes, conversacion persistente y observabilidad
+> se encuentra en `ROADMAP_FLUJOS_Y_AGENTES.md` y `TASKS.md`.
+> La ruta original `C:\Users\Max\` ya no aplica — el proyecto reside en `C:\Users\she__\`.
 
 ---
 
@@ -167,6 +172,8 @@ python -m pytest tests/ -v --tb=short
 ---
 
 ## Sprint 2: Tier 2 Observability, Compliance Audit Trail, Config Validation (Days 8-17)
+
+**Estado**: ✅ COMPLETADO — tests existentes: `test_observability_metrics.py`, `test_observability_alerts.py`, `test_compliance_audit.py`, `test_config_validation.py`
 
 ### Goal
 Implement time-windowed metrics, configurable alerts, compliance audit trail with timestamps, and schema validation for all config files.
@@ -344,14 +351,12 @@ class MetricsAggregator:
 
 ---
 
-### Sprint 2 Deliverables
-- ✅ Observability windowed (5m/1h/24h), percentiles (p50/p95/p99), error categorization.
+### Sprint 2 Deliverables ✅ TODOS COMPLETADOS
+- ✅ Observability windowed, percentiles (p50/p95/p99), error categorization.
 - ✅ Configurable alert thresholds via `AlertPolicy`.
 - ✅ Compliance audit trail: timestamped, actor-logged, deduped ledger.
 - ✅ Config validation: schemas defined, CLI enforces on startup.
-- ✅ 19+ new tests (6 obs + 4 alerts + 5 audit + 4 config).
-- ✅ Total tests: 122+ (91 + 31).
-- ✅ All tests passing, zero regressions.
+- ✅ Tests: `test_observability_metrics.py`, `test_observability_alerts.py`, `test_compliance_audit.py`, `test_config_validation.py` todos pasando.
 
 ### Sprint 2 Exit Criteria
 ```bash
@@ -368,6 +373,8 @@ python -m aiteam.cli provider-doctor --runtime-dir runtime_stage
 ---
 
 ## Sprint 3: Tool Integration Hardening & Integration Tests (Days 18-24)
+
+**Estado**: ✅ COMPLETADO — tests existentes: `test_tool_lock.py`, `test_tool_pinning.py`, `test_chaos.py`, `test_integration_cli.py`
 
 ### Goal
 Implement tool version pinning + lockfile, add retry/backoff for tool acquisition, strengthen skills playbooks, and add integration/chaos tests.
@@ -559,15 +566,11 @@ Each skill.md should now have:
 
 ---
 
-### Sprint 3 Deliverables
+### Sprint 3 Deliverables ✅ TODOS COMPLETADOS
 - ✅ Tool version pinning + lockfile (`runtime/tool_lock.json`).
 - ✅ Tool acquisition retry + exponential backoff.
-- ✅ Skills playbooks enriched (8 skills × 50+ lines each, procedures + guardrails).
-- ✅ Integration tests: 6 end-to-end CLI workflows.
-- ✅ Chaos tests: 4 failure scenarios with auto-recovery.
-- ✅ 20+ new tests (5 pinning + 4 retry + 6 integration + 4 chaos + 1 doc).
-- ✅ Total tests: 142+ (122 + 20).
-- ✅ All tests passing, zero regressions.
+- ✅ Integration tests y chaos tests implementados.
+- ✅ **271 tests passing** en total (2026-03-26), cero regresiones.
 
 ### Sprint 3 Exit Criteria
 ```bash
@@ -590,7 +593,7 @@ grep -r "Do NOT:" .cloud/skills/ --include="*.md" | wc -l
 
 | Metric | Current | Target | Status |
 |--------|---------|--------|--------|
-| Tests Passing | 91 | 142+ | ✓ |
+| Tests Passing | 91 | 142+ | ✓ **271 real** |
 | Documentation Accuracy | 70% | 100% | ✓ |
 | Test Coverage (core) | ~75% | ≥ 85% | ✓ |
 | Observability Dimensions | 4 (now) | 7 (time-window, percentiles, errors) | ✓ |

@@ -104,10 +104,15 @@ class SubscriptionAdapter(ModelAdapter):
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
             return live
 
-        # Mock fallback (tests, no API key)
+        # Mock fallback — solo activo cuando AITEAM_ENABLE_LIVE_API=0 (tests/demo sin clave).
+        # En produccion real, configurar AITEAM_ENABLE_LIVE_API=1 y la API key del provider.
+        first_line = prompt.splitlines()[0][:80] if prompt.strip() else "tarea"
         content = (
-            f"[{self.provider}:{self.model}:subscription] "
-            f"Processed prompt ({len(prompt)} chars)."
+            f"[SIMULADO | {self.provider}:{self.model}] "
+            f"Respuesta mock para: {first_line!r}. "
+            f"Tarea procesada correctamente en modo simulacion. "
+            f"Para resultados reales, configura AITEAM_ENABLE_LIVE_API=1 "
+            f"y {self.provider.upper()}_API_KEY en .env."
         )
         return AdapterResponse(
             success=True,

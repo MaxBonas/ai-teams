@@ -66,24 +66,40 @@ def build_default_orchestrator(
     event_logger = EventLogger(runtime_dir)
 
     adapters = [
+        # ── Canal Subscription (Pro-first) ─────────────────────────────────
+        # Prioridad maxima: usan la suscripcion del usuario sin coste extra por token.
+        # Requieren AITEAM_ENABLE_LIVE_API=1 + clave de cada provider en .env.
         SubscriptionAdapter(
             name="openai_pro",
             provider="openai",
-            model="gpt-4o",
-            capabilities={"reasoning", "coding", "review"},
+            model="gpt-4.1",               # gpt-4.1 (2025) — mejor relacion calidad/coste
+            capabilities={"reasoning", "coding", "review", "analysis"},
+            routing_priority=10,
         ),
         SubscriptionAdapter(
             name="gemini_pro",
             provider="google",
-            model="gemini-1.5-pro",
+            model="gemini-2.0-flash",       # 2.0 Flash — rapido, multimodal, sin coste extra en Pro
             capabilities={"analysis", "summarization", "reasoning", "coding"},
+            routing_priority=20,
         ),
         SubscriptionAdapter(
             name="claude_pro",
             provider="anthropic",
-            model="claude-3-5-sonnet-20241022",
-            capabilities={"reasoning", "coding", "analysis"},
+            model="claude-3-5-sonnet-20241022",  # Sonnet — mejor para coding y razonamiento complejo
+            capabilities={"reasoning", "coding", "analysis", "review"},
+            routing_priority=30,
         ),
+        SubscriptionAdapter(
+            name="claude_haiku",
+            provider="anthropic",
+            model="claude-3-5-haiku-20241022",   # Haiku — rapido y barato para tasks simples
+            capabilities={"reasoning", "coding", "analysis"},
+            routing_priority=40,
+            cost_tier=0,
+        ),
+        # ── Canal API (fallback presupuestado) ─────────────────────────────
+        # Activado cuando subscription falla o se agota. Consume cuota de presupuesto.
         ApiAdapter(
             name="openai_api_mini",
             provider="openai",
@@ -92,25 +108,18 @@ def build_default_orchestrator(
             cost_tier=1,
         ),
         ApiAdapter(
-            name="openai_api_reasoning",
-            provider="openai",
-            model="gpt-4o-mini",
-            capabilities={"reasoning", "coding", "analysis", "review"},
-            cost_tier=1,
-        ),
-        ApiAdapter(
-            name="openai_api_multimodal",
+            name="openai_api_fast",
             provider="openai",
             model="gpt-4o-mini",
             capabilities={"reasoning", "analysis", "multimodal", "tool_calling"},
-            cost_tier=2,
+            cost_tier=1,
         ),
         ApiAdapter(
-            name="groq_api_reasoning",
+            name="groq_api_fast",
             provider="groq",
-            model="llama-3.3-70b-versatile",
+            model="llama-3.3-70b-versatile",  # Llama 3.3 70B — fallback gratuito ultra-rapido
             capabilities={"reasoning", "coding", "analysis", "review"},
-            cost_tier=1,
+            cost_tier=0,
             require_key=True,
         ),
     ]

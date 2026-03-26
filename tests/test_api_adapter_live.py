@@ -27,7 +27,8 @@ class ApiAdapterLiveTests(unittest.TestCase):
         with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
             response = adapter.invoke("hello")
         self.assertTrue(response.success)
-        self.assertIn("Processed prompt", response.content)
+        # El mock incluye el marcador [SIMULADO | ...] para indicar que es una respuesta simulada
+        self.assertIn("SIMULADO", response.content)
 
     def test_api_adapter_calls_openai_compatible_endpoint_in_live_mode(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
