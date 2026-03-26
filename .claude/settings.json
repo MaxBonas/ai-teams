@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/Scripts/python.exe*)",
+      "Bash(venv/Scripts/pip*)",
+      "Bash(venv/Scripts/pip.exe*)",
+      "Bash(source venv/Scripts/activate*)",
+      "Bash(python -m pytest*)",
+      "Bash(pytest*)",
+      "Bash(py -*)",
+      "Bash(git *)",
+      "Bash(npm run*)",
+      "Bash(npx*)",
+      "Bash(node*)",
+      "Bash(curl -s \"http://localhost:*)",
+      "Bash(wc -l*)",
+      "Bash(grep *)",
+      "Bash(ls *)",
+      "Bash(winget install*)",
+      "Bash(where *)",
+      "Bash(gh *)",
+      "Bash(xargs grep*)",
+      "Bash(python -c*)",
+      "mcp__Claude_Preview__preview_start",
+      "mcp__antigravity-lan__list_nodes",
+      "mcp__antigravity-lan__syncthing_status",
+      "mcp__antigravity-lan__get_status",
+      "mcp__antigravity-lan__run_command",
+      "mcp__antigravity-lan__list_files",
+      "mcp__antigravity-lan__read_file"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "venv/Scripts/python.exe -m pytest tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x 2>&1 | tail -6"
+          }
+        ]
+      }
+    ]
+  }
+}

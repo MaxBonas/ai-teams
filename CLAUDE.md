@@ -74,6 +74,50 @@ Workflow por fases: `lead_intake -> discovery -> build -> review -> qa -> lead_c
 - Templates de configuracion usan sufijo `.example` (ej. `adapters.example.json`).
 - Estado de runtime va en directorios `runtime/` o `runtime_<entorno>/`.
 - Entorno de desarrollo: Windows 11, shell bash, venv en `venv/` (Python 3.12).
-- Raiz de herramientas compartidas: `C:\Users\she__\Documents\Antigravity Projects`.
+- Raiz base de proyectos: `C:\Users\<usuario>\Documents\Antigravity Projects\` (varia por maquina).
 - Activar venv: `source venv/Scripts/activate` (bash). Tests: `venv/Scripts/python.exe -m pytest tests/ -q --tb=short`.
-- Tests actuales: **271 passing** (2026-03-26). Antes de cualquier cambio verificar que pasan.
+- Tests actuales: **271 passing** (2026-03-26). Antes de cualquier cambio, verificar que pasan.
+- Smoke test rapido (2s): `venv/Scripts/python.exe -m pytest tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x`
+
+## Infraestructura — dos maquinas
+
+Este proyecto se desarrolla en un setup de dos maquinas en red local.
+
+| Maquina | Rol | Notas |
+|---------|-----|-------|
+| **max-gamingpc** | Principal (desarrollo activo) | Windows 11, usuario activo: `she__` |
+| **ORCH-01** (DESKTOP-SR6CQA1) | Secundaria (orquestacion) | Online en LAN, acceso via RustDesk |
+
+**Syncthing** sincroniza la carpeta `Antigravity Projects` entre ambas maquinas.
+- **NUNCA sincronizar**: `venv/`, `node_modules/`, `__pycache__/`, `.git/`, `runtime/`
+- Si un venv fue sincronizado desde otra maquina, los paths internos en `pyvenv.cfg` estan rotos.
+  Recrear siempre con: `py -3.12 -m venv venv --clear && venv/Scripts/pip install -r requirements.txt`
+- **GitHub** (`github.com/MaxBonas/ai-teams`, privado) es la fuente de verdad para codigo.
+
+**Red**: NordVPN en max-gamingpc puede interferir con conexiones LAN directas (RustDesk usa UDP).
+
+## Diagnostico antes de cualquier fix
+
+**Regla: listar 3 causas probables ANTES de tocar nada. Arreglar de una en una y verificar.**
+
+### MCP servers que no arrancan — orden obligatorio
+
+1. **Env vars** — Claude Desktop en Windows no hereda el PATH del shell. Verificar primero.
+2. **Venv integridad** — ¿existe local? ¿`pyvenv.cfg` apunta a esta maquina?
+3. **Paths con espacios** — `Antigravity Projects` tiene un espacio; usar comillas siempre.
+4. **Puerto/protocolo** — verificar puerto correcto y TCP vs UDP antes de tocar firewall.
+5. Solo si 1-4 estan OK: investigar DLL / pywin32. Usar skill `/fix-mcp`.
+
+### Problemas de red / conectividad — orden obligatorio
+
+1. Verificar si **NordVPN esta activo** — puede bloquear trafico LAN directo.
+2. Verificar **protocolo correcto** (RustDesk = UDP, no TCP).
+3. Verificar **puerto correcto** antes de modificar reglas de firewall.
+4. Solo entonces: revisar reglas de firewall.
+
+### Python / venv en Windows
+
+- Multiples versiones instaladas. Usar siempre `py -3.12` o el venv del proyecto.
+- En bash (Git Bash): paths con `/c/Users/...` no con `C:\Users\...`.
+- Comillas obligatorias en paths con espacios: `"/c/Users/she__/Documents/Antigravity Projects/..."`.
+- `UnicodeDecodeError cp1252` en subprocesos externos: ignorar, es un warning del SO, no del codigo.
