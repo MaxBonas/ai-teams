@@ -6,7 +6,7 @@ import json
 import urllib.error
 import urllib.request
 
-from aiteam.adapters.base import ModelAdapter
+from aiteam.adapters.base import ModelAdapter, messages_to_prompt, normalize_messages
 from aiteam.types import AdapterResponse, ChannelType
 
 
@@ -55,15 +55,21 @@ class ApiAdapter(ModelAdapter):
         key_name = f"{self.provider.upper()}_API_KEY"
         return bool(os.getenv(key_name))
 
-    def invoke(self, prompt: str) -> AdapterResponse:
+    def invoke(
+        self, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> AdapterResponse:
         start = time.time()
+        normalized_messages = normalize_messages(messages, prompt)
+        prompt_text = messages_to_prompt(messages, prompt)
         if self._live_api_enabled():
-            live = self._invoke_live(prompt=prompt)
+            live = self._invoke_live(prompt=prompt_text, messages=normalized_messages)
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
             return live
 
-        input_tokens = max(1, len(prompt) // 4)
-        first_line = prompt.splitlines()[0][:80] if prompt.strip() else "tarea"
+        input_tokens = max(1, len(prompt_text) // 4)
+        first_line = (
+            prompt_text.splitlines()[0][:80] if prompt_text.strip() else "tarea"
+        )
         content = (
             f"[SIMULADO | {self.provider}:{self.model}:api] "
             f"Respuesta mock para: {first_line!r}. "
@@ -84,22 +90,26 @@ class ApiAdapter(ModelAdapter):
         raw = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower()
         return raw in {"1", "true", "yes", "on"}
 
-    def _invoke_live(self, prompt: str) -> AdapterResponse:
+    def _invoke_live(
+        self, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> AdapterResponse:
         provider = self.provider.strip().lower()
         if provider == "openai":
             return self._invoke_openai_compatible(
                 url="https://api.openai.com/v1/chat/completions",
                 api_key_env="OPENAI_API_KEY",
                 prompt=prompt,
+                messages=messages,
             )
         if provider == "groq":
             return self._invoke_openai_compatible(
                 url="https://api.groq.com/openai/v1/chat/completions",
                 api_key_env="GROQ_API_KEY",
                 prompt=prompt,
+                messages=messages,
             )
         if provider == "anthropic":
-            return self._invoke_anthropic(prompt=prompt)
+            return self._invoke_anthropic(prompt=prompt, messages=messages)
         return AdapterResponse(
             success=False,
             content="",
@@ -109,20 +119,25 @@ class ApiAdapter(ModelAdapter):
             error=f"live_api_not_supported_for_provider:{provider}",
         )
 
-    def _invoke_anthropic(self, *, prompt: str) -> AdapterResponse:
+    def _invoke_anthropic(
+        self, *, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> AdapterResponse:
         """Invoca Anthropic Messages API."""
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
             return AdapterResponse(
-                success=False, content="", latency_ms=0,
-                input_tokens=max(1, len(prompt) // 4), output_tokens=0,
+                success=False,
+                content="",
+                latency_ms=0,
+                input_tokens=max(1, len(prompt) // 4),
+                output_tokens=0,
                 error="missing_api_key:ANTHROPIC_API_KEY",
             )
 
         body = {
             "model": self.model,
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": normalize_messages(messages, prompt),
         }
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {
@@ -132,7 +147,9 @@ class ApiAdapter(ModelAdapter):
         }
         request = urllib.request.Request(
             "https://api.anthropic.com/v1/messages",
-            data=payload, headers=headers, method="POST",
+            data=payload,
+            headers=headers,
+            method="POST",
         )
         started = time.time()
         try:
@@ -140,24 +157,33 @@ class ApiAdapter(ModelAdapter):
                 raw = response.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as exc:
             return AdapterResponse(
-                success=False, content="", error=f"http_error:{exc.code}",
+                success=False,
+                content="",
+                error=f"http_error:{exc.code}",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=max(1, len(prompt) // 4), output_tokens=0,
+                input_tokens=max(1, len(prompt) // 4),
+                output_tokens=0,
             )
         except urllib.error.URLError as exc:
             return AdapterResponse(
-                success=False, content="", error=f"connection_error:{exc.reason}",
+                success=False,
+                content="",
+                error=f"connection_error:{exc.reason}",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=max(1, len(prompt) // 4), output_tokens=0,
+                input_tokens=max(1, len(prompt) // 4),
+                output_tokens=0,
             )
 
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
             return AdapterResponse(
-                success=False, content="", error="invalid_json_response",
+                success=False,
+                content="",
+                error="invalid_json_response",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=max(1, len(prompt) // 4), output_tokens=0,
+                input_tokens=max(1, len(prompt) // 4),
+                output_tokens=0,
             )
 
         content_blocks = parsed.get("content", [])
@@ -171,21 +197,36 @@ class ApiAdapter(ModelAdapter):
         usage = parsed.get("usage", {})
         usage_dict = usage if isinstance(usage, dict) else {}
         input_tokens = int(usage_dict.get("input_tokens", max(1, len(prompt) // 4)))
-        output_tokens = int(usage_dict.get("output_tokens", max(1, len(content) // 4 if content else 1)))
+        output_tokens = int(
+            usage_dict.get("output_tokens", max(1, len(content) // 4 if content else 1))
+        )
 
         if not content:
             return AdapterResponse(
-                success=False, content="", error="empty_response_content",
+                success=False,
+                content="",
+                error="empty_response_content",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens, output_tokens=output_tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
         return AdapterResponse(
-            success=True, content=content, error=None,
+            success=True,
+            content=content,
+            error=None,
             latency_ms=int((time.time() - started) * 1000),
-            input_tokens=input_tokens, output_tokens=output_tokens,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
-    def _invoke_openai_compatible(self, *, url: str, api_key_env: str, prompt: str) -> AdapterResponse:
+    def _invoke_openai_compatible(
+        self,
+        *,
+        url: str,
+        api_key_env: str,
+        prompt: str,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AdapterResponse:
         api_key = os.getenv(api_key_env, "").strip()
         if not api_key:
             return AdapterResponse(
@@ -199,12 +240,7 @@ class ApiAdapter(ModelAdapter):
 
         body = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
+            "messages": normalize_messages(messages, prompt),
             "temperature": 0.2,
         }
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
@@ -212,7 +248,9 @@ class ApiAdapter(ModelAdapter):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
-        request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        request = urllib.request.Request(
+            url, data=payload, headers=headers, method="POST"
+        )
         started = time.time()
         try:
             with urllib.request.urlopen(request, timeout=45) as response:
@@ -269,8 +307,16 @@ class ApiAdapter(ModelAdapter):
 
         usage = parsed.get("usage", {}) if isinstance(parsed, dict) else {}
         usage_dict = usage if isinstance(usage, dict) else {}
-        input_tokens = int(usage_dict.get("prompt_tokens", max(1, len(prompt) // 4)) or max(1, len(prompt) // 4))
-        output_tokens = int(usage_dict.get("completion_tokens", max(1, len(content) // 4 if content else 1)) or 1)
+        input_tokens = int(
+            usage_dict.get("prompt_tokens", max(1, len(prompt) // 4))
+            or max(1, len(prompt) // 4)
+        )
+        output_tokens = int(
+            usage_dict.get(
+                "completion_tokens", max(1, len(content) // 4 if content else 1)
+            )
+            or 1
+        )
 
         if not content:
             return AdapterResponse(

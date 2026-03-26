@@ -29,7 +29,9 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 payload = response.json()
                 self.assertEqual(payload.get("role"), "team_lead")
-                self.assertTrue(str(payload.get("lead_task_id", "")).endswith("::lead_intake"))
+                self.assertTrue(
+                    str(payload.get("lead_task_id", "")).endswith("::lead_intake")
+                )
                 self.assertGreaterEqual(len(payload.get("delegated_task_ids", [])), 4)
                 phase_task_ids = payload.get("phase_task_ids", {})
                 self.assertIn("lead_intake", phase_task_ids)
@@ -40,11 +42,19 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertLessEqual(int(payload.get("productivity_score", 0)), 100)
                 self.assertGreaterEqual(int(payload.get("reasoning_score", 0)), 0)
                 self.assertLessEqual(int(payload.get("reasoning_score", 0)), 100)
-                self.assertIn(str(payload.get("productivity_status", "")), {"weak", "moderate", "strong"})
-                self.assertIn(str(payload.get("execution_mode", "")), {"simulated", "hybrid", "live"})
+                self.assertIn(
+                    str(payload.get("productivity_status", "")),
+                    {"weak", "moderate", "strong"},
+                )
+                self.assertIn(
+                    str(payload.get("execution_mode", "")),
+                    {"simulated", "hybrid", "live"},
+                )
                 self.assertGreaterEqual(int(payload.get("placeholder_outputs", 0)), 0)
                 self.assertTrue(isinstance(payload.get("evidence_gate_applied"), bool))
-                self.assertTrue(isinstance(payload.get("evidence_gate_failures", []), list))
+                self.assertTrue(
+                    isinstance(payload.get("evidence_gate_failures", []), list)
+                )
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -79,7 +89,10 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertTrue(mailbox_file.exists())
                 mailbox_text = mailbox_file.read_text(encoding="utf-8")
                 self.assertIn('"sender": "user"', mailbox_text)
-                self.assertIn('"body": "Plan architecture for a new project and then implement core module"', mailbox_text)
+                self.assertIn(
+                    '"body": "Plan architecture for a new project and then implement core module"',
+                    mailbox_text,
+                )
                 self.assertIn('"sender": "team_lead"', mailbox_text)
                 self.assertIn('"recipient": "user"', mailbox_text)
                 self.assertIn("Resumen del Team Lead para ti:", mailbox_text)
@@ -88,9 +101,15 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertTrue(events_file.exists())
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"event_type": "user_input"', events_text)
-                self.assertIn('"event_type": "chat_execution_mode_assessed"', events_text)
+                self.assertIn(
+                    '"event_type": "chat_execution_mode_assessed"', events_text
+                )
                 self.assertIn('"event_type": "routing_decision"', events_text)
-                event_rows = [json.loads(line) for line in events_text.splitlines() if line.strip()]
+                event_rows = [
+                    json.loads(line)
+                    for line in events_text.splitlines()
+                    if line.strip()
+                ]
                 routing_rows = [
                     row
                     for row in event_rows
@@ -100,7 +119,9 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertTrue(
                     all(
                         isinstance(row.get("payload", {}), dict)
-                        and str(row.get("payload", {}).get("task_id", "")).startswith("CHAT-")
+                        and str(row.get("payload", {}).get("task_id", "")).startswith(
+                            "CHAT-"
+                        )
                         for row in routing_rows
                     )
                 )
@@ -131,23 +152,41 @@ class APITeamChatTests(unittest.TestCase):
                 state_payload = state.json()
                 lead_summary = state_payload.get("last_lead_user_summary", {})
                 self.assertEqual(str(lead_summary.get("task_id", "")), task_id)
-                self.assertIn("Resumen del Team Lead para ti", str(lead_summary.get("body", "")))
+                self.assertIn(
+                    "Resumen del Team Lead para ti", str(lead_summary.get("body", ""))
+                )
                 last_chat = state_payload.get("last_chat_run", {})
-                self.assertIn(str(last_chat.get("execution_mode", "")), {"unknown", "simulated", "hybrid", "live"})
+                self.assertIn(
+                    str(last_chat.get("execution_mode", "")),
+                    {"unknown", "simulated", "hybrid", "live"},
+                )
                 self.assertGreaterEqual(int(last_chat.get("placeholder_outputs", 0)), 0)
-                self.assertTrue(isinstance(last_chat.get("successful_check_count", 0), int))
-                self.assertTrue(isinstance(last_chat.get("live_mode_required", False), bool))
-                self.assertTrue(isinstance(last_chat.get("live_mode_rejected", False), bool))
+                self.assertTrue(
+                    isinstance(last_chat.get("successful_check_count", 0), int)
+                )
+                self.assertTrue(
+                    isinstance(last_chat.get("live_mode_required", False), bool)
+                )
+                self.assertTrue(
+                    isinstance(last_chat.get("live_mode_rejected", False), bool)
+                )
 
                 conv = client.get("/api/aiteam/conversations?limit=120")
                 self.assertEqual(conv.status_code, 200)
                 conv_payload = conv.json()
                 items = conv_payload.get("items", [])
                 conv_last = conv_payload.get("last_chat_run", {})
-                self.assertIn(str(conv_last.get("execution_mode", "")), {"unknown", "simulated", "hybrid", "live"})
+                self.assertIn(
+                    str(conv_last.get("execution_mode", "")),
+                    {"unknown", "simulated", "hybrid", "live"},
+                )
                 self.assertGreaterEqual(int(conv_last.get("placeholder_outputs", 0)), 0)
-                self.assertTrue(isinstance(conv_last.get("successful_check_count", 0), int))
-                self.assertTrue(isinstance(conv_last.get("live_mode_required", False), bool))
+                self.assertTrue(
+                    isinstance(conv_last.get("successful_check_count", 0), int)
+                )
+                self.assertTrue(
+                    isinstance(conv_last.get("live_mode_required", False), bool)
+                )
                 matching = [
                     row
                     for row in items
@@ -156,7 +195,9 @@ class APITeamChatTests(unittest.TestCase):
                     and str(row.get("recipient", "")).lower() == "user"
                 ]
                 self.assertGreaterEqual(len(matching), 1)
-                self.assertIn("Resumen del Team Lead para ti", str(matching[0].get("body", "")))
+                self.assertIn(
+                    "Resumen del Team Lead para ti", str(matching[0].get("body", ""))
+                )
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -234,7 +275,9 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertTrue(bool(payload.get("strict_mode")))
                 if (
                     int(payload.get("execution_steps", 0)) == 0
-                    and int(payload.get("artifact_created", 0)) + int(payload.get("artifact_modified", 0)) == 0
+                    and int(payload.get("artifact_created", 0))
+                    + int(payload.get("artifact_modified", 0))
+                    == 0
                 ):
                     self.assertNotEqual(str(payload.get("state", "")), "completed")
                 self.assertIn("Strict mode", str(payload.get("response", "")))
@@ -261,7 +304,10 @@ class APITeamChatTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 200)
                 payload = response.json()
-                self.assertLess(int(payload.get("productivity_score", 100)), int(payload.get("productivity_threshold", 35)))
+                self.assertLess(
+                    int(payload.get("productivity_score", 100)),
+                    int(payload.get("productivity_threshold", 35)),
+                )
                 state_value = str(payload.get("state", ""))
                 self.assertIn(state_value, {"rejected", "failed"})
                 if state_value == "rejected":
@@ -342,19 +388,28 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 payload = response.json()
                 self.assertTrue(bool(payload.get("evidence_gate_applied")))
-                failures = [str(item) for item in payload.get("evidence_gate_failures", [])]
+                failures = [
+                    str(item) for item in payload.get("evidence_gate_failures", [])
+                ]
                 self.assertTrue(any("build" in item for item in failures))
 
                 events_file = workspace / "runtime" / "events.jsonl"
                 self.assertTrue(events_file.exists())
-                events_rows = [json.loads(line) for line in events_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+                events_rows = [
+                    json.loads(line)
+                    for line in events_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
                 compliance_rows = [
                     row
                     for row in events_rows
                     if str(row.get("event_type", "")) == "compliance_violation"
                 ]
                 self.assertTrue(compliance_rows)
-                reasons = [str((row.get("payload", {}) or {}).get("reason", "")) for row in compliance_rows]
+                reasons = [
+                    str((row.get("payload", {}) or {}).get("reason", ""))
+                    for row in compliance_rows
+                ]
                 self.assertIn("missing_execution_plan_required", reasons)
             finally:
                 api_main.set_current_workspace(previous_workspace)
@@ -421,12 +476,19 @@ class APITeamChatTests(unittest.TestCase):
                 )
                 self.assertEqual(timeline.status_code, 200)
                 payload = timeline.json()
-                self.assertEqual(str(payload.get("selected_task_id", "")), client_task_id)
+                self.assertEqual(
+                    str(payload.get("selected_task_id", "")), client_task_id
+                )
                 self.assertGreaterEqual(int(payload.get("total", 0)), 1)
                 self.assertTrue(isinstance(payload.get("items", []), list))
                 self.assertTrue(isinstance(payload.get("available_runs", []), list))
                 progress = payload.get("progress", {})
                 self.assertEqual(str(progress.get("task_id", "")), client_task_id)
+                if payload.get("items"):
+                    item = payload["items"][0]
+                    self.assertIn("execution_round", item)
+                    self.assertIn("execution_sub_iteration", item)
+                    self.assertIn("gate_iteration", item)
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -461,8 +523,13 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertEqual(second.status_code, 200)
                 second_payload = second.json()
                 self.assertTrue(bool(second_payload.get("continuation_requested")))
-                self.assertEqual(str(second_payload.get("continuation_of", "")), first_root)
-                self.assertIn(f"continuation_of={first_root}", str(second_payload.get("response", "")))
+                self.assertEqual(
+                    str(second_payload.get("continuation_of", "")), first_root
+                )
+                self.assertIn(
+                    f"continuation_of={first_root}",
+                    str(second_payload.get("response", "")),
+                )
 
                 state = client.get("/api/aiteam/state?environment=dev").json()
                 last_run = state.get("last_chat_run", {})
@@ -480,7 +547,9 @@ class APITeamChatTests(unittest.TestCase):
                 client = TestClient(api_main.app)
                 client_task_id = "CHAT-ABCDEF12"
 
-                initial_progress = client.get(f"/api/aiteam/chat/progress/{client_task_id}")
+                initial_progress = client.get(
+                    f"/api/aiteam/chat/progress/{client_task_id}"
+                )
                 self.assertEqual(initial_progress.status_code, 200)
                 initial_payload = initial_progress.json()
                 self.assertFalse(bool(initial_payload.get("exists")))
@@ -507,7 +576,9 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertGreaterEqual(int(payload.get("rounds_used", 0)), 1)
                 self.assertIn("lead_intake", payload.get("phase_states", {}))
                 self.assertGreaterEqual(int(payload.get("execution_attempts", 0)), 1)
-                self.assertGreaterEqual(int(payload.get("execution_steps_success", 0)), 0)
+                self.assertGreaterEqual(
+                    int(payload.get("execution_steps_success", 0)), 0
+                )
                 self.assertTrue(isinstance(payload.get("successful_checks", []), list))
             finally:
                 api_main.set_current_workspace(previous_workspace)
@@ -583,7 +654,9 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertEqual(int(second_payload.get("artifact_modified", 0)), 0)
                 self.assertTrue(bool(second_payload.get("evidence_gate_applied")))
                 failures = second_payload.get("evidence_gate_failures", [])
-                self.assertTrue(any("no_followup_artifact_delta" in str(item) for item in failures))
+                self.assertTrue(
+                    any("no_followup_artifact_delta" in str(item) for item in failures)
+                )
                 progress_path = workspace / ".aiteam_game_progress.json"
                 progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
                 self.assertEqual(int(progress_payload.get("iteration", 0)), 1)

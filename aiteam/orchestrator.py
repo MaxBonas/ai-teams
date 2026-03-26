@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aiteam.adapters.registry import load_external_adapters
-from aiteam.agent_session import AgentSession, SessionStore
+from aiteam.agent_session import ConversationThread, SessionStore, ThreadStore
 from aiteam.autotools import AutoToolIntegrator, ToolIntegrationReport
 from aiteam.communication import MeetingParticipant, TeamCommunicator
 from aiteam.compliance import ComplianceGuard, CompliancePolicy
@@ -23,7 +23,7 @@ from aiteam.execution import (
 from aiteam.mailbox import Mailbox
 from aiteam.memory import AgentMemoryStore
 from aiteam.observability import EventLogger
-from aiteam.profiles import build_prompt, role_charter_for
+from aiteam.profiles import build_prompt, build_system_prompt, role_charter_for
 from aiteam.router import HybridRouter
 from aiteam.runtime import SandboxManager
 from aiteam.taskboard import TaskBoard
@@ -62,6 +62,7 @@ class AITeamOrchestrator:
             policy=CompliancePolicy(environment=environment)
         )
         self.memory = AgentMemoryStore(runtime_dir / "memory")
+        self.thread_store = ThreadStore(runtime_dir)
         self.communicator = TeamCommunicator(
             mailbox=self.mailbox,
             memory=self.memory,
@@ -308,7 +309,7 @@ class AITeamOrchestrator:
             body=f"{task.title}",
             task_id=task.task_id,
         )
-        self.memory.remember(
+        self._remember_memory(
             agent_id="lead-1",
             role=Role.TEAM_LEAD.value,
             kind="task_submitted",
@@ -428,6 +429,15 @@ class AITeamOrchestrator:
             self._execute_claimed_tasks(claimed_tasks, active_round)
             total_processed += len(claimed_tasks)
             self._release_blocked_parent_tasks()
+            self.event_logger.emit(
+                "sub_iteration_barrier",
+                {
+                    "execution_round": active_round,
+                    "sub_iteration": sub_iteration,
+                    "tasks_processed_so_far": total_processed,
+                },
+            )
+            self.taskboard.checkpoint()
 
         if total_processed > 0:
             self.event_logger.emit(
@@ -611,6 +621,15 @@ class AITeamOrchestrator:
         execution_sub_iteration = int(task.metadata.get("execution_sub_iteration", 1))
         execution_order = int(task.metadata.get("execution_order", 0))
         gate_iteration = int(task.metadata.get("gate_iteration", 0))
+        thread = self.thread_store.get_thread(
+            agent_id=assignee,
+            project_key=self._project_thread_key(),
+        )
+        consumed_mailbox_messages = self._consume_actionable_mailbox_messages(
+            task=task,
+            assignee=assignee,
+            thread=thread,
+        )
 
         # ── Crear sesion auditable ──
         session = self.session_store.create_session(
@@ -632,6 +651,7 @@ class AITeamOrchestrator:
                 "execution_order": execution_order,
                 "gate_iteration": gate_iteration,
                 "session_id": session.session_id,
+                "thread_id": thread.thread_id,
             },
         )
         workspace = self.sandboxes.task_workspace(
@@ -730,7 +750,7 @@ class AITeamOrchestrator:
                     metadata={"exit_code": sr.exit_code},
                 )
             execution_context = self._compose_execution_context(step_results)
-            self.memory.remember(
+            self._remember_memory(
                 agent_id=assignee,
                 role=task.role.value,
                 kind="execution_plan_result",
@@ -801,16 +821,6 @@ class AITeamOrchestrator:
         prompt = build_prompt(
             task.role, task.title, task.description, ab_version=ab_version
         )
-        if context:
-            prompt = f"{prompt}\n\nContexto de equipo:\n{context}"
-        if peer_context:
-            prompt = f"{prompt}\n\nConsulta entre pares:\n{peer_context}"
-        if decision_governance:
-            prompt = f"{prompt}\n\nGobernanza de decision:\n{decision_governance}"
-        if skill_mcp_context:
-            prompt = f"{prompt}\n\nSkills/MCP relevantes:\n{skill_mcp_context}"
-        if execution_context:
-            prompt = f"{prompt}\n\nResultados de ejecucion:\n{execution_context}"
 
         # ── Tool context: herramientas disponibles + recomendaciones ──
         if self.tool_dispatcher is not None:
@@ -826,16 +836,16 @@ class AITeamOrchestrator:
         # ── Review feedback injection (gate iteration loop) ──
         review_feedback = task.metadata.get("review_feedback")
         gate_iteration = int(task.metadata.get("gate_iteration", 0))
+        review_feedback_text = ""
         if review_feedback:
-            prompt = (
-                f"{prompt}\n\n"
-                f"FEEDBACK DE REVISION (iteracion {gate_iteration or 1}):\n"
+            review_feedback_text = (
+                f"Iteracion {gate_iteration or 1}. "
                 f"{review_feedback}\n"
-                "Corrige los problemas senalados arriba. "
-                "Enfocate en resolver cada punto de feedback especificamente."
+                "Corrige cada punto de feedback de forma explicita."
             )
 
         # ── Session history: inyectar resumen del intento previo en retries ──
+        prev_summary = ""
         if gate_iteration > 0:
             prev_sessions = self.session_store.sessions_for_task(task.task_id)
             if prev_sessions:
@@ -850,11 +860,39 @@ class AITeamOrchestrator:
                     f"acciones=[{actions_summary}], "
                     f"resumen={self._compact_text(last.summary or '', 200)}"
                 )
-                prompt = (
-                    f"{prompt}\n\n"
-                    f"HISTORIAL DE INTENTO PREVIO:\n{prev_summary}\n"
-                    "Usa esta informacion para evitar repetir el mismo enfoque fallido."
-                )
+
+        current_user_turn = self._build_current_task_message(
+            task,
+            context=context,
+            peer_context=peer_context,
+            decision_governance=decision_governance,
+            skill_mcp_context=skill_mcp_context,
+            execution_context=execution_context,
+            review_feedback=review_feedback_text,
+            gate_iteration=gate_iteration,
+            prev_summary=prev_summary,
+        )
+        messages = self._build_task_messages(
+            task,
+            assignee=assignee,
+            ab_version=ab_version,
+            thread=thread,
+            context=context,
+            peer_context=peer_context,
+            decision_governance=decision_governance,
+            skill_mcp_context=skill_mcp_context,
+            execution_context=execution_context,
+            review_feedback=review_feedback_text,
+            gate_iteration=gate_iteration,
+            prev_summary=prev_summary,
+        )
+        thread.append_turn(
+            role="user",
+            content=current_user_turn,
+            source="task_retry" if gate_iteration > 0 else "task",
+            task_id=task.task_id,
+        )
+        self.thread_store.save_thread(thread)
 
         requested_approved_adapters = task.metadata.get("approved_adapters", [])
         if requested_approved_adapters and not sensitive_approval:
@@ -880,7 +918,10 @@ class AITeamOrchestrator:
         )
         session.record_action("llm_call", f"route_and_invoke:{task.role.value}")
         decision = self.router.route_and_invoke(
-            request=request, prompt=prompt, task_id=task.task_id
+            request=request,
+            prompt=prompt,
+            task_id=task.task_id,
+            messages=messages,
         )
         session.record_action(
             "llm_call",
@@ -920,6 +961,7 @@ class AITeamOrchestrator:
                         request=request,
                         prompt=prompt,
                         task_id=task.task_id,
+                        messages=messages,
                     )
 
             if not decision.success and retry_count < 2:
@@ -941,11 +983,12 @@ class AITeamOrchestrator:
                     request=fallback_request,
                     prompt=prompt,
                     task_id=task.task_id,
+                    messages=messages,
                 )
 
             if not decision.success:
                 # Record failure mode for future learning
-                self.memory.remember(
+                self._remember_memory(
                     agent_id=assignee,
                     role=task.role.value,
                     kind="failure_pattern",
@@ -983,6 +1026,7 @@ class AITeamOrchestrator:
                 "execution_sub_iteration": execution_sub_iteration,
                 "execution_order": execution_order,
                 "gate_iteration": gate_iteration,
+                "thread_id": thread.thread_id,
             },
         )
 
@@ -1048,7 +1092,20 @@ class AITeamOrchestrator:
                 output=safe_content,
                 peer_report=peer_report,
             )
-            self.memory.remember(
+            thread.append_turn(
+                role="assistant",
+                content=safe_content,
+                source="llm",
+                task_id=task.task_id,
+            )
+            self.thread_store.save_thread(thread)
+            self._maybe_reply_to_team_lead(
+                task=task,
+                assignee=assignee,
+                response_text=safe_content,
+                consumed_messages=consumed_mailbox_messages,
+            )
+            self._remember_memory(
                 agent_id=assignee,
                 role=task.role.value,
                 kind="task_success",
@@ -1193,7 +1250,7 @@ class AITeamOrchestrator:
             )
             return
 
-        self.memory.remember(
+        self._remember_memory(
             agent_id=assignee,
             role=task.role.value,
             kind="task_failure",
@@ -1597,7 +1654,7 @@ class AITeamOrchestrator:
         handoff_context = self._build_handoff_context(
             task=task, source_agent=failed_assignee, decision=decision
         )
-        self.memory.remember(
+        self._remember_memory(
             agent_id=substitute,
             role=task.role.value,
             kind="handoff_context",
@@ -1665,12 +1722,18 @@ class AITeamOrchestrator:
         self, task: WorkTask, source_agent: str, decision: RoutingDecision | None = None
     ) -> str:
         excluded = {"meeting_minutes"}
-        recent = self.memory.recent(source_agent, limit=5, exclude_kinds=excluded)
+        recent = self.memory.recent(
+            source_agent,
+            limit=5,
+            exclude_kinds=excluded,
+            project_key=self._project_thread_key(),
+        )
         relevant = self.memory.relevant(
             source_agent,
             f"{task.title}\n{task.description}",
             limit=4,
             exclude_kinds=excluded,
+            project_key=self._project_thread_key(),
         )
         lines = [
             f"Task: {task.task_id} {task.title}",
@@ -2139,7 +2202,7 @@ class AITeamOrchestrator:
                         body=f"Re-ejecutando con feedback de gates: {feedback[:200]}",
                         task_id=task.task_id,
                     )
-                    self.memory.remember(
+                    self._remember_memory(
                         agent_id="lead-1",
                         role=Role.TEAM_LEAD.value,
                         kind="gate_iteration",
@@ -2213,7 +2276,7 @@ class AITeamOrchestrator:
                     ),
                     task_id=task.task_id,
                 )
-                self.memory.remember(
+                self._remember_memory(
                     agent_id="lead-1",
                     role=Role.TEAM_LEAD.value,
                     kind="quality_gate_failure",
@@ -2258,7 +2321,7 @@ class AITeamOrchestrator:
                     body="Todas las gates de calidad finalizaron correctamente.",
                     task_id=task.task_id,
                 )
-                self.memory.remember(
+                self._remember_memory(
                     agent_id="lead-1",
                     role=Role.TEAM_LEAD.value,
                     kind="quality_gate_release",
@@ -2312,7 +2375,7 @@ class AITeamOrchestrator:
                 "decision_justification": justification,
             },
         )
-        self.memory.remember(
+        self._remember_memory(
             agent_id=assignee,
             role=task.role.value,
             kind="decision_justification",
@@ -2361,8 +2424,17 @@ class AITeamOrchestrator:
                 environment=self.environment,
             )
             peer_prompt = self._peer_prompt_for_task(task, peer_role)
+            peer_messages = self._build_peer_messages(
+                task=task,
+                peer_role=peer_role,
+                assignee=assignee,
+                round_label="round1",
+            )
             decision = self.router.route_and_invoke(
-                request=request, prompt=peer_prompt, task_id=task.task_id
+                request=request,
+                prompt=peer_prompt,
+                task_id=task.task_id,
+                messages=peer_messages,
             )
             if decision.success:
                 content = self.compliance.redact_text(decision.response.content)
@@ -2373,7 +2445,7 @@ class AITeamOrchestrator:
                     body=content[:500],
                     task_id=task.task_id,
                 )
-                self.memory.remember(
+                self._remember_memory(
                     agent_id=peer_agent,
                     role=peer_role.value,
                     kind="peer_consultation_outbound",
@@ -2381,7 +2453,7 @@ class AITeamOrchestrator:
                     task_id=task.task_id,
                     tags=["peer", "consultation"],
                 )
-                self.memory.remember(
+                self._remember_memory(
                     agent_id=assignee,
                     role=task.role.value,
                     kind="peer_consultation_inbound",
@@ -2421,10 +2493,18 @@ class AITeamOrchestrator:
                     required_capabilities=self._peer_capabilities(peer_role),
                     environment=self.environment,
                 )
+                r2_messages = self._build_peer_messages(
+                    task=task,
+                    peer_role=peer_role,
+                    assignee=assignee,
+                    round_label="round2",
+                    prior_inputs=all_inputs,
+                )
                 r2_decision = self.router.route_and_invoke(
                     request=r2_request,
                     prompt=r2_prompt,
                     task_id=task.task_id,
+                    messages=r2_messages,
                 )
                 if r2_decision.success:
                     r2_content = self.compliance.redact_text(
@@ -2437,7 +2517,7 @@ class AITeamOrchestrator:
                         body=r2_content[:500],
                         task_id=task.task_id,
                     )
-                    self.memory.remember(
+                    self._remember_memory(
                         agent_id=peer_agent,
                         role=peer_role.value,
                         kind="peer_dialogue_r2",
@@ -2560,11 +2640,13 @@ class AITeamOrchestrator:
             task.description,
             limit=3,
             exclude_kinds=excluded_memory,
+            project_key=self._project_thread_key(),
         )
         recent_memory = self.memory.recent(
             assignee,
             limit=2,
             exclude_kinds=excluded_memory,
+            project_key=self._project_thread_key(),
         )
         dm_messages = self._context_messages(recipient=assignee)
         role_messages = self._context_messages(recipient=task.role.value)
@@ -2614,6 +2696,7 @@ class AITeamOrchestrator:
             query=task.description,
             exclude_agent=assignee,
             limit=3,
+            project_key=self._project_thread_key(),
         )
         # Query for failure patterns on similar task types
         task_type = (
@@ -2624,6 +2707,7 @@ class AITeamOrchestrator:
             exclude_agent=assignee,
             limit=2,
             exclude_kinds={"meeting_minutes", "task_success"},
+            project_key=self._project_thread_key(),
         )
         # Query for architectural decisions
         arch_memory = self.memory.relevant_across_agents(
@@ -2631,6 +2715,7 @@ class AITeamOrchestrator:
             exclude_agent=assignee,
             limit=2,
             exclude_kinds={"meeting_minutes", "execution_plan_result"},
+            project_key=self._project_thread_key(),
         )
         # Merge and deduplicate
         seen_ids: set[str] = set()
@@ -2659,6 +2744,7 @@ class AITeamOrchestrator:
                     f"task_success {task_type}",
                     limit=2,
                     exclude_kinds={"meeting_minutes"},
+                    project_key=self._project_thread_key(),
                 )
                 if spec_memory:
                     lines.append(
@@ -2729,7 +2815,7 @@ class AITeamOrchestrator:
         compacted = self._compact_context(
             text.splitlines(), max_lines=14, max_chars=1200
         )
-        self.memory.remember(
+        self._remember_memory(
             agent_id=assignee,
             role=task.role.value,
             kind="skill_mcp_guidance",
@@ -2765,7 +2851,7 @@ class AITeamOrchestrator:
         )
         if report.messages:
             summary = "; ".join(report.messages)[:500]
-            self.memory.remember(
+            self._remember_memory(
                 agent_id=assignee,
                 role=task.role.value,
                 kind="tool_integration",
@@ -2837,7 +2923,7 @@ class AITeamOrchestrator:
             internet_allowed=internet_allowed,
         )
         if report.messages:
-            self.memory.remember(
+            self._remember_memory(
                 agent_id=assignee,
                 role=task.role.value,
                 kind="tool_auto_discovery",
@@ -2884,12 +2970,311 @@ class AITeamOrchestrator:
             for message in messages
             if not message.subject.lower().startswith("sync meeting:")
         ]
-        selected = filtered[-4:]
-        # Auto-mark consumed messages as read
-        read_ids = [m.message_id for m in selected if m.message_id]
+        return filtered[-4:]
+
+    def _project_thread_key(self) -> str:
+        return str(self.project_root)
+
+    def _remember_memory(
+        self,
+        *,
+        agent_id: str,
+        role: str,
+        kind: str,
+        content: str,
+        task_id: str | None = None,
+        tags: list[str] | None = None,
+    ) -> None:
+        self.memory.remember(
+            agent_id=agent_id,
+            role=role,
+            kind=kind,
+            content=content,
+            task_id=task_id,
+            tags=tags,
+            project_key=self._project_thread_key(),
+        )
+
+    def _thread_context(self, thread: ConversationThread, limit: int = 6) -> str:
+        turns = thread.recent_turns(limit=limit)
+        if not turns:
+            return ""
+        lines = ["Hilo conversacional reciente:"]
+        for turn in turns:
+            role = turn.role.upper()
+            source = turn.source
+            content = self._compact_text(turn.content, 220)
+            lines.append(f"- [{role}/{source}] {content}")
+        return "\n".join(lines)
+
+    def _thread_messages(
+        self,
+        thread: ConversationThread,
+        limit: int = 6,
+    ) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = []
+        for turn in thread.recent_turns(limit=limit):
+            role = str(turn.role or "user").strip().lower() or "user"
+            if role not in {"system", "user", "assistant"}:
+                role = (
+                    "user" if role in {"team_lead", "lead", "mailbox"} else "assistant"
+                )
+            content = str(turn.content or "").strip()
+            if not content:
+                continue
+            messages.append({"role": role, "content": self._compact_text(content, 700)})
+        return messages
+
+    def _context_block(self, title: str, value: str, limit: int = 1200) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        return f"{title}:\n{self._compact_text(text, limit)}"
+
+    def _build_current_task_message(
+        self,
+        task: WorkTask,
+        *,
+        context: str,
+        peer_context: str,
+        decision_governance: str,
+        skill_mcp_context: str,
+        execution_context: str,
+        review_feedback: str,
+        gate_iteration: int,
+        prev_summary: str,
+    ) -> str:
+        if gate_iteration > 0:
+            retry_parts = [
+                f"Retry de la tarea {task.task_id}.",
+                f"Titulo: {task.title}",
+                f"Gate iteration: {gate_iteration}",
+                "Manten el enfoque valido anterior y cambia solo lo necesario para resolver el feedback.",
+            ]
+            for block in (
+                self._context_block("Feedback de revision", review_feedback, 900),
+                self._context_block("Historial del intento previo", prev_summary, 700),
+                self._context_block("Resultados de ejecucion", execution_context, 700),
+            ):
+                if block:
+                    retry_parts.append(block)
+            retry_parts.append(
+                "Respuesta eficiente: enumera cambios concretos, evidencia actualizada, riesgos residuales y siguiente accion."
+            )
+            return "\n\n".join(retry_parts)
+
+        parts = [
+            f"Tarea actual: {task.task_id}",
+            f"Titulo: {task.title}",
+            f"Descripcion: {task.description}",
+            f"Gate iteration: {gate_iteration}",
+            "Entrega: propuesta, evidencia, aportes considerados, decision final, plan ejecutable inmediato y definition of done.",
+        ]
+        for block in (
+            self._context_block("Contexto de equipo", context, 1200),
+            self._context_block("Consulta entre pares", peer_context, 1000),
+            self._context_block("Gobernanza de decision", decision_governance, 900),
+            self._context_block("Skills y MCP relevantes", skill_mcp_context, 800),
+            self._context_block("Resultados de ejecucion", execution_context, 1000),
+            self._context_block("Feedback de revision", review_feedback, 1000),
+            self._context_block("Historial del intento previo", prev_summary, 700),
+        ):
+            if block:
+                parts.append(block)
+        parts.append(
+            "Responde de forma eficiente: poco relleno, detalle solo donde cambie la decision o la ejecucion."
+        )
+        return "\n\n".join(parts)
+
+    def _build_task_messages(
+        self,
+        task: WorkTask,
+        *,
+        assignee: str,
+        ab_version: str,
+        thread: ConversationThread,
+        context: str,
+        peer_context: str,
+        decision_governance: str,
+        skill_mcp_context: str,
+        execution_context: str,
+        review_feedback: str,
+        gate_iteration: int,
+        prev_summary: str,
+    ) -> list[dict[str, str]]:
+        system_message = build_system_prompt(task.role, ab_version=ab_version)
+        current_user_turn = self._build_current_task_message(
+            task,
+            context=context,
+            peer_context=peer_context,
+            decision_governance=decision_governance,
+            skill_mcp_context=skill_mcp_context,
+            execution_context=execution_context,
+            review_feedback=review_feedback,
+            gate_iteration=gate_iteration,
+            prev_summary=prev_summary,
+        )
+        thread_messages = self._thread_messages(thread, limit=6)
+        messages = [{"role": "system", "content": system_message}]
+        messages.extend(thread_messages)
+        messages.append({"role": "user", "content": current_user_turn})
+        self.event_logger.emit(
+            "conversation_messages_built",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "thread_id": thread.thread_id,
+                "message_count": len(messages),
+                "history_turns": len(thread_messages),
+                "gate_iteration": gate_iteration,
+            },
+        )
+        return messages
+
+    def _build_peer_messages(
+        self,
+        *,
+        task: WorkTask,
+        peer_role: Role,
+        assignee: str,
+        round_label: str,
+        prior_inputs: str = "",
+    ) -> list[dict[str, str]]:
+        system_message = build_system_prompt(peer_role)
+        user_parts = [
+            f"Consulta para {assignee} sobre la tarea {task.task_id}.",
+            f"Titulo: {task.title}",
+            f"Descripcion: {task.description}",
+            f"Modo: {round_label}",
+        ]
+        if prior_inputs.strip():
+            user_parts.append(
+                self._context_block("Aportes previos de peers", prior_inputs, 900)
+            )
+        if round_label == "round2":
+            user_parts.append(
+                "Da posicion final breve: acuerdo, desacuerdo o matiz importante. Maximo 3 oraciones."
+            )
+        else:
+            user_parts.append(
+                "Responde con recomendaciones concretas, riesgos y orden de ejecucion. Maximo 8 lineas."
+            )
+        messages = [
+            {"role": "system", "content": system_message},
+            {
+                "role": "user",
+                "content": "\n\n".join(part for part in user_parts if part),
+            },
+        ]
+        self.event_logger.emit(
+            "peer_messages_built",
+            {
+                "task_id": task.task_id,
+                "peer_role": peer_role.value,
+                "assignee": assignee,
+                "round_label": round_label,
+                "message_count": len(messages),
+            },
+        )
+        return messages
+
+    def _consume_actionable_mailbox_messages(
+        self,
+        task: WorkTask,
+        assignee: str,
+        thread: ConversationThread,
+    ) -> list:
+        task_root = self._task_root(task.task_id)
+        candidates = self.mailbox.list_messages(
+            recipient=assignee
+        ) + self.mailbox.list_messages(recipient=task.role.value)
+        selected = []
+        seen_ids: set[str] = set()
+        for message in candidates:
+            if not message.message_id or message.message_id in seen_ids:
+                continue
+            seen_ids.add(message.message_id)
+            if self.mailbox.is_read(message.message_id) or thread.has_consumed_message(
+                message.message_id
+            ):
+                continue
+            subject_lower = message.subject.lower()
+            if subject_lower.startswith("sync meeting:"):
+                continue
+            if message.task_id and message.task_id not in {task.task_id, task_root}:
+                continue
+            if message.sender not in {
+                "team_lead",
+                "lead-1",
+                "system",
+            } and message.recipient not in {
+                assignee,
+                task.role.value,
+            }:
+                continue
+            selected.append(message)
+
+        if not selected:
+            return []
+
+        read_ids = []
+        for message in selected:
+            thread.append_turn(
+                role="user",
+                content=(
+                    f"[MAILBOX] De {message.sender} a {message.recipient}. "
+                    f"Asunto: {message.subject}\n{message.body}"
+                ),
+                source="mailbox",
+                task_id=message.task_id or task.task_id,
+                message_id=message.message_id,
+            )
+            if message.message_id:
+                read_ids.append(message.message_id)
         if read_ids:
             self.mailbox.mark_read_bulk(read_ids)
+        self.thread_store.save_thread(thread)
+        self.event_logger.emit(
+            "conversation_mailbox_consumed",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "message_ids": read_ids,
+                "message_count": len(selected),
+            },
+        )
         return selected
+
+    def _maybe_reply_to_team_lead(
+        self,
+        task: WorkTask,
+        assignee: str,
+        response_text: str,
+        consumed_messages: list,
+    ) -> None:
+        if not consumed_messages:
+            return
+        senders = {msg.sender for msg in consumed_messages}
+        if not ({"team_lead", "lead-1", "system"} & senders):
+            return
+        subject = f"Reply: {task.task_id}"
+        body = self._compact_text(response_text, 280)
+        self.mailbox.send(
+            sender=assignee,
+            recipient="team_lead",
+            subject=subject,
+            body=body,
+            task_id=task.task_id,
+        )
+        self.event_logger.emit(
+            "conversation_mailbox_reply",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "recipient": "team_lead",
+                "consumed_messages": len(consumed_messages),
+            },
+        )
 
     def _compact_text(self, value: str, max_chars: int) -> str:
         clean = self.compliance.redact_text(value.strip().replace("\n", " "))
@@ -2988,6 +3373,7 @@ class AITeamOrchestrator:
         self.communicator.run_sync_meeting(
             topic=f"Round {self._round}",
             participants=self._meeting_participants(),
+            meeting_kind="informational",
         )
 
     def _maybe_run_event_meeting(self, trigger: str, task_id: str, reason: str) -> None:
@@ -2999,4 +3385,5 @@ class AITeamOrchestrator:
             topic=f"Event {trigger} @ {task_id} reason={reason}",
             participants=self._meeting_participants(),
             task_id=task_id,
+            meeting_kind="actionable",
         )

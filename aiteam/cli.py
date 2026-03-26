@@ -26,6 +26,7 @@ from aiteam.finops import BudgetManager, BudgetPolicy
 from aiteam.observability import EventLogger
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.pilot import PilotThresholds, compute_pilot_metrics, evaluate_pilot
+from aiteam.provider_ops import build_provider_ops_view
 from aiteam.router import HybridRouter
 from aiteam.snapshots import SnapshotManager
 from aiteam.tool_inventory import write_inventory
@@ -72,14 +73,14 @@ def build_default_orchestrator(
         SubscriptionAdapter(
             name="openai_pro",
             provider="openai",
-            model="gpt-4.1",               # gpt-4.1 (2025) — mejor relacion calidad/coste
+            model="gpt-4.1",  # gpt-4.1 (2025) — mejor relacion calidad/coste
             capabilities={"reasoning", "coding", "review", "analysis"},
             routing_priority=10,
         ),
         SubscriptionAdapter(
             name="gemini_pro",
             provider="google",
-            model="gemini-2.0-flash",       # 2.0 Flash — rapido, multimodal, sin coste extra en Pro
+            model="gemini-2.0-flash",  # 2.0 Flash — rapido, multimodal, sin coste extra en Pro
             capabilities={"analysis", "summarization", "reasoning", "coding"},
             routing_priority=20,
         ),
@@ -93,7 +94,7 @@ def build_default_orchestrator(
         SubscriptionAdapter(
             name="claude_haiku",
             provider="anthropic",
-            model="claude-3-5-haiku-20241022",   # Haiku — rapido y barato para tasks simples
+            model="claude-3-5-haiku-20241022",  # Haiku — rapido y barato para tasks simples
             capabilities={"reasoning", "coding", "analysis"},
             routing_priority=40,
             cost_tier=0,
@@ -128,8 +129,12 @@ def build_default_orchestrator(
     external_adapters = load_external_adapters(external_config_path)
     if external_adapters:
         adapters = external_adapters + adapters
-        _prepend_provider_priority(policy.preferred_subscription_providers, external_adapters, "subscription")
-        _prepend_provider_priority(policy.preferred_api_providers, external_adapters, "api")
+        _prepend_provider_priority(
+            policy.preferred_subscription_providers, external_adapters, "subscription"
+        )
+        _prepend_provider_priority(
+            policy.preferred_api_providers, external_adapters, "api"
+        )
 
     shared_tools_root = Path(
         os.getenv("AITEAM_SHARED_TOOLS_ROOT", str(Path.cwd().parent))
@@ -152,7 +157,9 @@ def build_default_orchestrator(
     )
 
 
-def _prepend_provider_priority(priority: list[str], adapters: list, channel: str) -> None:
+def _prepend_provider_priority(
+    priority: list[str], adapters: list, channel: str
+) -> None:
     providers = []
     for adapter in adapters:
         if adapter.channel.value != channel:
@@ -290,7 +297,10 @@ def _provider_connection_specs() -> list[dict]:
             "model": "claude-3-5-sonnet-20241022",
             "required": True,
             "env_command": "AITEAM_CLAUDE_PRO_COMMAND",
-            "candidates": [["claude", "--version"]],
+            "candidates": [
+                ["claude", "--version"],
+                ["npx", "-y", "@anthropic-ai/claude-code", "--version"],
+            ],
             "command_suffix": ["-p", "{prompt}"],
             "capabilities": ["coding", "reasoning", "analysis", "review"],
             "role_targets": ["team_lead", "engineer", "reviewer", "researcher"],
@@ -319,12 +329,35 @@ def _resolve_provider_command(spec: dict) -> list[str] | None:
             continue
         if _probe_command(command):
             template = spec.get("command_template")
-            if isinstance(template, list) and all(isinstance(item, str) for item in template):
+            if isinstance(template, list) and all(
+                isinstance(item, str) for item in template
+            ):
                 return [str(item) for item in template]
 
             invocation = [item for item in command if item != "--help"]
             if command[0].lower().endswith("claude") or "claude" in command[0].lower():
                 return [command[0], "-p", "{prompt}"]
+            if any("claude-code" in part.lower() for part in command):
+                package = next(
+                    (part for part in command if "claude-code" in part.lower()),
+                    "@anthropic-ai/claude-code",
+                )
+                return [command[0], "-y", package, "-p", "{prompt}"]
+            if any("gemini-cli" in part.lower() for part in command):
+                package = next(
+                    (part for part in command if "gemini-cli" in part.lower()),
+                    "@google/gemini-cli",
+                )
+                if (
+                    os.name == "nt"
+                    and os.getenv("GOOGLE_API_KEY")
+                    and not os.getenv("GEMINI_API_KEY")
+                ):
+                    return [
+                        "cmd",
+                        "/c",
+                        f"set GEMINI_API_KEY=%GOOGLE_API_KEY% && {command[0]} -y {package} {{prompt}}",
+                    ]
 
             if invocation and invocation[-1] != "{prompt}":
                 invocation.append("{prompt}")
@@ -341,7 +374,7 @@ def _provider_runtime_health(spec: dict, command: list[str] | None) -> tuple[boo
     if provider == "google":
         return _gemini_health(command)
     if provider == "anthropic":
-        return _claude_auth_health()
+        return _claude_auth_health(command)
     return True, "command_ok"
 
 
@@ -407,13 +440,38 @@ def _probe_command(command: list[str]) -> bool:
     return proc.returncode == 0
 
 
-def _claude_auth_health() -> tuple[bool, str]:
-    claude = shutil.which("claude")
-    if not claude:
+def _claude_auth_health(command: list[str] | None = None) -> tuple[bool, str]:
+    auth_command: list[str] | None = None
+    if command:
+        normalized = [
+            str(item).strip()
+            for item in command
+            if str(item).strip() and str(item).strip() != "{prompt}"
+        ]
+        if normalized:
+            base = normalized[0]
+            if Path(base).name.lower().startswith("npx") and any(
+                "claude-code" in item.lower() for item in normalized[1:]
+            ):
+                package = next(
+                    (item for item in normalized[1:] if "claude-code" in item.lower()),
+                    "@anthropic-ai/claude-code",
+                )
+                auth_command = [base, "-y", package, "auth", "status"]
+            else:
+                auth_command = [base, "auth", "status"]
+    if not auth_command:
+        claude = shutil.which("claude")
+        if not claude:
+            return False, "claude_not_found"
+        auth_command = [claude, "auth", "status"]
+    resolved = _resolve_executable(auth_command[0])
+    if resolved is None:
         return False, "claude_not_found"
+    auth_command[0] = resolved
     try:
         proc = subprocess.run(
-            [claude, "auth", "status"],
+            auth_command,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -436,6 +494,62 @@ def _claude_auth_health() -> tuple[bool, str]:
     if not logged:
         return False, "claude_not_logged_in"
     return True, f"claude_logged_in:{subscription}"
+
+
+def _detect_local_coding_runtime() -> tuple[bool, dict[str, object]]:
+    candidates = [
+        shutil.which("ollama"),
+        str(Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe"),
+    ]
+    binary = next((item for item in candidates if item and Path(item).exists()), None)
+    if not binary:
+        return False, {
+            "provider": "ollama",
+            "healthy": False,
+            "details": "ollama_not_found",
+            "command": [],
+        }
+    try:
+        proc = subprocess.run(
+            [binary, "list"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, {
+            "provider": "ollama",
+            "healthy": False,
+            "details": f"ollama_probe_error:{exc}",
+            "command": [binary],
+        }
+    blob = proc.stdout or ""
+    preferred_models = ["aiteam-qwen-coder:14b", "qwen2.5-coder:14b"]
+    if proc.returncode != 0:
+        return False, {
+            "provider": "ollama",
+            "healthy": False,
+            "details": "ollama_list_failed",
+            "command": [binary],
+        }
+    model = next((item for item in preferred_models if item in blob), "")
+    if not model:
+        return False, {
+            "provider": "ollama",
+            "healthy": False,
+            "details": f"model_missing:{preferred_models[0]}",
+            "command": [binary],
+        }
+    return True, {
+        "provider": "ollama",
+        "healthy": True,
+        "details": f"model_ready:{model}",
+        "command": [binary, "run", model, "{prompt}"],
+        "model": model,
+    }
 
 
 def _openai_pro_health() -> tuple[bool, str]:
@@ -515,8 +629,16 @@ def _gemini_auth_status_command(command: list[str] | None) -> list[str] | None:
     if not base:
         return None
 
-    normalized = [str(item).strip() for item in command if str(item).strip() and str(item).strip() != "{prompt}"]
-    if len(normalized) >= 3 and normalized[-2].lower() == "auth" and normalized[-1].lower() == "status":
+    normalized = [
+        str(item).strip()
+        for item in command
+        if str(item).strip() and str(item).strip() != "{prompt}"
+    ]
+    if (
+        len(normalized) >= 3
+        and normalized[-2].lower() == "auth"
+        and normalized[-1].lower() == "status"
+    ):
         return normalized
 
     executable_name = Path(base).name.lower()
@@ -671,7 +793,11 @@ def _notebooklm_ingest_command(runtime_dir: Path) -> list[str] | None:
     if parsed:
         return parsed
 
-    script_path = (Path(__file__).resolve().parent.parent / "scripts" / "notebooklm_ingest_bridge.py").resolve()
+    script_path = (
+        Path(__file__).resolve().parent.parent
+        / "scripts"
+        / "notebooklm_ingest_bridge.py"
+    ).resolve()
     if not script_path.exists():
         return None
     python_exec = _resolve_executable("python") or "python"
@@ -728,7 +854,9 @@ def cmd_notebooklm_connect(runtime_dir: Path) -> None:
     }
     adapters = _upsert_adapter(adapters, entry)
     payload["external_adapters"] = adapters
-    adapters_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+    adapters_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
     print(f"NotebookLM bridge adapter enabled: {adapters_path}")
 
 
@@ -745,7 +873,9 @@ def cmd_notebooklm_sync(
     quiet: bool,
 ) -> dict:
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    resolved_notebook_id = notebook_id.strip() or os.getenv("NOTEBOOKLM_NOTEBOOK_ID", "").strip()
+    resolved_notebook_id = (
+        notebook_id.strip() or os.getenv("NOTEBOOKLM_NOTEBOOK_ID", "").strip()
+    )
 
     if from_prompt.strip():
         content = from_prompt
@@ -768,10 +898,15 @@ def cmd_notebooklm_sync(
         "source": resolved_source,
         "content": content,
     }
-    payload_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+    payload_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
 
     endpoint = os.getenv("NOTEBOOKLM_INGEST_ENDPOINT", "").strip()
-    api_key = os.getenv("NOTEBOOKLM_API_KEY", "").strip() or os.getenv("GOOGLE_NOTEBOOKLM_API_KEY", "").strip()
+    api_key = (
+        os.getenv("NOTEBOOKLM_API_KEY", "").strip()
+        or os.getenv("GOOGLE_NOTEBOOKLM_API_KEY", "").strip()
+    )
     command = _notebooklm_ingest_command(runtime_dir)
 
     mode = "manual_export"
@@ -788,11 +923,15 @@ def cmd_notebooklm_sync(
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+        request = urllib.request.Request(
+            endpoint, data=body, headers=headers, method="POST"
+        )
         try:
             with urllib.request.urlopen(request, timeout=45) as response:
                 status_code = int(getattr(response, "status", 200))
-                response_text = (response.read() or b"").decode("utf-8", errors="replace").strip()
+                response_text = (
+                    (response.read() or b"").decode("utf-8", errors="replace").strip()
+                )
             connected = 200 <= status_code < 300
             success = connected
             details = f"HTTP {status_code}: {(response_text or 'ok')[:220]}"
@@ -805,7 +944,9 @@ def cmd_notebooklm_sync(
     elif command:
         mode = "command"
         resolved_command = [
-            part.replace("{payload_path}", str(payload_path)).replace("{runtime_dir}", str(runtime_dir))
+            part.replace("{payload_path}", str(payload_path)).replace(
+                "{runtime_dir}", str(runtime_dir)
+            )
             for part in command
         ]
         try:
@@ -837,7 +978,9 @@ def cmd_notebooklm_sync(
         "source": resolved_source,
     }
     status_path = runtime_dir / "notebooklm_sync_status.json"
-    status_path.write_text(json.dumps(status, indent=2, ensure_ascii=True), encoding="utf-8")
+    status_path.write_text(
+        json.dumps(status, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
     if not quiet:
         print(json.dumps(status, indent=2, ensure_ascii=True))
     return status
@@ -889,7 +1032,9 @@ def cmd_init(runtime_dir: Path) -> None:
         )
     if not (runtime_dir / "provider_accounts.json").exists():
         (runtime_dir / "provider_accounts.json").write_text(
-            json.dumps(_default_provider_accounts_template(), indent=2, ensure_ascii=True),
+            json.dumps(
+                _default_provider_accounts_template(), indent=2, ensure_ascii=True
+            ),
             encoding="utf-8",
         )
     print(f"Runtime initialized at: {runtime_dir}")
@@ -1008,7 +1153,9 @@ def cmd_status(runtime_dir: Path, browser_mode: str, environment: str) -> None:
         f"quality_gates_opened={summary['quality_gates_opened']} "
         f"compliance_violations={summary['compliance_violations']}"
     )
-    print(f"- api_share_percent={summary['api_share_percent']} alerts={summary['alerts']}")
+    print(
+        f"- api_share_percent={summary['api_share_percent']} alerts={summary['alerts']}"
+    )
     print(
         "- pilot_metrics "
         f"task_success_rate={pilot_metrics['task_success_rate']}% "
@@ -1021,7 +1168,9 @@ def cmd_status(runtime_dir: Path, browser_mode: str, environment: str) -> None:
         f"{[str(path) for path in orchestrator.execution.executor.allowed_roots]}"
     )
 
-    tool_integrator = AutoToolIntegrator(runtime_dir=runtime_dir, project_root=Path.cwd())
+    tool_integrator = AutoToolIntegrator(
+        runtime_dir=runtime_dir, project_root=Path.cwd()
+    )
     coverage = tool_integrator.skill_coverage(runtime_dir=runtime_dir)
     print(
         "- skills_coverage="
@@ -1050,7 +1199,9 @@ def cmd_status(runtime_dir: Path, browser_mode: str, environment: str) -> None:
         print(f"- {agent}: {orchestrator.memory.count(agent)} entries")
 
 
-def cmd_run(runtime_dir: Path, rounds: int, browser_mode: str, environment: str) -> None:
+def cmd_run(
+    runtime_dir: Path, rounds: int, browser_mode: str, environment: str
+) -> None:
     orchestrator = build_default_orchestrator(
         runtime_dir,
         browser_mode=browser_mode,
@@ -1060,7 +1211,9 @@ def cmd_run(runtime_dir: Path, rounds: int, browser_mode: str, environment: str)
     print(f"Run finished. max_rounds={rounds}")
 
 
-def cmd_meeting(runtime_dir: Path, topic: str, browser_mode: str, environment: str) -> None:
+def cmd_meeting(
+    runtime_dir: Path, topic: str, browser_mode: str, environment: str
+) -> None:
     orchestrator = build_default_orchestrator(
         runtime_dir,
         browser_mode=browser_mode,
@@ -1093,7 +1246,9 @@ def cmd_memory(runtime_dir: Path, agent: str, limit: int) -> None:
         print(f"- {entry.ts} [{entry.kind}] task={entry.task_id} {entry.content[:200]}")
 
 
-def cmd_exec(runtime_dir: Path, shell: str, command: str, browser_mode: str, environment: str) -> None:
+def cmd_exec(
+    runtime_dir: Path, shell: str, command: str, browser_mode: str, environment: str
+) -> None:
     orchestrator = build_default_orchestrator(
         runtime_dir,
         browser_mode=browser_mode,
@@ -1186,7 +1341,9 @@ def cmd_catalog_tools(catalog_root: Path, limit: int) -> None:
         markers: list[str] = []
         if (project / "package.json").exists():
             markers.append("node")
-        if (project / "requirements.txt").exists() or (project / "pyproject.toml").exists():
+        if (project / "requirements.txt").exists() or (
+            project / "pyproject.toml"
+        ).exists():
             markers.append("python")
         if (project / "README.md").exists() or (project / "README.txt").exists():
             markers.append("readme")
@@ -1455,9 +1612,11 @@ def cmd_provider_status(runtime_dir: Path, environment: str) -> None:
 def cmd_provider_doctor(runtime_dir: Path, strict: bool) -> None:
     specs = _provider_connection_specs()
     rows, required_healthy, required_total = _collect_provider_health(specs)
+    local_ok, local_runtime = _detect_local_coding_runtime()
     report = {
         "providers": rows,
         "api_keys": {},
+        "local_runtime": local_runtime,
         "healthy": required_healthy >= required_total,
     }
 
@@ -1466,6 +1625,9 @@ def cmd_provider_doctor(runtime_dir: Path, strict: bool) -> None:
         print(
             f"- {row['name']} provider={row['provider']} healthy={row['healthy']} details={row['details']}"
         )
+    print(
+        f"- local_runtime provider={local_runtime['provider']} healthy={local_ok} details={local_runtime['details']}"
+    )
 
     for key in [
         "OPENAI_API_KEY",
@@ -1490,6 +1652,110 @@ def cmd_provider_doctor(runtime_dir: Path, strict: bool) -> None:
         raise SystemExit(1)
 
 
+def _provider_smoke_probe(
+    name: str, command: list[str], env: dict[str, str] | None = None
+) -> tuple[bool, str]:
+    prompt = "Reply with exactly: OK"
+    resolved = [item.replace("{prompt}", prompt) for item in command]
+    if resolved and resolved[0].lower() != "cmd":
+        binary = _resolve_executable(resolved[0])
+        if binary is None:
+            return False, "smoke_command_not_found"
+        resolved[0] = binary
+    try:
+        proc = subprocess.run(
+            resolved,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=90,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"smoke_error:{exc}"
+    blob = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip().lower()
+    if proc.returncode == 0 and "ok" in blob:
+        return True, "smoke_ok"
+    return False, f"smoke_failed:{blob[:160]}"
+
+
+def cmd_provider_smoke(runtime_dir: Path, strict: bool) -> None:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    specs = _provider_connection_specs()
+    rows = []
+    dotenv_loaded = False
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(".env"))
+        dotenv_loaded = True
+    except Exception:
+        dotenv_loaded = False
+    for spec in specs:
+        command = _resolve_provider_command(spec)
+        if not command:
+            rows.append(
+                {"name": spec["name"], "healthy": False, "details": "command_missing"}
+            )
+            continue
+        env = os.environ.copy()
+        if (
+            spec["provider"] == "google"
+            and env.get("GOOGLE_API_KEY")
+            and not env.get("GEMINI_API_KEY")
+        ):
+            env["GEMINI_API_KEY"] = env["GOOGLE_API_KEY"]
+        healthy, details = _provider_smoke_probe(spec["name"], command, env=env)
+        rows.append(
+            {
+                "name": spec["name"],
+                "healthy": healthy,
+                "details": details,
+                "command": command,
+            }
+        )
+    local_ok, local_runtime = _detect_local_coding_runtime()
+    if local_ok and isinstance(local_runtime.get("command"), list):
+        healthy, details = _provider_smoke_probe(
+            "ollama_local", list(local_runtime["command"])
+        )
+        rows.append(
+            {
+                "name": "ollama_qwen_coder_local",
+                "healthy": healthy,
+                "details": details,
+                "command": local_runtime["command"],
+            }
+        )
+    report = {"dotenv_loaded": dotenv_loaded, "smoke": rows}
+    print("Provider smoke:")
+    for row in rows:
+        print(f"- {row['name']} healthy={row['healthy']} details={row['details']}")
+    path = runtime_dir / "provider_smoke.json"
+    path.write_text(json.dumps(report, indent=2, ensure_ascii=True), encoding="utf-8")
+    print(f"- report={path}")
+    if strict and any(not row["healthy"] for row in rows):
+        raise SystemExit(1)
+
+
+def cmd_provider_ops(runtime_dir: Path) -> None:
+    payload = build_provider_ops_view(runtime_dir)
+    summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+    print("Provider ops:")
+    print(
+        f"- operational={summary.get('operational_count', 0)} degraded={summary.get('degraded_count', 0)}"
+    )
+    print(f"- team_lead_candidates={summary.get('team_lead_candidates', [])}")
+    print(f"- alerts={payload.get('alerts', [])}")
+    for row in payload.get("providers", []):
+        print(
+            f"- {row['adapter_name']} tier={row['tier']} operational={row['operational']} doctor={row['doctor_details']} smoke={row['smoke_details']}"
+        )
+    print(f"- report={runtime_dir / 'provider_ops.json'}")
+
+
 def cmd_provider_connect(runtime_dir: Path, strict: bool) -> None:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     adapters_path = runtime_dir / "adapters.json"
@@ -1507,6 +1773,19 @@ def cmd_provider_connect(runtime_dir: Path, strict: bool) -> None:
         name = spec["name"]
         command = _resolve_provider_command(spec)
         enabled, details = _provider_runtime_health(spec, command)
+        if (
+            spec.get("provider") == "google"
+            and command
+            and command[:3] == ["npx", "-y", "@google/gemini-cli"]
+            and os.name == "nt"
+            and bool(os.getenv("GOOGLE_API_KEY"))
+            and not bool(os.getenv("GEMINI_API_KEY"))
+        ):
+            command = [
+                "cmd",
+                "/c",
+                "set GEMINI_API_KEY=%GOOGLE_API_KEY% && npx -y @google/gemini-cli {prompt}",
+            ]
 
         if not enabled and spec.get("required", False):
             missing.append(name)
@@ -1517,7 +1796,8 @@ def cmd_provider_connect(runtime_dir: Path, strict: bool) -> None:
             "provider": spec["provider"],
             "model": spec["model"],
             "channel": "subscription",
-            "command": command or ["python", "-c", "print('provider cli not configured')"],
+            "command": command
+            or ["python", "-c", "print('provider cli not configured')"],
             "capabilities": spec["capabilities"],
             "role_targets": spec["role_targets"],
             "priority": "primary",
@@ -1534,8 +1814,34 @@ def cmd_provider_connect(runtime_dir: Path, strict: bool) -> None:
             f"command={command or 'not-found'}"
         )
 
+    local_ok, local_runtime = _detect_local_coding_runtime()
+    if local_runtime.get("command"):
+        local_entry = {
+            "type": "external_program",
+            "name": "ollama_qwen_coder_local",
+            "provider": "local",
+            "model": str(local_runtime.get("model", "qwen2.5-coder:14b")),
+            "channel": "subscription",
+            "command": local_runtime.get("command", []),
+            "capabilities": ["coding", "reasoning", "analysis", "review"],
+            "role_targets": ["engineer", "reviewer", "researcher", "qa"],
+            "priority": "secondary",
+            "routing_priority": 40,
+            "enabled": local_ok,
+            "requires_approval": False,
+            "timeout_seconds": 240,
+            "cost_tier": 0,
+            "source": "ollama_local",
+        }
+        adapters = _upsert_adapter(adapters, local_entry)
+        print(
+            f"- ollama_qwen_coder_local enabled={local_ok} details={local_runtime['details']} command={local_runtime.get('command', [])}"
+        )
+
     payload["external_adapters"] = adapters
-    adapters_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+    adapters_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
 
     accounts_path = runtime_dir / "provider_accounts.json"
     accounts = _default_provider_accounts_template()
@@ -1548,7 +1854,9 @@ def cmd_provider_connect(runtime_dir: Path, strict: bool) -> None:
         connected, details = _provider_runtime_health(spec, command)
         row["connected"] = connected
         row["details"] = details
-    accounts_path.write_text(json.dumps(accounts, indent=2, ensure_ascii=True), encoding="utf-8")
+    accounts_path.write_text(
+        json.dumps(accounts, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
 
     print(f"Provider connections updated: {adapters_path}")
     if missing:
@@ -1572,8 +1880,12 @@ def cmd_system_check(
     )
     summary = orchestrator.event_logger.summary()
     metrics = compute_pilot_metrics(orchestrator.taskboard.list_tasks(), summary)
-    tool_integrator = AutoToolIntegrator(runtime_dir=runtime_dir, project_root=Path.cwd())
-    mcp_report = tool_integrator.mcp_doctor(timeout=doctor_timeout, enable_healthy=False)
+    tool_integrator = AutoToolIntegrator(
+        runtime_dir=runtime_dir, project_root=Path.cwd()
+    )
+    mcp_report = tool_integrator.mcp_doctor(
+        timeout=doctor_timeout, enable_healthy=False
+    )
     skill_coverage = tool_integrator.skill_coverage(runtime_dir=runtime_dir)
     provider_rows, required_healthy, required_total = _collect_provider_health()
     required_minimum = _required_provider_health_minimum(environment, required_total)
@@ -1590,16 +1902,25 @@ def cmd_system_check(
     cost_anomaly_detected = False
     cost_anomaly_reason = "normal"
     if orchestrator.router.budget_manager:
-        cost_anomaly_detected, cost_anomaly_reason = orchestrator.router.budget_manager.detect_cost_anomaly()
+        cost_anomaly_detected, cost_anomaly_reason = (
+            orchestrator.router.budget_manager.detect_cost_anomaly()
+        )
 
     from aiteam.tool_lock import ToolLockManager
+
     lock_manager = ToolLockManager(runtime_dir)
     catalog_tools = tool_integrator._catalog_items()
     drifts = lock_manager.check_drift(catalog_tools)
 
     checks = [
-        (subscription_available >= 1, f"subscription_available={subscription_available}"),
-        (mcp_report["healthy"] >= 1 or mcp_report["total"] == 0, f"mcp_healthy={mcp_report['healthy']}/{mcp_report['total']}"),
+        (
+            subscription_available >= 1,
+            f"subscription_available={subscription_available}",
+        ),
+        (
+            mcp_report["healthy"] >= 1 or mcp_report["total"] == 0,
+            f"mcp_healthy={mcp_report['healthy']}/{mcp_report['total']}",
+        ),
         (
             required_healthy >= required_minimum,
             (
@@ -1614,9 +1935,15 @@ def cmd_system_check(
                 f"required>={min_skills_coverage}%"
             ),
         ),
-        (metrics["compliance_violations"] == 0, f"compliance_violations={metrics['compliance_violations']}"),
+        (
+            metrics["compliance_violations"] == 0,
+            f"compliance_violations={metrics['compliance_violations']}",
+        ),
         (not cost_anomaly_detected, f"cost_anomaly={cost_anomaly_reason}"),
-        (len(drifts) == 0, f"tool_drift_detected={len(drifts)} files (run tool-lock to fix)"),
+        (
+            len(drifts) == 0,
+            f"tool_drift_detected={len(drifts)} files (run tool-lock to fix)",
+        ),
     ]
 
     print("System check:")
@@ -1676,15 +2003,19 @@ def cmd_system_check(
         "alerts": summary.get("alerts", []),
         "failed_checks": failed,
     }
-    report_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
     print(f"- report={report_path}")
 
     if strict and failed:
         raise SystemExit(1)
 
+
 def cmd_tool_lock(runtime_dir: Path, catalog_path: Path) -> None:
     from aiteam.autotools import AutoToolIntegrator
     from aiteam.tool_lock import ToolLockManager
+
     integrator = AutoToolIntegrator(
         runtime_dir=runtime_dir,
         project_root=Path.cwd(),
@@ -1694,10 +2025,11 @@ def cmd_tool_lock(runtime_dir: Path, catalog_path: Path) -> None:
     if not tools:
         print("No tools found in catalog to lock")
         return
-        
+
     manager = ToolLockManager(runtime_dir)
     manager.generate_lockfile(tools)
     print(f"Tool lockfile generated with {len(tools)} tools at {manager.lock_file}")
+
 
 def cmd_system_prune(runtime_dir: Path, max_days: int) -> None:
     orchestrator = build_default_orchestrator(
@@ -1706,8 +2038,11 @@ def cmd_system_prune(runtime_dir: Path, max_days: int) -> None:
         environment="dev",
     )
     archive_dir = runtime_dir / "archive"
-    removed = orchestrator.event_logger.prune_events(max_days=max_days, archive_dir=archive_dir)
+    removed = orchestrator.event_logger.prune_events(
+        max_days=max_days, archive_dir=archive_dir
+    )
     print(f"System prune: {removed} events archived to {archive_dir}")
+
 
 def cmd_snapshot_create(
     runtime_dir: Path,
@@ -1737,7 +2072,7 @@ def cmd_snapshot_list() -> None:
     for item in snapshots[:50]:
         print(
             f"- {item.get('id')} created={item.get('created_at')} "
-            f"files={item.get('file_count')} label={item.get('label','')}"
+            f"files={item.get('file_count')} label={item.get('label', '')}"
         )
 
 
@@ -1747,7 +2082,9 @@ def cmd_snapshot_restore(snapshot_id: str, no_backup: bool, dry_run: bool) -> No
         raise SystemExit("snapshot-restore requires --snapshot-id")
 
     if not no_backup and not dry_run:
-        backup = manager.create_snapshot(label=f"auto_backup_before_restore:{snapshot_id}")
+        backup = manager.create_snapshot(
+            label=f"auto_backup_before_restore:{snapshot_id}"
+        )
         print(f"Backup snapshot created: {backup['id']}")
 
     result = manager.restore_snapshot(snapshot_id, dry_run=dry_run)
@@ -1819,7 +2156,8 @@ def cmd_autotune_doctor(runtime_dir: Path, environment: str, window_hours: int) 
     task_events = [
         item
         for item in events
-        if str(item.get("event_type", "")) == "task_execution" and isinstance(item.get("payload"), dict)
+        if str(item.get("event_type", "")) == "task_execution"
+        and isinstance(item.get("payload"), dict)
     ]
 
     if not task_events:
@@ -1834,7 +2172,10 @@ def cmd_autotune_doctor(runtime_dir: Path, environment: str, window_hours: int) 
 
     env = environment.strip().lower()
     max_key = f"AITEAM_MAX_PARALLEL_TASKS_{env.upper()}"
-    configured_max = os.getenv(max_key, "").strip() or os.getenv("AITEAM_MAX_PARALLEL_TASKS", "1").strip()
+    configured_max = (
+        os.getenv(max_key, "").strip()
+        or os.getenv("AITEAM_MAX_PARALLEL_TASKS", "1").strip()
+    )
     try:
         current_max = max(1, int(configured_max))
     except ValueError:
@@ -1883,8 +2224,14 @@ def cmd_autotune_doctor(runtime_dir: Path, environment: str, window_hours: int) 
     else:
         recommended_max = min(hard_cap, current_max)
 
-    recommended_target_latency = max(400, int(p95_global * 1.2) if p95_global > 0 else latency_ceiling)
-    recommended_failure_rate = default_failure_rate if success_rate >= success_floor else max(10, default_failure_rate - 5)
+    recommended_target_latency = max(
+        400, int(p95_global * 1.2) if p95_global > 0 else latency_ceiling
+    )
+    recommended_failure_rate = (
+        default_failure_rate
+        if success_rate >= success_floor
+        else max(10, default_failure_rate - 5)
+    )
 
     print(f"Autotune doctor window_hours={max(1, window_hours)} env={env}")
     print(f"- task_events={len(task_events)} success_rate={success_rate:.2f}%")
@@ -1906,11 +2253,16 @@ def _percentile_int(values: list[int], percentile: int) -> int:
     if not values:
         return 0
     sorted_values = sorted(values)
-    position = max(0, min(len(sorted_values) - 1, (len(sorted_values) * percentile + 99) // 100 - 1))
+    position = max(
+        0,
+        min(len(sorted_values) - 1, (len(sorted_values) * percentile + 99) // 100 - 1),
+    )
     return int(sorted_values[position])
 
 
-def cmd_contract_first(runtime_dir: Path, epic_id: str, title: str, description: str) -> None:
+def cmd_contract_first(
+    runtime_dir: Path, epic_id: str, title: str, description: str
+) -> None:
     orchestrator = build_default_orchestrator(runtime_dir, environment="dev")
     lead = WorkTask(
         task_id=f"{epic_id}::lead",
@@ -1966,7 +2318,7 @@ def cmd_learning(
 
     registry = LearningRegistry(runtime_dir)
     normalized_tags = [item.strip() for item in tags.split(",") if item.strip()]
-    
+
     if action == "record-failure":
         if not title:
             print("Error: --learning-title is required for record-failure")
@@ -1982,7 +2334,7 @@ def cmd_learning(
             project_id=project or None,
         )
         print(f"OK Project failure recorded: {title}")
-    
+
     elif action == "record-insight":
         if not title:
             print("Error: --learning-title is required for record-insight")
@@ -1995,7 +2347,7 @@ def cmd_learning(
             tags=normalized_tags,
         )
         print(f"OK System insight recorded: {title}")
-    
+
     elif action == "record-team":
         if not title:
             print("Error: --learning-title is required for record-team")
@@ -2008,7 +2360,7 @@ def cmd_learning(
             tags=normalized_tags,
         )
         print(f"OK Team learning recorded: {title}")
-    
+
     elif action == "record-feedback":
         if not title:
             print("Error: --learning-title is required for record-feedback")
@@ -2028,7 +2380,7 @@ def cmd_learning(
             return
         registry.mark_addressed(title)
         print(f"OK Learning marked as addressed: {title}")
-    
+
     elif action == "list":
         learnings = registry.read_all()
         if category:
@@ -2042,25 +2394,35 @@ def cmd_learning(
                 "user_feedback": "user_feedback",
                 "feedback": "user_feedback",
             }
-            normalized_category = category_lookup.get(category.strip().lower(), category.strip().lower())
-            learnings = [item for item in learnings if item.get("category") == normalized_category]
+            normalized_category = category_lookup.get(
+                category.strip().lower(), category.strip().lower()
+            )
+            learnings = [
+                item
+                for item in learnings
+                if item.get("category") == normalized_category
+            ]
         if status:
-            learnings = [item for item in learnings if item.get("status") == status.lower()]
+            learnings = [
+                item for item in learnings if item.get("status") == status.lower()
+            ]
         if tag:
             learnings = [item for item in learnings if tag in item.get("tags", [])]
         if project:
-            learnings = [item for item in learnings if item.get("project_id") == project]
+            learnings = [
+                item for item in learnings if item.get("project_id") == project
+            ]
         if not learnings:
             print("No learnings recorded yet.")
             return
-        
+
         print(f"\nLearning Registry ({len(learnings)} items)\n")
         for idx, learning in enumerate(learnings, 1):
             cat = learning.get("category", "UNKNOWN")
             title = learning.get("title", "Untitled")
             status = learning.get("status", "unknown")
             print(f"{idx}. [{cat}] {title} ({status})")
-    
+
     elif action == "summary":
         summary = registry.summary()
         print("\nLearning Registry Summary")
@@ -2068,7 +2430,7 @@ def cmd_learning(
         print(f"  Open Items: {summary['open_count']}")
         print(f"  Addressed: {summary['addressed_count']}")
         print(f"  Archived: {summary['by_status'].get('archived', 0)}")
-    
+
     elif action == "export":
         if format == "json":
             learnings = registry.read_all()
@@ -2086,7 +2448,7 @@ def cmd_learning(
             if not all_learnings:
                 print("No learnings recorded yet.")
                 return
-            
+
             print(f"# Learning Registry Export\n")
             summary = registry.summary()
             print(f"- **Total Learnings**: {summary['total_records']}")
@@ -2096,10 +2458,11 @@ def cmd_learning(
 
 def main() -> None:
     _load_dotenv_if_present(Path(".env"))
-    
+
     # Load and validate schemas if validation not disabled
     if os.getenv("AITEAM_SKIP_CONFIG_VALIDATION", "0") not in {"1", "true"}:
         from aiteam.config_schema import validate_config
+
         config_dir = Path("config")
         checks = [
             (config_dir / "routing_policy.example.json", "routing_policy"),
@@ -2115,7 +2478,9 @@ def main() -> None:
             print("Configuration Validation Errors:")
             for e in errors:
                 print(f" - {e}")
-            raise SystemExit("\nPlease fix configuration errors before starting AI Team.")
+            raise SystemExit(
+                "\nPlease fix configuration errors before starting AI Team."
+            )
 
     parser = argparse.ArgumentParser(description="AI Team Hybrid Orchestrator")
     parser.add_argument(
@@ -2142,6 +2507,8 @@ def main() -> None:
             "provider-status",
             "provider-connect",
             "provider-doctor",
+            "provider-smoke",
+            "provider-ops",
             "autotune-doctor",
             "system-check",
             "system-prune",
@@ -2175,8 +2542,12 @@ def main() -> None:
         ],
         help="Optional learning subcommand (when command=learning)",
     )
-    parser.add_argument("--runtime-dir", default="runtime", help="Runtime storage directory")
-    parser.add_argument("--epic-id", default="EPIC-001", help="Epic ID for contract-first")
+    parser.add_argument(
+        "--runtime-dir", default="runtime", help="Runtime storage directory"
+    )
+    parser.add_argument(
+        "--epic-id", default="EPIC-001", help="Epic ID for contract-first"
+    )
     parser.add_argument("--title", default="Nuevo flujo AI Team", help="Epic title")
     parser.add_argument(
         "--description",
@@ -2188,7 +2559,9 @@ def main() -> None:
     parser.add_argument("--agent", default="lead-1", help="Agent ID for memory command")
     parser.add_argument("--limit", type=int, default=10, help="Memory entries to print")
     parser.add_argument("--shell", choices=["cmd", "powershell"], default="cmd")
-    parser.add_argument("--command-text", default="python --version", help="Command for exec")
+    parser.add_argument(
+        "--command-text", default="python --version", help="Command for exec"
+    )
     parser.add_argument("--min-task-success-rate", type=float, default=85.0)
     parser.add_argument("--min-gate-pass-rate", type=float, default=85.0)
     parser.add_argument("--min-pro-share", type=float, default=60.0)
@@ -2198,7 +2571,9 @@ def main() -> None:
         default=os.getenv("AITEAM_SHARED_TOOLS_ROOT", str(Path.cwd().parent)),
         help="Root directory to catalog external tools",
     )
-    parser.add_argument("--catalog-limit", type=int, default=30, help="Max projects in catalog")
+    parser.add_argument(
+        "--catalog-limit", type=int, default=30, help="Max projects in catalog"
+    )
     parser.add_argument(
         "--inventory-output",
         default="runtime/tool_inventory.json",
@@ -2483,9 +2858,13 @@ def main() -> None:
     elif args.command == "plan":
         cmd_plan()
     elif args.command == "demo":
-        cmd_demo(runtime_dir, browser_mode=args.browser_mode, environment=args.environment)
+        cmd_demo(
+            runtime_dir, browser_mode=args.browser_mode, environment=args.environment
+        )
     elif args.command == "status":
-        cmd_status(runtime_dir, browser_mode=args.browser_mode, environment=args.environment)
+        cmd_status(
+            runtime_dir, browser_mode=args.browser_mode, environment=args.environment
+        )
     elif args.command == "contract-first":
         cmd_contract_first(
             runtime_dir=runtime_dir,
@@ -2511,7 +2890,9 @@ def main() -> None:
             max_compliance_violations=args.max_compliance_violations,
         )
     elif args.command == "catalog-tools":
-        cmd_catalog_tools(catalog_root=Path(args.catalog_root), limit=args.catalog_limit)
+        cmd_catalog_tools(
+            catalog_root=Path(args.catalog_root), limit=args.catalog_limit
+        )
     elif args.command == "inventory-tools":
         cmd_inventory_tools(
             catalog_root=Path(args.catalog_root),
@@ -2519,7 +2900,9 @@ def main() -> None:
             limit=args.catalog_limit,
         )
     elif args.command == "tool-catalog":
-        cmd_tool_catalog(catalog_path=Path(args.tool_catalog_file), limit=args.catalog_limit)
+        cmd_tool_catalog(
+            catalog_path=Path(args.tool_catalog_file), limit=args.catalog_limit
+        )
     elif args.command == "tool-sync":
         cmd_tool_sync(
             runtime_dir=runtime_dir,
@@ -2532,7 +2915,9 @@ def main() -> None:
     elif args.command == "skills-library":
         cmd_skills_library(runtime_dir=runtime_dir, show_content=args.show_content)
     elif args.command == "skills-sync":
-        cmd_skills_sync(runtime_dir=runtime_dir, force=args.force, targets=args.skills_targets)
+        cmd_skills_sync(
+            runtime_dir=runtime_dir, force=args.force, targets=args.skills_targets
+        )
     elif args.command == "skills-pull":
         cmd_skills_pull(
             runtime_dir=runtime_dir,
@@ -2566,6 +2951,10 @@ def main() -> None:
         cmd_provider_connect(runtime_dir=runtime_dir, strict=args.strict)
     elif args.command == "provider-doctor":
         cmd_provider_doctor(runtime_dir=runtime_dir, strict=args.strict)
+    elif args.command == "provider-smoke":
+        cmd_provider_smoke(runtime_dir=runtime_dir, strict=args.strict)
+    elif args.command == "provider-ops":
+        cmd_provider_ops(runtime_dir=runtime_dir)
     elif args.command == "autotune-doctor":
         cmd_autotune_doctor(
             runtime_dir=runtime_dir,

@@ -10,21 +10,26 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Global state for the IDE's current workspace directory
 _CURRENT_WORKSPACE: Path = PROJECT_ROOT
 
+
 def get_current_workspace() -> Path:
     return _CURRENT_WORKSPACE
+
 
 def set_current_workspace(path: Path) -> None:
     global _CURRENT_WORKSPACE
     _CURRENT_WORKSPACE = path
 
+
 from pydantic import BaseModel
 from fastapi import HTTPException, Request
+
 
 def _truncate_text(value: object, limit: int = 360) -> str:
     text = str(value or "")
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)] + "..."
+
 
 def _read_json_payload(path: Path, fallback: object) -> object:
     if not path.exists():
@@ -35,15 +40,18 @@ def _read_json_payload(path: Path, fallback: object) -> object:
         return fallback
     return data
 
+
 def _read_jsonl_records(path: Path) -> list[dict]:
     if not path.exists():
         return []
     try:
         from aiteam.persistence import AtomicFileWriter
+
         records = AtomicFileWriter.read_jsonl_with_dedup(path)
     except Exception:
         return []
     return [item for item in records if isinstance(item, dict)]
+
 
 def _event_summary(event_type: str, payload: dict) -> str:
     if event_type == "user_input":
@@ -61,7 +69,35 @@ def _event_summary(event_type: str, payload: dict) -> str:
         assignee = payload.get("assignee", "-")
         success = payload.get("success", False)
         latency = payload.get("latency_ms", 0)
-        return f"task_execution success={success} role={role} assignee={assignee} latency={latency}ms"
+        round_id = payload.get("execution_round", 0)
+        sub_id = payload.get("execution_sub_iteration", 0)
+        gate_id = payload.get("gate_iteration", 0)
+        return f"task_execution success={success} role={role} assignee={assignee} latency={latency}ms r={round_id} s={sub_id} g={gate_id}"
+    if event_type == "task_started":
+        return (
+            f"task_started assignee={payload.get('assignee', '-')} "
+            f"r={payload.get('execution_round', 0)} s={payload.get('execution_sub_iteration', 0)} "
+            f"g={payload.get('gate_iteration', 0)}"
+        )
+    if event_type == "gate_iteration":
+        return (
+            f"gate_iteration iter={payload.get('iteration', 0)} failed={payload.get('failed_gates', [])} "
+            f"r={payload.get('execution_round', 0)} s={payload.get('execution_sub_iteration', 0)}"
+        )
+    if event_type in {
+        "agent_handoff",
+        "conversation_mailbox_consumed",
+        "conversation_mailbox_reply",
+    }:
+        return _truncate_text(json.dumps(payload, ensure_ascii=True), limit=220)
+    if event_type in {
+        "sync_meeting",
+        "sync_meeting_skipped",
+        "round_sub_iteration",
+        "round_completed",
+        "sub_iteration_barrier",
+    }:
+        return _truncate_text(json.dumps(payload, ensure_ascii=True), limit=220)
     if event_type == "execution_step":
         step_type = payload.get("step_type", "-")
         command = _truncate_text(payload.get("command", ""), limit=120)
@@ -75,14 +111,17 @@ def _event_summary(event_type: str, payload: dict) -> str:
         return f"mail sender={sender} recipient={recipient} subject={subject}"
     return _truncate_text(json.dumps(payload, ensure_ascii=True), limit=220)
 
+
 def _auth_expected_key() -> str:
     return os.getenv("AITEAM_API_KEY", "").strip()
+
 
 def _extract_auth_token(headers: dict[str, str]) -> str:
     auth = str(headers.get("authorization", "") or "").strip()
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
     return ""
+
 
 def _is_authorized(headers: dict[str, str]) -> bool:
     expected = _auth_expected_key()
@@ -92,10 +131,12 @@ def _is_authorized(headers: dict[str, str]) -> bool:
     bearer = _extract_auth_token(headers)
     return x_api_key == expected or bearer == expected
 
+
 def _require_api_auth_request(request: Request) -> None:
     if _is_authorized({k.lower(): v for k, v in request.headers.items()}):
         return
     raise HTTPException(status_code=401, detail="Unauthorized")
+
 
 def _normalize_workspace_path(raw_path: str, project_root: Path) -> Path:
     candidate = Path(raw_path.strip())
@@ -103,7 +144,10 @@ def _normalize_workspace_path(raw_path: str, project_root: Path) -> Path:
         candidate = (project_root / candidate).resolve()
     return candidate.resolve()
 
-def _workspace_from_header_map(headers: dict[str, str], current_workspace: Path, project_root: Path) -> Path:
+
+def _workspace_from_header_map(
+    headers: dict[str, str], current_workspace: Path, project_root: Path
+) -> Path:
     raw = str(headers.get("x-workspace-path", "") or "").strip()
     if not raw:
         return current_workspace
@@ -112,9 +156,13 @@ def _workspace_from_header_map(headers: dict[str, str], current_workspace: Path,
     except Exception:
         return current_workspace
 
-def _workspace_from_request(request: Request, current_workspace: Path, project_root: Path) -> Path:
+
+def _workspace_from_request(
+    request: Request, current_workspace: Path, project_root: Path
+) -> Path:
     header_map = {k.lower(): v for k, v in request.headers.items()}
     return _workspace_from_header_map(header_map, current_workspace, project_root)
+
 
 def _safe_workspace_target(workspace: Path, relative_path: str) -> Path | None:
     try:
@@ -123,6 +171,7 @@ def _safe_workspace_target(workspace: Path, relative_path: str) -> Path | None:
         return target
     except Exception:
         return None
+
 
 def _extract_user_message_from_task_description(description: str) -> str:
     marker = "Solicitud original:\n"
@@ -137,6 +186,7 @@ def _extract_user_message_from_task_description(description: str) -> str:
     if "\nEntrega:" in fragment:
         fragment = fragment.split("\nEntrega:", 1)[0]
     return fragment.strip()
+
 
 def _group_chat_roots(tasks_payload: object) -> dict[str, dict[str, object]]:
     roots: dict[str, dict[str, object]] = {}
@@ -175,6 +225,7 @@ def _group_chat_roots(tasks_payload: object) -> dict[str, dict[str, object]]:
         if extracted and not str(row.get("user_message", "")).strip():
             row["user_message"] = extracted
     return roots
+
 
 def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> str:
     tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
@@ -218,10 +269,7 @@ def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> 
         phase_states = row.get("phase_states", {})
         state_view = ""
         if isinstance(phase_states, dict):
-            state_view = ", ".join(
-                f"{k}:{v}"
-                for k, v in phase_states.items()
-            )
+            state_view = ", ".join(f"{k}:{v}" for k, v in phase_states.items())
         lines.append(f"- {root_id} msg={message or '-'}")
         if state_view:
             lines.append(f"  states={state_view}")
@@ -230,8 +278,10 @@ def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> 
 
     return "\n".join(lines)
 
+
 def _chat_round_budget(complexity, criticality) -> int:
     from aiteam.types import Complexity, Criticality
+
     override = os.getenv("AITEAM_CHAT_MAX_ROUNDS", "").strip()
     if override.isdigit():
         return max(12, int(override))
@@ -246,12 +296,14 @@ def _chat_round_budget(complexity, criticality) -> int:
         budget = max(budget, 36)
     return budget
 
+
 def _sanitize_project_name(raw_name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "-", raw_name.strip())
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._-")
     if not cleaned:
         return "New Project"
     return cleaned
+
 
 def _allocate_project_path(projects_root: Path, preferred_name: str) -> Path:
     candidate = projects_root / preferred_name
@@ -264,7 +316,10 @@ def _allocate_project_path(projects_root: Path, preferred_name: str) -> Path:
             return trial
         suffix += 1
 
-def _detect_notebooklm_status(runtime_dir: Path, project_root: Path) -> dict[str, str | bool]:
+
+def _detect_notebooklm_status(
+    runtime_dir: Path, project_root: Path
+) -> dict[str, str | bool]:
     adapters_path = runtime_dir / "adapters.json"
     sync_status_path = runtime_dir / "notebooklm_sync_status.json"
     notebooklm_adapters: list[dict[str, object]] = []
@@ -272,14 +327,20 @@ def _detect_notebooklm_status(runtime_dir: Path, project_root: Path) -> dict[str
     if adapters_path.exists():
         try:
             data = json.loads(adapters_path.read_text(encoding="utf-8"))
-            candidates = data.get("external_adapters", []) if isinstance(data, dict) else []
+            candidates = (
+                data.get("external_adapters", []) if isinstance(data, dict) else []
+            )
             for item in candidates:
                 if not isinstance(item, dict):
                     continue
                 name = str(item.get("name", "")).lower()
                 provider = str(item.get("provider", "")).lower()
                 model = str(item.get("model", "")).lower()
-                if "notebooklm" in name or "notebooklm" in provider or "notebooklm" in model:
+                if (
+                    "notebooklm" in name
+                    or "notebooklm" in provider
+                    or "notebooklm" in model
+                ):
                     notebooklm_adapters.append(item)
         except Exception:
             pass
@@ -300,16 +361,25 @@ def _detect_notebooklm_status(runtime_dir: Path, project_root: Path) -> dict[str
         except Exception:
             pass
 
-    enabled_adapters = [item for item in notebooklm_adapters if bool(item.get("enabled", False))]
+    enabled_adapters = [
+        item for item in notebooklm_adapters if bool(item.get("enabled", False))
+    ]
     if enabled_adapters:
         first = enabled_adapters[0]
-        auto_configured = bool(os.getenv("NOTEBOOKLM_INGEST_ENDPOINT") or os.getenv("NOTEBOOKLM_INGEST_COMMAND"))
+        auto_configured = bool(
+            os.getenv("NOTEBOOKLM_INGEST_ENDPOINT")
+            or os.getenv("NOTEBOOKLM_INGEST_COMMAND")
+        )
         return {
             "connected": auto_configured,
             "mode": "adapter",
             "details": (
                 f"Adapter enabled: {first.get('name', 'notebooklm')}."
-                + (" Auto-sync transport configured." if auto_configured else " Waiting for first sync transport config.")
+                + (
+                    " Auto-sync transport configured."
+                    if auto_configured
+                    else " Waiting for first sync transport config."
+                )
             ),
         }
 

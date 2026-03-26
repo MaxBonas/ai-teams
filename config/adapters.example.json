@@ -2,6 +2,37 @@
   "external_adapters": [
     {
       "type": "external_program",
+      "name": "ollama_qwen_coder_local",
+      "provider": "local",
+      "model": "qwen2.5-coder:14b",
+      "channel": "subscription",
+      "command": [
+        "C:\\Users\\she__\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+        "run",
+        "qwen2.5-coder:14b",
+        "{prompt}"
+      ],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "analysis",
+        "review"
+      ],
+      "role_targets": [
+        "team_lead",
+        "engineer",
+        "reviewer",
+        "researcher",
+        "qa"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": false,
+      "timeout_seconds": 240,
+      "cost_tier": 0
+    },
+    {
+      "type": "external_program",
       "name": "my_engineer_runtime",
       "provider": "custom",
       "model": "runtime-v1",

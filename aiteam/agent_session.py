@@ -8,6 +8,7 @@ llamadas a LLM, accesos a archivos, uso de MCPs, etc.
 Patron inspirado en: Magentic-One (ledger), Devin (persistent sessions),
 Claude Code (full tool call tracing).
 """
+
 from __future__ import annotations
 
 import json
@@ -22,8 +23,11 @@ from typing import Any
 @dataclass
 class SessionAction:
     """Una accion individual dentro de una sesion de agente."""
+
     ts: str
-    action_type: str  # llm_call, tool_invoke, file_access, mcp_call, command_exec, message_sent
+    action_type: (
+        str  # llm_call, tool_invoke, file_access, mcp_call, command_exec, message_sent
+    )
     detail: str
     success: bool = True
     duration_ms: int = 0
@@ -33,6 +37,7 @@ class SessionAction:
 @dataclass
 class AgentSession:
     """Sesion de trabajo de un agente en un task."""
+
     session_id: str
     agent_id: str
     role: str
@@ -78,7 +83,11 @@ class AgentSession:
     def elapsed_ms(self) -> int:
         try:
             start = datetime.fromisoformat(self.started_at)
-            end = datetime.fromisoformat(self.ended_at) if self.ended_at else datetime.now(timezone.utc)
+            end = (
+                datetime.fromisoformat(self.ended_at)
+                if self.ended_at
+                else datetime.now(timezone.utc)
+            )
             return int((end - start).total_seconds() * 1000)
         except (ValueError, TypeError):
             return 0
@@ -90,7 +99,6 @@ class AgentSession:
         return data
 
     def to_summary_dict(self) -> dict[str, Any]:
-        """Resumen compacto sin la lista completa de acciones."""
         return {
             "session_id": self.session_id,
             "agent_id": self.agent_id,
@@ -108,6 +116,91 @@ class AgentSession:
             "elapsed_ms": self.elapsed_ms(),
             "action_count": len(self.actions),
         }
+
+
+@dataclass
+class ConversationTurn:
+    ts: str
+    role: str
+    content: str
+    source: str = "task"
+    task_id: str | None = None
+    message_id: str | None = None
+
+
+@dataclass
+class ConversationThread:
+    thread_id: str
+    agent_id: str
+    project_key: str
+    created_at: str
+    last_updated: str
+    turns: list[ConversationTurn] = field(default_factory=list)
+    consumed_message_ids: list[str] = field(default_factory=list)
+
+    def append_turn(
+        self,
+        role: str,
+        content: str,
+        source: str = "task",
+        task_id: str | None = None,
+        message_id: str | None = None,
+    ) -> None:
+        normalized = content.strip()
+        if not normalized:
+            return
+        if self.turns:
+            last = self.turns[-1]
+            if (
+                last.role == role
+                and last.source == source
+                and (last.task_id or "") == (task_id or "")
+                and last.content.strip() == normalized
+            ):
+                if message_id and message_id not in self.consumed_message_ids:
+                    self.consumed_message_ids.append(message_id)
+                return
+        now = datetime.now(timezone.utc).isoformat()
+        self.turns.append(
+            ConversationTurn(
+                ts=now,
+                role=role,
+                content=normalized,
+                source=source,
+                task_id=task_id,
+                message_id=message_id,
+            )
+        )
+        self.last_updated = now
+        if message_id and message_id not in self.consumed_message_ids:
+            self.consumed_message_ids.append(message_id)
+        self._compact_turns()
+
+    def recent_turns(self, limit: int = 8) -> list[ConversationTurn]:
+        return self.turns[-limit:] if limit > 0 else list(self.turns)
+
+    def has_consumed_message(self, message_id: str) -> bool:
+        return message_id in self.consumed_message_ids
+
+    def _compact_turns(self, max_turns: int = 9, keep_recent: int = 8) -> None:
+        if len(self.turns) <= max_turns:
+            return
+        overflow = self.turns[:-keep_recent]
+        kept = self.turns[-keep_recent:]
+        snippets = []
+        for turn in overflow[:3]:
+            text = turn.content.strip().replace("\n", " ")[:80]
+            snippets.append(f"{turn.role}:{text}")
+        summary = ConversationTurn(
+            ts=datetime.now(timezone.utc).isoformat(),
+            role="system",
+            content=(
+                f"Resumen de {len(overflow)} turnos previos del proyecto: "
+                + " | ".join(snippets)
+            )[:400],
+            source="summary",
+        )
+        self.turns = [summary] + kept
 
 
 class SessionStore:
@@ -187,12 +280,18 @@ class SessionStore:
 
     def _persist_session(self, session: AgentSession) -> None:
         path = self.sessions_dir / f"{session.session_id}.json"
-        content = json.dumps(session.to_dict(), indent=2, ensure_ascii=False, default=str)
+        content = json.dumps(
+            session.to_dict(), indent=2, ensure_ascii=False, default=str
+        )
         import tempfile
+
         try:
             with tempfile.NamedTemporaryFile(
-                mode="w", dir=self.sessions_dir, suffix=".tmp",
-                delete=False, encoding="utf-8",
+                mode="w",
+                dir=self.sessions_dir,
+                suffix=".tmp",
+                delete=False,
+                encoding="utf-8",
             ) as tmp:
                 tmp_path = Path(tmp.name)
                 tmp.write(content)
@@ -237,5 +336,77 @@ class SessionStore:
             session = AgentSession(**raw)
             session.actions = actions
             return session
+        except (json.JSONDecodeError, TypeError, KeyError):
+            return None
+
+
+class ThreadStore:
+    def __init__(self, runtime_dir: Path) -> None:
+        self.threads_dir = runtime_dir / "sessions" / "threads"
+        self.threads_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+
+    def get_thread(self, agent_id: str, project_key: str) -> ConversationThread:
+        path = self._path_for(agent_id=agent_id, project_key=project_key)
+        with self._lock:
+            thread = self._load_thread(path)
+            if thread is not None:
+                return thread
+            now = datetime.now(timezone.utc).isoformat()
+            created = ConversationThread(
+                thread_id=str(uuid.uuid4())[:12],
+                agent_id=agent_id,
+                project_key=project_key,
+                created_at=now,
+                last_updated=now,
+            )
+            self._persist_thread(path, created)
+            return created
+
+    def save_thread(self, thread: ConversationThread) -> None:
+        path = self._path_for(agent_id=thread.agent_id, project_key=thread.project_key)
+        with self._lock:
+            self._persist_thread(path, thread)
+
+    def _path_for(self, agent_id: str, project_key: str) -> Path:
+        safe_agent = self._slug(agent_id)
+        safe_project = self._slug(project_key)
+        return self.threads_dir / f"{safe_agent}__{safe_project}.json"
+
+    @staticmethod
+    def _slug(value: str) -> str:
+        cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip())
+        compact = "_".join(part for part in cleaned.split("_") if part)
+        return compact[:120] or "default"
+
+    def _persist_thread(self, path: Path, thread: ConversationThread) -> None:
+        content = json.dumps(asdict(thread), indent=2, ensure_ascii=False, default=str)
+        import tempfile
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=self.threads_dir,
+                suffix=".tmp",
+                delete=False,
+                encoding="utf-8",
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+                tmp.write(content)
+                tmp.flush()
+            tmp_path.replace(path)
+        except Exception:
+            if "tmp_path" in dir():
+                tmp_path.unlink(missing_ok=True)
+
+    def _load_thread(self, path: Path) -> ConversationThread | None:
+        if not path.exists():
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            turns = [ConversationTurn(**item) for item in raw.pop("turns", [])]
+            thread = ConversationThread(**raw)
+            thread.turns = turns
+            return thread
         except (json.JSONDecodeError, TypeError, KeyError):
             return None

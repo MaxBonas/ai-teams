@@ -7,11 +7,11 @@ type EventCategory = 'all' | 'tasks' | 'quality' | 'decisions' | 'tools' | 'comm
 
 const EVENT_CATEGORIES: Record<EventCategory, { label: string; types: string[] }> = {
   all: { label: 'All', types: [] },
-  tasks: { label: 'Tasks', types: ['task_started', 'task_execution', 'task_completed', 'task_failed', 'placeholder_gate_failed', 'evidence_gate_failed'] },
+  tasks: { label: 'Tasks', types: ['task_started', 'task_execution', 'task_completed', 'task_failed', 'placeholder_gate_failed', 'evidence_gate_failed', 'round_sub_iteration', 'round_completed', 'sub_iteration_barrier'] },
   quality: { label: 'Quality', types: ['gate_iteration', 'quality_gates_failed', 'conflict_escalation', 'stall_detected'] },
   decisions: { label: 'Decisions', types: ['decision_recorded', 'decision_rank_escalation', 'peer_dialogue_round2', 'team_decision'] },
   tools: { label: 'Tools', types: ['agent_tool_invocation', 'tool_integration', 'agent_delegation', 'skill_mcp_guidance'] },
-  comms: { label: 'Comms', types: ['mail_dm', 'mail_broadcast', 'sync_meeting', 'agent_handoff'] },
+  comms: { label: 'Comms', types: ['mail_dm', 'mail_broadcast', 'sync_meeting', 'sync_meeting_skipped', 'agent_handoff', 'conversation_mailbox_consumed', 'conversation_mailbox_reply'] },
 };
 
 interface OperatorTimelineItem {
@@ -20,6 +20,15 @@ interface OperatorTimelineItem {
   task_id: string;
   level: string;
   summary: string;
+  assignee?: string;
+  execution_round?: number;
+  execution_sub_iteration?: number;
+  gate_iteration?: number;
+  blocked_reason?: string;
+  handoff_from?: string;
+  handoff_to?: string;
+  conversation_thread_id?: string;
+  meeting_kind?: string;
   artifact_created: number;
   artifact_modified: number;
   artifact_files: string[];
@@ -258,6 +267,14 @@ export default function OperatorTimeline({ workspacePath }: OperatorTimelineProp
                   <time>{formatTs(item.ts)}</time>
                 </div>
                 <div className={`team-operator-level level-${item.level || 'info'}`}>{item.level || 'info'}</div>
+                <div className="team-stream-task">
+                  flow r{Number(item.execution_round || 0)} / s{Number(item.execution_sub_iteration || 0)} / g{Number(item.gate_iteration || 0)}
+                  {item.assignee ? ` · ${item.assignee}` : ''}
+                  {item.blocked_reason ? ` · blocked=${item.blocked_reason}` : ''}
+                  {item.handoff_from || item.handoff_to ? ` · ${item.handoff_from || '-'} -> ${item.handoff_to || '-'}` : ''}
+                  {item.meeting_kind ? ` · meeting=${item.meeting_kind}` : ''}
+                  {item.conversation_thread_id ? ` · thread=${item.conversation_thread_id}` : ''}
+                </div>
                 <pre className="team-stream-body-text" style={isHandoff ? { color: 'var(--accent-warning)', fontWeight: 500 } : {}}>
                   {item.summary || '-'}
                 </pre>

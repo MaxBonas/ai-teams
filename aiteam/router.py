@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
+from pathlib import Path
 
 from aiteam.adapters.base import ModelAdapter
 from aiteam.config import RouterPolicy
 from aiteam.finops import BudgetManager
+from aiteam.model_catalog import load_model_catalog, provider_smoke_status
 from aiteam.observability import EventLogger
-from aiteam.types import ChannelType, Complexity, Criticality, RoutingDecision, RoutingRequest
+from aiteam.types import (
+    ChannelType,
+    Complexity,
+    Criticality,
+    Role,
+    RoutingDecision,
+    RoutingRequest,
+)
 
 
 @dataclass
@@ -31,6 +41,93 @@ class HybridRouter:
         self.policy = policy
         self.budget_manager = budget_manager
         self.event_logger = event_logger
+        self.runtime_dir = None
+        if self.budget_manager is not None:
+            self.runtime_dir = self.budget_manager.runtime_dir
+        project_root = None
+        if self.runtime_dir is not None:
+            project_root = Path(self.runtime_dir).parent
+        self.model_catalog = load_model_catalog(
+            project_root,
+            Path(self.runtime_dir) if self.runtime_dir is not None else None,
+        )
+
+    def _smoke_ok(self, adapter: ModelAdapter) -> bool:
+        if self.runtime_dir is None:
+            return True
+        status = provider_smoke_status(Path(self.runtime_dir))
+        if not status:
+            return True
+        if adapter.name in status:
+            return bool(status[adapter.name])
+        return True
+
+    def _team_lead_allowed(self, adapter: ModelAdapter) -> bool:
+        profile = self.model_catalog.get(adapter.name)
+        if profile is None:
+            return False
+        if profile.tier == "senior_cloud":
+            return self._smoke_ok(adapter)
+        if profile.tier == "advanced_api" and profile.api_allowed_for_team_lead:
+            return self._smoke_ok(adapter)
+        return False
+
+    def _role_rank(self, adapter: ModelAdapter, role_key: str) -> int:
+        profile = self.model_catalog.get(adapter.name)
+        if profile is None:
+            return 999
+        if role_key == "team_lead":
+            return -(profile.reasoning_rank + profile.coding_rank + profile.trust_rank)
+        if role_key == "engineer":
+            return -(profile.coding_rank + profile.reasoning_rank)
+        if role_key == "reviewer":
+            return -(profile.reasoning_rank + profile.trust_rank)
+        if role_key == "researcher":
+            return -(profile.reasoning_rank + profile.intelligence_rank)
+        return -(profile.trust_rank + profile.reasoning_rank)
+
+    def _api_pressure(self) -> float:
+        if self.budget_manager is None:
+            return 0.0
+        signal = self.budget_manager.api_signal()
+        return max(signal.daily_utilization_ratio, signal.monthly_utilization_ratio)
+
+    def _tier_rank(self, adapter: ModelAdapter, request: RoutingRequest) -> int:
+        profile = self.model_catalog.get(adapter.name)
+        if profile is None:
+            return 50
+        if request.role == Role.TEAM_LEAD:
+            order = {
+                "senior_cloud": 0,
+                "advanced_api": 1,
+                "budget_api": 9,
+                "local": 99,
+            }
+            return order.get(profile.tier, 50)
+        pressure = self._api_pressure()
+        if pressure >= 0.75:
+            order = {
+                "budget_api": 0,
+                "advanced_api": 1,
+                "senior_cloud": 2,
+                "local": 3,
+            }
+            return order.get(profile.tier, 50)
+        if pressure >= 0.5:
+            order = {
+                "senior_cloud": 0,
+                "budget_api": 1,
+                "advanced_api": 2,
+                "local": 3,
+            }
+            return order.get(profile.tier, 50)
+        order = {
+            "senior_cloud": 0,
+            "advanced_api": 1,
+            "budget_api": 2,
+            "local": 3,
+        }
+        return order.get(profile.tier, 50)
 
     def _eligible(self, request: RoutingRequest) -> list[ModelAdapter]:
         eligible = []
@@ -41,7 +138,9 @@ class HybridRouter:
             for item in self.policy.strict_role_policy_environments
             if str(item).strip()
         }
-        enforce_role_policy = self.policy.enforce_role_model_preferences or request_env in strict_envs
+        enforce_role_policy = (
+            self.policy.enforce_role_model_preferences or request_env in strict_envs
+        )
         role_model_preferences = {
             item.strip().lower()
             for item in self.policy.role_model_preferences.get(role_key, [])
@@ -55,17 +154,27 @@ class HybridRouter:
         for adapter in self.adapters:
             if adapter.role_targets and request.role.value not in adapter.role_targets:
                 continue
+            if request.role == Role.TEAM_LEAD and not self._team_lead_allowed(adapter):
+                continue
             if enforce_role_policy:
-                if role_model_preferences and adapter.model.strip().lower() not in role_model_preferences:
+                if (
+                    role_model_preferences
+                    and adapter.model.strip().lower() not in role_model_preferences
+                ):
                     continue
-                if role_provider_preferences and adapter.provider.strip().lower() not in role_provider_preferences:
+                if (
+                    role_provider_preferences
+                    and adapter.provider.strip().lower()
+                    not in role_provider_preferences
+                ):
                     continue
             if adapter.requires_approval and not (
                 request.sensitive_approval or adapter.name in request.approved_adapters
             ):
                 continue
-            if request.required_capabilities and not request.required_capabilities.issubset(
-                adapter.capabilities
+            if (
+                request.required_capabilities
+                and not request.required_capabilities.issubset(adapter.capabilities)
             ):
                 continue
             if not adapter.available():
@@ -73,23 +182,30 @@ class HybridRouter:
             eligible.append(adapter)
         return eligible
 
-    def _sort_adapters(self, adapters: list[ModelAdapter], request: RoutingRequest) -> list[ModelAdapter]:
+    def _sort_adapters(
+        self, adapters: list[ModelAdapter], request: RoutingRequest
+    ) -> list[ModelAdapter]:
         provider_priority_sub = {
             provider: i
             for i, provider in enumerate(self.policy.preferred_subscription_providers)
         }
         provider_priority_api = {
-            provider: i for i, provider in enumerate(self.policy.preferred_api_providers)
+            provider: i
+            for i, provider in enumerate(self.policy.preferred_api_providers)
         }
         role_key = request.role.value
         role_model_priority = {
             str(model).strip().lower(): idx
-            for idx, model in enumerate(self.policy.role_model_preferences.get(role_key, []))
+            for idx, model in enumerate(
+                self.policy.role_model_preferences.get(role_key, [])
+            )
             if str(model).strip()
         }
         role_provider_priority = {
             str(provider).strip().lower(): idx
-            for idx, provider in enumerate(self.policy.role_provider_preferences.get(role_key, []))
+            for idx, provider in enumerate(
+                self.policy.role_provider_preferences.get(role_key, [])
+            )
             if str(provider).strip()
         }
 
@@ -100,10 +216,16 @@ class HybridRouter:
             else:
                 provider_rank = provider_priority_api.get(adapter.provider, 99)
                 channel_rank = 1 if self.policy.pro_first else 0
-            role_model_rank = role_model_priority.get(adapter.model.strip().lower(), 999)
-            role_provider_rank = role_provider_priority.get(adapter.provider.strip().lower(), 999)
+            role_model_rank = role_model_priority.get(
+                adapter.model.strip().lower(), 999
+            )
+            role_provider_rank = role_provider_priority.get(
+                adapter.provider.strip().lower(), 999
+            )
             return (
                 channel_rank,
+                self._tier_rank(adapter, request),
+                self._role_rank(adapter, role_key),
                 role_model_rank,
                 role_provider_rank,
                 adapter.routing_priority,
@@ -117,16 +239,20 @@ class HybridRouter:
     def _must_include_api(self, request: RoutingRequest) -> bool:
         if not self.policy.pro_first:
             return True
-        return self._meets_complexity_threshold(request.complexity) or self._meets_criticality_threshold(
-            request.criticality
-        )
+        return self._meets_complexity_threshold(
+            request.complexity
+        ) or self._meets_criticality_threshold(request.criticality)
 
     def _meets_complexity_threshold(self, complexity: Complexity) -> bool:
-        threshold = self._complexity_from_policy(self.policy.complexity_threshold_for_api)
+        threshold = self._complexity_from_policy(
+            self.policy.complexity_threshold_for_api
+        )
         return self._complexity_rank(complexity) >= self._complexity_rank(threshold)
 
     def _meets_criticality_threshold(self, criticality: Criticality) -> bool:
-        threshold = self._criticality_from_policy(self.policy.criticality_threshold_for_api)
+        threshold = self._criticality_from_policy(
+            self.policy.criticality_threshold_for_api
+        )
         return self._criticality_rank(criticality) >= self._criticality_rank(threshold)
 
     @staticmethod
@@ -174,6 +300,7 @@ class HybridRouter:
         request: RoutingRequest,
         prompt: str,
         task_id: str = "",
+        messages: list[dict[str, str]] | None = None,
     ) -> RoutingDecision:
         attempts: list[str] = []
         attempted_channels: dict[ChannelType, int] = {
@@ -203,7 +330,9 @@ class HybridRouter:
         max_api_cost_tier = 999
         if self.budget_manager is not None:
             signal = self.budget_manager.api_signal()
-            api_attempt_limit = min(api_attempt_limit, signal.suggested_max_api_attempts)
+            api_attempt_limit = min(
+                api_attempt_limit, signal.suggested_max_api_attempts
+            )
             max_api_cost_tier = signal.max_api_cost_tier
 
         # Get per-model daily spend limits
@@ -216,7 +345,10 @@ class HybridRouter:
 
         for adapter in eligible:
             if adapter.channel == ChannelType.SUBSCRIPTION:
-                if attempted_channels[ChannelType.SUBSCRIPTION] >= self.policy.max_subscription_attempts:
+                if (
+                    attempted_channels[ChannelType.SUBSCRIPTION]
+                    >= self.policy.max_subscription_attempts
+                ):
                     continue
             else:
                 if not self.policy.api_fallback_enabled:
@@ -251,7 +383,11 @@ class HybridRouter:
                     continue
 
             attempted_channels[adapter.channel] += 1
-            response = adapter.invoke(prompt)
+            invoke_params = inspect.signature(adapter.invoke).parameters
+            if "messages" in invoke_params:
+                response = adapter.invoke(prompt, messages=messages)
+            else:
+                response = adapter.invoke(prompt)
             attempts.append(
                 f"{adapter.name}:{adapter.channel.value}:{'ok' if response.success else 'fail'}"
             )

@@ -27,10 +27,13 @@ class CliProviderTests(unittest.TestCase):
             "env_command": "AITEAM_TEST_COMMAND",
             "candidates": [],
         }
-        with patch("aiteam.cli._probe_command", return_value=True), patch.dict(
-            "os.environ",
-            {"AITEAM_TEST_COMMAND": '["claude","-p","{prompt}"]'},
-            clear=False,
+        with (
+            patch("aiteam.cli._probe_command", return_value=True),
+            patch.dict(
+                "os.environ",
+                {"AITEAM_TEST_COMMAND": '["claude","-p","{prompt}"]'},
+                clear=False,
+            ),
         ):
             command = cli._resolve_provider_command(spec)
             self.assertEqual(command, ["claude", "-p", "{prompt}"])
@@ -44,32 +47,109 @@ class CliProviderTests(unittest.TestCase):
             command = cli._resolve_provider_command(spec)
             self.assertEqual(command, ["npx", "-y", "@google/gemini-cli", "{prompt}"])
 
+    def test_resolve_provider_command_wraps_gemini_key_on_windows(self) -> None:
+        spec = {
+            "provider": "google",
+            "candidates": [["npx", "-y", "@google/gemini-cli", "--help"]],
+        }
+        with (
+            patch("aiteam.cli._probe_command", return_value=True),
+            patch("aiteam.cli.os.name", "nt"),
+            patch.dict("os.environ", {"GOOGLE_API_KEY": "x"}, clear=False),
+        ):
+            command = cli._resolve_provider_command(spec)
+            self.assertEqual(command[:2], ["cmd", "/c"])
+            self.assertIn("GEMINI_API_KEY=%GOOGLE_API_KEY%", command[2])
+
     def test_gemini_auth_status_command_uses_npx_package(self) -> None:
-        command = cli._gemini_auth_status_command(["npx", "-y", "@google/gemini-cli", "{prompt}"])
+        command = cli._gemini_auth_status_command(
+            ["npx", "-y", "@google/gemini-cli", "{prompt}"]
+        )
         self.assertEqual(command, ["npx", "-y", "@google/gemini-cli", "auth", "status"])
 
-    def test_gemini_health_detects_missing_auth(self) -> None:
-        with patch("aiteam.cli._resolve_executable", return_value="npx"), patch(
+    def test_claude_auth_health_supports_npx_package(self) -> None:
+        with patch(
             "aiteam.cli.subprocess.run",
             return_value=subprocess.CompletedProcess(
                 args=["npx"],
-                returncode=1,
-                stdout="",
-                stderr=(
-                    "Please set an Auth method in your C:/Users/test/.gemini/settings.json "
-                    "or specify GEMINI_API_KEY"
+                returncode=0,
+                stdout='{"loggedIn": true, "subscriptionType": "pro"}',
+                stderr="",
+            ),
+        ):
+            healthy, details = cli._claude_auth_health(
+                ["npx", "-y", "@anthropic-ai/claude-code", "-p", "{prompt}"]
+            )
+            self.assertTrue(healthy)
+            self.assertEqual(details, "claude_logged_in:pro")
+
+    def test_detect_local_coding_runtime_ready(self) -> None:
+        fake_ollama = "C:/Users/she__/AppData/Local/Programs/Ollama/ollama.exe"
+        with (
+            patch("aiteam.cli.shutil.which", return_value=None),
+            patch(
+                "aiteam.cli.Path.exists",
+                return_value=True,
+            ),
+            patch(
+                "aiteam.cli.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=[fake_ollama],
+                    returncode=0,
+                    stdout="qwen2.5-coder:14b 9.0 GB",
+                    stderr="",
                 ),
             ),
         ):
-            healthy, details = cli._gemini_health(["npx", "-y", "@google/gemini-cli", "{prompt}"])
+            healthy, payload = cli._detect_local_coding_runtime()
+            self.assertTrue(healthy)
+            self.assertEqual(payload["provider"], "ollama")
+            self.assertIn("model_ready", str(payload["details"]))
+
+    def test_provider_smoke_probe_ok(self) -> None:
+        with patch(
+            "aiteam.cli.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["cmd"],
+                returncode=0,
+                stdout="OK",
+                stderr="",
+            ),
+        ):
+            healthy, details = cli._provider_smoke_probe("x", ["cmd", "{prompt}"])
+            self.assertTrue(healthy)
+            self.assertEqual(details, "smoke_ok")
+
+    def test_gemini_health_detects_missing_auth(self) -> None:
+        with (
+            patch("aiteam.cli._resolve_executable", return_value="npx"),
+            patch(
+                "aiteam.cli.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=["npx"],
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "Please set an Auth method in your C:/Users/test/.gemini/settings.json "
+                        "or specify GEMINI_API_KEY"
+                    ),
+                ),
+            ),
+        ):
+            healthy, details = cli._gemini_health(
+                ["npx", "-y", "@google/gemini-cli", "{prompt}"]
+            )
             self.assertFalse(healthy)
             self.assertEqual(details, "gemini_auth_missing")
 
     def test_gemini_health_accepts_env_key(self) -> None:
-        with patch.dict("os.environ", {"GEMINI_API_KEY": "x"}, clear=False), patch(
-            "aiteam.cli.subprocess.run"
-        ) as run_mock:
-            healthy, details = cli._gemini_health(["npx", "-y", "@google/gemini-cli", "{prompt}"])
+        with (
+            patch.dict("os.environ", {"GEMINI_API_KEY": "x"}, clear=False),
+            patch("aiteam.cli.subprocess.run") as run_mock,
+        ):
+            healthy, details = cli._gemini_health(
+                ["npx", "-y", "@google/gemini-cli", "{prompt}"]
+            )
             self.assertTrue(healthy)
             self.assertEqual(details, "gemini_auth_env_key")
             run_mock.assert_not_called()

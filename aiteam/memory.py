@@ -17,6 +17,7 @@ class MemoryEntry:
     content: str
     task_id: str | None = None
     tags: list[str] | None = None
+    project_key: str | None = None
 
 
 class AgentMemoryStore:
@@ -35,6 +36,7 @@ class AgentMemoryStore:
         content: str,
         task_id: str | None = None,
         tags: list[str] | None = None,
+        project_key: str | None = None,
     ) -> None:
         entry = MemoryEntry(
             ts=datetime.now(timezone.utc).isoformat(),
@@ -44,6 +46,7 @@ class AgentMemoryStore:
             content=content,
             task_id=task_id,
             tags=tags,
+            project_key=project_key,
         )
         with self._lock:
             path = self._path_for(agent_id)
@@ -56,8 +59,12 @@ class AgentMemoryStore:
         agent_id: str,
         limit: int = 5,
         exclude_kinds: set[str] | None = None,
+        project_key: str | None = None,
     ) -> list[MemoryEntry]:
-        entries = self._filter_kinds(self._read(agent_id), exclude_kinds)
+        entries = self._filter_project(
+            self._filter_kinds(self._read(agent_id), exclude_kinds),
+            project_key,
+        )
         return entries[-limit:] if limit > 0 else entries
 
     def relevant(
@@ -66,8 +73,12 @@ class AgentMemoryStore:
         query: str,
         limit: int = 5,
         exclude_kinds: set[str] | None = None,
+        project_key: str | None = None,
     ) -> list[MemoryEntry]:
-        entries = self._filter_kinds(self._read(agent_id), exclude_kinds)
+        entries = self._filter_project(
+            self._filter_kinds(self._read(agent_id), exclude_kinds),
+            project_key,
+        )
         if not query.strip() or not entries:
             return []
 
@@ -82,13 +93,25 @@ class AgentMemoryStore:
         return [item[1] for item in scored[:limit]]
 
     @staticmethod
-    def _filter_kinds(entries: list[MemoryEntry], exclude_kinds: set[str] | None) -> list[MemoryEntry]:
+    def _filter_kinds(
+        entries: list[MemoryEntry], exclude_kinds: set[str] | None
+    ) -> list[MemoryEntry]:
         if not exclude_kinds:
             return entries
         normalized = {kind.strip().lower() for kind in exclude_kinds if kind.strip()}
         if not normalized:
             return entries
-        return [entry for entry in entries if entry.kind.strip().lower() not in normalized]
+        return [
+            entry for entry in entries if entry.kind.strip().lower() not in normalized
+        ]
+
+    @staticmethod
+    def _filter_project(
+        entries: list[MemoryEntry], project_key: str | None
+    ) -> list[MemoryEntry]:
+        if not project_key:
+            return entries
+        return [entry for entry in entries if entry.project_key == project_key]
 
     def relevant_across_agents(
         self,
@@ -97,6 +120,7 @@ class AgentMemoryStore:
         limit: int = 5,
         max_chars_per_entry: int = 500,
         exclude_kinds: set[str] | None = None,
+        project_key: str | None = None,
     ) -> list[MemoryEntry]:
         """Search all agents' memories for entries relevant to *query*.
 
@@ -105,7 +129,9 @@ class AgentMemoryStore:
         """
         if not query.strip():
             return []
-        kinds_to_exclude = exclude_kinds if exclude_kinds is not None else {"meeting_minutes"}
+        kinds_to_exclude = (
+            exclude_kinds if exclude_kinds is not None else {"meeting_minutes"}
+        )
         query_tokens = self._tokens(query)
         scored: list[tuple[int, MemoryEntry]] = []
         with self._lock:
@@ -113,7 +139,10 @@ class AgentMemoryStore:
                 agent_id = path.stem
                 if exclude_agent and agent_id == self._safe_segment(exclude_agent):
                     continue
-                entries = self._filter_kinds(self._read(agent_id), kinds_to_exclude)
+                entries = self._filter_project(
+                    self._filter_kinds(self._read(agent_id), kinds_to_exclude),
+                    project_key,
+                )
                 for entry in entries:
                     text = f"{entry.kind} {entry.content} {' '.join(entry.tags or [])}"
                     overlap = len(query_tokens.intersection(self._tokens(text)))
@@ -133,6 +162,7 @@ class AgentMemoryStore:
                     content=entry.content[:max_chars_per_entry] + "...",
                     task_id=entry.task_id,
                     tags=entry.tags,
+                    project_key=entry.project_key,
                 )
             trimmed.append(entry)
         return trimmed

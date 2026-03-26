@@ -2,12 +2,14 @@
 
 **Updated**: 2026-03-26 (TODOS LOS SPRINTS COMPLETADOS)
 **Status**: Sprint 1 ✅ → Sprint 2 ✅ → Sprint 3 ✅ — CICLO Q1 CERRADO
-**Current Baseline**: **271 tests passing** (2026-03-26). Ruta activa: `ROADMAP_FLUJOS_Y_AGENTES.md`
+**Current Baseline**: **282 tests passing** (2026-03-26). Ruta activa: `ROADMAP_FLUJOS_Y_AGENTES.md`
 
 > **NOTA**: Este documento describe el ciclo de hardening Q1 (Tier 1/2/3), completado en su totalidad.
 > El trabajo activo de mejora de flujo de agentes, conversacion persistente y observabilidad
 > se encuentra en `ROADMAP_FLUJOS_Y_AGENTES.md` y `TASKS.md`.
 > La ruta original `C:\Users\Max\` ya no aplica — el proyecto reside en `C:\Users\she__\`.
+> La baseline de tests de este documento ya fue superada; usar `ROADMAP_FLUJOS_Y_AGENTES.md`
+> como fuente de verdad para trabajo activo y `TASKS.md` para backlog operativo.
 
 ---
 
@@ -16,7 +18,7 @@
 This document defines 3 sprints (7-10 days each) to harden the AI Team orchestrator from research/staging toward production readiness.
 
 **Success Criteria (Exit)**
-- All 3 sprints complete: 130+ tests passing (no regressions).
+- All 3 sprints complete: baseline historica superada ampliamente; estado actual **282 tests passing** (no regressions).
 - `system-check --strict` passes consistently across dev/stage/prod.
 - Documentation unified + accurate (no stale metrics).
 - Security audit trail + observability windows functional.
@@ -361,7 +363,7 @@ class MetricsAggregator:
 ### Sprint 2 Exit Criteria
 ```bash
 python -m unittest discover -s tests -p "test_*.py" -v 2>&1 | tail -3
-# Expected: "Ran 122+ tests in X.XXXs" + "OK"
+# Referencia historica del objetivo Sprint 2. Baseline real actual: `282 passed`.
 
 python -m aiteam.cli system-check --environment stage --strict
 # Expected: "cost_anomaly=normal" + "checks_passed"
@@ -570,12 +572,12 @@ Each skill.md should now have:
 - ✅ Tool version pinning + lockfile (`runtime/tool_lock.json`).
 - ✅ Tool acquisition retry + exponential backoff.
 - ✅ Integration tests y chaos tests implementados.
-- ✅ **271 tests passing** en total (2026-03-26), cero regresiones.
+- ✅ **282 tests passing** en total (estado verificado 2026-03-26), cero regresiones.
 
 ### Sprint 3 Exit Criteria
 ```bash
 python -m unittest discover -s tests -p "test_*.py" -v 2>&1 | tail -3
-# Expected: "Ran 142+ tests in X.XXXs" + "OK"
+# Referencia historica del objetivo Sprint 3. Baseline real actual: `282 passed`.
 
 cat runtime/tool_lock.json | head -20
 # Expected: JSON with pinned versions + checksums
@@ -642,4 +644,3 @@ grep -r "Do NOT:" .cloud/skills/ --include="*.md" | wc -l
 | Date | Version | Author | Changes |
 |------|---------|--------|---------|
 | 2026-02-20 | 1.0 | Architecture | Initial sprint roadmap. |
-

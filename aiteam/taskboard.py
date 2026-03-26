@@ -40,12 +40,38 @@ class TaskBoard:
             self._refresh_readiness()
             return [t for t in self._tasks.values() if t.state == TaskState.READY]
 
+    def checkpoint(self) -> None:
+        with self._lock:
+            self._save()
+
     def claim_task(self, task_id: str, assignee: str) -> bool:
         with self._lock:
             self._refresh_readiness()
             task = self._tasks.get(task_id)
             if not task or task.state != TaskState.READY:
                 return False
+            if task.dependencies:
+                unmet = [
+                    dep
+                    for dep in task.dependencies
+                    if dep not in self._tasks
+                    or self._tasks[dep].state != TaskState.COMPLETED
+                ]
+                if unmet:
+                    failed_deps = [
+                        dep
+                        for dep in unmet
+                        if dep in self._tasks
+                        and self._tasks[dep].state == TaskState.FAILED
+                    ]
+                    if failed_deps:
+                        task.state = TaskState.BLOCKED
+                        task.metadata["blocked_reason"] = "dependency_failed"
+                        task.metadata["blocked_dependencies"] = failed_deps
+                    else:
+                        task.state = TaskState.PENDING
+                    self._save()
+                    return False
             owned_files = self._owned_files(task)
             if owned_files:
                 acquired, conflicts = self._file_locks.acquire(

@@ -12,14 +12,21 @@ Este proyecto inicia un sistema de AI Team con enfoque **Pro-first + API fallbac
 
 La app esta en estado **operativo para orquestacion, observabilidad y continuidad por proyecto**.
 
+Estado verificado a 2026-03-26:
+
+- Suite completa: **282 tests passing** (`venv/Scripts/python.exe -m pytest tests/ -q --tb=short`)
+- Roadmap activo de mejora de flujo/agentes: `ROADMAP_FLUJOS_Y_AGENTES.md`
+- Backlog operativo consolidado: `TASKS.md`
+
 Backend / orquestador:
 
 - Workflow chat **lead-first**: `lead_intake -> discovery -> build -> review -> qa -> lead_close`.
 - Task board con dependencias, estados (`ready/pending/claimed/blocked/completed/failed`) y recovery de tareas stale.
 - Gobernanza por rol con charter formal (rango de decision, personalidad operativa, roles a consultar, justificacion obligatoria).
 - Reuniones de sincronizacion por ronda + reuniones por evento critico (fallo, quality gate, compliance).
-- Memoria por agente (`runtime/memory/*.jsonl`) + continuidad por proyecto para retomar sesiones previas.
+- Memoria por agente (`runtime/memory/*.jsonl`) filtrable por proyecto + continuidad por proyecto para retomar sesiones previas.
 - Mensajeria interna (`runtime/mailbox.jsonl`) y eventos (`runtime/events.jsonl`) con trazabilidad completa.
+- Threads conversacionales persistentes por agente/proyecto (`runtime/sessions/threads/`) para continuidad real en handoffs y feedback del Team Lead.
 - Quality gates automáticos para tareas de Engineer (Review + QA antes de cierre final).
 - Compliance para ejecucion local (guardrails, redaccion de secretos, aprobaciones sensibles en `prod`).
 - FinOps (budget diario/mensual, señal dinamica, share API vs suscripcion, recomendaciones de tuning).
@@ -223,11 +230,17 @@ Para avance productivo en proyectos, combina:
 - tareas con `execution_plan`/acciones de archivo,
 - validacion de artefactos en review/qa (no solo texto de respuesta).
 
+### Estado de implementacion
+
+- **Implementado**: evidence gate mock robusto, bloqueo explicito por dependencias fallidas, rounds/sub-iteraciones visibles, meetings con menos ruido, mailbox conversacional basico, aislamiento de contexto por proyecto y observabilidad de flujo.
+- **Parcial**: agentes conversacionales multi-turn ya tienen thread persistente y consumo de mailbox, pero los adapters aun no trabajan nativamente con `messages[]`.
+- **Planificado**: adapters plenamente conversacionales, mailbox mas profundo TL <-> agentes y cierre E2E/documental del modelo multi-LLM.
+
 ## IDE Frontend (chat + viewer)
 
 El editor web esta orientado a programar con el AI Team e incluye:
 
-- Dashboard operativo live.
+- Dashboard operativo live con timeline de flujo, rounds/sub-iteraciones, bloqueos, handoffs y eventos conversacionales.
 - Chat con AI Team (`/api/aiteam/chat`) con intake obligatorio por Team Lead senior y delegacion automatica al resto del equipo.
 - Viewer de estado (`/api/aiteam/state`) con tasks/eventos/latencia/recomendaciones, continuidad de proyecto y estado NotebookLM.
 - Viewer de conversaciones (`/api/aiteam/conversations`) con mensajes de equipo y entradas de usuario.

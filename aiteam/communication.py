@@ -20,13 +20,16 @@ class MeetingParticipant:
 @dataclass
 class TeamDecision:
     """Decision registrada por el equipo."""
+
     decision_id: str
     task_id: str
     proposer: str  # agent_id que propuso
     decision_text: str
     context: str = ""
     status: str = "proposed"  # proposed, accepted, rejected
-    votes: dict[str, str] = field(default_factory=dict)  # agent_id → approve/reject/abstain
+    votes: dict[str, str] = field(
+        default_factory=dict
+    )  # agent_id → approve/reject/abstain
     created_at: str = ""
     resolved_at: str = ""
 
@@ -43,7 +46,9 @@ class TeamCommunicator:
         self.memory = memory
         self.event_logger = event_logger
         self._decisions: list[TeamDecision] = []
-        self._decisions_path = (runtime_dir / "team_decisions.jsonl") if runtime_dir else None
+        self._decisions_path = (
+            (runtime_dir / "team_decisions.jsonl") if runtime_dir else None
+        )
         if self._decisions_path:
             self._load_decisions()
 
@@ -100,20 +105,52 @@ class TeamCommunicator:
         topic: str,
         participants: list[MeetingParticipant],
         task_id: str | None = None,
+        meeting_kind: str | None = None,
     ) -> str:
-        lines = [f"Meeting Topic: {topic}"]
+        resolved_kind = meeting_kind or self._classify_meeting(
+            topic=topic, task_id=task_id
+        )
+        lines = [f"Meeting Topic: {topic}", f"Meeting Kind: {resolved_kind}"]
+        useful_participants = 0
         for participant in participants:
-            standup = self._standup_line(participant)
+            standup, is_useful = self._standup_line(participant)
+            if is_useful:
+                useful_participants += 1
             lines.append(standup)
 
         # Include recent decisions in meeting minutes
+        decision_count = 0
         if task_id:
             task_decisions = self.get_decisions(task_id=task_id, limit=5)
             if task_decisions:
+                decision_count = len(task_decisions)
                 lines.append("\nDecisiones del equipo:")
                 for d in task_decisions:
-                    status_icon = {"accepted": "+", "rejected": "-", "proposed": "?"}.get(d.status, "?")
-                    lines.append(f"  [{status_icon}] {d.decision_text[:150]} (por {d.proposer})")
+                    status_icon = {
+                        "accepted": "+",
+                        "rejected": "-",
+                        "proposed": "?",
+                    }.get(d.status, "?")
+                    lines.append(
+                        f"  [{status_icon}] {d.decision_text[:150]} (por {d.proposer})"
+                    )
+
+        if (
+            resolved_kind == "informational"
+            and useful_participants == 0
+            and decision_count == 0
+        ):
+            self._event(
+                "sync_meeting_skipped",
+                {
+                    "topic": topic,
+                    "meeting_kind": resolved_kind,
+                    "participants": [f"{p.role}:{p.agent_id}" for p in participants],
+                    "task_id": task_id,
+                    "reason": "insufficient_signal",
+                },
+            )
+            return ""
 
         minutes = "\n".join(lines)
         self.broadcast(
@@ -130,13 +167,16 @@ class TeamCommunicator:
                 kind="meeting_minutes",
                 content=minutes,
                 task_id=task_id,
-                tags=["meeting", "sync"],
+                tags=["meeting", "sync", resolved_kind],
             )
 
         self._event(
             "sync_meeting",
             {
                 "topic": topic,
+                "meeting_kind": resolved_kind,
+                "useful_participants": useful_participants,
+                "decision_count": decision_count,
                 "participants": [f"{p.role}:{p.agent_id}" for p in participants],
                 "task_id": task_id,
             },
@@ -155,6 +195,7 @@ class TeamCommunicator:
     ) -> TeamDecision:
         """Registra una decision del equipo."""
         import uuid
+
         now = datetime.now(timezone.utc).isoformat()
         decision = TeamDecision(
             decision_id=str(uuid.uuid4())[:8],
@@ -173,16 +214,21 @@ class TeamCommunicator:
         self.broadcast(
             sender=proposer,
             subject=f"Decision: {decision_text[:60]}",
-            body=f"[{status.upper()}] {decision_text}\nContexto: {context[:200]}" if context else f"[{status.upper()}] {decision_text}",
+            body=f"[{status.upper()}] {decision_text}\nContexto: {context[:200]}"
+            if context
+            else f"[{status.upper()}] {decision_text}",
             task_id=task_id,
         )
-        self._event("team_decision", {
-            "decision_id": decision.decision_id,
-            "task_id": task_id,
-            "proposer": proposer,
-            "status": status,
-            "text": decision_text[:200],
-        })
+        self._event(
+            "team_decision",
+            {
+                "decision_id": decision.decision_id,
+                "task_id": task_id,
+                "proposer": proposer,
+                "status": status,
+                "text": decision_text[:200],
+            },
+        )
         return decision
 
     def vote_on_decision(self, decision_id: str, voter: str, vote: str) -> bool:
@@ -240,8 +286,12 @@ class TeamCommunicator:
             if decisions:
                 lines = ["Decisiones del equipo:"]
                 for d in decisions:
-                    icon = {"accepted": "OK", "rejected": "NO", "proposed": "??"}.get(d.status, "??")
-                    lines.append(f"- [{icon}] {d.decision_text[:120]} (por {d.proposer})")
+                    icon = {"accepted": "OK", "rejected": "NO", "proposed": "??"}.get(
+                        d.status, "??"
+                    )
+                    lines.append(
+                        f"- [{icon}] {d.decision_text[:120]} (por {d.proposer})"
+                    )
                 sections.append("\n".join(lines))
 
         # Recent relevant messages from mailbox
@@ -260,7 +310,9 @@ class TeamCommunicator:
 
         # Agent's own recent memory
         recent_memory = self.memory.recent(
-            agent_id, limit=3, exclude_kinds={"meeting_minutes"},
+            agent_id,
+            limit=3,
+            exclude_kinds={"meeting_minutes"},
         )
         if recent_memory:
             lines = ["Tu contexto reciente:"]
@@ -298,7 +350,9 @@ class TeamCommunicator:
                 lines.append(f"- {d.decision_text[:120]}")
 
         # From-agent's recent findings
-        recent = self.memory.recent(from_agent, limit=3, exclude_kinds={"meeting_minutes"})
+        recent = self.memory.recent(
+            from_agent, limit=3, exclude_kinds={"meeting_minutes"}
+        )
         if recent:
             lines.append(f"Contexto de {from_role}:")
             for item in recent:
@@ -309,22 +363,62 @@ class TeamCommunicator:
 
     # ── Internal ──────────────────────────────────────────────
 
-    def _standup_line(self, participant: MeetingParticipant) -> str:
+    def _standup_line(self, participant: MeetingParticipant) -> tuple[str, bool]:
         recent = self.memory.recent(
             participant.agent_id,
             limit=4,
             exclude_kinds={"meeting_minutes"},
         )
         if not recent:
-            return f"- {participant.role}/{participant.agent_id}: sin novedades registradas."
+            return (
+                f"- {participant.role}/{participant.agent_id}: sin novedades registradas.",
+                False,
+            )
 
         chunks = []
+        useful_chunks = 0
         for item in recent:
             text = item.content.strip().replace("\n", " ")
             text = text[:120]
             chunks.append(f"[{item.kind}] {text}")
+            if self._is_useful_meeting_item(item.kind, text):
+                useful_chunks += 1
 
-        return f"- {participant.role}/{participant.agent_id}: " + " | ".join(chunks)
+        return f"- {participant.role}/{participant.agent_id}: " + " | ".join(
+            chunks
+        ), useful_chunks > 0
+
+    @staticmethod
+    def _classify_meeting(topic: str, task_id: str | None = None) -> str:
+        topic_lower = topic.lower()
+        if (
+            task_id
+            or "event " in topic_lower
+            or "blocked" in topic_lower
+            or "failed" in topic_lower
+        ):
+            return "actionable"
+        return "informational"
+
+    @staticmethod
+    def _is_useful_meeting_item(kind: str, text: str) -> bool:
+        text_lower = text.strip().lower()
+        if not text_lower:
+            return False
+        if kind == "meeting_minutes":
+            return False
+        weak_markers = (
+            "processed prompt",
+            "sin novedades",
+            "ok",
+            "done",
+            "completed",
+        )
+        if any(text_lower == marker for marker in weak_markers):
+            return False
+        if "processed prompt" in text_lower:
+            return False
+        return len(text_lower) >= 12
 
     def _persist_decision(self, decision: TeamDecision) -> None:
         if self._decisions_path is None:
@@ -358,17 +452,19 @@ class TeamCommunicator:
                     continue
                 try:
                     record = json.loads(line)
-                    self._decisions.append(TeamDecision(
-                        decision_id=record.get("decision_id", ""),
-                        task_id=record.get("task_id", ""),
-                        proposer=record.get("proposer", ""),
-                        decision_text=record.get("decision_text", ""),
-                        context=record.get("context", ""),
-                        status=record.get("status", "proposed"),
-                        votes=record.get("votes", {}),
-                        created_at=record.get("created_at", ""),
-                        resolved_at=record.get("resolved_at", ""),
-                    ))
+                    self._decisions.append(
+                        TeamDecision(
+                            decision_id=record.get("decision_id", ""),
+                            task_id=record.get("task_id", ""),
+                            proposer=record.get("proposer", ""),
+                            decision_text=record.get("decision_text", ""),
+                            context=record.get("context", ""),
+                            status=record.get("status", "proposed"),
+                            votes=record.get("votes", {}),
+                            created_at=record.get("created_at", ""),
+                            resolved_at=record.get("resolved_at", ""),
+                        )
+                    )
                 except (json.JSONDecodeError, TypeError):
                     continue
         except OSError:

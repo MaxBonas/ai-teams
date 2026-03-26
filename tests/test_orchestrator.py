@@ -753,6 +753,476 @@ class OrchestratorTests(unittest.TestCase):
             subjects = [msg.subject for msg in orchestrator.mailbox.list_messages()]
             self.assertTrue(any("Event task_failed" in subject for subject in subjects))
 
+    def test_team_lead_mailbox_message_is_consumed_into_agent_thread_and_replied(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "review", "analysis", "reasoning"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+            orchestrator.mailbox.send(
+                sender="team_lead",
+                recipient="eng-1",
+                subject="Feedback on implementation",
+                body="Integra tambien 2FA en el flujo actual.",
+                task_id="MAIL-1",
+            )
+
+            task = WorkTask(
+                task_id="MAIL-1",
+                title="Implement feature",
+                description="Implementar cambio solicitado.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            thread = orchestrator.thread_store.get_thread(
+                "eng-1", str(orchestrator.project_root)
+            )
+            mailbox_turns = [turn for turn in thread.turns if turn.source == "mailbox"]
+            self.assertTrue(mailbox_turns)
+            self.assertTrue(any("2FA" in turn.content for turn in mailbox_turns))
+            llm_turns = [turn for turn in thread.turns if turn.role == "assistant"]
+            self.assertTrue(llm_turns)
+
+            inbox = orchestrator.mailbox.list_messages(recipient="team_lead")
+            self.assertTrue(any(msg.subject == "Reply: MAIL-1" for msg in inbox))
+
+            eng_inbox = orchestrator.mailbox.list_messages(recipient="eng-1")
+            feedback = next(
+                msg for msg in eng_inbox if msg.subject == "Feedback on implementation"
+            )
+            self.assertTrue(orchestrator.mailbox.is_read(feedback.message_id))
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            self.assertTrue(
+                any(
+                    item.get("event_type") == "conversation_mailbox_consumed"
+                    for item in events
+                )
+            )
+            self.assertTrue(
+                any(
+                    item.get("event_type") == "conversation_mailbox_reply"
+                    for item in events
+                )
+            )
+
+    def test_orchestrator_sends_efficient_messages_with_history_and_feedback(
+        self,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class CaptureMessagesAdapter(SubscriptionAdapter):
+            def invoke(
+                self,
+                prompt: str,
+                messages: list[dict[str, str]] | None = None,
+            ) -> AdapterResponse:
+                captured["prompt"] = prompt
+                captured["messages"] = messages
+                return super().invoke(prompt, messages=messages)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                CaptureMessagesAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "review", "analysis", "reasoning"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+            thread = orchestrator.thread_store.get_thread(
+                "eng-1", str(orchestrator.project_root)
+            )
+            thread.append_turn(
+                "user",
+                "Primera propuesta: usar JWT.",
+                source="task",
+                task_id="PREV-1",
+            )
+            thread.append_turn(
+                "assistant",
+                "De acuerdo, JWT con refresh tokens.",
+                source="llm",
+                task_id="PREV-1",
+            )
+            orchestrator.thread_store.save_thread(thread)
+
+            task = WorkTask(
+                task_id="MSG-1",
+                title="Implement feature",
+                description="Implementar autenticacion segura.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "gate_iteration": 1,
+                    "review_feedback": "Anade 2FA y documenta impacto en sesiones.",
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            messages = captured.get("messages")
+            self.assertTrue(isinstance(messages, list))
+            typed_messages = list(messages or [])
+            self.assertGreaterEqual(len(typed_messages), 3)
+            self.assertEqual(typed_messages[0].get("role"), "system")
+            self.assertTrue(
+                any(msg.get("role") == "assistant" for msg in typed_messages)
+            )
+            final_user = str(typed_messages[-1].get("content", ""))
+            self.assertIn("Feedback de revision", final_user)
+            self.assertIn("2FA", final_user)
+            self.assertIn("Gate iteration: 1", final_user)
+            self.assertTrue(
+                any(
+                    "JWT con refresh tokens" in str(msg.get("content", ""))
+                    for msg in typed_messages
+                )
+            )
+            self.assertLessEqual(len(typed_messages), 8)
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            self.assertTrue(
+                any(
+                    item.get("event_type") == "conversation_messages_built"
+                    for item in events
+                )
+            )
+
+    def test_gate_retry_builds_compact_retry_message_and_persists_task_retry_turn(
+        self,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class CaptureRetryAdapter(SubscriptionAdapter):
+            def invoke(
+                self,
+                prompt: str,
+                messages: list[dict[str, str]] | None = None,
+            ) -> AdapterResponse:
+                captured["messages"] = messages
+                return super().invoke(prompt, messages=messages)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                CaptureRetryAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "review", "analysis", "reasoning"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+            task = WorkTask(
+                task_id="RETRY-MSG-1",
+                title="Implement feature",
+                description="Implementar autenticacion segura.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "gate_iteration": 1,
+                    "review_feedback": "Anade 2FA y revisa expiracion de sesiones.",
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            typed_messages = list(captured.get("messages") or [])
+            self.assertTrue(typed_messages)
+            final_user = str(typed_messages[-1].get("content", ""))
+            self.assertIn("Retry de la tarea RETRY-MSG-1.", final_user)
+            self.assertIn("Feedback de revision", final_user)
+            self.assertNotIn("Contexto de equipo", final_user)
+
+            thread = orchestrator.thread_store.get_thread(
+                "eng-1", str(orchestrator.project_root)
+            )
+            retry_turns = [
+                turn
+                for turn in thread.turns
+                if turn.source == "task_retry" and turn.task_id == "RETRY-MSG-1"
+            ]
+            self.assertTrue(retry_turns)
+
+    def test_peer_consultation_uses_compact_messages_protocol(self) -> None:
+        captured_calls: list[dict[str, object]] = []
+
+        class CapturePeerMessagesAdapter(SubscriptionAdapter):
+            def invoke(
+                self,
+                prompt: str,
+                messages: list[dict[str, str]] | None = None,
+            ) -> AdapterResponse:
+                captured_calls.append({"prompt": prompt, "messages": messages})
+                return super().invoke(prompt, messages=messages)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                CapturePeerMessagesAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "review", "analysis", "reasoning"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            task = WorkTask(
+                task_id="PEER-1",
+                title="Implement feature",
+                description="Implementar autenticacion segura.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "require_peer_consultation": True,
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            peer_calls = []
+            for call in captured_calls:
+                messages = call.get("messages")
+                if isinstance(messages, list) and len(messages) == 2:
+                    if str(messages[0].get("role", "")) == "system":
+                        user_content = str(messages[-1].get("content", ""))
+                        if "Consulta para" in user_content:
+                            peer_calls.append(messages)
+
+            self.assertTrue(peer_calls)
+            first_peer = peer_calls[0]
+            self.assertEqual(first_peer[0].get("role"), "system")
+            self.assertEqual(first_peer[1].get("role"), "user")
+            self.assertIn("Modo: round1", str(first_peer[1].get("content", "")))
+            self.assertLessEqual(len(str(first_peer[1].get("content", ""))), 1200)
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            self.assertTrue(
+                any(item.get("event_type") == "peer_messages_built" for item in events)
+            )
+
+    def test_conversational_e2e_flow_handles_team_lead_feedback_and_gate_retry(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            orchestrator_ref: dict[str, AITeamOrchestrator] = {}
+
+            class E2EAdapter(SubscriptionAdapter):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self.review_calls = 0
+
+                def invoke(
+                    self,
+                    prompt: str,
+                    messages: list[dict[str, str]] | None = None,
+                ) -> AdapterResponse:
+                    all_text = "\n".join(
+                        str(item.get("content", "")) for item in (messages or [])
+                    )
+                    if "Review Implement feature" in prompt:
+                        self.review_calls += 1
+                        if self.review_calls == 1:
+                            return AdapterResponse(
+                                success=False,
+                                content="",
+                                latency_ms=1,
+                                input_tokens=max(1, len(prompt) // 4),
+                                output_tokens=0,
+                                error="missing_2fa",
+                            )
+                        return AdapterResponse(
+                            success=True,
+                            content="Review OK: feedback aplicado y riesgo residual aceptable.",
+                            latency_ms=1,
+                            input_tokens=max(1, len(prompt) // 4),
+                            output_tokens=20,
+                        )
+                    if "QA Implement feature" in prompt:
+                        return AdapterResponse(
+                            success=True,
+                            content="QA OK: criterios de salida cumplidos.",
+                            latency_ms=1,
+                            input_tokens=max(1, len(prompt) // 4),
+                            output_tokens=18,
+                        )
+                    if "Feedback de revision" in all_text or "2FA" in all_text:
+                        return AdapterResponse(
+                            success=True,
+                            content=(
+                                "Decision: implementar JWT con refresh, 2FA y expiracion de sesiones. "
+                                "Evidencia: feedback de Team Lead y gate incorporados. "
+                                "Siguiente accion: actualizar backend, pruebas y docs."
+                            ),
+                            latency_ms=1,
+                            input_tokens=max(1, len(all_text) // 4),
+                            output_tokens=42,
+                        )
+                    return AdapterResponse(
+                        success=True,
+                        content=(
+                            "Decision: implementar JWT con refresh. "
+                            "Evidencia: base funcional inicial. "
+                            "Siguiente accion: abrir quality gates."
+                        ),
+                        latency_ms=1,
+                        input_tokens=max(1, len(all_text or prompt) // 4),
+                        output_tokens=30,
+                    )
+
+            adapters: list[ModelAdapter] = [
+                E2EAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "review", "analysis", "reasoning"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+            orchestrator_ref["instance"] = orchestrator
+            orchestrator.mailbox.send(
+                sender="team_lead",
+                recipient="engineer",
+                subject="Refuerzo de liderazgo",
+                body="Anade 2FA y expiracion de sesiones antes de cerrar.",
+                task_id="E2E-1",
+            )
+
+            task = WorkTask(
+                task_id="E2E-1",
+                title="Implement feature",
+                description="Implementar autenticacion segura.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "max_gate_iterations": 1,
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=10)
+
+            parent = orchestrator.taskboard.get_task("E2E-1")
+            review = orchestrator.taskboard.get_task("E2E-1::review")
+            qa = orchestrator.taskboard.get_task("E2E-1::qa")
+            assert parent is not None
+            assert review is not None
+            assert qa is not None
+            self.assertEqual(parent.state.value, "completed")
+            self.assertEqual(review.state.value, "completed")
+            self.assertEqual(qa.state.value, "completed")
+            assignee = parent.assignee or "eng-1"
+
+            engineer_mail = orchestrator.mailbox.list_messages(recipient="engineer")
+            lead_feedback = next(
+                msg for msg in engineer_mail if msg.subject == "Refuerzo de liderazgo"
+            )
+            self.assertTrue(orchestrator.mailbox.is_read(lead_feedback.message_id))
+
+            team_lead_mail = orchestrator.mailbox.list_messages(recipient="team_lead")
+            self.assertTrue(
+                any(msg.subject == "Reply: E2E-1" for msg in team_lead_mail)
+            )
+            reply_msg = next(
+                msg for msg in team_lead_mail if msg.subject == "Reply: E2E-1"
+            )
+            self.assertIn("2FA", reply_msg.body)
+            self.assertGreaterEqual(adapters[0].review_calls, 2)
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            self.assertTrue(
+                any(
+                    item.get("event_type") == "conversation_mailbox_consumed"
+                    for item in events
+                )
+            )
+            self.assertTrue(
+                any(
+                    item.get("event_type") == "conversation_mailbox_reply"
+                    for item in events
+                )
+            )
+            self.assertTrue(
+                any(
+                    item.get("event_type") == "conversation_messages_built"
+                    for item in events
+                )
+            )
+            self.assertTrue(
+                any(
+                    item.get("event_type") == "task_started"
+                    and str((item.get("payload", {}) or {}).get("task_id", ""))
+                    == "E2E-1"
+                    for item in events
+                )
+            )
+
     def test_peer_prompt_high_risk_uses_hypothesis_sections(self) -> None:
         task = WorkTask(
             task_id="T-HIGH",

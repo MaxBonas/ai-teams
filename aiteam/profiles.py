@@ -156,9 +156,14 @@ PROMPT_VERSIONS = {
 }
 
 
-def build_prompt(role: Role, task_title: str, task_description: str, ab_version: str = "A", team_context: str = "") -> str:
-    version_map = PROMPT_VERSIONS.get(ab_version.upper(), DEFAULT_PROFILES)
-    profile = version_map.get(role, DEFAULT_PROFILES[role])
+def build_prompt(
+    role: Role,
+    task_title: str,
+    task_description: str,
+    ab_version: str = "A",
+    team_context: str = "",
+) -> str:
+    profile = profile_for(role, ab_version=ab_version)
     charter = ROLE_CHARTERS[role]
     scope = "\n".join(f"- {item}" for item in charter.decision_scope)
     listeners = ", ".join(item.value for item in charter.must_listen_to)
@@ -191,3 +196,25 @@ def build_prompt(role: Role, task_title: str, task_description: str, ab_version:
 
 def role_charter_for(role: Role) -> RoleCharter:
     return ROLE_CHARTERS[role]
+
+
+def profile_for(role: Role, ab_version: str = "A") -> AgentProfile:
+    version_map = PROMPT_VERSIONS.get(ab_version.upper(), DEFAULT_PROFILES)
+    return version_map.get(role, DEFAULT_PROFILES[role])
+
+
+def build_system_prompt(role: Role, ab_version: str = "A") -> str:
+    profile = profile_for(role, ab_version=ab_version)
+    charter = ROLE_CHARTERS[role]
+    scope = "; ".join(charter.decision_scope)
+    listeners = ", ".join(item.value for item in charter.must_listen_to) or "none"
+    return (
+        f"{profile.system_prompt}\n"
+        f"Rango de decision: R{charter.decision_rank}/5.\n"
+        f"Personalidad operativa: {charter.personality}.\n"
+        f"Ambito: {scope}.\n"
+        f"Debes escuchar a: {listeners}.\n"
+        "Responde al grano, pero con detalle suficiente para ejecutar. "
+        "Prioriza decisiones, evidencia util, riesgos y siguiente accion concreta. "
+        "Evita relleno, teoria extensa y repeticiones."
+    )

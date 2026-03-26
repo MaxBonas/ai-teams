@@ -70,33 +70,80 @@ Reduce la sensacion de que "no se respetan los tiempos" cuando en realidad el pr
 
 ## Batch 2 — Barreras de dependencia y paralelismo seguro
 
+**Estado**: EN PROGRESO (B2.1-B2.4 implementados; Fix 5, Fix 6, Fix 7, Fix 8 y Fix 9 completados)
+
 ### Objetivo
 
 Hacer que el procesamiento paralelo sea comprensible y evite carreras sutiles al desbloquear tareas hijas.
 
 ### Tareas
 
-- [ ] B2.1 Revisar claim de todas las READY del lote.
-- [ ] B2.2 Introducir barrera explicita antes de reclamar hijos desbloqueados.
-- [ ] B2.3 Añadir tests de paralelismo y race conditions.
-- [ ] B2.4 Revisar `AITEAM_MAX_PARALLEL_TASKS` y defaults operativos recomendados.
+- [x] B2.1 Revisar claim de todas las READY del lote.
+- [x] B2.2 Introducir barrera explicita antes de reclamar hijos desbloqueados.
+- [x] B2.3 Añadir tests de paralelismo y race conditions.
+- [x] B2.4 Revisar `AITEAM_MAX_PARALLEL_TASKS` y defaults operativos recomendados.
+
+### Especificacion
+
+- `docs/BATCH2_SPEC.md`
+
+### Como se hizo
+
+- **B2.1**: se anadio un guard en `aiteam/taskboard.py` dentro de `claim_task()` para revalidar dependencias al momento del claim y rechazar estados READY corruptos o adelantados.
+- **B2.2**: no se uso `taskboard._save()` privado desde el orchestrator; en su lugar se introdujo una barrera publica con `taskboard.checkpoint()` y evento `sub_iteration_barrier` despues de cada batch.
+- **B2.3**: se creo `tests/test_parallel_taskboard.py` con pruebas de claim concurrente, dependencia compartida, guard con padre CLAIMED, dependencia fallida y evento de barrera.
+- **B2.4**: se documento en `docs/BATCH2_SPEC.md` la recomendacion operativa de paralelismo por entorno: `dev=1`, `stage=2`, `prod=2-3`, manteniendo el default de codigo en `1`.
+- **Fix 5**: se redujo ruido de meetings en `aiteam/communication.py` con clasificacion `informational/actionable`, skip de reuniones sin senal util, evento `sync_meeting_skipped` y metadata de utilidad (`meeting_kind`, `useful_participants`, `decision_count`).
+- **Fix 6**: se introdujo `ConversationThread` y `ThreadStore` en `aiteam/agent_session.py`, se consumen mensajes accionables del mailbox dentro del hilo del agente y se responde al Team Lead via mailbox con eventos `conversation_mailbox_consumed` y `conversation_mailbox_reply`.
+- **Fix 7**: se introdujo `project_key` en `aiteam/memory.py`, se filtra memoria por proyecto en contexto/handoff/cross-agent memory y se anadio compaction minima de threads en `aiteam/agent_session.py` para evitar mezcla de proyectos y crecimiento sin control.
+- **Fix 8**: se mejoro la observabilidad del flujo en `aiteam/dashboard.py`, `api/main.py`, `api/utils.py` e `ide-frontend/src/components/OperatorTimeline.tsx` para mostrar rounds, sub-iteraciones, gate iterations, bloqueos, handoffs, meetings y eventos conversacionales en backend y UI.
+- **Fix 9**: se alineo la documentacion operativa (`README.md`, `docs/INDEX.md`, `docs/EXECUTION_QUICK_START.md`, `docs/SPRINT_ROADMAP_Q1_2026.md`, `docs/TEST_MATRIX_SPRINTS_1_2_3.md`) con el estado real del proyecto, separando claramente documentos vigentes vs historicos y actualizando la baseline a **282 tests passing**.
+
+### Verificacion ejecutada
+
+- `venv/Scripts/python.exe -m pytest tests/ -q --tb=short`
+- Resultado: `282 passed`
 
 ### Archivos clave
 
 - `aiteam/orchestrator.py`
 - `aiteam/taskboard.py`
+- `aiteam/communication.py`
+- `aiteam/agent_session.py`
+- `aiteam/memory.py`
+- `aiteam/dashboard.py`
+- `api/main.py`
+- `api/utils.py`
+- `ide-frontend/src/components/OperatorTimeline.tsx`
+- `README.md`
+- `docs/INDEX.md`
+- `docs/EXECUTION_QUICK_START.md`
+- `docs/SPRINT_ROADMAP_Q1_2026.md`
+- `docs/TEST_MATRIX_SPRINTS_1_2_3.md`
+- `tests/test_parallel_taskboard.py`
+- `tests/test_memory_comms.py`
 - `tests/test_orchestrator.py`
-- `tests/test_chaos.py`
+- `tests/test_dashboard.py`
+- `tests/test_api_team_chat.py`
+- `docs/BATCH2_SPEC.md`
 
 ### Definition of done
 
 - Un hijo no se reclama antes de que sus dependencias queden persistidas como completadas.
 - Los runs paralelos no muestran solapes imposibles en timeline.
 - Hay pruebas que reproducen el caso y validan la correccion.
+- El default de codigo sigue siendo seguro (`1`) y los valores recomendados por entorno quedan documentados.
+- Los sync meetings informativos sin senal util ya no se emiten como ruido.
+- Los mensajes accionables del Team Lead ya pueden entrar en el hilo del agente y generar respuesta trazable.
+- La memoria operativa y el hilo conversacional ya no mezclan facilmente proyectos distintos.
+- El timeline operativo ya expone rounds, sub-iteraciones, bloqueos, handoffs, meetings y señales conversacionales de forma legible.
+- La documentacion operativa ya distingue entre estado vigente, estado parcial y documentos historicos.
 
 ---
 
 ## Batch 3 — Conversation Threads base
+
+**Estado**: COMPLETADO
 
 ### Objetivo
 
@@ -104,10 +151,22 @@ Introducir el concepto estructural clave: hilo conversacional persistente por ag
 
 ### Tareas
 
-- [ ] B3.1 Crear `ConversationThread`.
-- [ ] B3.2 Crear `ThreadStore` en `runtime/sessions/threads/`.
-- [ ] B3.3 Persistir y recuperar threads por `agent_id + project_root`.
-- [ ] B3.4 Añadir tests de persistencia y continuidad.
+- [x] B3.1 Crear `ConversationThread`.
+- [x] B3.2 Crear `ThreadStore` en `runtime/sessions/threads/`.
+- [x] B3.3 Persistir y recuperar threads por `agent_id + project_root`.
+- [x] B3.4 Añadir tests de persistencia y continuidad.
+
+### Como se hizo
+
+- Se introdujeron `ConversationTurn`, `ConversationThread` y `ThreadStore` en `aiteam/agent_session.py`.
+- Los threads se persisten por `agent_id + project_root` en `runtime/sessions/threads/`.
+- Se anadio compaction minima de turnos antiguos para mantener eficiencia del contexto.
+- Se cubrio persistencia, continuidad y compaction en `tests/test_memory_comms.py` y `tests/test_orchestrator.py`.
+
+### Verificacion ejecutada
+
+- `venv/Scripts/python.exe -m pytest tests/test_memory_comms.py tests/test_orchestrator.py -q`
+- Resultado: soporte base de thread validado dentro de la suite conversacional actual.
 
 ### Archivos clave
 
@@ -125,17 +184,31 @@ Introducir el concepto estructural clave: hilo conversacional persistente por ag
 
 ## Batch 4 — Adapters con `messages[]`
 
+**Estado**: COMPLETADO
+
 ### Objetivo
 
 Preparar la capa de invocacion LLM para soportar historiales conversacionales reales sin romper el modo actual por `prompt`.
 
 ### Tareas
 
-- [ ] B4.1 Extender contrato base `invoke(prompt, messages=None)`.
-- [ ] B4.2 Implementar soporte en `ApiAdapter`.
-- [ ] B4.3 Implementar soporte en `SubscriptionAdapter`.
-- [ ] B4.4 Mantener backward compatibility total.
-- [ ] B4.5 Añadir tests de compatibilidad y formato.
+- [x] B4.1 Extender contrato base `invoke(prompt, messages=None)`.
+- [x] B4.2 Implementar soporte en `ApiAdapter`.
+- [x] B4.3 Implementar soporte en `SubscriptionAdapter`.
+- [x] B4.4 Mantener backward compatibility total.
+- [x] B4.5 Añadir tests de compatibilidad y formato.
+
+### Como se hizo
+
+- Se extendio el contrato base en `aiteam/adapters/base.py` con `normalize_messages()` y `messages_to_prompt()`.
+- `ApiAdapter`, `SubscriptionAdapter` y `ExternalProgramAdapter` ya aceptan `messages[]`.
+- `HybridRouter.route_and_invoke()` ya pasa `messages[]` y detecta adapters viejos para no romper compatibilidad.
+- Se cubrio compatibilidad e invocacion live/mock con historial en `tests/test_router.py` y `tests/test_api_adapter_live.py`.
+
+### Verificacion ejecutada
+
+- `venv/Scripts/python.exe -m pytest tests/test_router.py tests/test_api_adapter_live.py tests/test_orchestrator.py tests/test_memory_comms.py -q`
+- Resultado: `52 passed`
 
 ### Archivos clave
 
@@ -154,17 +227,35 @@ Preparar la capa de invocacion LLM para soportar historiales conversacionales re
 
 ## Batch 5 — Orchestrator conversacional
 
+**Estado**: COMPLETADO
+
 ### Objetivo
 
 Hacer que cada nueva invocacion del mismo agente recupere su thread previo y responda en continuidad real.
 
 ### Tareas
 
-- [ ] B5.1 En `_run_task()`, recuperar thread del agente/proyecto.
-- [ ] B5.2 Añadir el task actual como turno `user`.
-- [ ] B5.3 Guardar respuesta del agente como turno `assistant`.
-- [ ] B5.4 Mantener integracion con `workflow_state`, retries y gates.
-- [ ] B5.5 Añadir tests de continuidad entre build -> review feedback -> build retry.
+- [x] B5.1 En `_run_task()`, recuperar thread del agente/proyecto.
+- [x] B5.2 Añadir el task actual como turno `user`.
+- [x] B5.3 Guardar respuesta del agente como turno `assistant`.
+- [x] B5.4 Mantener integracion con `workflow_state`, retries y gates.
+- [x] B5.5 Añadir tests de continuidad entre build -> review feedback -> build retry.
+
+### Como se hizo
+
+- `_run_task()` ya construye `messages[]` reales con `system + thread reciente + user actual`.
+- El mailbox accionable entra en el hilo antes de invocar al adapter.
+- La respuesta del agente se persiste como turno `assistant` y puede contestar al Team Lead.
+- Peer consultation y peer round 2 ya usan tambien `messages[]` compactos y eficientes.
+- Se emitieron eventos `conversation_messages_built` y `peer_messages_built` para trazabilidad.
+- Los retries por gate iteration ya usan mensajes compactos de retry y se persisten como `task_retry`, evitando repetir contexto innecesario.
+- `ConversationThread` ya deduplica turnos consecutivos identicos para no contaminar el historial con ruido repetido.
+- Se anadio un test E2E conversacional completo con feedback Team Lead -> quality gates -> respuesta final coherente.
+
+### Verificacion ejecutada
+
+- `venv/Scripts/python.exe -m pytest tests/test_orchestrator.py tests/test_memory_comms.py tests/test_router.py tests/test_api_adapter_live.py tests/test_cli_providers.py -q`
+- Resultado: `74 passed`
 
 ### Archivos clave
 
@@ -176,6 +267,22 @@ Hacer que cada nueva invocacion del mismo agente recupere su thread previo y res
 
 - Un mismo `engineer-*` referencia su razonamiento previo en el mismo proyecto.
 - Un retry por gate iteration reutiliza el hilo anterior, no solo metadata aislada.
+- El contexto conversacional se mantiene compacto: al grano, con detalle util y sin arrastrar ruido innecesario.
+- Los retries no vuelven a inyectar todo el contexto si solo cambia el feedback de gates.
+- Existe verificacion E2E del flujo conversacional completo con mailbox, gates, retry y respuesta final.
+
+### Siguiente tarea importante
+
+- Endurecimiento operativo: unificar salud real de providers, smoke, catalogo de modelos y politica de relevo en una vista operativa unica.
+
+## Politica Team Lead y Relevo
+
+- `team_lead` solo puede usar modelos `senior_cloud` o `advanced_api`.
+- `team_lead` nunca puede usar modelos locales, aunque esten sanos y disponibles.
+- Si los modelos Pro senior no estan sanos, el relevo permitido es una API avanzada y eficiente, no un modelo local.
+- El ranking de relevo debe combinar capacidad de coding, razonamiento, confianza y salud real (`provider_smoke.json`).
+- El catalogo de modelos debe ser editable sin tocar codigo via `runtime/model_catalog.json`.
+- Referencias: `aiteam/model_catalog.py`, `config/model_catalog.example.json`, `docs/MODEL_POLICY.md`, `aiteam/router.py`.
 
 ---
 

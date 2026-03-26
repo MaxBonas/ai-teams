@@ -5,6 +5,35 @@ from abc import ABC, abstractmethod
 from aiteam.types import AdapterResponse, ChannelType
 
 
+def normalize_messages(
+    messages: list[dict[str, str]] | None, prompt: str
+) -> list[dict[str, str]]:
+    if messages:
+        normalized: list[dict[str, str]] = []
+        for item in messages:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "user") or "user").strip() or "user"
+            content = str(item.get("content", "") or "")
+            if not content.strip():
+                continue
+            normalized.append({"role": role, "content": content})
+        if normalized:
+            return normalized
+    return [{"role": "user", "content": prompt}]
+
+
+def messages_to_prompt(messages: list[dict[str, str]] | None, prompt: str) -> str:
+    normalized = normalize_messages(messages, prompt)
+    parts: list[str] = []
+    for item in normalized:
+        role = str(item.get("role", "user") or "user").strip().upper()
+        content = str(item.get("content", "") or "").strip()
+        if content:
+            parts.append(f"[{role}] {content}")
+    return "\n\n".join(parts) if parts else prompt
+
+
 class ModelAdapter(ABC):
     def __init__(
         self,
@@ -33,5 +62,7 @@ class ModelAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def invoke(self, prompt: str) -> AdapterResponse:
+    def invoke(
+        self, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> AdapterResponse:
         raise NotImplementedError

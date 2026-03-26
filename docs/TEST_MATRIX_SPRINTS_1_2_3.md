@@ -992,6 +992,10 @@ router = HybridRouter(..., budget_manager=budget_manager)
 
 ## Test Coverage Summary by File
 
+> Nota historica: esta matriz describe el plan de tests del ciclo Q1 original.
+> La suite real del proyecto ya evoluciono mas alla de esta baseline.
+> Estado verificado actual: **282 passed** (`venv/Scripts/python.exe -m pytest tests/ -q --tb=short`).
+
 | Test File | # Tests | Focus | Sprint |
 |-----------|---------|-------|--------|
 | test_finops_anomaly.py | 5 | Anomaly detection, model caps | 1 |
@@ -1007,11 +1011,15 @@ router = HybridRouter(..., budget_manager=budget_manager)
 | test_chaos.py | 4 | Failure scenarios | 3 |
 | **TOTAL** | **50** | **All new tests** | **1-3** |
 
-**Final Test Count**: 91 (baseline) + 50 (new) = **141 tests** (target: 142+).
+**Final Test Count del plan Q1**: 91 (baseline) + 50 (new) = **141 tests** (target historico: 142+).
+
+**Estado actual del proyecto**: la suite real ya supera ampliamente esta cifra y se debe tomar `282 passed` como baseline vigente.
 
 ---
 
 ## Next Steps for Sprint Execution
+
+Estos pasos quedan como referencia historica del plan Q1. Para trabajo activo, usar `ROADMAP_FLUJOS_Y_AGENTES.md` y `TASKS.md`.
 
 1. Create each test file per Sprint timeline.
 2. Run tests independently to validate each sprint:
@@ -1029,4 +1037,3 @@ router = HybridRouter(..., budget_manager=budget_manager)
    ```bash
    python -m unittest discover -s tests -p "test_*.py" -v 2>&1 | tail -5
    ```
-

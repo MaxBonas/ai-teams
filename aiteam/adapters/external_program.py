@@ -5,7 +5,7 @@ import subprocess
 import time
 import os
 
-from aiteam.adapters.base import ModelAdapter
+from aiteam.adapters.base import ModelAdapter, messages_to_prompt
 from aiteam.types import AdapterResponse, ChannelType
 
 
@@ -45,10 +45,13 @@ class ExternalProgramAdapter(ModelAdapter):
             return False
         return self._resolve_executable(self.command[0]) is not None
 
-    def invoke(self, prompt: str) -> AdapterResponse:
+    def invoke(
+        self, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> AdapterResponse:
         start = time.time()
-        input_tokens = max(1, len(prompt) // 4)
-        cmd = [part.replace("{prompt}", prompt) for part in self.command]
+        prompt_text = messages_to_prompt(messages, prompt)
+        input_tokens = max(1, len(prompt_text) // 4)
+        cmd = [part.replace("{prompt}", prompt_text) for part in self.command]
         if cmd:
             resolved = self._resolve_executable(cmd[0])
             if resolved is not None:
@@ -57,7 +60,7 @@ class ExternalProgramAdapter(ModelAdapter):
         try:
             completed = subprocess.run(
                 cmd,
-                input=prompt,
+                input=prompt_text,
                 text=True,
                 capture_output=True,
                 timeout=self.timeout_seconds,

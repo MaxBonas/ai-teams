@@ -19,6 +19,7 @@ import json as std_json
 
 try:
     from dotenv import load_dotenv
+
     _root_env = Path(__file__).parent.parent / ".env"
     if _root_env.exists():
         load_dotenv(_root_env)
@@ -48,7 +49,7 @@ class SimplePTY:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            creationflags=subprocess.CREATE_NO_WINDOW
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
 
     def write(self, data):
@@ -65,12 +66,14 @@ class SimplePTY:
         pass
 
     def isalive(self):
-        if not self.proc: return False
+        if not self.proc:
+            return False
         return self.proc.poll() is None
 
     def close(self):
         if self.proc:
             self.proc.terminate()
+
 
 try:
     from pywinpty import PTY
@@ -93,6 +96,7 @@ app.add_middleware(
 )
 
 active_pty = None
+
 
 class WorkspacePath(BaseModel):
     path: str
@@ -191,6 +195,15 @@ class OperatorTimelineItem(BaseModel):
     task_id: str = ""
     level: str = "info"
     summary: str = ""
+    assignee: str = ""
+    execution_round: int = 0
+    execution_sub_iteration: int = 0
+    gate_iteration: int = 0
+    blocked_reason: str = ""
+    handoff_from: str = ""
+    handoff_to: str = ""
+    conversation_thread_id: str = ""
+    meeting_kind: str = ""
     artifact_created: int = 0
     artifact_modified: int = 0
     artifact_files: list[str] = []
@@ -227,7 +240,9 @@ def _resolve_chat_round_budget(
     return _chat_round_budget(complexity=complexity, criticality=criticality)
 
 
-def _recent_chat_roots(runtime_dir: Path, max_chats: int = 4) -> list[dict[str, object]]:
+def _recent_chat_roots(
+    runtime_dir: Path, max_chats: int = 4
+) -> list[dict[str, object]]:
     tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
     roots = _group_chat_roots(tasks_payload)
     if not roots:
@@ -412,9 +427,7 @@ def _workspace_artifact_diff(
 ) -> tuple[list[str], list[str]]:
     created = sorted(path for path in after.keys() if path not in before)
     modified = sorted(
-        path
-        for path in after.keys()
-        if path in before and after[path] != before[path]
+        path for path in after.keys() if path in before and after[path] != before[path]
     )
     return created, modified
 
@@ -446,7 +459,9 @@ def _materialize_game_iteration(workspace: Path, message: str) -> dict[str, obje
             "applied": False,
             "iteration": 0,
             "files": [],
-            "reason": "bootstrap_already_done" if not is_initial_bootstrap else "not_game_request",
+            "reason": "bootstrap_already_done"
+            if not is_initial_bootstrap
+            else "not_game_request",
         }
 
     iteration = 1
@@ -881,7 +896,9 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
                 failed_tasks += 1
             metadata = item.get("metadata", {})
             if isinstance(metadata, dict):
-                rounds_used = max(rounds_used, _safe_int_value(metadata.get("execution_round", 0), 0))
+                rounds_used = max(
+                    rounds_used, _safe_int_value(metadata.get("execution_round", 0), 0)
+                )
 
     last_event = ""
     last_event_ts = ""
@@ -902,17 +919,34 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
             continue
         root_event_seen = True
         if event_type == "chat_plan_created" and event_task_id_upper == normalized_root:
-            round_budget = max(round_budget, _safe_int_value(payload.get("round_budget", 0), 0))
-        if event_type == "chat_auto_rounds_extended" and event_task_id_upper == normalized_root:
-            round_budget = max(round_budget, _safe_int_value(payload.get("to_round_budget", 0), 0))
-        if event_type == "chat_execution_mode_assessed" and event_task_id_upper == normalized_root:
-            execution_mode = str(payload.get("execution_mode", execution_mode) or execution_mode)
+            round_budget = max(
+                round_budget, _safe_int_value(payload.get("round_budget", 0), 0)
+            )
+        if (
+            event_type == "chat_auto_rounds_extended"
+            and event_task_id_upper == normalized_root
+        ):
+            round_budget = max(
+                round_budget, _safe_int_value(payload.get("to_round_budget", 0), 0)
+            )
+        if (
+            event_type == "chat_execution_mode_assessed"
+            and event_task_id_upper == normalized_root
+        ):
+            execution_mode = str(
+                payload.get("execution_mode", execution_mode) or execution_mode
+            )
             placeholder_outputs = max(
                 placeholder_outputs,
                 _safe_int_value(payload.get("placeholder_outputs", 0), 0),
             )
-            live_mode_required = bool(payload.get("live_mode_required", live_mode_required))
-        if event_type == "chat_quality_assessed" and event_task_id_upper == normalized_root:
+            live_mode_required = bool(
+                payload.get("live_mode_required", live_mode_required)
+            )
+        if (
+            event_type == "chat_quality_assessed"
+            and event_task_id_upper == normalized_root
+        ):
             raw_checks = payload.get("successful_checks", [])
             if isinstance(raw_checks, list):
                 successful_checks = sorted(
@@ -922,7 +956,10 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
                         if str(item or "").strip()
                     }
                 )
-        if event_type == "chat_evidence_gate_rejected" and event_task_id_upper == normalized_root:
+        if (
+            event_type == "chat_evidence_gate_rejected"
+            and event_task_id_upper == normalized_root
+        ):
             evidence_gate_rejected = True
             raw_failures = payload.get("failures", [])
             if isinstance(raw_failures, list):
@@ -931,15 +968,25 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
                     for item in raw_failures
                     if str(item or "").strip()
                 ][:12]
-        if event_type == "chat_live_mode_required_rejected" and event_task_id_upper == normalized_root:
+        if (
+            event_type == "chat_live_mode_required_rejected"
+            and event_task_id_upper == normalized_root
+        ):
             live_mode_required = True
             live_mode_rejected = True
-        if event_type == "chat_window_exhausted" and event_task_id_upper == normalized_root:
+        if (
+            event_type == "chat_window_exhausted"
+            and event_task_id_upper == normalized_root
+        ):
             exhausted = True
-            rounds_used = max(rounds_used, _safe_int_value(payload.get("rounds_used", 0), 0))
+            rounds_used = max(
+                rounds_used, _safe_int_value(payload.get("rounds_used", 0), 0)
+            )
         if event_type == "task_execution":
             execution_attempts += 1
-            rounds_used = max(rounds_used, _safe_int_value(payload.get("execution_round", 0), 0))
+            rounds_used = max(
+                rounds_used, _safe_int_value(payload.get("execution_round", 0), 0)
+            )
         if event_type == "execution_step":
             execution_steps += 1
             if bool(payload.get("success", False)):
@@ -1107,10 +1154,30 @@ def _build_operator_timeline(
                 task_id=event_task_id,
                 level=level,
                 summary=_event_summary(event_type, payload),
+                assignee=str(payload.get("assignee", "") or ""),
+                execution_round=_safe_int_value(payload.get("execution_round", 0), 0),
+                execution_sub_iteration=_safe_int_value(
+                    payload.get(
+                        "execution_sub_iteration", payload.get("sub_iteration", 0)
+                    ),
+                    0,
+                ),
+                gate_iteration=_safe_int_value(
+                    payload.get("gate_iteration", payload.get("iteration", 0)), 0
+                ),
+                blocked_reason=str(payload.get("blocked_reason", "") or ""),
+                handoff_from=str(payload.get("from", "") or ""),
+                handoff_to=str(payload.get("to", "") or ""),
+                conversation_thread_id=str(payload.get("thread_id", "") or ""),
+                meeting_kind=str(payload.get("meeting_kind", "") or ""),
                 artifact_created=_safe_int_value(payload.get("created", 0), 0),
                 artifact_modified=_safe_int_value(payload.get("modified", 0), 0),
-                artifact_files=[str(item or "") for item in files if str(item or "").strip()][:16],
-                productivity_score=_safe_int_value(payload.get("productivity_score", 0), 0),
+                artifact_files=[
+                    str(item or "") for item in files if str(item or "").strip()
+                ][:16],
+                productivity_score=_safe_int_value(
+                    payload.get("productivity_score", 0), 0
+                ),
                 reasoning_score=_safe_int_value(payload.get("reasoning_score", 0), 0),
             )
         )
@@ -1231,7 +1298,9 @@ def _evaluate_chat_quality(
     elif failed_tasks > 0:
         hint = "Resuelve fases fallidas antes de ampliar alcance."
     else:
-        hint = "Buen avance; toma el siguiente slice de impacto con pruebas de regresion."
+        hint = (
+            "Buen avance; toma el siguiente slice de impacto con pruebas de regresion."
+        )
 
     return productivity_score, reasoning_score, productivity_status, hint
 
@@ -1240,9 +1309,34 @@ def _classify_check_from_command(command: str) -> str:
     text = str(command or "").strip().lower()
     if not text:
         return ""
-    test_tokens = ["pytest", "npm test", "pnpm test", "bun test", "vitest", "jest", "go test", "cargo test"]
-    lint_tokens = ["eslint", "ruff", "flake8", "pylint", "npm run lint", "pnpm lint", "bun lint"]
-    build_tokens = ["npm run build", "pnpm build", "bun run build", "vite build", "tsc -b", "cargo build", "go build"]
+    test_tokens = [
+        "pytest",
+        "npm test",
+        "pnpm test",
+        "bun test",
+        "vitest",
+        "jest",
+        "go test",
+        "cargo test",
+    ]
+    lint_tokens = [
+        "eslint",
+        "ruff",
+        "flake8",
+        "pylint",
+        "npm run lint",
+        "pnpm lint",
+        "bun lint",
+    ]
+    build_tokens = [
+        "npm run build",
+        "pnpm build",
+        "bun run build",
+        "vite build",
+        "tsc -b",
+        "cargo build",
+        "go build",
+    ]
     if any(token in text for token in test_tokens):
         return "test"
     if any(token in text for token in lint_tokens):
@@ -1278,15 +1372,23 @@ def _assess_execution_mode(
 ) -> tuple[str, int, float, int]:
     result_texts: list[str] = []
     for task in task_rows:
-        result = str(task.metadata.get("result") or task.metadata.get("error") or "").strip()
+        result = str(
+            task.metadata.get("result") or task.metadata.get("error") or ""
+        ).strip()
         if result:
             result_texts.append(result)
 
     if not result_texts:
-        mode = "live" if (execution_steps > 0 or (artifact_created + artifact_modified) > 0) else "simulated"
+        mode = (
+            "live"
+            if (execution_steps > 0 or (artifact_created + artifact_modified) > 0)
+            else "simulated"
+        )
         return mode, 0, 0.0, 0
 
-    placeholder_count = sum(1 for row in result_texts if _is_placeholder_output_text(row))
+    placeholder_count = sum(
+        1 for row in result_texts if _is_placeholder_output_text(row)
+    )
     placeholder_ratio = float(placeholder_count) / float(len(result_texts))
 
     if placeholder_count == len(result_texts) and execution_steps == 0:
@@ -1317,20 +1419,28 @@ def _evaluate_phase_evidence_gate(
         if task.state.value != "completed":
             failures.append(f"{phase}:not_completed")
             continue
-        result_text = str(task.metadata.get("result") or task.metadata.get("error") or "").strip()
+        result_text = str(
+            task.metadata.get("result") or task.metadata.get("error") or ""
+        ).strip()
         if not result_text:
             failures.append(f"{phase}:empty_result")
             continue
         if _is_placeholder_output_text(result_text):
             failures.append(f"{phase}:placeholder_output")
 
-        if phase == "build" and bool(task.metadata.get("require_execution_plan", False)):
+        if phase == "build" and bool(
+            task.metadata.get("require_execution_plan", False)
+        ):
             raw_plan = task.metadata.get("execution_plan", [])
             if not isinstance(raw_plan, list) or not raw_plan:
                 failures.append("build:missing_execution_plan")
 
     build_has_output = all(not row.startswith("build:") for row in failures)
-    if build_has_output and execution_steps <= 0 and (artifact_created + artifact_modified) <= 0:
+    if (
+        build_has_output
+        and execution_steps <= 0
+        and (artifact_created + artifact_modified) <= 0
+    ):
         failures.append("build:no_execution_evidence")
     if execution_steps_success <= 0:
         failures.append("build:no_successful_execution_steps")
@@ -1369,20 +1479,18 @@ def _compose_user_facing_run_summary(
     placeholder_outputs: int,
 ) -> str:
     decision_text = str(decision_compact or "").strip()
-    if not decision_text or "Processed prompt" in decision_text or "SIMULADO |" in decision_text:
-        decision_text = (
-            "Se priorizo completar el slice de mayor impacto de esta ronda y cerrar con review + QA."
-        )
+    if (
+        not decision_text
+        or "Processed prompt" in decision_text
+        or "SIMULADO |" in decision_text
+    ):
+        decision_text = "Se priorizo completar el slice de mayor impacto de esta ronda y cerrar con review + QA."
 
     if artifact_files:
         files_line = ", ".join(artifact_files[:10])
-        files_text = (
-            f"Se detectaron cambios en archivos (creados={artifact_created}, modificados={artifact_modified}): {files_line}."
-        )
+        files_text = f"Se detectaron cambios en archivos (creados={artifact_created}, modificados={artifact_modified}): {files_line}."
     else:
-        files_text = (
-            "No se detectaron cambios de archivos en esta ronda; se requiere ejecutar implementacion concreta en la siguiente iteracion."
-        )
+        files_text = "No se detectaron cambios de archivos en esta ronda; se requiere ejecutar implementacion concreta en la siguiente iteracion."
 
     return "\n".join(
         [
@@ -1446,7 +1554,9 @@ app.include_router(aiteam_router.router)
 async def post_notebooklm_sync(payload: NotebookLMSyncRequest, request: Request):
     _require_api_auth_request(request)
     try:
-        workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+        workspace = _workspace_from_request(
+            request, get_current_workspace(), PROJECT_ROOT
+        )
         runtime_dir = workspace / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1467,6 +1577,7 @@ async def post_notebooklm_sync(payload: NotebookLMSyncRequest, request: Request)
         return await asyncio.to_thread(_sync)
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).exception("Unhandled error in notebooklm sync")
         return {"error": str(e)}
 
@@ -1498,8 +1609,12 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
     }
 
     preferred_role = role_map.get(payload.role.strip().lower(), Role.ENGINEER)
-    complexity = complexity_map.get(payload.complexity.strip().lower(), Complexity.MEDIUM)
-    criticality = criticality_map.get(payload.criticality.strip().lower(), Criticality.MEDIUM)
+    complexity = complexity_map.get(
+        payload.complexity.strip().lower(), Complexity.MEDIUM
+    )
+    criticality = criticality_map.get(
+        payload.criticality.strip().lower(), Criticality.MEDIUM
+    )
 
     def _task_result(task: WorkTask | None) -> str:
         if task is None:
@@ -1523,7 +1638,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         previous_by_root: dict[str, dict[str, object]] = {
             str(item.get("root_id", "")).upper(): item
             for item in previous_runs
-            if isinstance(item, dict) and str(item.get("root_id", "")).upper().startswith("CHAT-")
+            if isinstance(item, dict)
+            and str(item.get("root_id", "")).upper().startswith("CHAT-")
         }
         continuation_requested = _is_continuation_message(payload.message)
         continuation_target = _extract_chat_root_from_message(payload.message)
@@ -1545,7 +1661,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     state_value = str(state or "")
                     if state_value != "completed":
                         unresolved.append(f"{phase_name}:{state_value}")
-            continuation_snapshot = ", ".join(unresolved[:8]) if unresolved else "all_completed"
+            continuation_snapshot = (
+                ", ".join(unresolved[:8]) if unresolved else "all_completed"
+            )
         elif continuation_requested and continuation_target:
             continuation_of = continuation_target
             continuation_snapshot = "target_not_found"
@@ -1569,7 +1687,14 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "qa": f"{task_root}::qa",
                 "lead_close": f"{task_root}::lead_close",
             }
-            workflow_phase_keys = ["lead_intake", "discovery", "build", "review", "qa", "lead_close"]
+            workflow_phase_keys = [
+                "lead_intake",
+                "discovery",
+                "build",
+                "review",
+                "qa",
+                "lead_close",
+            ]
             delegated_task_ids = [
                 phase_task_ids["discovery"],
                 phase_task_ids["build"],
@@ -1653,18 +1778,18 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     role=Role.TEAM_LEAD,
                     complexity=complexity,
                     criticality=criticality,
-                metadata={
-                    "required_capabilities": ["reasoning"],
-                    "interactive_chat": True,
-                    "skip_quality_gates": True,
-                    "require_peer_consultation": True,
-                    "phase": "lead_intake",
-                    "chat_preferred_role": preferred_role.value,
-                    "continuation_requested": continuation_requested,
-                    "continuation_of": continuation_of,
-                    "continuation_snapshot": continuation_snapshot,
-                },
-            ),
+                    metadata={
+                        "required_capabilities": ["reasoning"],
+                        "interactive_chat": True,
+                        "skip_quality_gates": True,
+                        "require_peer_consultation": True,
+                        "phase": "lead_intake",
+                        "chat_preferred_role": preferred_role.value,
+                        "continuation_requested": continuation_requested,
+                        "continuation_of": continuation_of,
+                        "continuation_snapshot": continuation_snapshot,
+                    },
+                ),
                 WorkTask(
                     task_id=phase_task_ids["discovery"],
                     title="Discovery and constraints",
@@ -1973,13 +2098,21 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         bootstrap_result = _materialize_game_iteration(workspace, payload.message)
         if bool(bootstrap_result.get("applied", False)):
             raw_bootstrap_files = bootstrap_result.get("files", [])
-            bootstrap_files = raw_bootstrap_files if isinstance(raw_bootstrap_files, list) else []
+            bootstrap_files = (
+                raw_bootstrap_files if isinstance(raw_bootstrap_files, list) else []
+            )
             orch.event_logger.emit(
                 "chat_artifact_bootstrap",
                 {
                     "task_id": task_root,
-                    "iteration": _safe_int_value(bootstrap_result.get("iteration", 0), 0),
-                    "files": [str(item or "") for item in bootstrap_files if str(item or "").strip()],
+                    "iteration": _safe_int_value(
+                        bootstrap_result.get("iteration", 0), 0
+                    ),
+                    "files": [
+                        str(item or "")
+                        for item in bootstrap_files
+                        if str(item or "").strip()
+                    ],
                 },
             )
 
@@ -2016,7 +2149,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         orch.run_until_idle(max_rounds=round_budget)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         artifact_after = _workspace_artifact_snapshot(workspace)
-        created_artifacts, modified_artifacts = _workspace_artifact_diff(artifact_before, artifact_after)
+        created_artifacts, modified_artifacts = _workspace_artifact_diff(
+            artifact_before, artifact_after
+        )
         artifact_created = len(created_artifacts)
         artifact_modified = len(modified_artifacts)
         artifact_files = sorted(set(created_artifacts + modified_artifacts))
@@ -2042,7 +2177,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         phase_task_set = set(phase_task_ids.values())
         game_followup_requested = _is_game_followup_request(workspace, payload.message)
 
-        def _collect_phase_progress() -> tuple[WorkTask | None, dict[str, str], int, int, int]:
+        def _collect_phase_progress() -> tuple[
+            WorkTask | None, dict[str, str], int, int, int
+        ]:
             local_lead = orch.taskboard.get_task(phase_task_ids["lead_close"])
             local_phase_states: dict[str, str] = {}
             local_rounds_used = 0
@@ -2052,16 +2189,26 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     local_phase_states[phase_name] = "missing"
                     continue
                 local_phase_states[phase_name] = task.state.value
-                execution_round = _safe_int_value(task.metadata.get("execution_round", 0), 0)
+                execution_round = _safe_int_value(
+                    task.metadata.get("execution_round", 0), 0
+                )
                 local_rounds_used = max(local_rounds_used, execution_round)
 
-            local_completed = sum(1 for state in local_phase_states.values() if state == "completed")
+            local_completed = sum(
+                1 for state in local_phase_states.values() if state == "completed"
+            )
             local_pending = sum(
                 1
                 for state in local_phase_states.values()
                 if state in {"pending", "ready", "claimed", "blocked"}
             )
-            return local_lead, local_phase_states, local_rounds_used, local_completed, local_pending
+            return (
+                local_lead,
+                local_phase_states,
+                local_rounds_used,
+                local_completed,
+                local_pending,
+            )
 
         auto_extended_rounds = 0
         if bool(payload.auto_extend_weak_runs) and round_budget < 80:
@@ -2077,7 +2224,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     continue
                 execution_steps_so_far += 1
 
-            weak_without_evidence = artifact_created == 0 and execution_steps_so_far == 0
+            weak_without_evidence = (
+                artifact_created == 0 and execution_steps_so_far == 0
+            )
             if weak_without_evidence:
                 next_round_budget = min(80, round_budget + 3)
                 if next_round_budget > round_budget:
@@ -2095,7 +2244,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     orch.run_until_idle(max_rounds=round_budget)
                     elapsed_ms = int((time.perf_counter() - started) * 1000)
                     artifact_after = _workspace_artifact_snapshot(workspace)
-                    created_artifacts, modified_artifacts = _workspace_artifact_diff(artifact_before, artifact_after)
+                    created_artifacts, modified_artifacts = _workspace_artifact_diff(
+                        artifact_before, artifact_after
+                    )
                     artifact_created = len(created_artifacts)
                     artifact_modified = len(modified_artifacts)
                     artifact_files = sorted(set(created_artifacts + modified_artifacts))
@@ -2116,12 +2267,18 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                             },
                         )
 
-        lead_result_task, phase_states, rounds_used, completed_tasks, pending_tasks = _collect_phase_progress()
+        lead_result_task, phase_states, rounds_used, completed_tasks, pending_tasks = (
+            _collect_phase_progress()
+        )
 
-        lead_completed = lead_result_task is not None and lead_result_task.state.value == "completed"
+        lead_completed = (
+            lead_result_task is not None and lead_result_task.state.value == "completed"
+        )
         lead_response = _task_result(lead_result_task)
         delegated_lines: list[str] = []
-        phase_name_by_task_id = {task_id: phase for phase, task_id in phase_task_ids.items()}
+        phase_name_by_task_id = {
+            task_id: phase for phase, task_id in phase_task_ids.items()
+        }
         if lead_result_task is None:
             final_state = "in_progress" if pending_tasks > 0 else "failed"
         elif lead_result_task.state.value == "completed":
@@ -2150,7 +2307,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             if task is not None:
                 task_rows_by_phase[phase_name] = task
 
-        role_participants = sorted({task.role.value for task in task_rows_by_phase.values()})
+        role_participants = sorted(
+            {task.role.value for task in task_rows_by_phase.values()}
+        )
         assignee_participants = sorted(
             {
                 str(task.assignee).strip()
@@ -2159,19 +2318,27 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             }
         )
 
-        done_phases = [phase for phase in workflow_phase_keys if phase_states.get(phase) == "completed"]
+        done_phases = [
+            phase
+            for phase in workflow_phase_keys
+            if phase_states.get(phase) == "completed"
+        ]
         pending_phases = [
             phase
             for phase in workflow_phase_keys
             if phase_states.get(phase) in {"pending", "ready", "claimed", "blocked"}
         ]
-        failed_phases = [phase for phase in workflow_phase_keys if phase_states.get(phase) == "failed"]
+        failed_phases = [
+            phase
+            for phase in workflow_phase_keys
+            if phase_states.get(phase) == "failed"
+        ]
 
         decision_source = lead_response
         if not decision_source:
             intake_task = task_rows_by_phase.get("lead_intake")
             decision_source = _task_result(intake_task)
-        
+
         decision_compact = str(decision_source or "").strip()
         if len(decision_compact) > 1500:
             decision_compact = decision_compact[:1490] + "...\n[truncado]"
@@ -2202,7 +2369,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 execution_steps += 1
                 if bool(payload_dict.get("success", False)):
                     execution_steps_success += 1
-                    check_type = _classify_check_from_command(str(payload_dict.get("command", "") or ""))
+                    check_type = _classify_check_from_command(
+                        str(payload_dict.get("command", "") or "")
+                    )
                     if check_type:
                         successful_checks_set.add(check_type)
 
@@ -2223,7 +2392,12 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
         execution_attempts = len(route_records)
         execution_success = successful_routes
-        execution_mode, placeholder_outputs, placeholder_output_ratio, output_result_count = _assess_execution_mode(
+        (
+            execution_mode,
+            placeholder_outputs,
+            placeholder_output_ratio,
+            output_result_count,
+        ) = _assess_execution_mode(
             task_rows=list(task_rows_by_phase.values()),
             execution_steps=execution_steps,
             artifact_created=artifact_created,
@@ -2240,20 +2414,23 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "execution_steps": execution_steps,
                 "artifact_created": artifact_created,
                 "artifact_modified": artifact_modified,
-                "live_mode_required": _env_bool("AITEAM_REQUIRE_LIVE_MODE", default=False),
+                "live_mode_required": _env_bool(
+                    "AITEAM_REQUIRE_LIVE_MODE", default=False
+                ),
             },
         )
 
-        live_mode_required = _env_bool("AITEAM_REQUIRE_LIVE_MODE", default=False) and not continuation_requested
+        live_mode_required = (
+            _env_bool("AITEAM_REQUIRE_LIVE_MODE", default=False)
+            and not continuation_requested
+        )
         live_mode_rejected = False
         if live_mode_required and execution_mode != "live":
             live_mode_rejected = True
             if final_state != "failed":
                 final_state = "rejected"
             productivity_status = "weak"
-            next_action_hint = (
-                "Este entorno requiere modo live; la corrida detectada no fue live. Configura adapters live y reintenta."
-            )
+            next_action_hint = "Este entorno requiere modo live; la corrida detectada no fue live. Configura adapters live y reintenta."
             orch.event_logger.emit(
                 "chat_live_mode_required_rejected",
                 {
@@ -2275,10 +2452,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
         if continuation_requested:
             evidence_gate_failures = [
-                f for f in evidence_gate_failures 
-                if not f.endswith("placeholder_output") 
-                and not f.endswith("no_execution_evidence") 
-                and not f.endswith("no_successful_execution_steps") 
+                f
+                for f in evidence_gate_failures
+                if not f.endswith("placeholder_output")
+                and not f.endswith("no_execution_evidence")
+                and not f.endswith("no_successful_execution_steps")
                 and not f.endswith("missing_test_or_build_check")
             ]
 
@@ -2288,9 +2466,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             if final_state != "failed":
                 final_state = "rejected"
             productivity_status = "weak"
-            next_action_hint = (
-                "Evidence gate bloquea cierre sin evidencia valida en build/review/qa; corrige y reintenta."
-            )
+            next_action_hint = "Evidence gate bloquea cierre sin evidencia valida en build/review/qa; corrige y reintenta."
             orch.event_logger.emit(
                 "chat_evidence_gate_rejected",
                 {
@@ -2328,25 +2504,31 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
 
         lead_justification = ""
         if lead_result_task is not None:
-            lead_justification = str(lead_result_task.metadata.get("decision_justification", ""))
+            lead_justification = str(
+                lead_result_task.metadata.get("decision_justification", "")
+            )
         if not lead_justification:
             intake_task = orch.taskboard.get_task(phase_task_ids["lead_intake"])
             if intake_task is not None:
-                lead_justification = str(intake_task.metadata.get("decision_justification", ""))
+                lead_justification = str(
+                    intake_task.metadata.get("decision_justification", "")
+                )
 
-        productivity_score, reasoning_score, productivity_status, next_action_hint = _evaluate_chat_quality(
-            decision_text=decision_source,
-            justification_text=lead_justification,
-            completed_tasks=completed_tasks,
-            total_tasks=len(phase_task_ids),
-            pending_tasks=pending_tasks,
-            failed_tasks=len(failed_phases),
-            execution_attempts=execution_attempts,
-            execution_success=execution_success,
-            execution_steps=execution_steps,
-            successful_checks=successful_checks,
-            artifact_created=artifact_created,
-            artifact_modified=artifact_modified,
+        productivity_score, reasoning_score, productivity_status, next_action_hint = (
+            _evaluate_chat_quality(
+                decision_text=decision_source,
+                justification_text=lead_justification,
+                completed_tasks=completed_tasks,
+                total_tasks=len(phase_task_ids),
+                pending_tasks=pending_tasks,
+                failed_tasks=len(failed_phases),
+                execution_attempts=execution_attempts,
+                execution_success=execution_success,
+                execution_steps=execution_steps,
+                successful_checks=successful_checks,
+                artifact_created=artifact_created,
+                artifact_modified=artifact_modified,
+            )
         )
 
         orch.event_logger.emit(
@@ -2367,19 +2549,23 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             },
         )
 
-        participants_line = ", ".join(role_participants) if role_participants else "none"
-        agents_line = ", ".join(assignee_participants) if assignee_participants else "none"
+        participants_line = (
+            ", ".join(role_participants) if role_participants else "none"
+        )
+        agents_line = (
+            ", ".join(assignee_participants) if assignee_participants else "none"
+        )
         used_line = ", ".join(used_routes[:5]) if used_routes else "none"
         done_line = ", ".join(done_phases) if done_phases else "none"
         pending_line = ", ".join(pending_phases) if pending_phases else "none"
         failed_line = ", ".join(failed_phases) if failed_phases else "none"
         request_line = _compact_text_line(payload.message, limit=180)
         if continuation_of and continuation_snapshot == "target_not_found":
-            continuity_line = f"requested target not found (continuation_of={continuation_of})"
-        elif continuation_of:
             continuity_line = (
-                f"yes (continuation_of={continuation_of}; carryover={continuation_snapshot or '-'})"
+                f"requested target not found (continuation_of={continuation_of})"
             )
+        elif continuation_of:
+            continuity_line = f"yes (continuation_of={continuation_of}; carryover={continuation_snapshot or '-'})"
         elif continuation_requested:
             continuity_line = "requested, but no previous chat root found"
         elif previous_root:
@@ -2389,20 +2575,20 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
 
         strict_mode_applied = False
         if bool(payload.strict_mode) and not continuation_requested:
-            has_minimum_evidence = (artifact_created + artifact_modified) > 0 or execution_steps > 0
+            has_minimum_evidence = (
+                artifact_created + artifact_modified
+            ) > 0 or execution_steps > 0
             mode_is_reliable = execution_mode in {"live", "hybrid"}
-            if final_state == "completed" and (not has_minimum_evidence or not mode_is_reliable):
+            if final_state == "completed" and (
+                not has_minimum_evidence or not mode_is_reliable
+            ):
                 strict_mode_applied = True
                 final_state = "in_progress"
                 productivity_status = "weak"
                 if not mode_is_reliable:
-                    next_action_hint = (
-                        "Strict mode bloquea cierre en modo simulado; activa adapters live o agrega ejecucion verificable."
-                    )
+                    next_action_hint = "Strict mode bloquea cierre en modo simulado; activa adapters live o agrega ejecucion verificable."
                 else:
-                    next_action_hint = (
-                        "Strict mode bloquea cierre sin evidencia minima; agrega pasos ejecutados o artefactos."
-                    )
+                    next_action_hint = "Strict mode bloquea cierre sin evidencia minima; agrega pasos ejecutados o artefactos."
                 orch.event_logger.emit(
                     "chat_strict_mode_blocked_close",
                     {
@@ -2416,15 +2602,19 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 )
 
         productivity_threshold = 35
-        low_productivity_override = bool(payload.allow_low_productivity_override) or bool(continuation_requested)
+        low_productivity_override = bool(
+            payload.allow_low_productivity_override
+        ) or bool(continuation_requested)
         low_productivity_rejected = False
-        if productivity_score < productivity_threshold and not low_productivity_override and final_state != "failed":
+        if (
+            productivity_score < productivity_threshold
+            and not low_productivity_override
+            and final_state != "failed"
+        ):
             low_productivity_rejected = True
             final_state = "rejected"
             productivity_status = "weak"
-            next_action_hint = (
-                f"Corrida rechazada por productividad<{productivity_threshold}; genera evidencia ejecutable y reintenta."
-            )
+            next_action_hint = f"Corrida rechazada por productividad<{productivity_threshold}; genera evidencia ejecutable y reintenta."
             orch.event_logger.emit(
                 "chat_low_productivity_rejected",
                 {
@@ -2646,16 +2836,31 @@ async def post_aiteam_chat_async(payload: TeamChatRequest, request: Request):
             from aiteam.types import Complexity, Criticality, Role, TaskState, WorkTask
 
             role_map = {
-                "team_lead": Role.TEAM_LEAD, "lead": Role.TEAM_LEAD,
-                "researcher": Role.RESEARCHER, "engineer": Role.ENGINEER,
-                "reviewer": Role.REVIEWER, "qa": Role.QA,
+                "team_lead": Role.TEAM_LEAD,
+                "lead": Role.TEAM_LEAD,
+                "researcher": Role.RESEARCHER,
+                "engineer": Role.ENGINEER,
+                "reviewer": Role.REVIEWER,
+                "qa": Role.QA,
             }
-            complexity_map = {"low": Complexity.LOW, "medium": Complexity.MEDIUM, "high": Complexity.HIGH}
-            criticality_map = {"low": Criticality.LOW, "medium": Criticality.MEDIUM, "high": Criticality.HIGH}
+            complexity_map = {
+                "low": Complexity.LOW,
+                "medium": Complexity.MEDIUM,
+                "high": Complexity.HIGH,
+            }
+            criticality_map = {
+                "low": Criticality.LOW,
+                "medium": Criticality.MEDIUM,
+                "high": Criticality.HIGH,
+            }
 
             preferred_role = role_map.get(payload.role.strip().lower(), Role.ENGINEER)
-            complexity = complexity_map.get(payload.complexity.strip().lower(), Complexity.MEDIUM)
-            criticality = criticality_map.get(payload.criticality.strip().lower(), Criticality.MEDIUM)
+            complexity = complexity_map.get(
+                payload.complexity.strip().lower(), Complexity.MEDIUM
+            )
+            criticality = criticality_map.get(
+                payload.criticality.strip().lower(), Criticality.MEDIUM
+            )
 
             orch = build_default_orchestrator(runtime_dir=runtime_dir)
             round_budget = min(max(1, payload.max_rounds or 5), 20)
@@ -2703,7 +2908,11 @@ async def post_aiteam_chat_async(payload: TeamChatRequest, request: Request):
                     _background_runs[task_root]["result"] = final
 
         except Exception as exc:
-            error_result = {"task_root": task_root, "status": "failed", "error": str(exc)[:500]}
+            error_result = {
+                "task_root": task_root,
+                "status": "failed",
+                "error": str(exc)[:500],
+            }
             progress_queue.put(("error", error_result))
             with _background_runs_lock:
                 if task_root in _background_runs:
@@ -2713,7 +2922,11 @@ async def post_aiteam_chat_async(payload: TeamChatRequest, request: Request):
     thread = threading.Thread(target=_run_bg, daemon=True)
     thread.start()
 
-    return {"task_root": task_root, "status": "running", "stream_url": f"/api/aiteam/chat/stream/{task_root}"}
+    return {
+        "task_root": task_root,
+        "status": "running",
+        "stream_url": f"/api/aiteam/chat/stream/{task_root}",
+    }
 
 
 @app.get("/api/aiteam/chat/stream/{task_root}")
@@ -2724,15 +2937,20 @@ async def stream_chat_progress(task_root: str, request: Request):
     with _background_runs_lock:
         run = _background_runs.get(task_root)
     if run is None:
-        raise HTTPException(status_code=404, detail=f"No background run for {task_root}")
+        raise HTTPException(
+            status_code=404, detail=f"No background run for {task_root}"
+        )
 
     progress_queue = run["progress_queue"]
 
     async def event_stream():
         import queue as queue_module
+
         while True:
             try:
-                event_type, data = await asyncio.to_thread(progress_queue.get, timeout=30)
+                event_type, data = await asyncio.to_thread(
+                    progress_queue.get, timeout=30
+                )
                 yield f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
                 if event_type in ("done", "error"):
                     break
@@ -2755,7 +2973,9 @@ async def get_async_chat_status(task_root: str, request: Request):
     with _background_runs_lock:
         run = _background_runs.get(task_root)
     if run is None:
-        raise HTTPException(status_code=404, detail=f"No background run for {task_root}")
+        raise HTTPException(
+            status_code=404, detail=f"No background run for {task_root}"
+        )
     return {
         "task_root": task_root,
         "status": run["status"],
@@ -2784,6 +3004,7 @@ async def get_aiteam_operator_timeline(
         key_only=key_only,
     )
 
+
 @app.get("/api/aiteam/mailbox/inbox")
 async def get_mailbox_inbox(request: Request):
     """Query agent mailbox with optional filters."""
@@ -2795,11 +3016,15 @@ async def get_mailbox_inbox(request: Request):
         return {"messages": [], "total": 0, "unread": 0}
 
     from aiteam.mailbox import Mailbox
+
     mb = Mailbox(mailbox_path)
     recipient = request.query_params.get("recipient", "")
     sender_filter = request.query_params.get("sender", "")
     task_filter = request.query_params.get("task_id", "")
-    unread_only = request.query_params.get("unread_only", "false").lower() in ("true", "1")
+    unread_only = request.query_params.get("unread_only", "false").lower() in (
+        "true",
+        "1",
+    )
     limit = min(int(request.query_params.get("limit", "50")), 200)
 
     messages = mb.inbox_query(
@@ -2829,6 +3054,7 @@ async def get_mailbox_inbox(request: Request):
         "unread": unread,
     }
 
+
 @app.get("/api/fs/tree")
 async def get_fs_tree(request: Request):
     _require_api_auth_request(request)
@@ -2836,11 +3062,22 @@ async def get_fs_tree(request: Request):
 
     def build_tree(path: Path):
         name = path.name
-        if name in [".git", "__pycache__", "venv", ".pytest_cache", ".aiteam_snapshots", "node_modules"]:
+        if name in [
+            ".git",
+            "__pycache__",
+            "venv",
+            ".pytest_cache",
+            ".aiteam_snapshots",
+            "node_modules",
+        ]:
             return None
         try:
             if path.is_file():
-                return {"name": name, "path": str(path.relative_to(workspace).as_posix()), "type": "file"}
+                return {
+                    "name": name,
+                    "path": str(path.relative_to(workspace).as_posix()),
+                    "type": "file",
+                }
             elif path.is_dir():
                 children = []
                 for child in path.iterdir():
@@ -2848,14 +3085,27 @@ async def get_fs_tree(request: Request):
                     if node:
                         children.append(node)
                 # Sort alphabetically, directories first
-                children.sort(key=lambda x: (0 if x["type"] == "directory" else 1, x["name"].lower()))
-                return {"name": name, "path": str(path.relative_to(workspace).as_posix()), "type": "directory", "children": children}
+                children.sort(
+                    key=lambda x: (
+                        0 if x["type"] == "directory" else 1,
+                        x["name"].lower(),
+                    )
+                )
+                return {
+                    "name": name,
+                    "path": str(path.relative_to(workspace).as_posix()),
+                    "type": "directory",
+                    "children": children,
+                }
         except Exception:
             return None
+
     return build_tree(workspace)
+
 
 class FileContent(BaseModel):
     content: str
+
 
 @app.get("/api/fs/file")
 async def read_file(path: str, request: Request):
@@ -2874,6 +3124,7 @@ async def read_file(path: str, request: Request):
         logger.exception("Error reading file: %s", path)
         raise HTTPException(status_code=500, detail="Error reading file")
 
+
 @app.put("/api/fs/file")
 async def write_file(path: str, payload: FileContent, request: Request):
     _require_api_auth_request(request)
@@ -2891,34 +3142,50 @@ async def write_file(path: str, payload: FileContent, request: Request):
         logger.exception("Error writing file: %s", path)
         raise HTTPException(status_code=500, detail="Error writing file")
 
+
 @app.websocket("/api/terminal")
 async def terminal_endpoint(websocket: WebSocket):
     global active_pty
     header_map = {k.lower(): v for k, v in websocket.headers.items()}
     query_api_key = str(websocket.query_params.get("api_key", "") or "").strip()
-    query_workspace_path = str(websocket.query_params.get("workspace_path", "") or "").strip()
+    query_workspace_path = str(
+        websocket.query_params.get("workspace_path", "") or ""
+    ).strip()
     if query_api_key:
         header_map.setdefault("x-api-key", query_api_key)
     if query_workspace_path:
         header_map["x-workspace-path"] = query_workspace_path
-    logger.debug("WebSocket connection request to /api/terminal from %s", websocket.client.host if websocket.client else 'unknown')
+    logger.debug(
+        "WebSocket connection request to /api/terminal from %s",
+        websocket.client.host if websocket.client else "unknown",
+    )
     # Temporarily bypass auth for debugging if requested by localhost
     is_authorized = _is_authorized(header_map)
     if not is_authorized:
-        logger.debug("WebSocket auth failed for header_map keys: %s", list(header_map.keys()))
+        logger.debug(
+            "WebSocket auth failed for header_map keys: %s", list(header_map.keys())
+        )
         # Bypass for local dev
-        if websocket.client and websocket.client.host in ("127.0.0.1", "localhost", "::1"):
+        if websocket.client and websocket.client.host in (
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        ):
             logger.debug("Bypassing auth for local connection")
             is_authorized = True
 
     if not is_authorized:
         await websocket.close(code=1008)
         return
-    workspace = _workspace_from_header_map(header_map, get_current_workspace(), PROJECT_ROOT)
+    workspace = _workspace_from_header_map(
+        header_map, get_current_workspace(), PROJECT_ROOT
+    )
     logger.debug("WebSocket accepted for workspace: %s", workspace)
     await websocket.accept()
     if PTY is None:
-        await websocket.send_text("Error: pywinpty is not installed on this system.\r\n")
+        await websocket.send_text(
+            "Error: pywinpty is not installed on this system.\r\n"
+        )
         await websocket.close()
         return
 
@@ -2929,7 +3196,10 @@ async def terminal_endpoint(websocket: WebSocket):
     if sys.platform == "win32":
         # Check standard location as fallback if powershell.exe not in PATH
         std_ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-        if not any(Path(p).joinpath("powershell.exe").exists() for p in os.environ.get("PATH", "").split(os.pathsep)):
+        if not any(
+            Path(p).joinpath("powershell.exe").exists()
+            for p in os.environ.get("PATH", "").split(os.pathsep)
+        ):
             if Path(std_ps).exists():
                 _shell = std_ps
 

@@ -34,6 +34,9 @@ def build_dashboard_payload(
         latency_percentiles=latency_percentiles,
     )
     latency_trends = _agent_round_latency_percentiles(recent_events, max_rounds=8)
+    flow_timeline = _flow_timeline(recent_events, limit=24)
+    flow_summary = _flow_summary(tasks=tasks, recent_events=recent_events)
+    provider_ops = _provider_ops(runtime_dir)
 
     def classify(task: WorkTask) -> str:
         diff = str(task.metadata.get("git_diff_evidence", ""))
@@ -50,9 +53,13 @@ def build_dashboard_payload(
             return "Bootstrap"
         return "Other"
 
-    mode_counts = Counter(classify(task) for task in tasks if task.role.value == "engineer")
+    mode_counts = Counter(
+        classify(task) for task in tasks if task.role.value == "engineer"
+    )
 
-    ab_versions = Counter(str(task.metadata.get("prompt_ab_version", "A")) for task in tasks)
+    ab_versions = Counter(
+        str(task.metadata.get("prompt_ab_version", "A")) for task in tasks
+    )
 
     return {
         "runtime_dir": str(runtime_dir.resolve()),
@@ -72,6 +79,9 @@ def build_dashboard_payload(
         "agent_latency_percentiles": latency_percentiles,
         "agent_latency_trends": latency_trends,
         "tuning_recommendations": tuning_recommendations,
+        "flow_timeline": flow_timeline,
+        "flow_summary": flow_summary,
+        "provider_ops": provider_ops,
     }
 
 
@@ -106,11 +116,25 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
         f"<td>{html.escape(str(item.get('state', '')))}</td>"
         f"<td>{html.escape(str(item.get('role', '')))}</td>"
         f"<td>{html.escape(str(item.get('assignee', '')))}</td>"
+        f"<td>r{item.get('execution_round', 0)} / s{item.get('execution_sub_iteration', 0)} / g{item.get('gate_iteration', 0)}</td>"
+        f"<td>{html.escape(str(item.get('blocked_reason', '')) or '-')}</td>"
         f"<td>{html.escape(str(item.get('title', '')))}</td>"
         f"<td>{item.get('total_latency_ms', 0):,} ms</td>"
         f"<td><div style='width: {min(100, int(item.get('evidence_lines', 0)))}px; height: 8px; background: var(--accent); border-radius: 4px;' title='{item.get('evidence_lines', 0)} lines diff'></div></td>"
         "</tr>"
         for item in payload.get("tasks", [])
+    )
+
+    flow_rows = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(str(item.get('ts', '')))}</td>"
+        f"<td>{html.escape(str(item.get('event_type', '')))}</td>"
+        f"<td>{html.escape(str(item.get('task_id', '')))}</td>"
+        f"<td>{html.escape(str(item.get('assignee', '')))}</td>"
+        f"<td>r{item.get('execution_round', 0)} / s{item.get('execution_sub_iteration', 0)} / g{item.get('gate_iteration', 0)}</td>"
+        f"<td>{html.escape(str(item.get('summary', '')))}</td>"
+        "</tr>"
+        for item in payload.get("flow_timeline", [])
     )
 
     event_rows = "\n".join(
@@ -137,10 +161,27 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
         payload.get("agent_latency_histogram", {}),
         payload.get("agent_latency_avg_ms", {}),
     )
-    latency_percentile_items = _latency_percentiles_list(payload.get("agent_latency_percentiles", {}))
+    latency_percentile_items = _latency_percentiles_list(
+        payload.get("agent_latency_percentiles", {})
+    )
     latency_trend_items = _latency_trends_list(payload.get("agent_latency_trends", {}))
     tuning_items = _text_list(payload.get("tuning_recommendations", []))
     error_items = _kv_list(payload.get("summary", {}).get("error_breakdown", {}))
+    flow_items = _kv_list(payload.get("flow_summary", {}))
+    provider_ops = payload.get("provider_ops", {}) or {}
+    provider_summary_items = _kv_list(provider_ops.get("summary", {}))
+    provider_alert_items = _text_list(provider_ops.get("alerts", []))
+    provider_rows = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(str(item.get('adapter_name', '')))}</td>"
+        f"<td>{html.escape(str(item.get('tier', '')))}</td>"
+        f"<td>{html.escape(str(item.get('provider', '')))}</td>"
+        f"<td>{html.escape(str(item.get('operational', '')))}</td>"
+        f"<td>{html.escape(str(item.get('doctor_details', '')))}</td>"
+        f"<td>{html.escape(str(item.get('smoke_details', '')))}</td>"
+        "</tr>"
+        for item in provider_ops.get("providers", [])
+    )
 
     card_html = "\n".join(
         "<div class='card'>"
@@ -187,7 +228,7 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
 <body>
   <div class="wrap">
     <h1>AI Team Operations Dashboard</h1>
-    <div class="sub">runtime: {html.escape(str(payload.get('runtime_dir', '')))}</div>
+    <div class="sub">runtime: {html.escape(str(payload.get("runtime_dir", "")))}</div>
     <div class="cards">{card_html}</div>
     <div class="grid">
       <section class="panel"><h2>Alerts</h2><ul>{alert_items}</ul></section>
@@ -203,12 +244,27 @@ def render_dashboard_html(payload: dict[str, Any]) -> str:
       <section class="panel"><h2>Latency Percentiles</h2><ul>{latency_percentile_items}</ul></section>
       <section class="panel"><h2>Latency Trend (p95 by round)</h2><ul>{latency_trend_items}</ul></section>
       <section class="panel"><h2>Tuning Recommendations</h2><ul>{tuning_items}</ul></section>
+      <section class="panel"><h2>Flow Summary</h2><ul>{flow_items}</ul></section>
+      <section class="panel"><h2>Provider Ops Summary</h2><ul>{provider_summary_items}</ul></section>
+      <section class="panel"><h2>Provider Alerts</h2><ul>{provider_alert_items}</ul></section>
     </div>
 
     <div class="table-title">Tasks & Evidence</div>
     <table>
-      <thead><tr><th>ID</th><th>State</th><th>Role</th><th>Assignee</th><th>Title</th><th>Total Latency</th><th>Evidence Bar</th></tr></thead>
+      <thead><tr><th>ID</th><th>State</th><th>Role</th><th>Assignee</th><th>Flow</th><th>Blocked</th><th>Title</th><th>Total Latency</th><th>Evidence Bar</th></tr></thead>
       <tbody>{tasks_rows}</tbody>
+    </table>
+
+    <div class="table-title">Flow Timeline</div>
+    <table>
+      <thead><tr><th>Timestamp</th><th>Type</th><th>Task</th><th>Assignee</th><th>Flow</th><th>Summary</th></tr></thead>
+      <tbody>{flow_rows}</tbody>
+    </table>
+
+    <div class="table-title">Provider Ops</div>
+    <table>
+      <thead><tr><th>Adapter</th><th>Tier</th><th>Provider</th><th>Operational</th><th>Doctor</th><th>Smoke</th></tr></thead>
+      <tbody>{provider_rows}</tbody>
     </table>
 
     <div class="table-title">Recent Events</div>
@@ -231,6 +287,12 @@ def _task_row(task: WorkTask) -> dict[str, Any]:
         "state": task.state.value,
         "role": task.role.value,
         "assignee": task.assignee or "",
+        "execution_round": int(task.metadata.get("execution_round", 0) or 0),
+        "execution_sub_iteration": int(
+            task.metadata.get("execution_sub_iteration", 0) or 0
+        ),
+        "gate_iteration": int(task.metadata.get("gate_iteration", 0) or 0),
+        "blocked_reason": str(task.metadata.get("blocked_reason", "") or ""),
         "title": task.title,
         "total_latency_ms": total_ms,
         "evidence_lines": lines,
@@ -251,6 +313,92 @@ def _recent_events(path: Path, limit: int) -> list[dict[str, Any]]:
         if isinstance(record, dict):
             items.append(record)
     return items[-max(1, limit) :]
+
+
+def _flow_timeline(
+    recent_events: list[dict[str, Any]], limit: int
+) -> list[dict[str, Any]]:
+    interesting = {
+        "task_started",
+        "task_execution",
+        "round_sub_iteration",
+        "round_completed",
+        "gate_iteration",
+        "agent_handoff",
+        "sync_meeting",
+        "sync_meeting_skipped",
+        "conversation_mailbox_consumed",
+        "conversation_mailbox_reply",
+        "sub_iteration_barrier",
+    }
+    rows: list[dict[str, Any]] = []
+    for item in recent_events:
+        event_type = str(item.get("event_type", "") or "")
+        if event_type not in interesting:
+            continue
+        payload = (
+            item.get("payload", {}) if isinstance(item.get("payload"), dict) else {}
+        )
+        rows.append(
+            {
+                "ts": str(item.get("ts", "") or ""),
+                "event_type": event_type,
+                "task_id": str(payload.get("task_id", "") or ""),
+                "assignee": str(payload.get("assignee", payload.get("from", "")) or ""),
+                "execution_round": int(payload.get("execution_round", 0) or 0),
+                "execution_sub_iteration": int(
+                    payload.get(
+                        "execution_sub_iteration", payload.get("sub_iteration", 0)
+                    )
+                    or 0
+                ),
+                "gate_iteration": int(
+                    payload.get("gate_iteration", payload.get("iteration", 0)) or 0
+                ),
+                "summary": _compact_json(payload, 160),
+            }
+        )
+    return rows[-max(1, limit) :]
+
+
+def _flow_summary(
+    tasks: list[WorkTask], recent_events: list[dict[str, Any]]
+) -> dict[str, Any]:
+    blocked = sum(1 for task in tasks if task.state.value == "blocked")
+    handoffs = 0
+    gate_iterations = 0
+    mailbox_turns = 0
+    meetings = 0
+    for item in recent_events:
+        event_type = str(item.get("event_type", "") or "")
+        if event_type == "agent_handoff":
+            handoffs += 1
+        elif event_type == "gate_iteration":
+            gate_iterations += 1
+        elif event_type in {
+            "conversation_mailbox_consumed",
+            "conversation_mailbox_reply",
+        }:
+            mailbox_turns += 1
+        elif event_type in {"sync_meeting", "sync_meeting_skipped"}:
+            meetings += 1
+    return {
+        "blocked_tasks": blocked,
+        "handoffs": handoffs,
+        "gate_iterations": gate_iterations,
+        "mailbox_thread_events": mailbox_turns,
+        "meeting_events": meetings,
+    }
+
+
+def _provider_ops(runtime_dir: Path) -> dict[str, Any]:
+    path = runtime_dir / "provider_ops.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _kv_list(items: dict[str, Any]) -> str:
@@ -318,7 +466,9 @@ def _agent_latency_average_ms(series: dict[str, list[int]]) -> dict[str, float]:
     return avg
 
 
-def _agent_latency_percentiles(series: dict[str, list[int]]) -> dict[str, dict[str, float]]:
+def _agent_latency_percentiles(
+    series: dict[str, list[int]],
+) -> dict[str, dict[str, float]]:
     result: dict[str, dict[str, float]] = {}
     for assignee, values in series.items():
         if not values:
@@ -351,7 +501,9 @@ def _latency_histogram_list(
     for assignee in sorted(histogram.keys()):
         buckets = histogram.get(assignee, {})
         avg_ms = averages.get(assignee, 0.0)
-        bucket_text = ", ".join(f"{bucket}:{count}" for bucket, count in buckets.items())
+        bucket_text = ", ".join(
+            f"{bucket}:{count}" for bucket, count in buckets.items()
+        )
         rows.append(
             f"<li><strong>{html.escape(assignee)}</strong>: avg={html.escape(str(avg_ms))}ms, "
             f"{html.escape(bucket_text)}</li>"
@@ -477,7 +629,10 @@ def _parallel_tuning_recommendations(
         task_exec_count >= 6
         and success_rate >= 98.0
         and latency_percentiles
-        and all(float(values.get("p95_ms", 99999.0)) < 450.0 for values in latency_percentiles.values())
+        and all(
+            float(values.get("p95_ms", 99999.0)) < 450.0
+            for values in latency_percentiles.values()
+        )
     )
     if low_latency:
         recommendations.append(
@@ -508,7 +663,9 @@ def _parallel_tuning_recommendations(
         )
 
     if not recommendations:
-        recommendations.append("Operacion estable; mantener configuracion actual y seguir observando p95 por agente.")
+        recommendations.append(
+            "Operacion estable; mantener configuracion actual y seguir observando p95 por agente."
+        )
     return recommendations[:5]
 
 

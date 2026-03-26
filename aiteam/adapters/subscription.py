@@ -6,7 +6,7 @@ import time
 import urllib.error
 import urllib.request
 
-from aiteam.adapters.base import ModelAdapter
+from aiteam.adapters.base import ModelAdapter, messages_to_prompt, normalize_messages
 from aiteam.types import AdapterResponse, ChannelType
 
 
@@ -85,10 +85,14 @@ class SubscriptionAdapter(ModelAdapter):
 
         return True
 
-    def invoke(self, prompt: str) -> AdapterResponse:
+    def invoke(
+        self, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> AdapterResponse:
         start = time.time()
-        input_tokens = max(1, len(prompt) // 4)
-        if "FORCE_API_FALLBACK" in prompt:
+        normalized_messages = normalize_messages(messages, prompt)
+        prompt_text = messages_to_prompt(messages, prompt)
+        input_tokens = max(1, len(prompt_text) // 4)
+        if "FORCE_API_FALLBACK" in prompt_text:
             return AdapterResponse(
                 success=False,
                 content="",
@@ -100,13 +104,15 @@ class SubscriptionAdapter(ModelAdapter):
 
         # If live API is enabled and key exists, make real call
         if self._live_api_enabled():
-            live = self._invoke_live(prompt)
+            live = self._invoke_live(prompt_text, normalized_messages)
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
             return live
 
         # Mock fallback — solo activo cuando AITEAM_ENABLE_LIVE_API=0 (tests/demo sin clave).
         # En produccion real, configurar AITEAM_ENABLE_LIVE_API=1 y la API key del provider.
-        first_line = prompt.splitlines()[0][:80] if prompt.strip() else "tarea"
+        first_line = (
+            prompt_text.splitlines()[0][:80] if prompt_text.strip() else "tarea"
+        )
         content = (
             f"[SIMULADO | {self.provider}:{self.model}] "
             f"Respuesta mock para: {first_line!r}. "
@@ -128,38 +134,52 @@ class SubscriptionAdapter(ModelAdapter):
         raw = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower()
         return raw in {"1", "true", "yes", "on"}
 
-    def _invoke_live(self, prompt: str) -> AdapterResponse:
+    def _invoke_live(
+        self, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> AdapterResponse:
         """Invoca la API real del provider."""
         provider_key = self.provider.strip().lower()
         config = _PROVIDER_CONFIGS.get(provider_key)
         if config is None:
             return AdapterResponse(
-                success=False, content="", latency_ms=0,
-                input_tokens=max(1, len(prompt) // 4), output_tokens=0,
+                success=False,
+                content="",
+                latency_ms=0,
+                input_tokens=max(1, len(prompt) // 4),
+                output_tokens=0,
                 error=f"unsupported_provider:{provider_key}",
             )
 
         api_key = os.getenv(config["key_env"], "").strip()
         if not api_key:
             return AdapterResponse(
-                success=False, content="", latency_ms=0,
-                input_tokens=max(1, len(prompt) // 4), output_tokens=0,
+                success=False,
+                content="",
+                latency_ms=0,
+                input_tokens=max(1, len(prompt) // 4),
+                output_tokens=0,
                 error=f"missing_api_key:{config['key_env']}",
             )
 
         fmt = config["format"]
         if fmt == "anthropic":
-            return self._invoke_anthropic(api_key, prompt)
+            return self._invoke_anthropic(api_key, prompt, messages)
         if fmt == "google":
-            return self._invoke_google(api_key, prompt, config["url"])
+            return self._invoke_google(api_key, prompt, config["url"], messages)
         # openai-compatible (openai, groq)
-        return self._invoke_openai_compatible(config["url"], api_key, prompt)
+        return self._invoke_openai_compatible(config["url"], api_key, prompt, messages)
 
-    def _invoke_openai_compatible(self, url: str, api_key: str, prompt: str) -> AdapterResponse:
+    def _invoke_openai_compatible(
+        self,
+        url: str,
+        api_key: str,
+        prompt: str,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AdapterResponse:
         """Invoca API compatible con OpenAI (OpenAI, Groq, etc.)."""
         body = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": normalize_messages(messages, prompt),
             "temperature": 0.2,
         }
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
@@ -167,14 +187,18 @@ class SubscriptionAdapter(ModelAdapter):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
-        return self._http_request(url, payload, headers, prompt, self._parse_openai_response)
+        return self._http_request(
+            url, payload, headers, prompt, self._parse_openai_response
+        )
 
-    def _invoke_anthropic(self, api_key: str, prompt: str) -> AdapterResponse:
+    def _invoke_anthropic(
+        self, api_key: str, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> AdapterResponse:
         """Invoca API de Anthropic (Messages API)."""
         body = {
             "model": self.model,
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": normalize_messages(messages, prompt),
         }
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {
@@ -184,19 +208,37 @@ class SubscriptionAdapter(ModelAdapter):
         }
         return self._http_request(
             "https://api.anthropic.com/v1/messages",
-            payload, headers, prompt, self._parse_anthropic_response,
+            payload,
+            headers,
+            prompt,
+            self._parse_anthropic_response,
         )
 
-    def _invoke_google(self, api_key: str, prompt: str, url_template: str) -> AdapterResponse:
+    def _invoke_google(
+        self,
+        api_key: str,
+        prompt: str,
+        url_template: str,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AdapterResponse:
         """Invoca Gemini API de Google."""
         url = url_template.replace("{model}", self.model) + f"?key={api_key}"
+        normalized = normalize_messages(messages, prompt)
+        combined = (
+            "\n\n".join(
+                str(item.get("content", "") or "") for item in normalized
+            ).strip()
+            or prompt
+        )
         body = {
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": [{"text": combined}]}],
             "generationConfig": {"temperature": 0.2},
         }
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        return self._http_request(url, payload, headers, prompt, self._parse_google_response)
+        return self._http_request(
+            url, payload, headers, prompt, self._parse_google_response
+        )
 
     def _http_request(
         self,
@@ -210,7 +252,9 @@ class SubscriptionAdapter(ModelAdapter):
         started = time.time()
         input_tokens = max(1, len(prompt) // 4)
         try:
-            request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            request = urllib.request.Request(
+                url, data=payload, headers=headers, method="POST"
+            )
             with urllib.request.urlopen(request, timeout=90) as response:
                 status_code = int(getattr(response, "status", 200))
                 raw = response.read().decode("utf-8", errors="replace")
@@ -221,43 +265,60 @@ class SubscriptionAdapter(ModelAdapter):
             except Exception:
                 pass
             return AdapterResponse(
-                success=False, content="", error=f"http_error:{exc.code}:{error_body}",
+                success=False,
+                content="",
+                error=f"http_error:{exc.code}:{error_body}",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens, output_tokens=0,
+                input_tokens=input_tokens,
+                output_tokens=0,
             )
         except urllib.error.URLError as exc:
             return AdapterResponse(
-                success=False, content="", error=f"connection_error:{exc.reason}",
+                success=False,
+                content="",
+                error=f"connection_error:{exc.reason}",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens, output_tokens=0,
+                input_tokens=input_tokens,
+                output_tokens=0,
             )
         except Exception as exc:
             return AdapterResponse(
-                success=False, content="", error=f"request_error:{exc}",
+                success=False,
+                content="",
+                error=f"request_error:{exc}",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens, output_tokens=0,
+                input_tokens=input_tokens,
+                output_tokens=0,
             )
 
         if status_code < 200 or status_code >= 300:
             return AdapterResponse(
-                success=False, content="", error=f"http_status:{status_code}",
+                success=False,
+                content="",
+                error=f"http_status:{status_code}",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens, output_tokens=0,
+                input_tokens=input_tokens,
+                output_tokens=0,
             )
 
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
             return AdapterResponse(
-                success=False, content="", error="invalid_json_response",
+                success=False,
+                content="",
+                error="invalid_json_response",
                 latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens, output_tokens=0,
+                input_tokens=input_tokens,
+                output_tokens=0,
             )
 
         return parser(parsed, prompt, int((time.time() - started) * 1000))
 
     @staticmethod
-    def _parse_openai_response(parsed: dict, prompt: str, latency_ms: int) -> AdapterResponse:
+    def _parse_openai_response(
+        parsed: dict, prompt: str, latency_ms: int
+    ) -> AdapterResponse:
         """Parsea respuesta OpenAI/Groq."""
         content = ""
         choices = parsed.get("choices", [])
@@ -270,20 +331,34 @@ class SubscriptionAdapter(ModelAdapter):
         usage = parsed.get("usage", {})
         usage_dict = usage if isinstance(usage, dict) else {}
         input_tokens = int(usage_dict.get("prompt_tokens", max(1, len(prompt) // 4)))
-        output_tokens = int(usage_dict.get("completion_tokens", max(1, len(content) // 4 if content else 1)))
+        output_tokens = int(
+            usage_dict.get(
+                "completion_tokens", max(1, len(content) // 4 if content else 1)
+            )
+        )
 
         if not content:
             return AdapterResponse(
-                success=False, content="", error="empty_response_content",
-                latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens,
+                success=False,
+                content="",
+                error="empty_response_content",
+                latency_ms=latency_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
         return AdapterResponse(
-            success=True, content=content, error=None,
-            latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens,
+            success=True,
+            content=content,
+            error=None,
+            latency_ms=latency_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
     @staticmethod
-    def _parse_anthropic_response(parsed: dict, prompt: str, latency_ms: int) -> AdapterResponse:
+    def _parse_anthropic_response(
+        parsed: dict, prompt: str, latency_ms: int
+    ) -> AdapterResponse:
         """Parsea respuesta Anthropic Messages API."""
         content_blocks = parsed.get("content", [])
         parts = []
@@ -296,20 +371,32 @@ class SubscriptionAdapter(ModelAdapter):
         usage = parsed.get("usage", {})
         usage_dict = usage if isinstance(usage, dict) else {}
         input_tokens = int(usage_dict.get("input_tokens", max(1, len(prompt) // 4)))
-        output_tokens = int(usage_dict.get("output_tokens", max(1, len(content) // 4 if content else 1)))
+        output_tokens = int(
+            usage_dict.get("output_tokens", max(1, len(content) // 4 if content else 1))
+        )
 
         if not content:
             return AdapterResponse(
-                success=False, content="", error="empty_response_content",
-                latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens,
+                success=False,
+                content="",
+                error="empty_response_content",
+                latency_ms=latency_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
         return AdapterResponse(
-            success=True, content=content, error=None,
-            latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens,
+            success=True,
+            content=content,
+            error=None,
+            latency_ms=latency_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
     @staticmethod
-    def _parse_google_response(parsed: dict, prompt: str, latency_ms: int) -> AdapterResponse:
+    def _parse_google_response(
+        parsed: dict, prompt: str, latency_ms: int
+    ) -> AdapterResponse:
         """Parsea respuesta Google Gemini API."""
         content = ""
         candidates = parsed.get("candidates", [])
@@ -319,20 +406,34 @@ class SubscriptionAdapter(ModelAdapter):
             if isinstance(content_obj, dict):
                 parts = content_obj.get("parts", [])
                 if isinstance(parts, list):
-                    texts = [str(p.get("text", "")) for p in parts if isinstance(p, dict)]
+                    texts = [
+                        str(p.get("text", "")) for p in parts if isinstance(p, dict)
+                    ]
                     content = "\n".join(texts)
 
         usage = parsed.get("usageMetadata", {})
         usage_dict = usage if isinstance(usage, dict) else {}
         input_tokens = int(usage_dict.get("promptTokenCount", max(1, len(prompt) // 4)))
-        output_tokens = int(usage_dict.get("candidatesTokenCount", max(1, len(content) // 4 if content else 1)))
+        output_tokens = int(
+            usage_dict.get(
+                "candidatesTokenCount", max(1, len(content) // 4 if content else 1)
+            )
+        )
 
         if not content:
             return AdapterResponse(
-                success=False, content="", error="empty_response_content",
-                latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens,
+                success=False,
+                content="",
+                error="empty_response_content",
+                latency_ms=latency_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
         return AdapterResponse(
-            success=True, content=content, error=None,
-            latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens,
+            success=True,
+            content=content,
+            error=None,
+            latency_ms=latency_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )

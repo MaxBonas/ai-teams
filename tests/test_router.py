@@ -55,12 +55,53 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(decision.success)
         self.assertEqual(decision.channel.value, "api")
 
+    def test_route_and_invoke_forwards_messages_history(self) -> None:
+        captured: dict[str, object] = {}
+
+        class CaptureAdapter(SubscriptionAdapter):
+            def invoke(self, prompt: str, messages: list[dict[str, str]] | None = None):
+                captured["prompt"] = prompt
+                captured["messages"] = messages
+                return super().invoke(prompt, messages=messages)
+
+        router = HybridRouter(
+            adapters=[
+                CaptureAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                )
+            ],
+            policy=build_default_router_policy(),
+        )
+        request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            required_capabilities={"coding"},
+        )
+        messages = [
+            {"role": "system", "content": "You are Engineer"},
+            {"role": "user", "content": "Implement auth with 2FA"},
+        ]
+
+        decision = router.route_and_invoke(
+            request=request, prompt="fallback prompt", messages=messages
+        )
+
+        self.assertTrue(decision.success)
+        self.assertEqual(captured.get("messages"), messages)
+        self.assertEqual(captured.get("prompt"), "fallback prompt")
+
     def test_api_budget_blocks_api_channel(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             policy = build_default_router_policy()
             budget = BudgetManager(
                 runtime_dir=Path(tmp),
-                policy=BudgetPolicy(daily_api_budget_usd=0.0, monthly_api_budget_usd=0.0),
+                policy=BudgetPolicy(
+                    daily_api_budget_usd=0.0, monthly_api_budget_usd=0.0
+                ),
             )
             router = HybridRouter(
                 adapters=[
@@ -98,7 +139,9 @@ class RouterTests(unittest.TestCase):
             policy = build_default_router_policy()
             budget = BudgetManager(
                 runtime_dir=Path(tmp),
-                policy=BudgetPolicy(daily_api_budget_usd=1.0, monthly_api_budget_usd=100.0),
+                policy=BudgetPolicy(
+                    daily_api_budget_usd=1.0, monthly_api_budget_usd=100.0
+                ),
             )
             now = datetime.now(timezone.utc).isoformat()
             budget.ledger_path.write_text(
@@ -175,7 +218,12 @@ class RouterTests(unittest.TestCase):
 
     def test_routing_priority_keeps_secondary_adapter_as_fallback(self) -> None:
         policy = build_default_router_policy()
-        policy.preferred_subscription_providers = ["custom", "openai", "anthropic", "google"]
+        policy.preferred_subscription_providers = [
+            "custom",
+            "openai",
+            "anthropic",
+            "google",
+        ]
         router = HybridRouter(
             adapters=[
                 SubscriptionAdapter(
@@ -284,7 +332,10 @@ class RouterTests(unittest.TestCase):
 
     def test_role_model_preference_prioritizes_configured_model(self) -> None:
         policy = build_default_router_policy()
-        policy.role_model_preferences["engineer"] = ["preferred-model", "secondary-model"]
+        policy.role_model_preferences["engineer"] = [
+            "preferred-model",
+            "secondary-model",
+        ]
         router = HybridRouter(
             adapters=[
                 SubscriptionAdapter(
@@ -400,6 +451,204 @@ class RouterTests(unittest.TestCase):
         )
         self.assertTrue(decision.success)
         self.assertEqual(decision.provider, "groq")
+
+    def test_team_lead_rejects_local_models_even_if_available(self) -> None:
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="ollama_qwen_coder_local",
+                    provider="local",
+                    model="qwen2.5-coder:14b",
+                    capabilities={"coding", "reasoning", "analysis"},
+                )
+            ],
+            policy=build_default_router_policy(),
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.HIGH,
+                criticality=Criticality.HIGH,
+                required_capabilities={"coding"},
+            ),
+            prompt="Lead the team",
+        )
+        self.assertFalse(decision.success)
+        self.assertEqual(decision.reason, "no_eligible_adapter")
+
+    def test_team_lead_falls_back_to_advanced_api_when_pro_models_unhealthy(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            (runtime_dir / "provider_smoke.json").write_text(
+                '{"smoke":[{"name":"openai_pro_cli","healthy":false},{"name":"gemini_pro_cli","healthy":false},{"name":"claude_pro_cli","healthy":false},{"name":"openai_api","healthy":true}]}',
+                encoding="utf-8",
+            )
+            budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro_cli",
+                        provider="openai",
+                        model="gpt-4o",
+                        capabilities={"coding", "reasoning", "analysis"},
+                    ),
+                    ApiAdapter(
+                        name="openai_api",
+                        provider="openai",
+                        model="gpt-4.1-mini",
+                        capabilities={"coding", "reasoning", "analysis"},
+                        cost_tier=1,
+                    ),
+                    SubscriptionAdapter(
+                        name="ollama_qwen_coder_local",
+                        provider="local",
+                        model="qwen2.5-coder:14b",
+                        capabilities={"coding", "reasoning", "analysis"},
+                    ),
+                ],
+                policy=build_default_router_policy(),
+                budget_manager=budget,
+            )
+            decision = router.route_and_invoke(
+                request=RoutingRequest(
+                    role=Role.TEAM_LEAD,
+                    complexity=Complexity.HIGH,
+                    criticality=Criticality.HIGH,
+                    required_capabilities={"coding"},
+                ),
+                prompt="Lead the team",
+            )
+            self.assertTrue(decision.success)
+            self.assertEqual(decision.channel.value, "api")
+            self.assertEqual(decision.model, "gpt-4.1-mini")
+
+    def test_team_lead_prefers_higher_ranked_senior_cloud_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            (runtime_dir / "provider_smoke.json").write_text(
+                '{"smoke":[{"name":"openai_pro_cli","healthy":true},{"name":"gemini_pro_cli","healthy":true}]}',
+                encoding="utf-8",
+            )
+            budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="gemini_pro_cli",
+                        provider="google",
+                        model="gemini-1.5-pro",
+                        capabilities={"coding", "reasoning", "analysis"},
+                    ),
+                    SubscriptionAdapter(
+                        name="openai_pro_cli",
+                        provider="openai",
+                        model="gpt-4o",
+                        capabilities={"coding", "reasoning", "analysis"},
+                    ),
+                ],
+                policy=build_default_router_policy(),
+                budget_manager=budget,
+            )
+            decision = router.route_and_invoke(
+                request=RoutingRequest(
+                    role=Role.TEAM_LEAD,
+                    complexity=Complexity.HIGH,
+                    criticality=Criticality.HIGH,
+                    required_capabilities={"coding"},
+                ),
+                prompt="Lead the team",
+            )
+            self.assertTrue(decision.success)
+            self.assertEqual(decision.provider, "openai")
+
+    def test_budget_pressure_prefers_budget_api_for_engineer_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            now = datetime.now(timezone.utc).isoformat()
+            (runtime_dir / "cost_ledger.jsonl").write_text(
+                f'{{"ts":"{now}","model":"gpt-4.1-mini","cost_usd":8.5}}\n',
+                encoding="utf-8",
+            )
+            budget = BudgetManager(
+                runtime_dir=runtime_dir,
+                policy=BudgetPolicy(
+                    daily_api_budget_usd=10.0, monthly_api_budget_usd=200.0
+                ),
+            )
+            router = HybridRouter(
+                adapters=[
+                    ApiAdapter(
+                        name="openai_api",
+                        provider="openai",
+                        model="gpt-4.1-mini",
+                        capabilities={"coding"},
+                        cost_tier=1,
+                    ),
+                    ApiAdapter(
+                        name="gpt-4o-mini",
+                        provider="openai",
+                        model="gpt-4o-mini",
+                        capabilities={"coding"},
+                        cost_tier=1,
+                    ),
+                ],
+                policy=build_default_router_policy(),
+                budget_manager=budget,
+            )
+            decision = router.route_and_invoke(
+                request=RoutingRequest(
+                    role=Role.ENGINEER,
+                    complexity=Complexity.HIGH,
+                    criticality=Criticality.HIGH,
+                    required_capabilities={"coding"},
+                ),
+                prompt="simple prompt",
+            )
+            self.assertTrue(decision.success)
+            self.assertEqual(decision.model, "gpt-4o-mini")
+
+    def test_router_loads_model_catalog_override_from_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            (runtime_dir / "model_catalog.json").write_text(
+                '{"models":[{"adapter_name":"gemini_pro_cli","provider":"google","model":"gemini-1.5-pro","tier":"senior_cloud","intelligence_rank":99,"coding_rank":99,"reasoning_rank":99,"trust_rank":99,"local_allowed_for_team_lead":false,"api_allowed_for_team_lead":true}]}',
+                encoding="utf-8",
+            )
+            (runtime_dir / "provider_smoke.json").write_text(
+                '{"smoke":[{"name":"openai_pro_cli","healthy":true},{"name":"gemini_pro_cli","healthy":true}]}',
+                encoding="utf-8",
+            )
+            budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro_cli",
+                        provider="openai",
+                        model="gpt-4o",
+                        capabilities={"coding", "reasoning", "analysis"},
+                    ),
+                    SubscriptionAdapter(
+                        name="gemini_pro_cli",
+                        provider="google",
+                        model="gemini-1.5-pro",
+                        capabilities={"coding", "reasoning", "analysis"},
+                    ),
+                ],
+                policy=build_default_router_policy(),
+                budget_manager=budget,
+            )
+            decision = router.route_and_invoke(
+                request=RoutingRequest(
+                    role=Role.TEAM_LEAD,
+                    complexity=Complexity.HIGH,
+                    criticality=Criticality.HIGH,
+                    required_capabilities={"coding"},
+                ),
+                prompt="Lead the team",
+            )
+            self.assertTrue(decision.success)
+            self.assertEqual(decision.provider, "google")
 
 
 if __name__ == "__main__":
