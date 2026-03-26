@@ -289,16 +289,31 @@ Hacer que cada nueva invocacion del mismo agente recupere su thread previo y res
 
 ## Batch 6 — Mailbox conversacional Team Lead <-> agentes
 
+**Estado**: COMPLETADO
+
 ### Objetivo
 
 Convertir el mailbox de bitacora/event bus a canal util de conversacion integrada al hilo del agente.
 
 ### Tareas
 
-- [ ] B6.1 Definir mensajes consumibles por thread.
-- [ ] B6.2 Insertar mensajes relevantes del Team Lead en el `ConversationThread` del agente.
-- [ ] B6.3 Registrar respuestas del agente en mailbox y thread.
-- [ ] B6.4 Distinguir mensajes informativos vs accionables vs ya consumidos.
+- [x] B6.1 Definir mensajes consumibles por thread.
+- [x] B6.2 Insertar mensajes relevantes del Team Lead en el `ConversationThread` del agente.
+- [x] B6.3 Registrar respuestas del agente en mailbox y thread.
+- [x] B6.4 Distinguir mensajes informativos vs accionables vs ya consumidos.
+
+### Como se hizo
+
+- El Team Lead ya delega con `delegation_brief` estructurado por rol/fase en `api/main.py`.
+- `_run_task()` integra mensajes accionables del mailbox en el hilo antes de invocar al agente.
+- El agente puede responder al Team Lead y dejar trazabilidad en mailbox, thread y eventos.
+- Los handoffs entre agentes ya incluyen contexto estructurado, fallo previo, feedback pendiente y siguiente accion esperada.
+- `Mailbox` ya distingue `kind=actionable|informational` y registra `consumed` / `consumed_by`.
+
+### Verificacion ejecutada
+
+- `venv/Scripts/python.exe -m pytest tests/test_memory_comms.py tests/test_orchestrator.py tests/test_api_team_chat.py tests/test_provider_ops.py tests/test_dashboard.py tests/test_router.py tests/test_cli_providers.py -q`
+- Resultado: `91 passed`
 
 ### Archivos clave
 
@@ -312,6 +327,8 @@ Convertir el mailbox de bitacora/event bus a canal util de conversacion integrad
 - El Team Lead puede mandar feedback contextual a un agente.
 - El agente lo recibe en su hilo y responde en continuidad.
 - El mailbox refleja el intercambio de forma auditable.
+- El Team Lead delega con briefs estructurados y handoffs claros por rol.
+- Los mensajes del mailbox se distinguen entre informativos, accionables y consumidos.
 
 ---
 
@@ -440,3 +457,81 @@ Batch 10 -> documentacion + E2E + cierre
 ## Recomendacion de arranque
 
 Empezar por **Batch 1**. Sin esa estabilizacion, cualquier implementacion de agentes conversacionales se apoyaria en un scheduler y una semantica de estados que hoy ya generan confusion por si mismos.
+
+---
+
+## Deuda tecnica — auditoria 2026-03-26
+
+Puntos flacos identificados para funcionar como equipo LLM real (Claude Teams).
+Ver detalle completo en `TASKS.md` seccion "Puntos flacos identificados".
+
+### Urgente (bloquea produccion real)
+
+**1. claude_pro_cli caido por creditos agotados** — PENDIENTE operativo
+- Impacto: Anthropic queda fuera del pool de team_lead. El router lo excluye automaticamente via `provider_smoke`.
+- Estado en `runtime/provider_smoke.json`: `smoke_failed: credit balance is too low`.
+- Accion: recargar creditos Anthropic o promover OpenAI/Gemini como Team Lead primario mientras dure.
+
+**2. Google Gemini aplana messages[] — historial conversacional roto** — ✅ RESUELTO 2026-03-26
+- `_invoke_google()` reescrita en `aiteam/adapters/subscription.py`.
+- Ahora usa `contents[{role, parts}]` nativo, `system_instruction` separado, fusiona turnos consecutivos.
+- 5 tests en `GeminiConversationalTests` en `tests/test_api_adapter_live.py`.
+
+### Alta (limita calidad del equipo)
+
+**3. Tool calling via texto `[USE_TOOL]` — fragil** — PENDIENTE (spec para siguiente agente)
+- No usa `tools`/`tool_choice` (OpenAI) ni `tool_use` (Anthropic) de las APIs.
+- El LLM puede variar el formato y la herramienta no se ejecuta sin aviso visible.
+- **Spec del fix**:
+  - Añadir `ToolDefinition(name, description, parameters_json_schema)` en `aiteam/adapters/base.py`.
+  - `invoke(prompt, messages, tools=None)` — nuevo parametro opcional en todos los adapters.
+  - `ApiAdapter._invoke_openai_compatible()`: si `tools` presente, añadir `"tools"` y `"tool_choice": "auto"` al body; parsear `finish_reason == "tool_calls"` en la respuesta; devolver `tool_calls` en `AdapterResponse`.
+  - `SubscriptionAdapter._invoke_anthropic()`: anadir `"tools"` al body; parsear bloques `type == "tool_use"` en `content`.
+  - En `orchestrator.py::_run_task()`: pasar definiciones de herramientas al invoke; si la respuesta tiene `tool_calls`, ejecutar, serializar resultado y hacer segundo invoke con el resultado.
+  - Mantener `[USE_TOOL]` como fallback cuando el adapter no soporte tools nativos.
+  - Tests: `test_openai_tool_calling_roundtrip`, `test_anthropic_tool_use_roundtrip`, `test_tool_call_result_injected_in_thread`.
+
+**4. Sin streaming al frontend** — PENDIENTE (spec para siguiente agente)
+- Llamadas LLM de 20-60s sin feedback visible para el usuario.
+- **Spec del fix**:
+  - Añadir `invoke_stream(prompt, messages) -> Iterator[str]` en `ModelAdapter` (default: yield el invoke completo en un chunk).
+  - Implementar streaming real en `ApiAdapter` para OpenAI (`stream: true`, parsear `data: {delta}` SSE).
+  - Implementar streaming real en `SubscriptionAdapter` para Anthropic (`stream: true`, parsear `content_block_delta`).
+  - En `api/main.py`: nuevo endpoint `GET /tasks/{task_id}/stream` que hace SSE al cliente React.
+  - El orchestrator emite eventos `token_chunk` por task_id al event_logger mientras el adapter hace stream.
+  - El frontend se suscribe al SSE y muestra los chunks en tiempo real en la timeline del task.
+
+### Media (limita robustez en uso prolongado)
+
+**5. Context overflow sin gestion de tokens** — ✅ RESUELTO 2026-03-26
+- `_compact_turns()` ahora acepta `max_chars=60_000` y calcula total de chars del thread.
+- Ajusta `keep_recent` dinamicamente para dejar los turnos retenidos bajo el 70% del limite.
+- 3 tests en `ThreadCompactionTests` en `tests/test_api_adapter_live.py`.
+
+**6. Paralelismo=1 por defecto — equipo secuencial** — PENDIENTE operativo
+- `AITEAM_MAX_PARALLEL_TASKS=1` ejecuta todo en serie.
+- Para tareas independientes el equipo podria correr en paralelo real (2-3 workers).
+- Accion: subir a 2 en `.env` y verificar que no hay race conditions nuevas con la suite completa.
+
+**7. Evidence gate no valida calidad** — ✅ RESUELTO 2026-03-26
+- Nuevo `_assess_output_quality(output, role, phase)` en `aiteam/orchestrator.py`.
+- En live mode: detecta respuestas triviales; exige observaciones para REVIEWER; resultados de test para QA; output sustancial para ENGINEER.
+- 7 tests en `EvidenceGateQualityTests` en `tests/test_api_adapter_live.py`.
+
+### Baja (confusion operativa)
+
+**8. SubscriptionAdapter y ApiAdapter son identicos en la practica** — PENDIENTE documental
+- Ambos usan REST + API key via `urllib`. La distincion "Pro-first" es solo de prioridad en el router.
+- Los smoke tests usan Codex CLI / Gemini CLI / Claude Code CLI solo para health check, no para inferencia.
+- Accion: documentar en `docs/MODEL_POLICY.md`.
+
+**9. model_catalog.json usa nombres de clase, no IDs reales de API** — PENDIENTE documental
+- `"model": "gpt-5.4 / gpt-4o class"` es metadata descriptiva, no el ID que se envia a la API.
+- El `adapter.model` real es lo que importa. Editar el catalogo no cambia el modelo invocado.
+- Fix sugerido: separar `model_display_name` de `api_model_id` en el esquema del catalogo.
+
+### Baseline tras esta ronda de fixes
+
+- **Antes**: 302 tests passing
+- **Despues**: 317 tests passing (+15 tests nuevos)
+- Fixes implementados: Gemini messages[], context token-aware, evidence gate quality

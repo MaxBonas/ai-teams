@@ -221,19 +221,59 @@ class SubscriptionAdapter(ModelAdapter):
         url_template: str,
         messages: list[dict[str, str]] | None = None,
     ) -> AdapterResponse:
-        """Invoca Gemini API de Google."""
+        """Invoca Gemini API de Google con historial conversacional nativo.
+
+        Gemini requiere contents[{role, parts}] donde role es "user" o "model"
+        (no "assistant"). Los mensajes "system" van en system_instruction separado.
+        El historial debe empezar con "user" y alternar sin turnos consecutivos del
+        mismo rol.
+        """
         url = url_template.replace("{model}", self.model) + f"?key={api_key}"
         normalized = normalize_messages(messages, prompt)
-        combined = (
-            "\n\n".join(
-                str(item.get("content", "") or "") for item in normalized
-            ).strip()
-            or prompt
+
+        # Separar system instructions del historial conversacional.
+        system_parts: list[str] = []
+        raw_turns: list[tuple[str, str]] = []  # (gemini_role, content)
+        for msg in normalized:
+            role = msg.get("role", "user")
+            content = str(msg.get("content", "") or "").strip()
+            if not content:
+                continue
+            if role == "system":
+                system_parts.append(content)
+            elif role == "assistant":
+                raw_turns.append(("model", content))
+            else:
+                raw_turns.append(("user", content))
+
+        # Fusionar turnos consecutivos del mismo rol (Gemini los rechaza).
+        merged: list[tuple[str, str]] = []
+        for gemini_role, content in raw_turns:
+            if merged and merged[-1][0] == gemini_role:
+                merged[-1] = (gemini_role, merged[-1][1] + "\n\n" + content)
+            else:
+                merged.append((gemini_role, content))
+
+        # El historial debe empezar con "user".
+        if merged and merged[0][0] == "model":
+            merged.insert(0, ("user", "(contexto previo)"))
+
+        # Si no hay historial, usar el prompt directamente.
+        contents = (
+            [{"role": r, "parts": [{"text": c}]} for r, c in merged]
+            if merged
+            else [{"role": "user", "parts": [{"text": prompt}]}]
         )
-        body = {
-            "contents": [{"parts": [{"text": combined}]}],
+
+        body: dict = {
+            "contents": contents,
             "generationConfig": {"temperature": 0.2},
         }
+        if system_parts:
+            body["system_instruction"] = {
+                "parts": [{"text": "\n\n".join(system_parts)}]
+            }
+
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         return self._http_request(

@@ -308,6 +308,7 @@ class AITeamOrchestrator:
             subject=f"Nueva tarea: {task.task_id}",
             body=f"{task.title}",
             task_id=task.task_id,
+            kind="actionable",
         )
         self._remember_memory(
             agent_id="lead-1",
@@ -1669,6 +1670,17 @@ class AITeamOrchestrator:
             body=handoff_context,
             task_id=task.task_id,
         )
+        self.mailbox.send(
+            sender="team_lead",
+            recipient="team_lead",
+            subject=f"Handoff executed: {task.task_id}",
+            body=(
+                f"Se reasigna {task.task_id} de {failed_assignee} a {substitute}.\n"
+                f"Motivo: {decision.response.error or decision.reason}\n"
+                f"Resumen: {self._compact_text(handoff_context, 260)}"
+            ),
+            task_id=task.task_id,
+        )
 
         new_history = sorted(blocked)
         self.taskboard.update_metadata(
@@ -1694,6 +1706,7 @@ class AITeamOrchestrator:
                 "to": substitute,
                 "reason": decision.response.error or decision.reason,
                 "attempts": decision.attempts,
+                "summary": self._compact_text(handoff_context, 220),
             },
         )
         return True
@@ -1736,16 +1749,21 @@ class AITeamOrchestrator:
             project_key=self._project_thread_key(),
         )
         lines = [
-            f"Task: {task.task_id} {task.title}",
+            f"Handoff Task: {task.task_id} | {task.title}",
             f"Descripcion: {self._compact_text(task.description, 180)}",
+            f"Objetivo inmediato: retomar la ejecucion sin repetir el fallo previo.",
         ]
         if decision and not decision.success:
             err_msg = decision.response.error or decision.reason
-            lines.append(f"Motivo devolucion/fallo: {err_msg}")
+            lines.append(f"Fallo anterior: {err_msg}")
             if task.metadata.get("execution_plan"):
                 lines.append(
                     f"Plan parcial heredado: {task.metadata['execution_plan']}"
                 )
+        if task.metadata.get("review_feedback"):
+            lines.append(
+                f"Feedback pendiente: {self._compact_text(str(task.metadata.get('review_feedback', '')), 180)}"
+            )
         lines.append("Contexto transferido:")
         seen: set[str] = set()
         for entry in relevant + recent:
@@ -1756,6 +1774,9 @@ class AITeamOrchestrator:
             lines.append(f"- [{entry.kind}] {self._compact_text(entry.content, 180)}")
         if len(lines) == 3:
             lines.append("- Sin memoria relevante, revisar taskboard y mailbox")
+        lines.append(
+            "Siguiente accion esperada: continuar desde este contexto, validar el fallo y producir una salida concreta o nuevo bloqueo justificable."
+        )
         return self._compact_context(lines, max_lines=12, max_chars=1200)
 
     def _verify_task_evidence(
@@ -1809,6 +1830,19 @@ class AITeamOrchestrator:
         if not live_api_enabled and _agent_output.strip():
             return True, "simulated_mode_accepted"
 
+        # ── Modo live sin git diff: validar calidad minima del output por rol ──
+        # Un LLM puede devolver "Tarea completada." y no hacer nada. Se exige
+        # contenido tecnico minimo apropiado al rol antes de aceptar como evidencia.
+        if live_api_enabled and _agent_output.strip():
+            _phase_name = (
+                task.task_id.split("::")[-1] if "::" in task.task_id else ""
+            )
+            quality_ok, quality_reason = self._assess_output_quality(
+                _agent_output, task.role, _phase_name
+            )
+            if quality_ok:
+                return True, f"live_output_quality:{quality_reason}"
+
         # ── Fallback: tarea conversacional / teorica ────────────────────────
         # Si la tarea fue marcada como conversacional, aceptar:
         #   (a) documentacion generada (.md/.txt) en el workspace o runtime/
@@ -1848,6 +1882,69 @@ class AITeamOrchestrator:
             False,
             "Strict Evidence Gate: No file modifications detected. Tasks must produce tangible output.",
         )
+
+    @staticmethod
+    def _assess_output_quality(
+        output: str, role: Role, phase: str
+    ) -> tuple[bool, str]:
+        """Valida calidad minima del output LLM en modo live (sin git diff).
+
+        Evita que respuestas triviales como "Tarea completada." pasen el gate.
+        El orden de checks es: trivial → rol especifico → longitud minima.
+        Retorna (pasa, razon).
+        """
+        text = output.strip()
+        if not text:
+            return False, "output_vacio"
+
+        lower = text.lower()
+
+        # Detectar respuestas triviales sin contenido tecnico real (cualquier longitud).
+        trivial_patterns = [
+            "tarea completada", "task completed", "done.", "listo.",
+            "completado.", "finalizado.", "he completado", "he realizado",
+            "he implementado", "como se solicito",
+        ]
+        is_trivial = any(p in lower for p in trivial_patterns) and len(text) < 200
+        if is_trivial:
+            return False, "output_trivial_sin_contenido_tecnico"
+
+        if role == Role.REVIEWER:
+            # Un reviewer debe producir observaciones accionables.
+            reviewer_signals = [
+                "issue", "problema", "error", "bug", "sugerencia", "mejora",
+                "recomendacion", "fix:", "correc", "falta", "observacion",
+                "nota:", "- ", "* ", "1.", "2.", "•",
+            ]
+            has_signal = any(s in lower for s in reviewer_signals)
+            if has_signal or len(text) >= 300:
+                return True, "review_con_observaciones"
+            if len(text) < 80:
+                return False, f"output_muy_corto:{len(text)}_chars"
+            return False, "review_sin_observaciones_accionables"
+
+        if role == Role.QA:
+            # QA debe reportar resultados de tests o analisis de calidad.
+            qa_signals = [
+                "passed", "failed", "error", "test", "prueba", "resultado",
+                "pass", "fail", "assert", "verificado", "ok:", "✓", "✗",
+                "coverage", "cobertura", "suite",
+            ]
+            has_signal = any(s in lower for s in qa_signals)
+            if has_signal:
+                return True, "qa_con_resultados"
+            if len(text) >= 300:
+                return True, "qa_output_sustancial"
+            return False, "qa_sin_resultados_de_test"
+
+        # ENGINEER y otros roles: exigir output tecnico sustancial.
+        if len(text) < 80:
+            return False, f"output_muy_corto:{len(text)}_chars"
+
+        if len(text) >= 200:
+            return True, "substantial_technical_output"
+
+        return False, f"output_insuficiente_en_live:{len(text)}_chars"
 
     # ── Conversational task detection ────────────────────────────────────
 
@@ -3044,6 +3141,7 @@ class AITeamOrchestrator:
         gate_iteration: int,
         prev_summary: str,
     ) -> str:
+        delegation_brief = str(task.metadata.get("delegation_brief", "") or "").strip()
         if gate_iteration > 0:
             retry_parts = [
                 f"Retry de la tarea {task.task_id}.",
@@ -3052,6 +3150,7 @@ class AITeamOrchestrator:
                 "Manten el enfoque valido anterior y cambia solo lo necesario para resolver el feedback.",
             ]
             for block in (
+                self._context_block("Delegation brief", delegation_brief, 700),
                 self._context_block("Feedback de revision", review_feedback, 900),
                 self._context_block("Historial del intento previo", prev_summary, 700),
                 self._context_block("Resultados de ejecucion", execution_context, 700),
@@ -3071,6 +3170,7 @@ class AITeamOrchestrator:
             "Entrega: propuesta, evidencia, aportes considerados, decision final, plan ejecutable inmediato y definition of done.",
         ]
         for block in (
+            self._context_block("Delegation brief", delegation_brief, 800),
             self._context_block("Contexto de equipo", context, 1200),
             self._context_block("Consulta entre pares", peer_context, 1000),
             self._context_block("Gobernanza de decision", decision_governance, 900),
@@ -3198,6 +3298,8 @@ class AITeamOrchestrator:
                 message.message_id
             ):
                 continue
+            if message.kind != "actionable":
+                continue
             subject_lower = message.subject.lower()
             if subject_lower.startswith("sync meeting:"):
                 continue
@@ -3233,6 +3335,9 @@ class AITeamOrchestrator:
                 read_ids.append(message.message_id)
         if read_ids:
             self.mailbox.mark_read_bulk(read_ids)
+            for message in selected:
+                if message.message_id:
+                    self.mailbox.mark_consumed(message.message_id, consumed_by=assignee)
         self.thread_store.save_thread(thread)
         self.event_logger.emit(
             "conversation_mailbox_consumed",

@@ -182,22 +182,54 @@ class ConversationThread:
     def has_consumed_message(self, message_id: str) -> bool:
         return message_id in self.consumed_message_ids
 
-    def _compact_turns(self, max_turns: int = 9, keep_recent: int = 8) -> None:
-        if len(self.turns) <= max_turns:
+    def _compact_turns(
+        self,
+        max_turns: int = 9,
+        keep_recent: int = 8,
+        max_chars: int = 60_000,
+    ) -> None:
+        """Compacta el thread cuando supera max_turns O max_chars de contenido.
+
+        El limite de caracteres evita context overflow en modelos con ventana
+        limitada (aprox. 60k chars ~ 15k tokens, dejando margen para system +
+        task actual). Cuando hay overflow de chars, ajusta keep_recent dinamicamente
+        para que los turnos retenidos queden bajo el 70% del limite.
+        """
+        total_chars = sum(len(t.content) for t in self.turns)
+        turns_overflow = len(self.turns) > max_turns
+        chars_overflow = total_chars > max_chars
+
+        if not turns_overflow and not chars_overflow:
             return
+
+        # En overflow de chars: recalcular cuantos turnos recientes caben.
+        if chars_overflow:
+            target = int(max_chars * 0.7)
+            chars_accumulated = 0
+            keep_count = 0
+            for turn in reversed(self.turns):
+                chars_accumulated += len(turn.content)
+                if chars_accumulated > target:
+                    break
+                keep_count += 1
+            keep_recent = max(2, keep_count)
+
         overflow = self.turns[:-keep_recent]
         kept = self.turns[-keep_recent:]
         snippets = []
         for turn in overflow[:3]:
             text = turn.content.strip().replace("\n", " ")[:80]
             snippets.append(f"{turn.role}:{text}")
+        summary_text = (
+            f"Resumen de {len(overflow)} turnos previos"
+            + (f" ({total_chars} chars)" if chars_overflow else "")
+            + ": "
+            + " | ".join(snippets)
+        )
         summary = ConversationTurn(
             ts=datetime.now(timezone.utc).isoformat(),
             role="system",
-            content=(
-                f"Resumen de {len(overflow)} turnos previos del proyecto: "
-                + " | ".join(snippets)
-            )[:400],
+            content=summary_text[:400],
             source="summary",
         )
         self.turns = [summary] + kept

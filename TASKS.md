@@ -1,6 +1,6 @@
 # Tasks — AI Team Hybrid Orchestrator
 
-> Ultima actualizacion: 2026-03-26 (auditoria y limpieza de planes)
+> Ultima actualizacion: 2026-03-26 (fixes complejos Claude Teams — 317 tests)
 
 ## Completado
 
@@ -117,6 +117,28 @@
   - Verificacion: `venv/Scripts/python.exe -m pytest tests/test_provider_ops.py tests/test_dashboard.py tests/test_router.py tests/test_cli_providers.py -q` -> `35 passed`
   - Archivos clave: `aiteam/provider_ops.py`, `aiteam/cli.py`, `aiteam/dashboard.py`, `runtime/provider_ops.json`, `tests/test_provider_ops.py`, `tests/test_dashboard.py`.
 
+- [x] **Delegacion estructurada del Team Lead y handoffs mas utiles**
+  - Objetivo: mejorar como el `team_lead` encarga trabajo y como los agentes se relevan entre si.
+  - Como se hizo:
+    - `delegation_brief` por rol/fase en `api/main.py` para discovery, build, review, qa y planning tasks
+    - inclusion del `delegation_brief` en el contexto conversacional del task actual en `aiteam/orchestrator.py`
+    - handoff context mas estructurado con fallo previo, feedback pendiente y siguiente accion esperada
+    - aviso explicito al `team_lead` cuando se ejecuta un handoff
+    - tests en `tests/test_api_team_chat.py` y `tests/test_orchestrator.py`
+  - Verificacion: `venv/Scripts/python.exe -m pytest tests/test_api_team_chat.py tests/test_orchestrator.py tests/test_provider_ops.py tests/test_dashboard.py tests/test_router.py tests/test_cli_providers.py -q` -> `79 passed`
+  - Archivos clave: `api/main.py`, `aiteam/orchestrator.py`, `tests/test_api_team_chat.py`, `tests/test_orchestrator.py`.
+
+- [x] **Mailbox conversacional con clasificacion y consumo fino**
+  - Objetivo: distinguir bien mensajes informativos, accionables y ya consumidos dentro del flujo conversacional.
+  - Como se hizo:
+    - `MailMessage` ahora incluye `kind`, `consumed` y `consumed_by` en `aiteam/mailbox.py`
+    - `send_dm()` genera mensajes accionables y `broadcast()` informativos
+    - `_consume_actionable_mailbox_messages()` en `aiteam/orchestrator.py` solo consume mensajes accionables y los marca como `read` + `consumed`
+    - filtro `actionable_only` y `mark_consumed()` en mailbox
+    - tests en `tests/test_memory_comms.py` y `tests/test_orchestrator.py`
+  - Verificacion: `venv/Scripts/python.exe -m pytest tests/test_memory_comms.py tests/test_orchestrator.py tests/test_api_team_chat.py tests/test_provider_ops.py tests/test_dashboard.py tests/test_router.py tests/test_cli_providers.py -q` -> `91 passed`
+  - Archivos clave: `aiteam/mailbox.py`, `aiteam/communication.py`, `aiteam/orchestrator.py`, `tests/test_memory_comms.py`, `tests/test_orchestrator.py`.
+
 ## Backlog Prioritario
 
 - [x] **Fix 4 — Barrera de dependencia mas segura en paralelo**
@@ -186,6 +208,29 @@
     - separacion explicita entre implementado, parcial y planificado
   - Verificacion: `venv/Scripts/python.exe -m pytest tests/ -q --tb=short` -> `282 passed`
   - Archivos clave: `README.md`, `docs/SPRINT_ROADMAP_Q1_2026.md`, `docs/INDEX.md`, `docs/EXECUTION_QUICK_START.md`, `docs/TEST_MATRIX_SPRINTS_1_2_3.md`.
+
+## Puntos flacos identificados — auditoria 2026-03-26 (para Claude Teams)
+
+Auditoria tecnica del estado actual orientada a hacer funcionar el sistema como equipo LLM real.
+Prioridad: 🔴 urgente / 🟠 alta / 🟡 media / 🔵 baja.
+
+- [ ] 🔴 **claude_pro_cli caido — creditos agotados** (`runtime/provider_smoke.json`: `smoke_failed: credit balance is too low`). El router excluye Anthropic de team_lead. Recargar creditos o reconfigurar el Team Lead con OpenAI/Gemini como primario hasta que vuelva. Archivo: `runtime/provider_smoke.json`, `runtime/provider_doctor.json`.
+
+- [x] 🔴 **Google Gemini aplana messages[] — pierde historial conversacional** (RESUELTO 2026-03-26). Reescritura de `_invoke_google()` en `aiteam/adapters/subscription.py`: ahora usa `contents[{role, parts}]` nativo de Gemini, separa `system` → `system_instruction`, mapea `assistant` → `model`, fusiona turnos consecutivos del mismo rol, inserta turno `user` prefijo si el historial empieza con `model`. 5 tests nuevos en `GeminiConversationalTests`.
+
+- [ ] 🟠 **Tool calling por texto `[USE_TOOL]` — fragil e incompatible con function calling nativo**. Los agentes deben formatear `[USE_TOOL tool_name arg="..."]` en su output para que el sistema ejecute herramientas. No usa `tools`/`tool_choice` de la API de OpenAI ni `tool_use` de Anthropic. El LLM puede variar el formato y la herramienta nunca se ejecuta sin aviso claro. Archivo: `aiteam/orchestrator.py::_parse_tool_invocations()`, `aiteam/tool_dispatch.py`.
+
+- [ ] 🟠 **No hay streaming al frontend — usuario ciego durante ejecucion**. Cada llamada LLM puede tardar 20-60s y el frontend no recibe nada hasta que termina. No hay streaming de tokens, ni progress parcial, ni cancelacion de tareas en curso. Archivos: `api/main.py`, adapters, frontend SSE.
+
+- [x] 🟡 **Context overflow sin gestion de tokens** (RESUELTO 2026-03-26). `_compact_turns()` en `aiteam/agent_session.py` ahora acepta `max_chars=60_000` ademas de `max_turns`. Calcula `total_chars` del thread y ajusta `keep_recent` dinamicamente para dejar los turnos retenidos bajo el 70% del limite. El resumen de compaction incluye el total de chars compactado para auditoria. 3 tests nuevos en `ThreadCompactionTests`.
+
+- [ ] 🟡 **Paralelismo por defecto es 1 — el equipo es secuencial**. `AITEAM_MAX_PARALLEL_TASKS=1` hace que Engineer → Reviewer → QA vayan uno detras del otro. Para funcionar como equipo LLM real con varias tareas independientes en paralelo habria que subir a 2-3 y verificar que no haya race conditions nuevas. Archivo: `aiteam/orchestrator.py`, `.env`.
+
+- [x] 🟡 **Evidence gate no valida calidad** (RESUELTO 2026-03-26). Nuevo metodo `_assess_output_quality(output, role, phase)` en `aiteam/orchestrator.py`. En modo live (sin git diff): detecta respuestas triviales ("tarea completada", "done.", etc.) y las rechaza; exige observaciones accionables para REVIEWER; exige senales de test results para QA; exige output tecnico sustancial (>=200 chars) para ENGINEER. El orden de checks es: trivial → rol especifico → longitud minima. Mock mode sigue sin cambios. 7 tests nuevos en `EvidenceGateQualityTests`.
+
+- [ ] 🟡 **SubscriptionAdapter y ApiAdapter son identicos en la practica**. Ambos llaman REST APIs con `urllib` usando API keys. La distincion "Pro-first" es solo de prioridad en el router, no de canal real. No hay acceso real a planes Pro de ningun proveedor via subscription. Los smoke tests usan Codex CLI / Gemini CLI / Claude Code CLI solo para detectar disponibilidad, no para inferencia real. Documento: `docs/MODEL_POLICY.md`.
+
+- [ ] 🔵 **model_catalog.json usa nombres de clase, no IDs reales de API**. El catalogo tiene `"gpt-5.4 / gpt-4o class"` como `model` string pero el `adapter.model` real es lo que se envia a la API. Si alguien edita `runtime/model_catalog.json` pensando que cambia el modelo invocado, no funciona. La conexion entre catalogo y adapter es solo por `adapter_name`. Archivo: `runtime/model_catalog.json`, `aiteam/model_catalog.py`, `docs/MODEL_POLICY.md`.
 
 ## Backlog Secundario
 
