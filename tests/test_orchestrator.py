@@ -9,10 +9,104 @@ from aiteam.adapters.base import ModelAdapter
 from aiteam.config import build_default_router_policy
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.router import HybridRouter
-from aiteam.types import AdapterResponse, Complexity, Criticality, Role, WorkTask
+from aiteam.types import (
+    AdapterResponse,
+    Complexity,
+    Criticality,
+    Role,
+    TaskState,
+    WorkTask,
+)
 
 
 class OrchestratorTests(unittest.TestCase):
+    def test_verify_task_evidence_accepts_non_empty_output_in_mock_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "reasoning", "analysis", "review"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="EVID-UNIT-1",
+                title="Implement feature",
+                description="Implement a concrete backend change",
+                role=Role.ENGINEER,
+                metadata={
+                    "_last_agent_output": "Processed prompt with useful mock output."
+                },
+            )
+
+            with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
+                has_evidence, reason = orchestrator._verify_task_evidence(
+                    task, project_root
+                )
+
+            self.assertTrue(has_evidence)
+            self.assertEqual(reason, "simulated_mode_accepted")
+
+    def test_non_conversational_engineer_task_completes_in_mock_mode_without_git_diff(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "reasoning", "analysis", "review"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="EVID-INTEG-1",
+                title="Implement feature",
+                description="Implement a concrete backend change",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                },
+            )
+
+            with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
+                orchestrator.submit_task(task)
+                orchestrator.run_until_idle(max_rounds=4)
+
+            completed = orchestrator.taskboard.get_task("EVID-INTEG-1")
+            assert completed is not None
+            self.assertEqual(completed.state.value, "completed")
+            self.assertEqual(
+                completed.metadata.get("evidence_reason"), "simulated_mode_accepted"
+            )
+
     def test_environment_specific_parallel_limits_are_applied(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
@@ -24,7 +118,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "reasoning", "analysis", "review"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             with patch.dict(
                 "os.environ",
                 {
@@ -33,8 +129,12 @@ class OrchestratorTests(unittest.TestCase):
                 },
                 clear=False,
             ):
-                prod = AITeamOrchestrator(router=router, runtime_dir=runtime_dir, environment="prod")
-                stage = AITeamOrchestrator(router=router, runtime_dir=runtime_dir, environment="stage")
+                prod = AITeamOrchestrator(
+                    router=router, runtime_dir=runtime_dir, environment="prod"
+                )
+                stage = AITeamOrchestrator(
+                    router=router, runtime_dir=runtime_dir, environment="stage"
+                )
                 self.assertEqual(prod.max_parallel_tasks, 2)
                 self.assertEqual(stage.max_parallel_tasks, 4)
 
@@ -49,7 +149,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "reasoning", "analysis", "review"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             with patch.dict(
                 "os.environ",
                 {
@@ -61,7 +163,9 @@ class OrchestratorTests(unittest.TestCase):
                 },
                 clear=False,
             ):
-                orchestrator = AITeamOrchestrator(router=router, runtime_dir=runtime_dir, environment="stage")
+                orchestrator = AITeamOrchestrator(
+                    router=router, runtime_dir=runtime_dir, environment="stage"
+                )
                 orchestrator._dynamic_parallel_tasks = 4
 
                 orchestrator.event_logger.emit(
@@ -100,7 +204,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "reasoning", "analysis", "review"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             with patch.dict(
                 "os.environ",
                 {
@@ -121,14 +227,24 @@ class OrchestratorTests(unittest.TestCase):
                     title="Task 1",
                     description="Implement",
                     role=Role.ENGINEER,
-                    metadata={"required_capabilities": ["coding"], "skip_quality_gates": True, "skip_evidence_gate": True, "skip_placeholder_check": True},
+                    metadata={
+                        "required_capabilities": ["coding"],
+                        "skip_quality_gates": True,
+                        "skip_evidence_gate": True,
+                        "skip_placeholder_check": True,
+                    },
                 )
                 t2 = WorkTask(
                     task_id="LB-2",
                     title="Task 2",
                     description="Implement",
                     role=Role.ENGINEER,
-                    metadata={"required_capabilities": ["coding"], "skip_quality_gates": True, "skip_evidence_gate": True, "skip_placeholder_check": True},
+                    metadata={
+                        "required_capabilities": ["coding"],
+                        "skip_quality_gates": True,
+                        "skip_evidence_gate": True,
+                        "skip_placeholder_check": True,
+                    },
                 )
 
                 orchestrator.submit_task(t1)
@@ -156,8 +272,12 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "reasoning", "analysis", "review"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
-            with patch.dict("os.environ", {"AITEAM_MAX_PARALLEL_TASKS": "2"}, clear=False):
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            with patch.dict(
+                "os.environ", {"AITEAM_MAX_PARALLEL_TASKS": "2"}, clear=False
+            ):
                 orchestrator = AITeamOrchestrator(
                     router=router,
                     runtime_dir=runtime_dir,
@@ -168,14 +288,24 @@ class OrchestratorTests(unittest.TestCase):
                     title="Parallel one",
                     description="Implement",
                     role=Role.ENGINEER,
-                    metadata={"required_capabilities": ["coding"], "skip_quality_gates": True, "skip_evidence_gate": True, "skip_placeholder_check": True},
+                    metadata={
+                        "required_capabilities": ["coding"],
+                        "skip_quality_gates": True,
+                        "skip_evidence_gate": True,
+                        "skip_placeholder_check": True,
+                    },
                 )
                 second = WorkTask(
                     task_id="PAR-2",
                     title="Parallel two",
                     description="Implement",
                     role=Role.ENGINEER,
-                    metadata={"required_capabilities": ["coding"], "skip_quality_gates": True, "skip_evidence_gate": True, "skip_placeholder_check": True},
+                    metadata={
+                        "required_capabilities": ["coding"],
+                        "skip_quality_gates": True,
+                        "skip_evidence_gate": True,
+                        "skip_placeholder_check": True,
+                    },
                 )
                 orchestrator.submit_task(first)
                 orchestrator.submit_task(second)
@@ -189,11 +319,108 @@ class OrchestratorTests(unittest.TestCase):
                 self.assertEqual(task_two.state.value, "completed")
                 self.assertEqual(task_one.metadata.get("execution_round"), 1)
                 self.assertEqual(task_two.metadata.get("execution_round"), 1)
-                self.assertNotEqual(task_one.metadata.get("execution_order"), task_two.metadata.get("execution_order"))
+                self.assertNotEqual(
+                    task_one.metadata.get("execution_order"),
+                    task_two.metadata.get("execution_order"),
+                )
 
                 events = orchestrator.event_logger.recent_events(hours=1)
-                started = [item for item in events if item.get("event_type") == "task_started"]
+                started = [
+                    item for item in events if item.get("event_type") == "task_started"
+                ]
                 self.assertGreaterEqual(len(started), 2)
+
+    def test_eager_dependency_chain_tracks_sub_iterations_within_same_round(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "reasoning", "analysis", "review"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            parent = WorkTask(
+                task_id="CHAIN-1",
+                title="Parent task",
+                description="Implement first step",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+            child = WorkTask(
+                task_id="CHAIN-2",
+                title="Child task",
+                description="Implement second step",
+                role=Role.ENGINEER,
+                dependencies=["CHAIN-1"],
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+            orchestrator.submit_task(parent)
+            orchestrator.submit_task(child)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            parent_task = orchestrator.taskboard.get_task("CHAIN-1")
+            child_task = orchestrator.taskboard.get_task("CHAIN-2")
+            assert parent_task is not None
+            assert child_task is not None
+            self.assertEqual(parent_task.metadata.get("execution_round"), 1)
+            self.assertEqual(child_task.metadata.get("execution_round"), 1)
+            self.assertEqual(parent_task.metadata.get("execution_sub_iteration"), 1)
+            self.assertEqual(child_task.metadata.get("execution_sub_iteration"), 2)
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            sub_events = [
+                item
+                for item in events
+                if item.get("event_type") == "round_sub_iteration"
+            ]
+            self.assertTrue(
+                any(
+                    int((item.get("payload", {}) or {}).get("sub_iteration", 0)) == 1
+                    and str((item.get("payload", {}) or {}).get("phase", ""))
+                    == "execute_batch"
+                    for item in sub_events
+                )
+            )
+            self.assertTrue(
+                any(
+                    int((item.get("payload", {}) or {}).get("sub_iteration", 0)) == 2
+                    and str((item.get("payload", {}) or {}).get("phase", ""))
+                    == "execute_batch"
+                    for item in sub_events
+                )
+            )
+
+            round_completed = [
+                item for item in events if item.get("event_type") == "round_completed"
+            ]
+            self.assertTrue(round_completed)
+            payload = round_completed[-1].get("payload", {}) or {}
+            self.assertEqual(int(payload.get("execution_round", 0)), 1)
+            self.assertEqual(int(payload.get("sub_iterations_used", 0)), 3)
+            self.assertEqual(int(payload.get("tasks_processed", 0)), 2)
 
     def test_assignee_prefers_lower_latency_and_penalty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,7 +433,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "reasoning", "analysis", "review"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             with patch.dict(
                 "os.environ",
                 {
@@ -245,7 +474,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "review", "analysis", "reasoning"},
                 ),
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(
                 router=router,
                 runtime_dir=runtime_dir,
@@ -257,7 +488,11 @@ class OrchestratorTests(unittest.TestCase):
                 title="Implement feature",
                 description="Implementar cambio solicitado.",
                 role=Role.ENGINEER,
-                metadata={"required_capabilities": ["coding"], "skip_evidence_gate": True, "skip_placeholder_check": True},
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
             )
             orchestrator.submit_task(task)
             orchestrator.run_until_idle(max_rounds=8)
@@ -276,7 +511,10 @@ class OrchestratorTests(unittest.TestCase):
     def test_parent_task_fails_when_quality_gate_fails(self) -> None:
         class ReviewFailAdapter(SubscriptionAdapter):
             def invoke(self, prompt: str) -> AdapterResponse:
-                if "Review implement feature" in prompt or "Review Implement feature" in prompt:
+                if (
+                    "Review implement feature" in prompt
+                    or "Review Implement feature" in prompt
+                ):
                     return AdapterResponse(
                         success=False,
                         content="",
@@ -297,7 +535,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "review", "analysis", "reasoning"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(
                 router=router,
                 runtime_dir=runtime_dir,
@@ -327,6 +567,148 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(parent.state.value, "failed")
             self.assertIn("quality_gates_failed", str(parent.metadata.get("error", "")))
 
+    def test_gate_retry_events_include_gate_iteration_and_execution_context(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "review", "analysis", "reasoning"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            task = WorkTask(
+                task_id="ENG-RETRY-1",
+                title="Implement feature",
+                description="Implementar cambio solicitado.",
+                role=Role.ENGINEER,
+                metadata={
+                    "quality_gate_tasks": ["ENG-RETRY-1::review"],
+                    "quality_gate_spawned": True,
+                    "execution_round": 3,
+                    "execution_sub_iteration": 2,
+                    "max_gate_iterations": 1,
+                },
+                state=TaskState.BLOCKED,
+            )
+            failed_gate = WorkTask(
+                task_id="ENG-RETRY-1::review",
+                title="Review Implement feature",
+                description="Gate failed",
+                role=Role.REVIEWER,
+                state=TaskState.FAILED,
+                metadata={"error": "forced_review_failure_once"},
+            )
+            orchestrator.taskboard.add_task(task)
+            orchestrator.taskboard.add_task(failed_gate)
+
+            parent_before = orchestrator.taskboard.get_task("ENG-RETRY-1")
+            assert parent_before is not None
+            parent_before.state = TaskState.BLOCKED
+            gate_before = orchestrator.taskboard.get_task("ENG-RETRY-1::review")
+            assert gate_before is not None
+            gate_before.state = TaskState.FAILED
+
+            orchestrator._release_blocked_parent_tasks()
+
+            retried = orchestrator.taskboard.get_task("ENG-RETRY-1")
+            assert retried is not None
+            self.assertEqual(retried.state.value, "ready")
+            self.assertEqual(int(retried.metadata.get("gate_iteration", 0)), 1)
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            gate_events = [
+                item for item in events if item.get("event_type") == "gate_iteration"
+            ]
+            self.assertTrue(gate_events)
+            gate_payload = gate_events[-1].get("payload", {}) or {}
+            self.assertEqual(int(gate_payload.get("iteration", 0)), 1)
+            self.assertEqual(int(gate_payload.get("execution_round", 0)), 3)
+            self.assertEqual(int(gate_payload.get("execution_sub_iteration", 0)), 2)
+
+    def test_failed_parent_blocks_dependent_task_instead_of_leaving_it_pending(
+        self,
+    ) -> None:
+        class FailRootAdapter(SubscriptionAdapter):
+            def invoke(self, prompt: str) -> AdapterResponse:
+                if "Force root failure" in prompt:
+                    return AdapterResponse(
+                        success=False,
+                        content="",
+                        latency_ms=1,
+                        input_tokens=max(1, len(prompt) // 4),
+                        output_tokens=0,
+                        error="forced_root_failure",
+                    )
+                return super().invoke(prompt)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                FailRootAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "review", "analysis", "reasoning"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            parent = WorkTask(
+                task_id="ROOT-FAIL-1",
+                title="Force root failure",
+                description="This task should fail before child can run",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+            child = WorkTask(
+                task_id="ROOT-FAIL-1::child",
+                title="Dependent child",
+                description="Should not stay pending forever",
+                role=Role.REVIEWER,
+                dependencies=["ROOT-FAIL-1"],
+            )
+            orchestrator.submit_task(parent)
+            orchestrator.submit_task(child)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            failed_parent = orchestrator.taskboard.get_task("ROOT-FAIL-1")
+            blocked_child = orchestrator.taskboard.get_task("ROOT-FAIL-1::child")
+            assert failed_parent is not None
+            assert blocked_child is not None
+            self.assertEqual(failed_parent.state.value, "failed")
+            self.assertEqual(blocked_child.state.value, "blocked")
+            self.assertEqual(
+                blocked_child.metadata.get("blocked_reason"), "dependency_failed"
+            )
+            self.assertEqual(
+                blocked_child.metadata.get("blocked_dependencies"), ["ROOT-FAIL-1"]
+            )
+
     def test_failure_triggers_event_meeting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
@@ -338,7 +720,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(
                 router=router,
                 runtime_dir=runtime_dir,
@@ -352,7 +736,12 @@ class OrchestratorTests(unittest.TestCase):
                 role=Role.ENGINEER,
                 complexity=Complexity.HIGH,
                 criticality=Criticality.HIGH,
-                metadata={"required_capabilities": ["coding"], "skip_quality_gates": True, "skip_evidence_gate": True, "skip_placeholder_check": True},
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
             )
             orchestrator.submit_task(task)
             orchestrator.run_until_idle(max_rounds=4)
@@ -394,7 +783,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"reasoning", "coding", "analysis", "review"},
                 ),
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(
                 router=router,
                 runtime_dir=runtime_dir,
@@ -409,7 +800,11 @@ class OrchestratorTests(unittest.TestCase):
                 metadata={
                     "required_capabilities": ["coding"],
                     "execution_plan": [
-                        {"type": "cmd", "command": "echo publish playstore", "timeout": 10}
+                        {
+                            "type": "cmd",
+                            "command": "echo publish playstore",
+                            "timeout": 10,
+                        }
                     ],
                     "skip_quality_gates": True,
                     "skip_evidence_gate": True,
@@ -421,10 +816,14 @@ class OrchestratorTests(unittest.TestCase):
             blocked = orchestrator.taskboard.get_task("SEC-1")
             assert blocked is not None
             self.assertEqual(blocked.state.value, "failed")
-            self.assertIn("sensitive_commands_require_approval", blocked.metadata.get("error", ""))
+            self.assertIn(
+                "sensitive_commands_require_approval", blocked.metadata.get("error", "")
+            )
 
             subjects = [msg.subject for msg in orchestrator.mailbox.list_messages()]
-            self.assertTrue(any("Task blocked by compliance" in subject for subject in subjects))
+            self.assertTrue(
+                any("Task blocked by compliance" in subject for subject in subjects)
+            )
 
     def test_sensitive_execution_plan_runs_when_approved(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -437,7 +836,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"reasoning", "coding", "analysis", "review"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(router=router, runtime_dir=runtime_dir)
 
             task = WorkTask(
@@ -447,7 +848,11 @@ class OrchestratorTests(unittest.TestCase):
                 role=Role.TEAM_LEAD,
                 metadata={
                     "execution_plan": [
-                        {"type": "cmd", "command": "echo publish playstore", "timeout": 10}
+                        {
+                            "type": "cmd",
+                            "command": "echo publish playstore",
+                            "timeout": 10,
+                        }
                     ],
                     "approved_sensitive_ops": True,
                 },
@@ -470,7 +875,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"reasoning", "coding", "analysis", "review"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(
                 router=router,
                 runtime_dir=runtime_dir,
@@ -484,7 +891,11 @@ class OrchestratorTests(unittest.TestCase):
                 role=Role.TEAM_LEAD,
                 metadata={
                     "execution_plan": [
-                        {"type": "cmd", "command": "echo publish playstore", "timeout": 10}
+                        {
+                            "type": "cmd",
+                            "command": "echo publish playstore",
+                            "timeout": 10,
+                        }
                     ],
                     "approved_sensitive_ops": True,
                     "approved_by": ["lead-1"],
@@ -496,7 +907,9 @@ class OrchestratorTests(unittest.TestCase):
             failed = orchestrator.taskboard.get_task("SEC-PROD-1")
             assert failed is not None
             self.assertEqual(failed.state.value, "failed")
-            self.assertIn("insufficient_approvers_required_2", failed.metadata.get("error", ""))
+            self.assertIn(
+                "insufficient_approvers_required_2", failed.metadata.get("error", "")
+            )
 
     def test_high_risk_engineer_task_opens_security_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -509,7 +922,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "review", "analysis", "reasoning"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(router=router, runtime_dir=runtime_dir)
 
             task = WorkTask(
@@ -519,7 +934,11 @@ class OrchestratorTests(unittest.TestCase):
                 role=Role.ENGINEER,
                 complexity=Complexity.HIGH,
                 criticality=Criticality.HIGH,
-                metadata={"required_capabilities": ["coding"], "skip_evidence_gate": True, "skip_placeholder_check": True},
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
             )
             orchestrator.submit_task(task)
             orchestrator.run_until_idle(max_rounds=10)
@@ -568,7 +987,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "analysis"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(
                 router=router,
                 runtime_dir=runtime_dir,
@@ -607,7 +1028,9 @@ class OrchestratorTests(unittest.TestCase):
                     role_targets={"qa"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(
                 router=router,
                 runtime_dir=runtime_dir,
@@ -628,7 +1051,9 @@ class OrchestratorTests(unittest.TestCase):
             orchestrator.run_until_idle(max_rounds=4)
 
             entries = orchestrator.memory.recent("qa-1", limit=20)
-            guidance_entries = [item for item in entries if item.kind == "skill_mcp_guidance"]
+            guidance_entries = [
+                item for item in entries if item.kind == "skill_mcp_guidance"
+            ]
             self.assertTrue(guidance_entries)
 
     def test_records_decision_rank_and_justification_metadata(self) -> None:
@@ -642,7 +1067,9 @@ class OrchestratorTests(unittest.TestCase):
                     capabilities={"coding", "analysis", "review", "reasoning"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(router=router, runtime_dir=runtime_dir)
 
             task = WorkTask(
@@ -652,7 +1079,12 @@ class OrchestratorTests(unittest.TestCase):
                 role=Role.ENGINEER,
                 complexity=Complexity.MEDIUM,
                 criticality=Criticality.MEDIUM,
-                metadata={"required_capabilities": ["coding"], "skip_quality_gates": True, "skip_evidence_gate": True, "skip_placeholder_check": True},
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
             )
             orchestrator.submit_task(task)
             orchestrator.run_until_idle(max_rounds=5)
@@ -676,7 +1108,9 @@ class OrchestratorTests(unittest.TestCase):
                     role_targets={"engineer"},
                 )
             ]
-            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
             orchestrator = AITeamOrchestrator(router=router, runtime_dir=runtime_dir)
 
             task = WorkTask(

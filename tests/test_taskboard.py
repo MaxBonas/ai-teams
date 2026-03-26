@@ -10,7 +10,9 @@ class TaskBoardTests(unittest.TestCase):
     def test_dependency_flow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             board = TaskBoard(Path(tmp) / "tasks.json")
-            t1 = WorkTask(task_id="A", title="Root", description="x", role=Role.TEAM_LEAD)
+            t1 = WorkTask(
+                task_id="A", title="Root", description="x", role=Role.TEAM_LEAD
+            )
             t2 = WorkTask(
                 task_id="B",
                 title="Child",
@@ -56,6 +58,61 @@ class TaskBoardTests(unittest.TestCase):
             blocked = board.get_task("B")
             assert blocked is not None
             self.assertEqual(blocked.state.value, "blocked")
+
+    def test_failed_dependency_blocks_child_with_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            board = TaskBoard(Path(tmp) / "tasks.json")
+            parent = WorkTask(
+                task_id="A", title="Root", description="x", role=Role.TEAM_LEAD
+            )
+            child = WorkTask(
+                task_id="B",
+                title="Child",
+                description="x",
+                role=Role.ENGINEER,
+                dependencies=["A"],
+            )
+            board.add_task(parent)
+            board.add_task(child)
+
+            self.assertTrue(board.claim_task("A", assignee="lead-1"))
+            board.mark_failed("A", error="root_failed")
+
+            blocked = board.get_task("B")
+            assert blocked is not None
+            self.assertEqual(blocked.state.value, "blocked")
+            self.assertEqual(
+                blocked.metadata.get("blocked_reason"), "dependency_failed"
+            )
+            self.assertEqual(blocked.metadata.get("blocked_dependencies"), ["A"])
+
+    def test_retrying_failed_parent_unblocks_child_when_parent_completes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            board = TaskBoard(Path(tmp) / "tasks.json")
+            parent = WorkTask(
+                task_id="A", title="Root", description="x", role=Role.TEAM_LEAD
+            )
+            child = WorkTask(
+                task_id="B",
+                title="Child",
+                description="x",
+                role=Role.ENGINEER,
+                dependencies=["A"],
+            )
+            board.add_task(parent)
+            board.add_task(child)
+
+            self.assertTrue(board.claim_task("A", assignee="lead-1"))
+            board.mark_failed("A", error="root_failed")
+            board.retry_task("A", reason="manual_retry", assignee="lead-1")
+            self.assertTrue(board.claim_task("A", assignee="lead-1"))
+            board.mark_completed("A", details="done")
+
+            unblocked = board.get_task("B")
+            assert unblocked is not None
+            self.assertEqual(unblocked.state.value, "ready")
+            self.assertIsNone(unblocked.metadata.get("blocked_reason"))
+            self.assertIsNone(unblocked.metadata.get("blocked_dependencies"))
 
     def test_load_ignores_corrupted_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

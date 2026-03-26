@@ -48,7 +48,9 @@ class TaskBoard:
                 return False
             owned_files = self._owned_files(task)
             if owned_files:
-                acquired, conflicts = self._file_locks.acquire(task_id=task.task_id, files=owned_files)
+                acquired, conflicts = self._file_locks.acquire(
+                    task_id=task.task_id, files=owned_files
+                )
                 if not acquired:
                     task.state = TaskState.BLOCKED
                     task.metadata["blocked_by_files"] = conflicts
@@ -76,6 +78,7 @@ class TaskBoard:
             task.state = TaskState.FAILED
             self._file_locks.release_for_task(task_id)
             task.metadata["error"] = error
+            self._refresh_readiness()
             self._save()
 
     def mark_blocked(self, task_id: str, reason: str) -> None:
@@ -100,15 +103,20 @@ class TaskBoard:
                     del self._tasks[task_id]
             self._save()
 
-    def retry_task(self, task_id: str, reason: str, assignee: str | None = None) -> None:
+    def retry_task(
+        self, task_id: str, reason: str, assignee: str | None = None
+    ) -> None:
         with self._lock:
             task = self._require(task_id)
             self._file_locks.release_for_task(task_id)
             task.state = TaskState.READY
             task.assignee = assignee
             task.metadata.pop("error", None)
+            task.metadata.pop("blocked_reason", None)
+            task.metadata.pop("blocked_dependencies", None)
             task.metadata["retry_reason"] = reason
             task.metadata["retry_count"] = int(task.metadata.get("retry_count", 0)) + 1
+            self._refresh_readiness()
             self._save()
 
     def _refresh_readiness(self) -> None:
@@ -120,16 +128,32 @@ class TaskBoard:
                     # Se reevalua solo al liberar locks, manteniendo trazabilidad de bloqueo.
                     task.state = TaskState.PENDING
                     task.metadata.pop("blocked_by_files", None)
-                else:
+                elif task.metadata.get("blocked_reason") != "dependency_failed":
                     continue
             if not task.dependencies:
                 task.state = TaskState.READY
                 continue
 
+            failed_dependencies = [
+                dep
+                for dep in task.dependencies
+                if dep in self._tasks and self._tasks[dep].state == TaskState.FAILED
+            ]
+            if failed_dependencies:
+                task.state = TaskState.BLOCKED
+                task.metadata["blocked_reason"] = "dependency_failed"
+                task.metadata["blocked_dependencies"] = failed_dependencies
+                continue
+
+            if task.metadata.get("blocked_reason") == "dependency_failed":
+                task.metadata.pop("blocked_reason", None)
+                task.metadata.pop("blocked_dependencies", None)
+
             unresolved = [
                 dep
                 for dep in task.dependencies
-                if dep not in self._tasks or self._tasks[dep].state != TaskState.COMPLETED
+                if dep not in self._tasks
+                or self._tasks[dep].state != TaskState.COMPLETED
             ]
             task.state = TaskState.PENDING if unresolved else TaskState.READY
 
@@ -150,10 +174,14 @@ class TaskBoard:
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         payload = [self._task_to_dict(task) for task in self._tasks.values()]
         import tempfile
+
         content = json.dumps(payload, indent=2)
         with tempfile.NamedTemporaryFile(
-            mode="w", dir=self.storage_path.parent, suffix=".tmp",
-            delete=False, encoding="utf-8",
+            mode="w",
+            dir=self.storage_path.parent,
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
         ) as tmp:
             tmp_path = Path(tmp.name)
             try:
@@ -163,6 +191,7 @@ class TaskBoard:
                 tmp_path.unlink(missing_ok=True)
                 raise
         import time
+
         last_err: Exception | None = None
         for attempt in range(5):
             try:
