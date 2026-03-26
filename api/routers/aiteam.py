@@ -279,7 +279,10 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
             )
             continuity = _build_project_continuity_context(runtime_dir)
             recent = payload.get("recent_events", [])
-            latest_chat_run = _latest_chat_run_summary(recent if isinstance(recent, list) else [])
+            # Use all events (not just the recent 120 in payload) so that
+            # chat_plan_created events are found even in long sessions with many events.
+            all_events = _read_jsonl_records(runtime_dir / "events.jsonl")
+            latest_chat_run = _latest_chat_run_summary(all_events if isinstance(all_events, list) else [])
             latest_lead_summary = _latest_lead_user_summary(runtime_dir, str(latest_chat_run.get("task_id", "") or ""))
             return {
                 "task_total": payload.get("task_total", 0),

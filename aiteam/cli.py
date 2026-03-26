@@ -85,6 +85,13 @@ def build_default_orchestrator(
             capabilities={"reasoning", "coding", "analysis"},
         ),
         ApiAdapter(
+            name="openai_api_mini",
+            provider="openai",
+            model="gpt-4.1-mini",
+            capabilities={"reasoning", "coding", "analysis", "review"},
+            cost_tier=1,
+        ),
+        ApiAdapter(
             name="openai_api_reasoning",
             provider="openai",
             model="gpt-4o-mini",
