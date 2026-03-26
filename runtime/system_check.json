@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-03-03T19:15:40.113765+00:00",
-  "environment": "stage",
+  "timestamp": "2026-03-26T17:19:50.672396+00:00",
+  "environment": "dev",
   "providers": {
-    "subscription_available": 7,
+    "subscription_available": 9,
     "api_available": 2,
     "required_healthy": 3,
     "required_total": 3,
-    "required_minimum": 3,
+    "required_minimum": 1,
     "details": [
       {
         "provider": "openai",
@@ -40,9 +40,11 @@
         "provider": "anthropic",
         "name": "claude_pro_cli",
         "healthy": true,
-        "details": "claude_logged_in:None",
+        "details": "claude_logged_in:unknown",
         "command": [
-          "claude",
+          "npx",
+          "-y",
+          "@anthropic-ai/claude-code",
           "-p",
           "{prompt}"
         ],
@@ -63,9 +65,9 @@
     "compliance_violations": 0
   },
   "mcp": {
-    "healthy": 0,
-    "total": 0,
-    "enabled": 0
+    "healthy": 4,
+    "total": 12,
+    "enabled": 6
   },
   "skills_coverage": {
     "total_task_execution": 11,
@@ -77,5 +79,7 @@
     "cost_anomaly_reason": "insufficient_daily_data"
   },
   "alerts": [],
-  "failed_checks": []
+  "failed_checks": [
+    "tool_drift_detected=2 files (run tool-lock to fix)"
+  ]
 }

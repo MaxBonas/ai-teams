@@ -68,6 +68,7 @@ class TeamCommunicator:
             subject=subject,
             body=body,
             task_id=task_id,
+            kind="actionable",
         )
         self._event(
             "mail_dm",
@@ -92,6 +93,7 @@ class TeamCommunicator:
             subject=subject,
             body=body,
             task_id=task_id,
+            kind="informational",
         )
         self._event(
             "mail_broadcast",

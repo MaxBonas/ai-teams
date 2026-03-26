@@ -585,5 +585,108 @@ class NativeFunctionCallingTests(unittest.TestCase):
         self.assertEqual(received_tools[0].name, "read_file")
 
 
+class StreamingInvokeTests(unittest.TestCase):
+    """Tests para invoke_stream en adapters."""
+
+    def test_base_adapter_stream_falls_back_to_invoke(self):
+        """invoke_stream del base adapter hace yield del contenido de invoke() completo."""
+        adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
+        with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
+            chunks = list(adapter.invoke_stream("hello world"))
+        # En modo mock, debe devolver exactamente un chunk con el contenido simulado
+        self.assertEqual(len(chunks), 1)
+        self.assertIn("SIMULADO", chunks[0])
+
+    def test_invoke_stream_openai_yields_chunks(self):
+        """_stream_openai_compatible parsea SSE y hace yield de chunks."""
+        from unittest.mock import MagicMock
+
+        adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
+
+        mock_response = MagicMock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.__iter__ = lambda s: iter([
+            b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
+            b'data: [DONE]\n',
+        ])
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"AITEAM_ENABLE_LIVE_API": "1", "OPENAI_API_KEY": "test-key"},
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", return_value=mock_response),
+        ):
+            chunks = list(adapter.invoke_stream("test prompt"))
+
+        self.assertEqual(chunks, ["Hello"])
+
+    def test_invoke_stream_anthropic_yields_chunks(self):
+        """_stream_anthropic parsea SSE de Anthropic y hace yield de chunks."""
+        from unittest.mock import MagicMock
+
+        adapter = ApiAdapter(name="anthropic_api", provider="anthropic", model="claude-3-5-haiku-20241022")
+
+        mock_response = MagicMock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.__iter__ = lambda s: iter([
+            b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}\n',
+            b'data: {"type":"message_stop"}\n',
+        ])
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"AITEAM_ENABLE_LIVE_API": "1", "ANTHROPIC_API_KEY": "test-key"},
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", return_value=mock_response),
+        ):
+            chunks = list(adapter.invoke_stream("test prompt"))
+
+        self.assertEqual(chunks, ["Hi"])
+
+    def test_router_on_chunk_callback_receives_chunks(self):
+        """route_and_invoke con on_chunk llama callback por chunk."""
+        from aiteam.config import build_default_router_policy
+        from aiteam.router import HybridRouter
+        from aiteam.types import Complexity, Criticality, Role, RoutingRequest
+
+        class _StreamingAdapter(ApiAdapter):
+            def available(self):
+                return True
+
+            def invoke_stream(self, prompt, messages=None):
+                yield "foo"
+                yield "bar"
+
+        adapter = _StreamingAdapter(
+            name="openai_api",
+            provider="openai",
+            model="gpt-4.1-mini",
+            capabilities={"coding"},
+        )
+        router = HybridRouter(adapters=[adapter], policy=build_default_router_policy())
+
+        received_chunks: list[str] = []
+        request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+        )
+        decision = router.route_and_invoke(
+            request,
+            "test prompt",
+            on_chunk=lambda c: received_chunks.append(c),
+        )
+
+        self.assertTrue(decision.success)
+        self.assertEqual(received_chunks, ["foo", "bar"])
+        self.assertEqual(decision.response.content, "foobar")
+
+
 if __name__ == "__main__":
     unittest.main()

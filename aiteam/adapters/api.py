@@ -5,6 +5,7 @@ import time
 import json
 import urllib.error
 import urllib.request
+from typing import Iterator
 
 from aiteam.adapters.base import ModelAdapter, messages_to_prompt, normalize_messages
 from aiteam.types import AdapterResponse, ChannelType
@@ -90,6 +91,117 @@ class ApiAdapter(ModelAdapter):
     def _live_api_enabled() -> bool:
         raw = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower()
         return raw in {"1", "true", "yes", "on"}
+
+    def invoke_stream(
+        self, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> Iterator[str]:
+        """Streaming invoke — yields text chunks as they arrive from the provider."""
+        normalized = normalize_messages(messages, prompt)
+        if not self._live_api_enabled():
+            # En modo mock, yield el contenido mock como un solo chunk
+            response = self.invoke(prompt, messages=messages)
+            if response.success and response.content:
+                yield response.content
+            return
+        provider = self.provider.strip().lower()
+        if provider == "openai":
+            yield from self._stream_openai_compatible(
+                url="https://api.openai.com/v1/chat/completions",
+                api_key_env="OPENAI_API_KEY",
+                messages=normalized,
+            )
+        elif provider == "groq":
+            yield from self._stream_openai_compatible(
+                url="https://api.groq.com/openai/v1/chat/completions",
+                api_key_env="GROQ_API_KEY",
+                messages=normalized,
+            )
+        elif provider == "anthropic":
+            yield from self._stream_anthropic(messages=normalized)
+        else:
+            response = self.invoke(prompt, messages=messages)
+            if response.success and response.content:
+                yield response.content
+
+    def _stream_openai_compatible(
+        self, *, url: str, api_key_env: str, messages: list[dict]
+    ) -> Iterator[str]:
+        """Parsea SSE de la API compatible con OpenAI y hace yield de chunks de texto."""
+        api_key = os.getenv(api_key_env, "").strip()
+        if not api_key:
+            return
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.2,
+            "stream": True,
+        }
+        payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+        request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        parsed = json.loads(data)
+                        delta = parsed["choices"][0]["delta"].get("content") or ""
+                        if delta:
+                            yield delta
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+        except (urllib.error.URLError, urllib.error.HTTPError):
+            return
+
+    def _stream_anthropic(self, *, messages: list[dict]) -> Iterator[str]:
+        """Parsea SSE de Anthropic Messages API y hace yield de chunks de texto."""
+        api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            return
+        body = {
+            "model": self.model,
+            "max_tokens": 4096,
+            "messages": messages,
+            "stream": True,
+        }
+        payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+        request = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    try:
+                        parsed = json.loads(data)
+                        if parsed.get("type") == "content_block_delta":
+                            delta = parsed.get("delta", {})
+                            text = delta.get("text") or ""
+                            if text:
+                                yield text
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        except (urllib.error.URLError, urllib.error.HTTPError):
+            return
 
     def _invoke_live(
         self, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,

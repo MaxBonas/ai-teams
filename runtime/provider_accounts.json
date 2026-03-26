@@ -2,7 +2,7 @@
   "subscription_accounts": [
     {
       "provider": "openai",
-      "model": "gpt-5.3-codex",
+      "model": "gpt-4o",
       "enabled_env": "AITEAM_SUBSCRIPTION_OPENAI_ENABLED",
       "notes": "Primary senior coder account",
       "connected": true,
@@ -10,19 +10,19 @@
     },
     {
       "provider": "google",
-      "model": "gemini-3.1-pro",
+      "model": "gemini-1.5-pro",
       "enabled_env": "AITEAM_SUBSCRIPTION_GOOGLE_ENABLED",
       "notes": "Second senior coder account",
-      "connected": false,
-      "details": "gemini_auth_missing"
+      "connected": true,
+      "details": "gemini_auth_env_key"
     },
     {
       "provider": "anthropic",
-      "model": "claude-code",
+      "model": "claude-3-5-sonnet-20241022",
       "enabled_env": "AITEAM_SUBSCRIPTION_ANTHROPIC_ENABLED",
       "notes": "Third senior coder account",
       "connected": true,
-      "details": "claude_logged_in:pro"
+      "details": "claude_logged_in:unknown"
     }
   ],
   "api_accounts": [
@@ -34,6 +34,14 @@
       ],
       "api_key_env": "OPENAI_API_KEY",
       "notes": "Fallback API budget-aware"
+    },
+    {
+      "provider": "groq",
+      "models": [
+        "llama-3.3-70b-versatile"
+      ],
+      "api_key_env": "GROQ_API_KEY",
+      "notes": "Secondary API fallback for fast reasoning"
     }
   ]
 }

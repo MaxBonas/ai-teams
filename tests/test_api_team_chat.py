@@ -9,6 +9,22 @@ from fastapi.testclient import TestClient
 import api.main as api_main
 
 
+def _parse_sse_result(response) -> dict:
+    """Parse an SSE streaming response and return the data of the 'result' event."""
+    text = response.text
+    current_event = ""
+    for line in text.splitlines():
+        if line.startswith("event: "):
+            current_event = line[7:].strip()
+        elif line.startswith("data: ") and current_event == "result":
+            return json.loads(line[6:])
+    # Fallback: try parsing as plain JSON (backward compat)
+    try:
+        return response.json()
+    except Exception:
+        return {}
+
+
 class APITeamChatTests(unittest.TestCase):
     def test_chat_is_led_by_team_lead_and_returns_delegation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -27,7 +43,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertEqual(payload.get("role"), "team_lead")
                 self.assertTrue(
                     str(payload.get("lead_task_id", "")).endswith("::lead_intake")
@@ -75,7 +91,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 tasks_file = workspace / "runtime" / "tasks.json"
                 self.assertTrue(tasks_file.exists())
                 tasks_text = tasks_file.read_text(encoding="utf-8")
@@ -84,6 +100,36 @@ class APITeamChatTests(unittest.TestCase):
                     self.assertIn(phase_id, tasks_text)
                 for delegated_id in payload.get("delegated_task_ids", []):
                     self.assertIn(delegated_id, tasks_text)
+
+                tasks_data = json.loads(tasks_file.read_text(encoding="utf-8"))
+                by_id = {
+                    item.get("task_id"): item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                }
+                build_task = by_id.get(payload.get("phase_task_ids", {}).get("build"))
+                review_task = by_id.get(payload.get("phase_task_ids", {}).get("review"))
+                self.assertIsNotNone(build_task)
+                self.assertIsNotNone(review_task)
+                self.assertIn(
+                    "Delegation brief:",
+                    str((build_task or {}).get("description", "")),
+                )
+                self.assertTrue(
+                    str(
+                        ((build_task or {}).get("metadata", {}) or {}).get(
+                            "delegation_brief", ""
+                        )
+                    )
+                )
+                self.assertEqual(
+                    str(
+                        ((review_task or {}).get("metadata", {}) or {}).get(
+                            "delegation_from_role", ""
+                        )
+                    ),
+                    "team_lead",
+                )
 
                 mailbox_file = workspace / "runtime" / "mailbox.jsonl"
                 self.assertTrue(mailbox_file.exists())
@@ -144,7 +190,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 task_id = str(payload.get("task_id", ""))
 
                 state = client.get("/api/aiteam/state?environment=dev")
@@ -221,7 +267,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertEqual(payload.get("chat_mode"), "sprint5")
                 self.assertEqual(int(payload.get("round_budget", 0)), 4)
                 self.assertGreaterEqual(int(payload.get("rounds_used", 0)), 1)
@@ -247,7 +293,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertGreaterEqual(int(payload.get("round_budget", 0)), 6)
                 self.assertGreaterEqual(int(payload.get("auto_extended_rounds", 0)), 3)
             finally:
@@ -271,7 +317,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertTrue(bool(payload.get("strict_mode")))
                 if (
                     int(payload.get("execution_steps", 0)) == 0
@@ -303,7 +349,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertLess(
                     int(payload.get("productivity_score", 100)),
                     int(payload.get("productivity_threshold", 35)),
@@ -334,7 +380,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertTrue(bool(payload.get("low_productivity_override")))
                 self.assertFalse(bool(payload.get("low_productivity_rejected")))
             finally:
@@ -359,7 +405,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertTrue(bool(payload.get("evidence_gate_applied")))
                 self.assertIn(str(payload.get("state", "")), {"rejected", "failed"})
                 failures = payload.get("evidence_gate_failures", [])
@@ -386,7 +432,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertTrue(bool(payload.get("evidence_gate_applied")))
                 failures = [
                     str(item) for item in payload.get("evidence_gate_failures", [])
@@ -437,7 +483,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
                 self.assertTrue(bool(payload.get("live_mode_required")))
                 self.assertTrue(bool(payload.get("live_mode_rejected")))
                 self.assertIn(str(payload.get("state", "")), {"rejected", "failed"})
@@ -508,7 +554,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(first.status_code, 200)
-                first_payload = first.json()
+                first_payload = _parse_sse_result(first)
                 first_root = str(first_payload.get("task_id", ""))
                 self.assertTrue(first_root.startswith("CHAT-"))
 
@@ -521,7 +567,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(second.status_code, 200)
-                second_payload = second.json()
+                second_payload = _parse_sse_result(second)
                 self.assertTrue(bool(second_payload.get("continuation_requested")))
                 self.assertEqual(
                     str(second_payload.get("continuation_of", "")), first_root
@@ -564,7 +610,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(chat_response.status_code, 200)
-                chat_payload = chat_response.json()
+                chat_payload = _parse_sse_result(chat_response)
                 self.assertEqual(str(chat_payload.get("task_id", "")), client_task_id)
 
                 progress = client.get(f"/api/aiteam/chat/progress/{client_task_id}")
@@ -599,7 +645,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 200)
-                payload = response.json()
+                payload = _parse_sse_result(response)
 
                 self.assertGreaterEqual(int(payload.get("artifact_created", 0)), 1)
                 artifact_files = payload.get("artifact_files", [])
@@ -635,7 +681,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(first.status_code, 200)
-                first_payload = first.json()
+                first_payload = _parse_sse_result(first)
                 first_root = str(first_payload.get("task_id", ""))
 
                 second = client.post(
@@ -649,7 +695,7 @@ class APITeamChatTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(second.status_code, 200)
-                second_payload = second.json()
+                second_payload = _parse_sse_result(second)
                 self.assertEqual(int(second_payload.get("artifact_created", 0)), 0)
                 self.assertEqual(int(second_payload.get("artifact_modified", 0)), 0)
                 self.assertTrue(bool(second_payload.get("evidence_gate_applied")))

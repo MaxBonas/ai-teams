@@ -1582,7 +1582,7 @@ async def post_notebooklm_sync(payload: NotebookLMSyncRequest, request: Request)
         return {"error": str(e)}
 
 
-@app.post("/api/aiteam/chat", response_model=TeamChatResponse)
+@app.post("/api/aiteam/chat")
 async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
     _require_api_auth_request(request)
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
@@ -1627,12 +1627,19 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             return flat
         return flat[: max(0, limit - 3)] + "..."
 
+    import queue as _queue_mod
+    _token_queue: _queue_mod.Queue = _queue_mod.Queue()
+
     def _run_chat() -> TeamChatResponse:
         orch = build_default_orchestrator(
             runtime_dir=runtime_dir,
             browser_mode="basic",
             environment="dev",
         )
+
+        def _on_chunk(task_id: str, chunk: str) -> None:
+            _token_queue.put(("token_chunk", {"task_id": task_id, "chunk": chunk}))
+        orch.token_chunk_callback = _on_chunk
         previous_runs = _recent_chat_roots(runtime_dir, max_chats=3)
         previous_root = previous_runs[0] if previous_runs else {}
         previous_by_root: dict[str, dict[str, object]] = {
@@ -1677,6 +1684,46 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             criticality=criticality,
         )
         require_build_execution_plan = not bool(continuation_requested)
+
+        def _delegation_brief(phase: str) -> str:
+            mapping = {
+                "discovery": (
+                    "Objetivo: descubrir restricciones, contexto tecnico y riesgos reales antes de implementar.\n"
+                    "Enfocate en dependencias, limites, supuestos y decisiones que afecten al build.\n"
+                    "Entrega: hallazgos accionables, riesgos y recomendaciones concretas para engineer."
+                ),
+                "build": (
+                    "Objetivo: construir la solucion principal de forma ejecutable y revisable.\n"
+                    "Enfocate en decisiones tecnicas, implementacion, tradeoffs y evidencia util.\n"
+                    "Entrega: solucion, decisiones y siguiente accion clara para review/qa."
+                ),
+                "review": (
+                    "Objetivo: tensionar la solucion y detectar defectos, riesgos y deuda.\n"
+                    "Enfocate en calidad, seguridad, mantenibilidad y feedback accionable.\n"
+                    "Entrega: feedback priorizado, claro y verificable para build/team_lead."
+                ),
+                "qa": (
+                    "Objetivo: validar criterios de aceptacion, regresiones y cierre operativo.\n"
+                    "Enfocate en pruebas, edge cases, consistencia y riesgos residuales.\n"
+                    "Entrega: estado de validacion, riesgos residuales y recomendacion de cierre o bloqueo."
+                ),
+                "plan_research": (
+                    "Objetivo: mapear opciones, constraints y riesgos del plan.\n"
+                    "Entrega: investigacion util para plan_engineering y plan_risks."
+                ),
+                "plan_engineering": (
+                    "Objetivo: convertir el input del lead en una estrategia tecnica viable.\n"
+                    "Entrega: arquitectura, secuencia de implementacion y tradeoffs."
+                ),
+                "plan_risks": (
+                    "Objetivo: identificar riesgos de ejecucion, seguridad, coste y bloqueo.\n"
+                    "Entrega: matriz breve de riesgos y mitigaciones."
+                ),
+            }
+            return mapping.get(
+                phase,
+                "Objetivo: ejecutar el trabajo delegado con claridad, evidencia y siguiente accion.",
+            )
 
         if chat_mode == "classic":
             phase_task_ids = {
@@ -1796,7 +1843,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     description=(
                         "Recopila contexto tecnico y restricciones para ejecutar la solicitud del usuario.\n"
                         f"Solicitud: {payload.message}\n"
-                        "Entrega hallazgos accionables para implementacion."
+                        "Entrega hallazgos accionables para implementacion.\n\n"
+                        f"Delegation brief:\n{_delegation_brief('discovery')}"
                         f"{continuity_block}"
                     ),
                     role=Role.RESEARCHER,
@@ -1811,6 +1859,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "discovery",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("discovery"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -1819,7 +1869,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     description=(
                         "Implementa la solucion principal solicitada por el usuario con foco en codigo listo para revisar.\n"
                         f"Solicitud: {payload.message}\n"
-                        "Incluye decisiones tecnicas y tradeoffs."
+                        "Incluye decisiones tecnicas y tradeoffs.\n\n"
+                        f"Delegation brief:\n{_delegation_brief('build')}"
                         f"{continuity_block}"
                     ),
                     role=Role.ENGINEER,
@@ -1835,6 +1886,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "build",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("build"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -1842,7 +1895,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     title="Review quality and risks",
                     description=(
                         "Revisa la salida de build, valida calidad, seguridad y mantenibilidad.\n"
-                        f"Solicitud: {payload.message}"
+                        f"Solicitud: {payload.message}\n\n"
+                        f"Delegation brief:\n{_delegation_brief('review')}"
                         f"{continuity_block}"
                     ),
                     role=Role.REVIEWER,
@@ -1857,6 +1911,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "review",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("review"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -1864,7 +1920,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     title="QA verification",
                     description=(
                         "Valida criterios de aceptacion y riesgos de regresion sobre la propuesta.\n"
-                        f"Solicitud: {payload.message}"
+                        f"Solicitud: {payload.message}\n\n"
+                        f"Delegation brief:\n{_delegation_brief('qa')}"
                         f"{continuity_block}"
                     ),
                     role=Role.QA,
@@ -1879,6 +1936,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "qa",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("qa"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -1933,7 +1992,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     description=(
                         "Construye base de decision para el plan: restricciones, riesgos tecnicos y supuestos criticos.\n"
                         f"Solicitud: {payload.message}\n"
-                        "Entrega: checklist accionable para build en esta ventana."
+                        "Entrega: checklist accionable para build en esta ventana.\n\n"
+                        f"Delegation brief:\n{_delegation_brief('plan_research')}"
                         f"{continuity_block}"
                     ),
                     role=Role.RESEARCHER,
@@ -1948,6 +2008,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "plan_research",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("plan_research"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -1956,7 +2018,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     description=(
                         "Define corte de implementacion para esta ventana.\n"
                         f"Solicitud: {payload.message}\n"
-                        "Entrega: tareas secuenciadas, criterios de aceptacion y tradeoffs para ejecutar en build."
+                        "Entrega: tareas secuenciadas, criterios de aceptacion y tradeoffs para ejecutar en build.\n\n"
+                        f"Delegation brief:\n{_delegation_brief('plan_engineering')}"
                         f"{continuity_block}"
                     ),
                     role=Role.ENGINEER,
@@ -1971,6 +2034,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "plan_engineering",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("plan_engineering"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -1979,7 +2044,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     description=(
                         "Define quality gates, pruebas minimas y riesgos de release para esta ventana.\n"
                         f"Solicitud: {payload.message}\n"
-                        "Entrega: criterios de revison/QA para validar lo ejecutado."
+                        "Entrega: criterios de revison/QA para validar lo ejecutado.\n\n"
+                        f"Delegation brief:\n{_delegation_brief('plan_risks')}"
                         f"{continuity_block}"
                     ),
                     role=Role.REVIEWER,
@@ -1994,6 +2060,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "plan_risks",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("plan_risks"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -2002,7 +2070,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     description=(
                         "Ejecuta el slice de mayor impacto definido en planning para esta ventana.\n"
                         f"Solicitud: {payload.message}\n"
-                        "Entrega: implementado, pendientes explicitos y riesgos abiertos."
+                        "Entrega: implementado, pendientes explicitos y riesgos abiertos.\n\n"
+                        f"Delegation brief:\n{_delegation_brief('build')}"
                         f"{continuity_block}"
                     ),
                     role=Role.ENGINEER,
@@ -2022,6 +2091,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "build",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("build"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -2030,7 +2101,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     description=(
                         "Revisa el build contra el plan acordado.\n"
                         f"Solicitud: {payload.message}\n"
-                        "Entrega: hallazgos, bloqueos y decisiones para cerrar o iterar."
+                        "Entrega: hallazgos, bloqueos y decisiones para cerrar o iterar.\n\n"
+                        f"Delegation brief:\n{_delegation_brief('review')}"
                         f"{continuity_block}"
                     ),
                     role=Role.REVIEWER,
@@ -2045,6 +2117,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "review",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("review"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -2053,7 +2127,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     description=(
                         "Valida criterios de aceptacion para lo ejecutado en la ventana.\n"
                         f"Solicitud: {payload.message}\n"
-                        "Entrega: veredicto, cobertura lograda y riesgos de regresion."
+                        "Entrega: veredicto, cobertura lograda y riesgos de regresion.\n\n"
+                        f"Delegation brief:\n{_delegation_brief('qa')}"
                         f"{continuity_block}"
                     ),
                     role=Role.QA,
@@ -2068,6 +2143,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "phase": "qa",
                         "chat_parent": task_root,
                         "delegated_by": "team_lead",
+                        "delegation_brief": _delegation_brief("qa"),
+                        "delegation_from_role": "team_lead",
                     },
                 ),
                 WorkTask(
@@ -2739,6 +2816,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             )
         merged_response = "\n".join(response_lines)
 
+        _token_queue.put(("done", None))
         return TeamChatResponse(
             task_id=task_root,
             role=Role.TEAM_LEAD.value,
@@ -2784,7 +2862,38 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             evidence_gate_failures=evidence_gate_failures,
         )
 
-    return await asyncio.to_thread(_run_chat)
+    async def _event_stream():
+        import asyncio as _asyncio
+        _chat_fut = _asyncio.get_event_loop().run_in_executor(None, _run_chat)
+
+        while True:
+            try:
+                item = await _asyncio.to_thread(lambda: _token_queue.get(timeout=2.0))
+                event_type, data = item
+                if event_type == "token_chunk":
+                    yield f"event: token_chunk\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                elif event_type == "done":
+                    # _run_chat already finished — await the future for the result
+                    try:
+                        result = await _asyncio.wait_for(_asyncio.wrap_future(_chat_fut), timeout=5.0)
+                        result_dict = result.model_dump() if hasattr(result, "model_dump") else {}
+                        yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
+                    except Exception as exc:
+                        yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+                    break
+            except Exception:
+                # timeout in queue.get (queue.Empty) — send keepalive or recover if done
+                if _chat_fut.done():
+                    try:
+                        result = _chat_fut.result()
+                        result_dict = result.model_dump() if hasattr(result, "model_dump") else {}
+                        yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
+                    except Exception as exc:
+                        yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+                    break
+                yield "event: keepalive\ndata: {}\n\n"
+
+    return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
 
 @app.get("/api/aiteam/chat/progress/{task_id}", response_model=TeamChatProgressResponse)
@@ -2863,6 +2972,13 @@ async def post_aiteam_chat_async(payload: TeamChatRequest, request: Request):
             )
 
             orch = build_default_orchestrator(runtime_dir=runtime_dir)
+
+            # Wire token streaming callback → progress_queue
+            def _on_token_chunk(task_id: str, chunk: str) -> None:
+                progress_queue.put(("token_chunk", {"task_id": task_id, "chunk": chunk}))
+
+            orch.token_chunk_callback = _on_token_chunk
+
             round_budget = min(max(1, payload.max_rounds or 5), 20)
 
             # Submit tasks (simplified — lead_intake only for async)

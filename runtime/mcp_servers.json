@@ -23,8 +23,9 @@
         "engineer",
         "reviewer"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "healthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_ok"
     },
     {
       "name": "notion_mcp",
@@ -48,8 +49,9 @@
         "team_lead",
         "researcher"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "unhealthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_failed:npm error code E404 npm error 404 Not Found - GET https://registry.npmjs.org/@modelcontextprotocol%2fserver-notion - Not found npm error 404"
     },
     {
       "name": "postgres_mcp",
@@ -74,8 +76,9 @@
         "qa",
         "researcher"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "unhealthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_failed:Please provide a database URL as a command-line argument"
     },
     {
       "name": "supabase_mcp",
@@ -99,8 +102,9 @@
         "engineer",
         "qa"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "unhealthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_failed:npm error code E404 npm error 404 Not Found - GET https://registry.npmjs.org/@modelcontextprotocol%2fserver-supabase - Not found npm error 4"
     },
     {
       "name": "semgrep_mcp",
@@ -125,8 +129,9 @@
         "qa",
         "engineer"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "unhealthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_failed:npm error code E404 npm error 404 Not Found - GET https://registry.npmjs.org/@modelcontextprotocol%2fserver-semgrep - Not found npm error 40"
     },
     {
       "name": "context7_mcp",
@@ -150,8 +155,9 @@
         "researcher",
         "engineer"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "healthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_ok"
     },
     {
       "name": "perplexity_mcp",
@@ -175,8 +181,9 @@
         "researcher",
         "reviewer"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "unhealthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_failed:npm error code E404 npm error 404 Not Found - GET https://registry.npmjs.org/@modelcontextprotocol%2fserver-perplexity - Not found npm error"
     },
     {
       "name": "slack_mcp",
@@ -198,8 +205,9 @@
       "role_targets": [
         "team_lead"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "unhealthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_failed:Please set SLACK_BOT_TOKEN and SLACK_TEAM_ID environment variables"
     },
     {
       "name": "stripe_mcp",
@@ -223,8 +231,9 @@
         "team_lead",
         "engineer"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "unhealthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_failed:npm error code E404 npm error 404 Not Found - GET https://registry.npmjs.org/@modelcontextprotocol%2fserver-stripe - Not found npm error 404"
     },
     {
       "name": "playwright_mcp",
@@ -248,10 +257,10 @@
         "qa",
         "engineer"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
-    }
-  ,
+      "health_status": "unhealthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_failed:npm error code E404 npm error 404 Not Found - GET https://registry.npmjs.org/@modelcontextprotocol%2fserver-playwright - Not found npm error"
+    },
     {
       "name": "filesystem_mcp",
       "command": "npx.cmd",
@@ -278,8 +287,9 @@
         "qa",
         "researcher"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "healthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_ok"
     },
     {
       "name": "git_mcp",
@@ -306,8 +316,9 @@
         "reviewer",
         "team_lead"
       ],
-      "health_status": "unknown",
-      "last_checked": ""
+      "health_status": "healthy",
+      "last_checked": "2026-03-26T17:19:27.971651+00:00",
+      "health_reason": "probe_ok"
     }
   ]
 }

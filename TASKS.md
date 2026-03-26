@@ -1,6 +1,6 @@
 # Tasks — AI Team Hybrid Orchestrator
 
-> Ultima actualizacion: 2026-03-26 (fixes complejos Claude Teams — 317 tests)
+> Ultima actualizacion: 2026-03-26 (native function calling — 321 tests)
 
 ## Completado
 
@@ -218,13 +218,13 @@ Prioridad: 🔴 urgente / 🟠 alta / 🟡 media / 🔵 baja.
 
 - [x] 🔴 **Google Gemini aplana messages[] — pierde historial conversacional** (RESUELTO 2026-03-26). Reescritura de `_invoke_google()` en `aiteam/adapters/subscription.py`: ahora usa `contents[{role, parts}]` nativo de Gemini, separa `system` → `system_instruction`, mapea `assistant` → `model`, fusiona turnos consecutivos del mismo rol, inserta turno `user` prefijo si el historial empieza con `model`. 5 tests nuevos en `GeminiConversationalTests`.
 
-- [ ] 🟠 **Tool calling por texto `[USE_TOOL]` — fragil e incompatible con function calling nativo**. Los agentes deben formatear `[USE_TOOL tool_name arg="..."]` en su output para que el sistema ejecute herramientas. No usa `tools`/`tool_choice` de la API de OpenAI ni `tool_use` de Anthropic. El LLM puede variar el formato y la herramienta nunca se ejecuta sin aviso claro. Archivo: `aiteam/orchestrator.py::_parse_tool_invocations()`, `aiteam/tool_dispatch.py`.
+- [x] 🟠 **Tool calling por texto `[USE_TOOL]` — fragil e incompatible con function calling nativo** (RESUELTO 2026-03-26). Implementado native function calling en OpenAI (`tools`/`tool_choice`/`tool_calls`) y Anthropic (`tools`/`input_schema`/`tool_use` blocks). `NativeToolDefinition` en `aiteam/adapters/base.py`; `ToolCall` dataclass y `AdapterResponse.tool_calls` en `aiteam/types.py`; router pasa tools via `inspect.signature`; orchestrator hace dos rondas (invoke → execute → follow-up) con guard `_native_tool_round_done`. Gemini mantiene `[USE_TOOL]` como fallback. `[USE_TOOL]` textual preservado como fallback para adapters legacy. 4 tests nuevos en `NativeFunctionCallingTests`. Tests totales: 321.
 
 - [ ] 🟠 **No hay streaming al frontend — usuario ciego durante ejecucion**. Cada llamada LLM puede tardar 20-60s y el frontend no recibe nada hasta que termina. No hay streaming de tokens, ni progress parcial, ni cancelacion de tareas en curso. Archivos: `api/main.py`, adapters, frontend SSE.
 
 - [x] 🟡 **Context overflow sin gestion de tokens** (RESUELTO 2026-03-26). `_compact_turns()` en `aiteam/agent_session.py` ahora acepta `max_chars=60_000` ademas de `max_turns`. Calcula `total_chars` del thread y ajusta `keep_recent` dinamicamente para dejar los turnos retenidos bajo el 70% del limite. El resumen de compaction incluye el total de chars compactado para auditoria. 3 tests nuevos en `ThreadCompactionTests`.
 
-- [ ] 🟡 **Paralelismo por defecto es 1 — el equipo es secuencial**. `AITEAM_MAX_PARALLEL_TASKS=1` hace que Engineer → Reviewer → QA vayan uno detras del otro. Para funcionar como equipo LLM real con varias tareas independientes en paralelo habria que subir a 2-3 y verificar que no haya race conditions nuevas. Archivo: `aiteam/orchestrator.py`, `.env`.
+- [x] 🟡 **Paralelismo por defecto es 1 — el equipo es secuencial** (RESUELTO 2026-03-26). `AITEAM_MAX_PARALLEL_TASKS=2` añadido en `.env`. El orquestador lee primero `AITEAM_MAX_PARALLEL_TASKS_<ENV>` y cae al generico si no existe. Las barreras de dependencia del Batch 2 ya protegen contra race conditions a este nivel de paralelismo.
 
 - [x] 🟡 **Evidence gate no valida calidad** (RESUELTO 2026-03-26). Nuevo metodo `_assess_output_quality(output, role, phase)` en `aiteam/orchestrator.py`. En modo live (sin git diff): detecta respuestas triviales ("tarea completada", "done.", etc.) y las rechaza; exige observaciones accionables para REVIEWER; exige senales de test results para QA; exige output tecnico sustancial (>=200 chars) para ENGINEER. El orden de checks es: trivial → rol especifico → longitud minima. Mock mode sigue sin cambios. 7 tests nuevos en `EvidenceGateQualityTests`.
 

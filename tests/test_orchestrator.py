@@ -814,6 +814,8 @@ class OrchestratorTests(unittest.TestCase):
                 msg for msg in eng_inbox if msg.subject == "Feedback on implementation"
             )
             self.assertTrue(orchestrator.mailbox.is_read(feedback.message_id))
+            self.assertTrue(feedback.consumed)
+            self.assertEqual(feedback.consumed_by, "eng-1")
 
             events = orchestrator.event_logger.recent_events(hours=1)
             self.assertTrue(
@@ -1610,6 +1612,20 @@ class OrchestratorTests(unittest.TestCase):
                 if item.kind == "handoff_context"
             ]
             self.assertTrue(handoff_memory)
+            self.assertIn("Handoff Task:", handoff_memory[-1].content)
+            self.assertIn("Siguiente accion esperada:", handoff_memory[-1].content)
+
+            lead_mail = orchestrator.mailbox.list_messages(recipient="team_lead")
+            self.assertTrue(
+                any(msg.subject == "Handoff executed: HANDOFF-1" for msg in lead_mail)
+            )
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            handoff_events = [
+                item for item in events if item.get("event_type") == "agent_handoff"
+            ]
+            self.assertTrue(handoff_events)
+            self.assertIn("summary", handoff_events[-1].get("payload", {}))
 
 
 if __name__ == "__main__":

@@ -21,10 +21,9 @@
       "healthy": true,
       "details": "gemini_auth_env_key",
       "command": [
-        "npx",
-        "-y",
-        "@google/gemini-cli",
-        "{prompt}"
+        "cmd",
+        "/c",
+        "set GEMINI_API_KEY=%GOOGLE_API_KEY% && npx -y @google/gemini-cli {prompt}"
       ],
       "required": true
     },
@@ -32,9 +31,11 @@
       "provider": "anthropic",
       "name": "claude_pro_cli",
       "healthy": true,
-      "details": "claude_logged_in:None",
+      "details": "claude_logged_in:unknown",
       "command": [
-        "claude",
+        "npx",
+        "-y",
+        "@anthropic-ai/claude-code",
         "-p",
         "{prompt}"
       ],
@@ -45,7 +46,23 @@
     "OPENAI_API_KEY": "set",
     "GOOGLE_API_KEY": "set",
     "ANTHROPIC_API_KEY": "set",
-    "GROQ_API_KEY": "missing"
+    "GROQ_API_KEY": "missing",
+    "NOTEBOOKLM_API_KEY": "missing",
+    "GOOGLE_NOTEBOOKLM_API_KEY": "missing",
+    "NOTEBOOKLM_INGEST_ENDPOINT": "missing",
+    "NOTEBOOKLM_INGEST_COMMAND": "missing"
+  },
+  "local_runtime": {
+    "provider": "ollama",
+    "healthy": true,
+    "details": "model_ready:aiteam-qwen-coder:14b",
+    "command": [
+      "C:\\Users\\she__\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+      "run",
+      "aiteam-qwen-coder:14b",
+      "{prompt}"
+    ],
+    "model": "aiteam-qwen-coder:14b"
   },
   "healthy": true
 }

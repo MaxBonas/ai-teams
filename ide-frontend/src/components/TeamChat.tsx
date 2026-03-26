@@ -339,6 +339,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const [conversationMinimized, setConversationMinimized] = useState(false);
   const [composerMinimized, setComposerMinimized] = useState(false);
   const [showConfig, setShowConfig] = useState<boolean>(readShowConfig);
+  const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [streamingTaskId, setStreamingTaskId] = useState<string>('');
 
   const conversationPanelRef = useRef<PanelImperativeHandle | null>(null);
   const composerPanelRef = useRef<PanelImperativeHandle | null>(null);
@@ -586,110 +588,171 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
         const errorText = await response.text().catch(() => `HTTP ${response.status}`);
         throw new Error(errorText);
       }
-      const json = await response.json();
-      const modeUsed = typeof json.chat_mode === 'string' ? json.chat_mode : chatMode;
-      const roundBudget = Number.isFinite(Number(json.round_budget)) ? Number(json.round_budget) : maxRounds;
-      const roundsUsed = Number.isFinite(Number(json.rounds_used)) ? Number(json.rounds_used) : 0;
-      const completedTasks = Number.isFinite(Number(json.completed_tasks)) ? Number(json.completed_tasks) : 0;
-      const pendingTasks = Number.isFinite(Number(json.pending_tasks)) ? Number(json.pending_tasks) : 0;
-      const artifactCreated = Number.isFinite(Number(json.artifact_created)) ? Number(json.artifact_created) : 0;
-      const artifactModified = Number.isFinite(Number(json.artifact_modified)) ? Number(json.artifact_modified) : 0;
-      const productivityScore = Number.isFinite(Number(json.productivity_score)) ? Number(json.productivity_score) : 0;
-      const reasoningScore = Number.isFinite(Number(json.reasoning_score)) ? Number(json.reasoning_score) : 0;
-      const productivityStatus = typeof json.productivity_status === 'string' ? json.productivity_status : '-';
-      const strictModeApplied = Boolean(json.strict_mode_applied);
-      const autoExtendedRounds = Number.isFinite(Number(json.auto_extended_rounds)) ? Number(json.auto_extended_rounds) : 0;
-      const lowGateRejected = Boolean(json.low_productivity_rejected);
-      const productivityThreshold = Number.isFinite(Number(json.productivity_threshold)) ? Number(json.productivity_threshold) : 35;
-      const executionMode = typeof json.execution_mode === 'string' ? json.execution_mode : 'unknown';
-      const placeholderOutputs = Number.isFinite(Number(json.placeholder_outputs)) ? Number(json.placeholder_outputs) : 0;
-      const evidenceRejected = Boolean(json.evidence_gate_applied);
-      const liveModeRequired = Boolean(json.live_mode_required);
-      const liveModeRejected = Boolean(json.live_mode_rejected);
-      const evidenceFailures = Array.isArray(json.evidence_gate_failures)
-        ? json.evidence_gate_failures.map((item: unknown) => String(item ?? '')).filter((item: string) => item.trim().length > 0)
-        : [];
-      const checkList = Array.isArray(json.successful_checks)
-        ? json.successful_checks.map((item: unknown) => String(item ?? '')).filter((item: string) => item.trim().length > 0)
-        : [];
-      const statusMeta = `mode ${modeUsed} · exec ${executionMode} (placeholder=${placeholderOutputs}) · live-gate ${liveModeRejected ? 'rejected' : (liveModeRequired ? 'required' : 'off')} · checks ${checkList.join(',') || 'none'} · evidence ${evidenceRejected ? `rejected(${evidenceFailures.slice(0, 2).join('|') || 'fail'})` : 'ok'} · rounds ${roundsUsed}/${roundBudget} (+${autoExtendedRounds}) · done ${completedTasks} · pending ${pendingTasks} · delegated ${(json.delegated_task_ids || []).length} · artifacts +${artifactCreated}/~${artifactModified} · quality P${productivityScore}/R${reasoningScore} (${productivityStatus}) · strict ${strictModeApplied ? 'blocked_close' : (strictMode ? 'on' : 'off')} · low-gate ${lowGateRejected ? `rejected(<${productivityThreshold})` : (allowLowProductivityOverride ? 'override' : 'active')} · state ${json.state || '-'} · ${json.elapsed_ms || 0}ms`;
-      const answer = typeof json.response === 'string' && json.response.trim().length > 0
-        ? json.response
-        : (json.error || 'No response content returned by AI Team.');
-      const teamMessage: ChatMessage = {
-        id: `team-${Date.now()}`,
-        sender: 'team',
-        text: answer,
-        meta: statusMeta,
-      };
-      setMessages((prev) => [...prev, teamMessage]);
 
-      const latestRun = json?.task_id
-        ? {
-          task_id: String(json.task_id),
-          mode: String(json.chat_mode || chatMode),
-          round_budget: Number(json.round_budget || maxRounds),
-          rounds_used: Number(json.rounds_used || 0),
-          phase_count: Object.keys(json.phase_task_ids || {}).length,
-          delegated_count: Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids.length : 0,
-          continuation_requested: /\bcontinue\b|\bcontinua\b|\bproceed\b|\bgo on\b/i.test(trimmed),
-          continuation_of: typeof json.continuation_of === 'string' ? json.continuation_of : '',
-          status: typeof json.state === 'string' && json.state === 'in_progress' ? 'window_exhausted' : 'completed_or_closed',
-          execution_mode: executionMode,
-          placeholder_outputs: placeholderOutputs,
-          successful_check_count: Number.isFinite(Number(json.successful_check_count)) ? Number(json.successful_check_count) : 0,
-          live_mode_required: liveModeRequired,
-          live_mode_rejected: liveModeRejected,
-          ts: new Date().toISOString(),
+      // ── Streaming SSE reader ──────────────────────────────────────
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = '';
+      let currentEventType = '';
+      let accumulated = '';
+
+      if (reader) {
+        // Show empty streaming bubble
+        setStreamingText('');
+        setStreamingTaskId(clientTaskId);
+
+        outer: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+
+          // Process complete SSE lines from buffer
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEventType = line.slice(7).trim();
+            } else if (line.startsWith('data: ')) {
+              const rawData = line.slice(6);
+              if (currentEventType === 'keepalive') {
+                currentEventType = '';
+                continue;
+              }
+              if (currentEventType === 'token_chunk') {
+                try {
+                  const parsed = JSON.parse(rawData) as { chunk?: string };
+                  const chunk = parsed.chunk ?? '';
+                  if (chunk) {
+                    accumulated += chunk;
+                    setStreamingText(accumulated);
+                  }
+                } catch { /* ignore malformed chunk */ }
+                currentEventType = '';
+              } else if (currentEventType === 'result') {
+                setStreamingText(null);
+                setStreamingTaskId('');
+                try {
+                  const json = JSON.parse(rawData) as Record<string, unknown>;
+                  const modeUsed = typeof json.chat_mode === 'string' ? json.chat_mode : chatMode;
+                  const roundBudget = Number.isFinite(Number(json.round_budget)) ? Number(json.round_budget) : maxRounds;
+                  const roundsUsed = Number.isFinite(Number(json.rounds_used)) ? Number(json.rounds_used) : 0;
+                  const completedTasks = Number.isFinite(Number(json.completed_tasks)) ? Number(json.completed_tasks) : 0;
+                  const pendingTasks = Number.isFinite(Number(json.pending_tasks)) ? Number(json.pending_tasks) : 0;
+                  const artifactCreated = Number.isFinite(Number(json.artifact_created)) ? Number(json.artifact_created) : 0;
+                  const artifactModified = Number.isFinite(Number(json.artifact_modified)) ? Number(json.artifact_modified) : 0;
+                  const productivityScore = Number.isFinite(Number(json.productivity_score)) ? Number(json.productivity_score) : 0;
+                  const reasoningScore = Number.isFinite(Number(json.reasoning_score)) ? Number(json.reasoning_score) : 0;
+                  const productivityStatus = typeof json.productivity_status === 'string' ? json.productivity_status : '-';
+                  const strictModeApplied = Boolean(json.strict_mode_applied);
+                  const autoExtendedRounds = Number.isFinite(Number(json.auto_extended_rounds)) ? Number(json.auto_extended_rounds) : 0;
+                  const lowGateRejected = Boolean(json.low_productivity_rejected);
+                  const productivityThreshold = Number.isFinite(Number(json.productivity_threshold)) ? Number(json.productivity_threshold) : 35;
+                  const executionMode = typeof json.execution_mode === 'string' ? json.execution_mode : 'unknown';
+                  const placeholderOutputs = Number.isFinite(Number(json.placeholder_outputs)) ? Number(json.placeholder_outputs) : 0;
+                  const evidenceRejected = Boolean(json.evidence_gate_applied);
+                  const liveModeRequired = Boolean(json.live_mode_required);
+                  const liveModeRejected = Boolean(json.live_mode_rejected);
+                  const evidenceFailures = Array.isArray(json.evidence_gate_failures)
+                    ? (json.evidence_gate_failures as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
+                    : [];
+                  const checkList = Array.isArray(json.successful_checks)
+                    ? (json.successful_checks as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
+                    : [];
+                  const statusMeta = `mode ${modeUsed} · exec ${executionMode} (placeholder=${placeholderOutputs}) · live-gate ${liveModeRejected ? 'rejected' : (liveModeRequired ? 'required' : 'off')} · checks ${checkList.join(',') || 'none'} · evidence ${evidenceRejected ? `rejected(${evidenceFailures.slice(0, 2).join('|') || 'fail'})` : 'ok'} · rounds ${roundsUsed}/${roundBudget} (+${autoExtendedRounds}) · done ${completedTasks} · pending ${pendingTasks} · delegated ${(Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids : []).length} · artifacts +${artifactCreated}/~${artifactModified} · quality P${productivityScore}/R${reasoningScore} (${productivityStatus}) · strict ${strictModeApplied ? 'blocked_close' : (strictMode ? 'on' : 'off')} · low-gate ${lowGateRejected ? `rejected(<${productivityThreshold})` : (allowLowProductivityOverride ? 'override' : 'active')} · state ${String(json.state || '-')} · ${Number(json.elapsed_ms) || 0}ms`;
+                  const answer = typeof json.response === 'string' && json.response.trim().length > 0
+                    ? json.response
+                    : (String(json.error || '') || 'No response content returned by AI Team.');
+                  const teamMessage: ChatMessage = {
+                    id: `team-${Date.now()}`,
+                    sender: 'team',
+                    text: answer,
+                    meta: statusMeta,
+                  };
+                  setMessages((prev) => [...prev, teamMessage]);
+
+                  const latestRun = typeof json.task_id === 'string' && json.task_id
+                    ? {
+                      task_id: String(json.task_id),
+                      mode: String(json.chat_mode ?? chatMode),
+                      round_budget: Number(json.round_budget ?? maxRounds),
+                      rounds_used: Number(json.rounds_used ?? 0),
+                      phase_count: Object.keys(typeof json.phase_task_ids === 'object' && json.phase_task_ids ? json.phase_task_ids as object : {}).length,
+                      delegated_count: Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids.length : 0,
+                      continuation_requested: /\bcontinue\b|\bcontinua\b|\bproceed\b|\bgo on\b/i.test(trimmed),
+                      continuation_of: typeof json.continuation_of === 'string' ? json.continuation_of : '',
+                      status: typeof json.state === 'string' && json.state === 'in_progress' ? 'window_exhausted' : 'completed_or_closed',
+                      execution_mode: executionMode,
+                      placeholder_outputs: placeholderOutputs,
+                      successful_check_count: Number.isFinite(Number(json.successful_check_count)) ? Number(json.successful_check_count) : 0,
+                      live_mode_required: liveModeRequired,
+                      live_mode_rejected: liveModeRejected,
+                      ts: new Date().toISOString(),
+                    }
+                    : null;
+                  if (latestRun) setLastChatRun(latestRun);
+
+                  setChatProgress((prev) => ({
+                    task_id: typeof json.task_id === 'string' && json.task_id.trim().length > 0 ? json.task_id : clientTaskId,
+                    exists: true,
+                    state: typeof json.state === 'string' ? json.state : (prev?.state ?? 'completed'),
+                    round_budget: roundBudget,
+                    rounds_used: roundsUsed,
+                    phase_states: prev?.phase_states ?? {},
+                    completed_tasks: completedTasks,
+                    pending_tasks: pendingTasks,
+                    failed_tasks: prev?.failed_tasks ?? 0,
+                    execution_attempts: Number.isFinite(Number(json.execution_attempts)) ? Number(json.execution_attempts) : (prev?.execution_attempts ?? 0),
+                    execution_steps: Number.isFinite(Number(json.execution_steps)) ? Number(json.execution_steps) : (prev?.execution_steps ?? 0),
+                    execution_steps_success: Number.isFinite(Number(json.execution_steps_success)) ? Number(json.execution_steps_success) : (prev?.execution_steps_success ?? 0),
+                    execution_mode: typeof json.execution_mode === 'string' ? json.execution_mode : (prev?.execution_mode ?? 'queued'),
+                    placeholder_outputs: Number.isFinite(Number(json.placeholder_outputs)) ? Number(json.placeholder_outputs) : (prev?.placeholder_outputs ?? 0),
+                    successful_checks: Array.isArray(json.successful_checks)
+                      ? (json.successful_checks as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
+                      : (prev?.successful_checks ?? []),
+                    successful_check_count: Number.isFinite(Number(json.successful_check_count)) ? Number(json.successful_check_count) : (prev?.successful_check_count ?? 0),
+                    live_mode_required: Boolean(json.live_mode_required),
+                    live_mode_rejected: Boolean(json.live_mode_rejected),
+                    evidence_gate_rejected: Boolean(json.evidence_gate_applied),
+                    evidence_gate_failures: Array.isArray(json.evidence_gate_failures)
+                      ? (json.evidence_gate_failures as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
+                      : (prev?.evidence_gate_failures ?? []),
+                    last_event: typeof json.state === 'string' ? `Run ${json.state}` : (prev?.last_event ?? ''),
+                    last_event_ts: new Date().toISOString(),
+                  }));
+
+                  if (json.decision_justification) {
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id: `team-just-${Date.now()}`,
+                        sender: 'team',
+                        text: `Decision trace: ${String(json.decision_justification)}`,
+                        meta: 'justification',
+                      },
+                    ]);
+                  }
+                } catch { /* error parsing result JSON */ }
+                currentEventType = '';
+                break outer;
+              } else if (currentEventType === 'error') {
+                setStreamingText(null);
+                setStreamingTaskId('');
+                try {
+                  const parsed = JSON.parse(rawData) as { error?: string };
+                  throw new Error(parsed.error ?? 'SSE error event');
+                } catch (parseErr) {
+                  throw parseErr instanceof Error ? parseErr : new Error('SSE error');
+                }
+              }
+            }
+          }
         }
-        : null;
-      if (latestRun) {
-        setLastChatRun(latestRun);
-      }
-
-      setChatProgress((prev) => ({
-        task_id: typeof json.task_id === 'string' && json.task_id.trim().length > 0 ? json.task_id : clientTaskId,
-        exists: true,
-        state: typeof json.state === 'string' ? json.state : (prev?.state || 'completed'),
-        round_budget: roundBudget,
-        rounds_used: roundsUsed,
-        phase_states: prev?.phase_states || {},
-        completed_tasks: completedTasks,
-        pending_tasks: pendingTasks,
-        failed_tasks: prev?.failed_tasks || 0,
-        execution_attempts: Number.isFinite(Number(json.execution_attempts)) ? Number(json.execution_attempts) : (prev?.execution_attempts || 0),
-        execution_steps: Number.isFinite(Number(json.execution_steps)) ? Number(json.execution_steps) : (prev?.execution_steps || 0),
-        execution_steps_success: Number.isFinite(Number(json.execution_steps_success)) ? Number(json.execution_steps_success) : (prev?.execution_steps_success || 0),
-        execution_mode: typeof json.execution_mode === 'string' ? json.execution_mode : (prev?.execution_mode || 'queued'),
-        placeholder_outputs: Number.isFinite(Number(json.placeholder_outputs)) ? Number(json.placeholder_outputs) : (prev?.placeholder_outputs || 0),
-        successful_checks: Array.isArray(json.successful_checks)
-          ? json.successful_checks.map((item: unknown) => String(item ?? '')).filter((item: string) => item.trim().length > 0)
-          : (prev?.successful_checks || []),
-        successful_check_count: Number.isFinite(Number(json.successful_check_count))
-          ? Number(json.successful_check_count)
-          : (prev?.successful_check_count || 0),
-        live_mode_required: Boolean(json.live_mode_required),
-        live_mode_rejected: Boolean(json.live_mode_rejected),
-        evidence_gate_rejected: Boolean(json.evidence_gate_applied),
-        evidence_gate_failures: Array.isArray(json.evidence_gate_failures)
-          ? json.evidence_gate_failures.map((item: unknown) => String(item ?? '')).filter((item: string) => item.trim().length > 0)
-          : (prev?.evidence_gate_failures || []),
-        last_event: typeof json.state === 'string' ? `Run ${json.state}` : (prev?.last_event || ''),
-        last_event_ts: new Date().toISOString(),
-      }));
-
-      if (json.decision_justification) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `team-just-${Date.now()}`,
-            sender: 'team',
-            text: `Decision trace: ${json.decision_justification}`,
-            meta: 'justification',
-          },
-        ]);
+        reader.releaseLock();
       }
     } catch (error) {
+      setStreamingText(null);
+      setStreamingTaskId('');
       const err = error instanceof Error ? error.message : 'Unknown network error';
       setMessages((prev) => [
         ...prev,
@@ -712,6 +775,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
         };
       });
     } finally {
+      setStreamingText(null);
+      setStreamingTaskId('');
       if (progressIntervalId !== null) {
         window.clearInterval(progressIntervalId);
       }
@@ -825,6 +890,15 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                     </article>
                   );
                 })
+              )}
+              {streamingText !== null && (
+                <div className="team-chat-message team-chat-message--team team-chat-message--streaming">
+                  <div className="team-chat-message-content">
+                    <span className="team-chat-streaming-cursor">{streamingText}</span>
+                    <span className="team-chat-cursor-blink">&#x258A;</span>
+                  </div>
+                  <div className="team-chat-message-meta">streaming… {streamingTaskId}</div>
+                </div>
               )}
             </div>
           </div>

@@ -159,7 +159,7 @@
       "type": "external_program",
       "name": "openai_pro_cli",
       "provider": "openai",
-      "model": "gpt-5.3-codex",
+      "model": "gpt-4o",
       "channel": "subscription",
       "command": [
         "npx",
@@ -192,13 +192,12 @@
       "type": "external_program",
       "name": "gemini_pro_cli",
       "provider": "google",
-      "model": "gemini-3.1-pro",
+      "model": "gemini-1.5-pro",
       "channel": "subscription",
       "command": [
-        "npx",
-        "-y",
-        "@google/gemini-cli",
-        "{prompt}"
+        "cmd",
+        "/c",
+        "set GEMINI_API_KEY=%GOOGLE_API_KEY% && npx -y @google/gemini-cli {prompt}"
       ],
       "capabilities": [
         "coding",
@@ -213,7 +212,7 @@
       ],
       "priority": "primary",
       "routing_priority": 20,
-      "enabled": false,
+      "enabled": true,
       "requires_approval": false,
       "timeout_seconds": 180,
       "cost_tier": 0,
@@ -223,10 +222,12 @@
       "type": "external_program",
       "name": "claude_pro_cli",
       "provider": "anthropic",
-      "model": "claude-code",
+      "model": "claude-3-5-sonnet-20241022",
       "channel": "subscription",
       "command": [
-        "claude",
+        "npx",
+        "-y",
+        "@anthropic-ai/claude-code",
         "-p",
         "{prompt}"
       ],
@@ -285,6 +286,38 @@
       "timeout_seconds": 180,
       "cost_tier": 0,
       "source": "notebooklm_bridge"
+    },
+    {
+      "type": "external_program",
+      "name": "ollama_qwen_coder_local",
+      "provider": "local",
+      "model": "aiteam-qwen-coder:14b",
+      "channel": "subscription",
+      "command": [
+        "C:\\Users\\she__\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+        "run",
+        "aiteam-qwen-coder:14b",
+        "{prompt}"
+      ],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "analysis",
+        "review"
+      ],
+      "role_targets": [
+        "engineer",
+        "reviewer",
+        "researcher",
+        "qa"
+      ],
+      "priority": "secondary",
+      "routing_priority": 40,
+      "enabled": true,
+      "requires_approval": false,
+      "timeout_seconds": 240,
+      "cost_tier": 0,
+      "source": "ollama_local"
     }
   ]
 }

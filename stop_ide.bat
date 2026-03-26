@@ -1,8 +1,8 @@
 @echo off
 setlocal EnableExtensions
 
-set "BACKEND_PORT=8000"
-set "FRONTEND_PORT=9483"
+set "BACKEND_PORT=8010"
+set "FRONTEND_PORT=9490"
 
 echo [AI Team IDE] Stopping services...
 call :kill_port %BACKEND_PORT%

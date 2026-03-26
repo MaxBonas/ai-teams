@@ -919,3 +919,32 @@
   display: block;
   line-height: 1.4;
 }
+
+/* ── Streaming SSE bubble ── */
+.team-chat-message--streaming {
+  opacity: 0.85;
+  padding: 6px 10px;
+  background: var(--surface-color-2, var(--surface-color));
+  border-radius: 6px;
+  margin: 4px 0;
+}
+.team-chat-message-content {
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.team-chat-message-meta {
+  font-size: 0.75em;
+  color: var(--text-secondary, #888);
+  margin-top: 2px;
+}
+.team-chat-cursor-blink {
+  display: inline-block;
+  animation: blink 1s step-end infinite;
+  margin-left: 1px;
+  color: var(--accent, #4a9eff);
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}

@@ -108,6 +108,7 @@ class AITeamOrchestrator:
         self._workflow_state_path = runtime_dir / "workflow_state.json"
         self._load_workflow_state()
         self.session_store = SessionStore(runtime_dir)
+        self.token_chunk_callback: "Callable[[str, str], None] | None" = None
         self._init_tool_dispatcher()
 
     def _init_tool_dispatcher(self) -> None:
@@ -919,12 +920,18 @@ class AITeamOrchestrator:
         )
         session.record_action("llm_call", f"route_and_invoke:{task.role.value}")
         native_tools = self._build_native_tools_for_task(task)
+        on_chunk = None
+        if self.token_chunk_callback is not None:
+            _task_id_for_chunk = task.task_id
+            _cb = self.token_chunk_callback
+            on_chunk = lambda chunk: _cb(_task_id_for_chunk, chunk)
         decision = self.router.route_and_invoke(
             request=request,
             prompt=prompt,
             task_id=task.task_id,
             messages=messages,
             tools=native_tools if native_tools else None,
+            on_chunk=on_chunk,
         )
         session.record_action(
             "llm_call",

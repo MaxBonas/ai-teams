@@ -315,6 +315,7 @@ class HybridRouter:
         task_id: str = "",
         messages: list[dict[str, str]] | None = None,
         tools=None,
+        on_chunk: "Callable[[str], None] | None" = None,
     ) -> RoutingDecision:
         attempts: list[str] = []
         attempted_channels: dict[ChannelType, int] = {
@@ -397,13 +398,43 @@ class HybridRouter:
                     continue
 
             attempted_channels[adapter.channel] += 1
-            invoke_params = inspect.signature(adapter.invoke).parameters
-            kwargs = {}
-            if "messages" in invoke_params:
-                kwargs["messages"] = messages
-            if "tools" in invoke_params and tools is not None:
-                kwargs["tools"] = tools
-            response = adapter.invoke(prompt, **kwargs)
+            if on_chunk is not None:
+                import time as _time
+                started = _time.time()
+                chunks: list[str] = []
+                try:
+                    for chunk in adapter.invoke_stream(prompt, messages=messages):
+                        on_chunk(chunk)
+                        chunks.append(chunk)
+                except Exception:
+                    chunks = []
+                if chunks:
+                    content = "".join(chunks)
+                    from aiteam.types import AdapterResponse
+                    response = AdapterResponse(
+                        success=True,
+                        content=content,
+                        latency_ms=int((_time.time() - started) * 1000),
+                        input_tokens=max(1, len(prompt) // 4),
+                        output_tokens=max(1, len(content) // 4),
+                    )
+                else:
+                    # Fallback a invoke normal si streaming no produjo chunks
+                    invoke_params = inspect.signature(adapter.invoke).parameters
+                    kwargs = {}
+                    if "messages" in invoke_params:
+                        kwargs["messages"] = messages
+                    if "tools" in invoke_params and tools is not None:
+                        kwargs["tools"] = tools
+                    response = adapter.invoke(prompt, **kwargs)
+            else:
+                invoke_params = inspect.signature(adapter.invoke).parameters
+                kwargs = {}
+                if "messages" in invoke_params:
+                    kwargs["messages"] = messages
+                if "tools" in invoke_params and tools is not None:
+                    kwargs["tools"] = tools
+                response = adapter.invoke(prompt, **kwargs)
             attempts.append(
                 f"{adapter.name}:{adapter.channel.value}:{'ok' if response.success else 'fail'}"
             )

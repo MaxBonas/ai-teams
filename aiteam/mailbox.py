@@ -16,6 +16,9 @@ class MailMessage:
     body: str
     task_id: str | None = None
     message_id: str = ""
+    kind: str = "informational"
+    consumed: bool = False
+    consumed_by: str = ""
 
 
 class Mailbox:
@@ -35,6 +38,7 @@ class Mailbox:
         subject: str,
         body: str,
         task_id: str | None = None,
+        kind: str = "actionable",
     ) -> None:
         with self._lock:
             self._msg_counter += 1
@@ -47,6 +51,7 @@ class Mailbox:
             body=body,
             task_id=task_id,
             message_id=msg_id,
+            kind=kind,
         )
         with self._lock:
             with self.storage_path.open("a", encoding="utf-8") as f:
@@ -79,6 +84,30 @@ class Mailbox:
         with self._lock:
             self._read_set.add(message_id)
 
+    def mark_consumed(self, message_id: str, consumed_by: str) -> None:
+        with self._lock:
+            raw = self.storage_path.read_text(encoding="utf-8")
+            rows = []
+            for line in raw.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict) and data.get("message_id") == message_id:
+                    data["consumed"] = True
+                    data["consumed_by"] = consumed_by
+                rows.append(data)
+            serialized = [
+                json.dumps(item, ensure_ascii=True)
+                for item in rows
+                if isinstance(item, dict)
+            ]
+            self.storage_path.write_text(
+                "\n".join(serialized) + ("\n" if serialized else ""), encoding="utf-8"
+            )
+
     def mark_read_bulk(self, message_ids: list[str]) -> None:
         """Mark multiple messages as read."""
         with self._lock:
@@ -92,7 +121,11 @@ class Mailbox:
         """Get unread messages for a recipient."""
         messages = self.list_messages(recipient=recipient)
         with self._lock:
-            return [m for m in messages if m.message_id and m.message_id not in self._read_set]
+            return [
+                m
+                for m in messages
+                if m.message_id and m.message_id not in self._read_set
+            ]
 
     def unread_count(self, recipient: str) -> int:
         return len(self.unread_messages(recipient))
@@ -102,6 +135,7 @@ class Mailbox:
         recipient: str,
         *,
         unread_only: bool = False,
+        actionable_only: bool = False,
         sender: str | None = None,
         task_id: str | None = None,
         limit: int = 20,
@@ -111,6 +145,8 @@ class Mailbox:
             messages = self.unread_messages(recipient)
         else:
             messages = self.list_messages(recipient=recipient)
+        if actionable_only:
+            messages = [m for m in messages if m.kind == "actionable"]
         if sender:
             messages = [m for m in messages if m.sender == sender]
         if task_id:

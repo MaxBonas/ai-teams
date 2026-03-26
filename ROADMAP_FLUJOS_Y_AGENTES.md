@@ -479,17 +479,15 @@ Ver detalle completo en `TASKS.md` seccion "Puntos flacos identificados".
 
 ### Alta (limita calidad del equipo)
 
-**3. Tool calling via texto `[USE_TOOL]` — fragil** — PENDIENTE (spec para siguiente agente)
-- No usa `tools`/`tool_choice` (OpenAI) ni `tool_use` (Anthropic) de las APIs.
-- El LLM puede variar el formato y la herramienta no se ejecuta sin aviso visible.
-- **Spec del fix**:
-  - Añadir `ToolDefinition(name, description, parameters_json_schema)` en `aiteam/adapters/base.py`.
-  - `invoke(prompt, messages, tools=None)` — nuevo parametro opcional en todos los adapters.
-  - `ApiAdapter._invoke_openai_compatible()`: si `tools` presente, añadir `"tools"` y `"tool_choice": "auto"` al body; parsear `finish_reason == "tool_calls"` en la respuesta; devolver `tool_calls` en `AdapterResponse`.
-  - `SubscriptionAdapter._invoke_anthropic()`: anadir `"tools"` al body; parsear bloques `type == "tool_use"` en `content`.
-  - En `orchestrator.py::_run_task()`: pasar definiciones de herramientas al invoke; si la respuesta tiene `tool_calls`, ejecutar, serializar resultado y hacer segundo invoke con el resultado.
-  - Mantener `[USE_TOOL]` como fallback cuando el adapter no soporte tools nativos.
-  - Tests: `test_openai_tool_calling_roundtrip`, `test_anthropic_tool_use_roundtrip`, `test_tool_call_result_injected_in_thread`.
+**3. Tool calling via texto `[USE_TOOL]` — fragil** — ✅ RESUELTO 2026-03-26
+- Native function calling implementado para OpenAI y Anthropic.
+- `NativeToolDefinition(name, description, parameters)` en `aiteam/adapters/base.py`.
+- `ToolCall(id, name, arguments)` dataclass + `AdapterResponse.tool_calls` en `aiteam/types.py`.
+- `ApiAdapter` y `SubscriptionAdapter`: OpenAI usa `tools`/`tool_choice`/`tool_calls`; Anthropic usa `input_schema`/`tool_use` blocks.
+- Router pasa `tools` via `inspect.signature` (backward compatible).
+- Orchestrator: `_build_native_tools_for_task()`, `_execute_native_tool_calls()`, dos rondas con guard `_native_tool_round_done`.
+- Gemini mantiene `[USE_TOOL]` como fallback; adapters legacy no afectados.
+- 4 tests en `NativeFunctionCallingTests` en `tests/test_api_adapter_live.py`. Total: 321 tests.
 
 **4. Sin streaming al frontend** — PENDIENTE (spec para siguiente agente)
 - Llamadas LLM de 20-60s sin feedback visible para el usuario.

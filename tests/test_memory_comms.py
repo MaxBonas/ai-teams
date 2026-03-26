@@ -56,6 +56,7 @@ class MemoryAndCommsTests(unittest.TestCase):
             messages = mailbox.list_messages(recipient="lead-1")
             self.assertTrue(messages)
             self.assertIn("Sync meeting", messages[-1].subject)
+            self.assertEqual(messages[-1].kind, "informational")
 
     def test_informational_meeting_skips_when_signal_is_insufficient(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -113,6 +114,24 @@ class MemoryAndCommsTests(unittest.TestCase):
             self.assertTrue(meeting_events)
             payload = meeting_events[-1].get("payload", {}) or {}
             self.assertEqual(payload.get("meeting_kind"), "actionable")
+
+    def test_mailbox_can_mark_message_consumed_and_filter_actionable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mailbox = Mailbox(Path(tmp) / "mailbox.jsonl")
+            mailbox.send(
+                "team_lead", "eng-1", "Do this", "Implement 2FA", kind="actionable"
+            )
+            mailbox.send("system", "eng-1", "FYI", "Status note", kind="informational")
+
+            actionable = mailbox.inbox_query("eng-1", actionable_only=True)
+            self.assertEqual(len(actionable), 1)
+            self.assertEqual(actionable[0].subject, "Do this")
+
+            mailbox.mark_consumed(actionable[0].message_id, consumed_by="eng-1")
+            reloaded = mailbox.list_messages(recipient="eng-1")
+            consumed = next(msg for msg in reloaded if msg.subject == "Do this")
+            self.assertTrue(consumed.consumed)
+            self.assertEqual(consumed.consumed_by, "eng-1")
 
     def test_memory_filters_exclude_meeting_minutes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
