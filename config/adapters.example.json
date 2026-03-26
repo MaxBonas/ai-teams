@@ -1,0 +1,132 @@
+{
+  "external_adapters": [
+    {
+      "type": "external_program",
+      "name": "my_engineer_runtime",
+      "provider": "custom",
+      "model": "runtime-v1",
+      "channel": "subscription",
+      "command": [
+        "python",
+        "-c",
+        "print('external runtime ok')"
+      ],
+      "capabilities": [
+        "coding",
+        "analysis"
+      ],
+      "role_targets": [
+        "engineer",
+        "reviewer"
+      ],
+      "priority": "secondary",
+      "enabled": true,
+      "requires_approval": false,
+      "timeout_seconds": 120,
+      "cost_tier": 0
+    },
+    {
+      "type": "external_program",
+      "name": "secretariawhatsapp",
+      "provider": "custom",
+      "model": "whatsapp-assistant",
+      "channel": "subscription",
+      "command": [
+        "python",
+        "-c",
+        "print('configure secretariawhatsapp command')"
+      ],
+      "capabilities": [
+        "analysis",
+        "knowledge_base",
+        "messaging"
+      ],
+      "role_targets": [
+        "team_lead",
+        "researcher"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": true,
+      "timeout_seconds": 120,
+      "cost_tier": 1
+    },
+    {
+      "type": "external_program",
+      "name": "playstore_publisher",
+      "provider": "custom",
+      "model": "android-release-bot",
+      "channel": "subscription",
+      "command": [
+        "python",
+        "-c",
+        "print('configure playstore publisher command')"
+      ],
+      "capabilities": [
+        "release",
+        "android",
+        "automation"
+      ],
+      "role_targets": [
+        "engineer",
+        "qa"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": true,
+      "timeout_seconds": 180,
+      "cost_tier": 1
+    },
+    {
+      "type": "external_program",
+      "name": "android_browser_auditor",
+      "provider": "custom",
+      "model": "android-audit-bot",
+      "channel": "subscription",
+      "command": [
+        "python",
+        "-c",
+        "print('configure android auditor command')"
+      ],
+      "capabilities": [
+        "qa",
+        "android",
+        "browser_testing"
+      ],
+      "role_targets": [
+        "qa"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": true,
+      "timeout_seconds": 180,
+      "cost_tier": 1
+    },
+    {
+      "type": "external_program",
+      "name": "video_editor_remotion",
+      "provider": "custom",
+      "model": "remotion-video-suite",
+      "channel": "subscription",
+      "command": [
+        "cmd",
+        "/c",
+        "cd /d \"C:\\Users\\Max\\Antigravity Projects\\VideoGenerator\" && npm run build -- --help"
+      ],
+      "capabilities": [
+        "multimodal",
+        "video_generation",
+        "rendering"
+      ],
+      "role_targets": [
+        "engineer",
+        "researcher"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": false,
+      "timeout_seconds": 180,
+      "cost_tier": 1
+    }
+  ]
+}

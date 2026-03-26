@@ -1,0 +1,84 @@
+.sidebar {
+  background: var(--surface-color);
+  backdrop-filter: blur(10px);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-header {
+  padding: 16px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--accent);
+}
+
+.sidebar-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sidebar-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.file-item {
+  padding: 4px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.file-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.file-item.active {
+  background: rgba(47, 129, 247, 0.1);
+  color: var(--accent-hover);
+  border-right: 2px solid var(--accent);
+}
+
+.file-item.dir {
+  font-weight: 500;
+}

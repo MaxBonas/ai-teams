@@ -1,0 +1,290 @@
+{
+  "external_adapters": [
+    {
+      "type": "external_program",
+      "name": "my_engineer_runtime",
+      "provider": "custom",
+      "model": "runtime-v1",
+      "channel": "subscription",
+      "command": [
+        "python",
+        "-c",
+        "print('external runtime ok')"
+      ],
+      "capabilities": [
+        "coding",
+        "analysis"
+      ],
+      "role_targets": [
+        "engineer",
+        "reviewer"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": false,
+      "timeout_seconds": 120,
+      "cost_tier": 0
+    },
+    {
+      "type": "external_program",
+      "name": "secretariawhatsapp",
+      "provider": "custom",
+      "model": "whatsapp-assistant",
+      "channel": "subscription",
+      "command": [
+        "cmd",
+        "/c",
+        "cd /d \"C:\\Users\\she__\\Documents\\Antigravity Projects\\Secretaria_Whatsapp\" && npx tsx src/index.ts"
+      ],
+      "capabilities": [
+        "analysis",
+        "knowledge_base",
+        "messaging"
+      ],
+      "role_targets": [
+        "team_lead",
+        "researcher"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": true,
+      "timeout_seconds": 120,
+      "cost_tier": 1
+    },
+    {
+      "type": "external_program",
+      "name": "playstore_publisher",
+      "provider": "custom",
+      "model": "android-release-bot",
+      "channel": "subscription",
+      "command": [
+        "cmd",
+        "/c",
+        "cd /d \"C:\\Users\\she__\\Documents\\Antigravity Projects\\AgenteGptPlayStore\" && python main.py auto \"{prompt}\" --dry-run"
+      ],
+      "capabilities": [
+        "release",
+        "android",
+        "automation"
+      ],
+      "role_targets": [
+        "engineer",
+        "qa"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": true,
+      "timeout_seconds": 180,
+      "cost_tier": 1
+    },
+    {
+      "type": "external_program",
+      "name": "android_browser_auditor",
+      "provider": "custom",
+      "model": "android-audit-bot",
+      "channel": "subscription",
+      "command": [
+        "python",
+        "scripts/android_auditor_bridge.py",
+        "--check",
+        "--prompt",
+        "{prompt}"
+      ],
+      "capabilities": [
+        "qa",
+        "android",
+        "browser_testing"
+      ],
+      "role_targets": [
+        "qa"
+      ],
+      "priority": "secondary",
+      "enabled": true,
+      "requires_approval": false,
+      "timeout_seconds": 180,
+      "cost_tier": 1
+    },
+    {
+      "type": "external_program",
+      "name": "video_editor_remotion",
+      "provider": "custom",
+      "model": "remotion-video-suite",
+      "channel": "subscription",
+      "command": [
+        "cmd",
+        "/c",
+        "cd /d \"C:\\Users\\she__\\Documents\\Antigravity Projects\\VideoGenerator\" && npm run build -- --help"
+      ],
+      "capabilities": [
+        "multimodal",
+        "video_generation",
+        "rendering"
+      ],
+      "role_targets": [
+        "engineer",
+        "researcher"
+      ],
+      "priority": "secondary",
+      "enabled": false,
+      "requires_approval": false,
+      "timeout_seconds": 180,
+      "cost_tier": 1
+    },
+    {
+      "type": "api",
+      "name": "groq_fallback",
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "channel": "api",
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "analysis",
+        "summarization"
+      ],
+      "role_targets": [
+        "engineer",
+        "researcher",
+        "reviewer",
+        "qa"
+      ],
+      "priority": "secondary",
+      "routing_priority": 90,
+      "enabled": true,
+      "requires_approval": false,
+      "require_key": true,
+      "cost_tier": 1
+    },
+    {
+      "type": "external_program",
+      "name": "openai_pro_cli",
+      "provider": "openai",
+      "model": "gpt-5.3-codex",
+      "channel": "subscription",
+      "command": [
+        "npx",
+        "-y",
+        "@openai/codex",
+        "exec",
+        "--skip-git-repo-check",
+        "{prompt}"
+      ],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "review",
+        "analysis"
+      ],
+      "role_targets": [
+        "team_lead",
+        "engineer",
+        "reviewer"
+      ],
+      "priority": "primary",
+      "routing_priority": 10,
+      "enabled": true,
+      "requires_approval": false,
+      "timeout_seconds": 180,
+      "cost_tier": 0,
+      "source": "openai_pro_cli"
+    },
+    {
+      "type": "external_program",
+      "name": "gemini_pro_cli",
+      "provider": "google",
+      "model": "gemini-3.1-pro",
+      "channel": "subscription",
+      "command": [
+        "npx",
+        "-y",
+        "@google/gemini-cli",
+        "{prompt}"
+      ],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "analysis",
+        "summarization"
+      ],
+      "role_targets": [
+        "team_lead",
+        "engineer",
+        "researcher"
+      ],
+      "priority": "primary",
+      "routing_priority": 20,
+      "enabled": false,
+      "requires_approval": false,
+      "timeout_seconds": 180,
+      "cost_tier": 0,
+      "source": "gemini_pro_cli"
+    },
+    {
+      "type": "external_program",
+      "name": "claude_pro_cli",
+      "provider": "anthropic",
+      "model": "claude-code",
+      "channel": "subscription",
+      "command": [
+        "claude",
+        "-p",
+        "{prompt}"
+      ],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "analysis",
+        "review"
+      ],
+      "role_targets": [
+        "team_lead",
+        "engineer",
+        "reviewer",
+        "researcher"
+      ],
+      "priority": "primary",
+      "routing_priority": 30,
+      "enabled": true,
+      "requires_approval": false,
+      "timeout_seconds": 180,
+      "cost_tier": 0,
+      "source": "claude_pro_cli"
+    },
+    {
+      "type": "external_program",
+      "name": "notebooklm_bridge",
+      "provider": "notebooklm",
+      "model": "knowledge-sync-v1",
+      "channel": "subscription",
+      "command": [
+        "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\venv\\Scripts\\python.exe",
+        "-m",
+        "aiteam.cli",
+        "notebooklm-sync",
+        "--runtime-dir",
+        "runtime",
+        "--notebooklm-from-prompt",
+        "{prompt}",
+        "--notebooklm-title",
+        "AI Team Adapter Sync",
+        "--quiet"
+      ],
+      "capabilities": [
+        "knowledge_base",
+        "learning_sync",
+        "summarization"
+      ],
+      "role_targets": [
+        "team_lead",
+        "researcher"
+      ],
+      "priority": "secondary",
+      "routing_priority": 180,
+      "enabled": true,
+      "requires_approval": false,
+      "timeout_seconds": 180,
+      "cost_tier": 0,
+      "source": "notebooklm_bridge"
+    }
+  ]
+}

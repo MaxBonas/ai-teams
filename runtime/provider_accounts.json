@@ -1,0 +1,39 @@
+{
+  "subscription_accounts": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.3-codex",
+      "enabled_env": "AITEAM_SUBSCRIPTION_OPENAI_ENABLED",
+      "notes": "Primary senior coder account",
+      "connected": true,
+      "details": "openai_logged_in:chatgpt"
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.1-pro",
+      "enabled_env": "AITEAM_SUBSCRIPTION_GOOGLE_ENABLED",
+      "notes": "Second senior coder account",
+      "connected": false,
+      "details": "gemini_auth_missing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-code",
+      "enabled_env": "AITEAM_SUBSCRIPTION_ANTHROPIC_ENABLED",
+      "notes": "Third senior coder account",
+      "connected": true,
+      "details": "claude_logged_in:pro"
+    }
+  ],
+  "api_accounts": [
+    {
+      "provider": "openai",
+      "models": [
+        "gpt-4.1-mini",
+        "gpt-4o-mini"
+      ],
+      "api_key_env": "OPENAI_API_KEY",
+      "notes": "Fallback API budget-aware"
+    }
+  ]
+}

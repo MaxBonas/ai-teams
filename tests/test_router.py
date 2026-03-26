@@ -1,0 +1,406 @@
+import unittest
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+from aiteam.adapters import ApiAdapter, SubscriptionAdapter
+from aiteam.config import build_default_router_policy
+from aiteam.finops import BudgetManager, BudgetPolicy
+from aiteam.router import HybridRouter
+from aiteam.types import Complexity, Criticality, Role, RoutingRequest
+
+
+class RouterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                ),
+                ApiAdapter(
+                    name="openai_api",
+                    provider="openai",
+                    model="gpt-api",
+                    capabilities={"coding"},
+                ),
+            ],
+            policy=build_default_router_policy(),
+        )
+
+    def test_prefers_subscription(self) -> None:
+        request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            required_capabilities={"coding"},
+        )
+        decision = self.router.route_and_invoke(request=request, prompt="simple prompt")
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.channel.value, "subscription")
+
+    def test_fallback_to_api(self) -> None:
+        request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.HIGH,
+            criticality=Criticality.HIGH,
+            required_capabilities={"coding"},
+        )
+        decision = self.router.route_and_invoke(
+            request=request,
+            prompt="FORCE_API_FALLBACK this should fail pro path",
+        )
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.channel.value, "api")
+
+    def test_api_budget_blocks_api_channel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = build_default_router_policy()
+            budget = BudgetManager(
+                runtime_dir=Path(tmp),
+                policy=BudgetPolicy(daily_api_budget_usd=0.0, monthly_api_budget_usd=0.0),
+            )
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"coding"},
+                    ),
+                    ApiAdapter(
+                        name="openai_api",
+                        provider="openai",
+                        model="gpt-api",
+                        capabilities={"coding"},
+                    ),
+                ],
+                policy=policy,
+                budget_manager=budget,
+            )
+            request = RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.HIGH,
+                criticality=Criticality.HIGH,
+                required_capabilities={"coding"},
+            )
+            decision = router.route_and_invoke(
+                request=request,
+                prompt="FORCE_API_FALLBACK to force pro failure",
+            )
+            self.assertFalse(decision.success)
+            self.assertIn("api_budget_block", " ".join(decision.attempts))
+
+    def test_finops_signal_blocks_expensive_api_tier(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = build_default_router_policy()
+            budget = BudgetManager(
+                runtime_dir=Path(tmp),
+                policy=BudgetPolicy(daily_api_budget_usd=1.0, monthly_api_budget_usd=100.0),
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            budget.ledger_path.write_text(
+                f'{{"ts":"{now}","cost_usd":0.8}}\n',
+                encoding="utf-8",
+            )
+
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"coding"},
+                    ),
+                    ApiAdapter(
+                        name="openai_api_expensive",
+                        provider="openai",
+                        model="gpt-expensive",
+                        capabilities={"coding"},
+                        routing_priority=10,
+                        cost_tier=2,
+                    ),
+                    ApiAdapter(
+                        name="openai_api_cheap",
+                        provider="openai",
+                        model="gpt-cheap",
+                        capabilities={"coding"},
+                        routing_priority=100,
+                        cost_tier=1,
+                    ),
+                ],
+                policy=policy,
+                budget_manager=budget,
+            )
+            request = RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.HIGH,
+                criticality=Criticality.HIGH,
+                required_capabilities={"coding"},
+            )
+            decision = router.route_and_invoke(
+                request=request,
+                prompt="FORCE_API_FALLBACK to force subscription failure",
+            )
+            self.assertTrue(decision.success)
+            self.assertEqual(decision.model, "gpt-cheap")
+            self.assertIn("api_tier_block", " ".join(decision.attempts))
+
+    def test_role_target_filtering(self) -> None:
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="review_only_adapter",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"review"},
+                    role_targets={"reviewer"},
+                )
+            ],
+            policy=build_default_router_policy(),
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                required_capabilities={"review"},
+            ),
+            prompt="x",
+        )
+        self.assertFalse(decision.success)
+        self.assertEqual(decision.reason, "no_eligible_adapter")
+
+    def test_routing_priority_keeps_secondary_adapter_as_fallback(self) -> None:
+        policy = build_default_router_policy()
+        policy.preferred_subscription_providers = ["custom", "openai", "anthropic", "google"]
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="secondary_external",
+                    provider="custom",
+                    model="ext-runtime",
+                    capabilities={"coding"},
+                    routing_priority=200,
+                ),
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                    routing_priority=100,
+                ),
+            ],
+            policy=policy,
+        )
+
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                required_capabilities={"coding"},
+            ),
+            prompt="simple prompt",
+        )
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.provider, "openai")
+
+    def test_requires_approval_adapter_is_filtered_without_approval(self) -> None:
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="sensitive_external",
+                    provider="custom",
+                    model="runtime-v1",
+                    capabilities={"coding"},
+                    requires_approval=True,
+                )
+            ],
+            policy=build_default_router_policy(),
+        )
+
+        base_request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            required_capabilities={"coding"},
+        )
+        blocked = router.route_and_invoke(request=base_request, prompt="x")
+        self.assertFalse(blocked.success)
+        self.assertEqual(blocked.reason, "no_eligible_adapter")
+
+        approved_request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            required_capabilities={"coding"},
+            approved_adapters={"sensitive_external"},
+        )
+        allowed = router.route_and_invoke(request=approved_request, prompt="x")
+        self.assertTrue(allowed.success)
+
+    def test_api_is_used_when_no_subscription_candidate_exists(self) -> None:
+        router = HybridRouter(
+            adapters=[
+                ApiAdapter(
+                    name="openai_api_only",
+                    provider="openai",
+                    model="gpt-api",
+                    capabilities={"coding"},
+                )
+            ],
+            policy=build_default_router_policy(),
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                required_capabilities={"coding"},
+            ),
+            prompt="simple prompt",
+        )
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.channel.value, "api")
+
+    def test_api_thresholds_follow_policy_configuration(self) -> None:
+        policy = build_default_router_policy()
+        policy.complexity_threshold_for_api = "medium"
+        policy.criticality_threshold_for_api = "medium"
+        router = HybridRouter(adapters=[], policy=policy)
+        request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.LOW,
+        )
+        self.assertTrue(router._must_include_api(request))
+
+        policy.complexity_threshold_for_api = "invalid"
+        router = HybridRouter(adapters=[], policy=policy)
+        self.assertFalse(router._must_include_api(request))
+
+    def test_role_model_preference_prioritizes_configured_model(self) -> None:
+        policy = build_default_router_policy()
+        policy.role_model_preferences["engineer"] = ["preferred-model", "secondary-model"]
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="secondary_adapter",
+                    provider="openai",
+                    model="secondary-model",
+                    capabilities={"coding"},
+                    routing_priority=1,
+                ),
+                SubscriptionAdapter(
+                    name="preferred_adapter",
+                    provider="anthropic",
+                    model="preferred-model",
+                    capabilities={"coding"},
+                    routing_priority=100,
+                ),
+            ],
+            policy=policy,
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                required_capabilities={"coding"},
+            ),
+            prompt="simple prompt",
+        )
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.model, "preferred-model")
+
+    def test_enforce_role_model_preferences_blocks_non_matching_models(self) -> None:
+        policy = build_default_router_policy()
+        policy.enforce_role_model_preferences = True
+        policy.role_model_preferences["engineer"] = ["gpt-5.3-codex"]
+        router = HybridRouter(
+            adapters=[
+                ApiAdapter(
+                    name="groq_reasoning",
+                    provider="groq",
+                    model="llama-3.3-70b-versatile",
+                    capabilities={"coding"},
+                )
+            ],
+            policy=policy,
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.HIGH,
+                criticality=Criticality.HIGH,
+                required_capabilities={"coding"},
+            ),
+            prompt="simple prompt",
+        )
+        self.assertFalse(decision.success)
+        self.assertEqual(decision.reason, "no_eligible_adapter")
+
+    def test_strict_environment_policy_blocks_non_matching_models(self) -> None:
+        policy = build_default_router_policy()
+        policy.enforce_role_model_preferences = False
+        policy.strict_role_policy_environments = ["prod"]
+        policy.role_model_preferences["engineer"] = ["gpt-5.3-codex"]
+        router = HybridRouter(
+            adapters=[
+                ApiAdapter(
+                    name="groq_reasoning",
+                    provider="groq",
+                    model="llama-3.3-70b-versatile",
+                    capabilities={"coding"},
+                )
+            ],
+            policy=policy,
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.HIGH,
+                criticality=Criticality.HIGH,
+                required_capabilities={"coding"},
+                environment="prod",
+            ),
+            prompt="simple prompt",
+        )
+        self.assertFalse(decision.success)
+        self.assertEqual(decision.reason, "no_eligible_adapter")
+
+    def test_non_strict_environment_allows_non_matching_models(self) -> None:
+        policy = build_default_router_policy()
+        policy.enforce_role_model_preferences = False
+        policy.strict_role_policy_environments = ["prod"]
+        policy.role_model_preferences["engineer"] = ["gpt-5.3-codex"]
+        router = HybridRouter(
+            adapters=[
+                ApiAdapter(
+                    name="groq_reasoning",
+                    provider="groq",
+                    model="llama-3.3-70b-versatile",
+                    capabilities={"coding"},
+                )
+            ],
+            policy=policy,
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.HIGH,
+                criticality=Criticality.HIGH,
+                required_capabilities={"coding"},
+                environment="stage",
+            ),
+            prompt="simple prompt",
+        )
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.provider, "groq")
+
+
+if __name__ == "__main__":
+    unittest.main()

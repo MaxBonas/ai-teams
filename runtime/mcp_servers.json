@@ -1,0 +1,313 @@
+{
+  "servers": [
+    {
+      "name": "github_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": false,
+      "requires_approval": true,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-github",
+      "capabilities": [
+        "github",
+        "pr_management",
+        "issue_triage"
+      ],
+      "role_targets": [
+        "team_lead",
+        "engineer",
+        "reviewer"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "notion_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-notion"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": false,
+      "requires_approval": true,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-notion",
+      "capabilities": [
+        "project_management",
+        "docs",
+        "knowledge_base"
+      ],
+      "role_targets": [
+        "team_lead",
+        "researcher"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "postgres_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": false,
+      "requires_approval": true,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-postgres",
+      "capabilities": [
+        "sql",
+        "database",
+        "schema_analysis"
+      ],
+      "role_targets": [
+        "engineer",
+        "qa",
+        "researcher"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "supabase_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-supabase"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": false,
+      "requires_approval": true,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-supabase",
+      "capabilities": [
+        "database",
+        "backend_ops",
+        "crud"
+      ],
+      "role_targets": [
+        "engineer",
+        "qa"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "semgrep_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-semgrep"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": true,
+      "requires_approval": false,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-semgrep",
+      "capabilities": [
+        "security_scan",
+        "sast",
+        "code_quality"
+      ],
+      "role_targets": [
+        "reviewer",
+        "qa",
+        "engineer"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "context7_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": true,
+      "requires_approval": false,
+      "source_type": "npm",
+      "source": "@upstash/context7-mcp",
+      "capabilities": [
+        "documentation",
+        "ground_truth",
+        "research"
+      ],
+      "role_targets": [
+        "researcher",
+        "engineer"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "perplexity_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-perplexity"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": true,
+      "requires_approval": false,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-perplexity",
+      "capabilities": [
+        "web_search",
+        "research",
+        "best_practices"
+      ],
+      "role_targets": [
+        "researcher",
+        "reviewer"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "slack_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-slack"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": false,
+      "requires_approval": true,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-slack",
+      "capabilities": [
+        "notifications",
+        "ops_reporting"
+      ],
+      "role_targets": [
+        "team_lead"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "stripe_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-stripe"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": false,
+      "requires_approval": true,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-stripe",
+      "capabilities": [
+        "billing",
+        "payments",
+        "webhooks"
+      ],
+      "role_targets": [
+        "team_lead",
+        "engineer"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "playwright_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-playwright"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": true,
+      "requires_approval": false,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-playwright",
+      "capabilities": [
+        "browser_testing",
+        "e2e",
+        "web_automation"
+      ],
+      "role_targets": [
+        "qa",
+        "engineer"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    }
+  ,
+    {
+      "name": "filesystem_mcp",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\Users\\she__\\Documents\\Antigravity Projects"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": true,
+      "requires_approval": false,
+      "source_type": "npm",
+      "source": "@modelcontextprotocol/server-filesystem",
+      "capabilities": [
+        "file_read",
+        "file_write",
+        "directory_listing",
+        "local_fs"
+      ],
+      "role_targets": [
+        "engineer",
+        "reviewer",
+        "qa",
+        "researcher"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    },
+    {
+      "name": "git_mcp",
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams"
+      ],
+      "env": {},
+      "transport": "stdio",
+      "enabled": true,
+      "requires_approval": false,
+      "source_type": "uvx",
+      "source": "mcp-server-git",
+      "capabilities": [
+        "git_log",
+        "git_diff",
+        "git_status",
+        "version_control"
+      ],
+      "role_targets": [
+        "engineer",
+        "reviewer",
+        "team_lead"
+      ],
+      "health_status": "unknown",
+      "last_checked": ""
+    }
+  ]
+}

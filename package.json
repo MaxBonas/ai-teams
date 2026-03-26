@@ -1,0 +1,16 @@
+{
+  "name": "aiteam-hybrid",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Team Hybrid Orchestrator — dev workspace root",
+  "scripts": {
+    "start": "node scripts/dev.mjs",
+    "build": "cd ide-frontend && npm run build",
+    "test":  "python -m pytest tests/ -q",
+    "lint":  "cd ide-frontend && npm run lint"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

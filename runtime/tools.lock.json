@@ -1,0 +1,83 @@
+{
+  "tools": {
+    "context7_mcp": {
+      "integrity": "md5-cddf3522e81511c169bb8f7122a2daf8",
+      "source": "@upstash/context7-mcp",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "fine_skills": {
+      "integrity": "md5-9264131c54575c1dd10fa34892cb8023",
+      "source": "fine-skills",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "github_mcp": {
+      "integrity": "md5-4e66d6ebca070f1749e3c662ce9c3128",
+      "source": "@modelcontextprotocol/server-github",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "n8n_skill": {
+      "integrity": "md5-281b2540b543c3a0e96bc9154abd15d7",
+      "source": "builtin",
+      "source_type": "builtin",
+      "version": "latest"
+    },
+    "notion_mcp": {
+      "integrity": "md5-12b0da8cc6f8e3273a64fd721a7c0729",
+      "source": "@modelcontextprotocol/server-notion",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "perplexity_mcp": {
+      "integrity": "md5-8832572770cdbee87a483e56e1e25994",
+      "source": "@modelcontextprotocol/server-perplexity",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "playwright_mcp": {
+      "integrity": "md5-7587503b75d87a35a94a4881515e1c59",
+      "source": "@modelcontextprotocol/server-playwright",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "postgres_mcp": {
+      "integrity": "md5-a566f76a3768c0c7477a0b7741af2e1a",
+      "source": "@modelcontextprotocol/server-postgres",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "remotion_skill": {
+      "integrity": "md5-512cecc27675cd75e0b41809c3aaa77a",
+      "source": "builtin",
+      "source_type": "builtin",
+      "version": "latest"
+    },
+    "semgrep_mcp": {
+      "integrity": "md5-77475cc5a3d2da0a173bee4b3e6cf7af",
+      "source": "@modelcontextprotocol/server-semgrep",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "slack_mcp": {
+      "integrity": "md5-a74eef6ccfc047fefc7f270cf93a3e3f",
+      "source": "@modelcontextprotocol/server-slack",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "stripe_mcp": {
+      "integrity": "md5-fee6e7e7699faf6b8fe481033f88f621",
+      "source": "@modelcontextprotocol/server-stripe",
+      "source_type": "npm",
+      "version": "latest"
+    },
+    "supabase_mcp": {
+      "integrity": "md5-bbbd47cc8e146e43514745eeb2f7d830",
+      "source": "@modelcontextprotocol/server-supabase",
+      "source_type": "npm",
+      "version": "latest"
+    }
+  },
+  "version": "1.0"
+}

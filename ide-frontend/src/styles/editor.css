@@ -1,0 +1,28 @@
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-color);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-header {
+  height: 40px;
+  min-height: 40px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+}

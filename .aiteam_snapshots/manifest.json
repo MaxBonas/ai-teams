@@ -1,0 +1,36 @@
+{
+  "snapshots": [
+    {
+      "id": "20260220T152435Z-908126",
+      "label": "pre-gemini-auth-check",
+      "created_at": "2026-02-20T15:24:37.155296+00:00",
+      "archive": "20260220T152435Z-908126.zip",
+      "file_count": 200,
+      "size_bytes": 271664
+    },
+    {
+      "id": "20260220T145708Z-cb901c",
+      "label": "post-provider-connect-flow",
+      "created_at": "2026-02-20T14:57:09.544750+00:00",
+      "archive": "20260220T145708Z-cb901c.zip",
+      "file_count": 190,
+      "size_bytes": 264806
+    },
+    {
+      "id": "20260220T144826Z-8061ad",
+      "label": "post-provider-mcp-hardening",
+      "created_at": "2026-02-20T14:48:28.502856+00:00",
+      "archive": "20260220T144826Z-8061ad.zip",
+      "file_count": 187,
+      "size_bytes": 261065
+    },
+    {
+      "id": "20260220T144449Z-c07a07",
+      "label": "post-mcp-hardening",
+      "created_at": "2026-02-20T14:44:52.579718+00:00",
+      "archive": "20260220T144449Z-c07a07.zip",
+      "file_count": 175,
+      "size_bytes": 256847
+    }
+  ]
+}

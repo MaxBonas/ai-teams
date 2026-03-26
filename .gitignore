@@ -1,0 +1,64 @@
+# Entorno virtual Python
+venv/
+.venv/
+env/
+
+# Variables de entorno (contienen secrets)
+.env
+.env.local
+.env.*.local
+
+# Secretos y credenciales
+*.pem
+*.key
+*.p12
+credentials.json
+service_account*.json
+
+# Cachés Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+ide-frontend/node_modules/
+ide-frontend/dist/
+ide-frontend/.vite/
+
+# Runtime state (generado, no versionable)
+runtime/ide_logs/
+runtime/sandboxes/
+runtime/sessions/
+runtime/memory/
+runtime/mailbox.jsonl
+runtime/events.jsonl
+runtime/cost_ledger.jsonl
+runtime/tasks.json
+runtime/dashboard.html
+runtime/notebooklm_sync_status.json
+
+# Logs
+*.log
+dev_out*.txt
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+
+# Claude Code (mantener CLAUDE.md y settings.json pero no lo local)
+.claude/settings.local.json
