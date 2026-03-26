@@ -26,7 +26,7 @@ from aiteam.finops import BudgetManager, BudgetPolicy
 from aiteam.observability import EventLogger
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.pilot import PilotThresholds, compute_pilot_metrics, evaluate_pilot
-from aiteam.provider_ops import build_provider_ops_view
+from aiteam.provider_ops import build_provider_ops_view, sync_provider_ops_alerts
 from aiteam.router import HybridRouter
 from aiteam.snapshots import SnapshotManager
 from aiteam.tool_inventory import write_inventory
@@ -1741,7 +1741,8 @@ def cmd_provider_smoke(runtime_dir: Path, strict: bool) -> None:
 
 
 def cmd_provider_ops(runtime_dir: Path) -> None:
-    payload = build_provider_ops_view(runtime_dir)
+    sync = sync_provider_ops_alerts(runtime_dir)
+    payload = sync.get("payload", {}) if isinstance(sync, dict) else {}
     summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
     print("Provider ops:")
     print(
@@ -1749,6 +1750,7 @@ def cmd_provider_ops(runtime_dir: Path) -> None:
     )
     print(f"- team_lead_candidates={summary.get('team_lead_candidates', [])}")
     print(f"- alerts={payload.get('alerts', [])}")
+    print(f"- changes_emitted={bool(sync.get('emitted', False))}")
     for row in payload.get("providers", []):
         print(
             f"- {row['adapter_name']} tier={row['tier']} operational={row['operational']} doctor={row['doctor_details']} smoke={row['smoke_details']}"

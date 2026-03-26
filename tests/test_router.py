@@ -481,8 +481,8 @@ class RouterTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
-            (runtime_dir / "provider_smoke.json").write_text(
-                '{"smoke":[{"name":"openai_pro_cli","healthy":false},{"name":"gemini_pro_cli","healthy":false},{"name":"claude_pro_cli","healthy":false},{"name":"openai_api","healthy":true}]}',
+            (runtime_dir / "provider_ops.json").write_text(
+                '{"providers":[{"adapter_name":"openai_pro_cli","smoke_healthy":false,"operational":false},{"adapter_name":"gemini_pro_cli","smoke_healthy":false,"operational":false},{"adapter_name":"claude_pro_cli","smoke_healthy":false,"operational":false},{"adapter_name":"openai_api","smoke_healthy":true,"operational":true}]}',
                 encoding="utf-8",
             )
             budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
@@ -527,8 +527,8 @@ class RouterTests(unittest.TestCase):
     def test_team_lead_prefers_higher_ranked_senior_cloud_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
-            (runtime_dir / "provider_smoke.json").write_text(
-                '{"smoke":[{"name":"openai_pro_cli","healthy":true},{"name":"gemini_pro_cli","healthy":true}]}',
+            (runtime_dir / "provider_ops.json").write_text(
+                '{"providers":[{"adapter_name":"openai_pro_cli","smoke_healthy":true,"operational":true},{"adapter_name":"gemini_pro_cli","smoke_healthy":true,"operational":true}]}',
                 encoding="utf-8",
             )
             budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
@@ -615,8 +615,8 @@ class RouterTests(unittest.TestCase):
                 '{"models":[{"adapter_name":"gemini_pro_cli","provider":"google","model":"gemini-1.5-pro","tier":"senior_cloud","intelligence_rank":99,"coding_rank":99,"reasoning_rank":99,"trust_rank":99,"local_allowed_for_team_lead":false,"api_allowed_for_team_lead":true}]}',
                 encoding="utf-8",
             )
-            (runtime_dir / "provider_smoke.json").write_text(
-                '{"smoke":[{"name":"openai_pro_cli","healthy":true},{"name":"gemini_pro_cli","healthy":true}]}',
+            (runtime_dir / "provider_ops.json").write_text(
+                '{"providers":[{"adapter_name":"openai_pro_cli","smoke_healthy":true,"operational":true},{"adapter_name":"gemini_pro_cli","smoke_healthy":true,"operational":true}]}',
                 encoding="utf-8",
             )
             budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
@@ -649,6 +649,47 @@ class RouterTests(unittest.TestCase):
             )
             self.assertTrue(decision.success)
             self.assertEqual(decision.provider, "google")
+
+    def test_team_lead_uses_provider_ops_operational_state_as_source_of_truth(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            (runtime_dir / "provider_ops.json").write_text(
+                '{"providers":[{"adapter_name":"openai_pro_cli","smoke_healthy":true,"operational":false},{"adapter_name":"openai_api","smoke_healthy":true,"operational":true}]}',
+                encoding="utf-8",
+            )
+            budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro_cli",
+                        provider="openai",
+                        model="gpt-4o",
+                        capabilities={"coding", "reasoning", "analysis"},
+                    ),
+                    ApiAdapter(
+                        name="openai_api",
+                        provider="openai",
+                        model="gpt-4.1-mini",
+                        capabilities={"coding", "reasoning", "analysis"},
+                        cost_tier=1,
+                    ),
+                ],
+                policy=build_default_router_policy(),
+                budget_manager=budget,
+            )
+            decision = router.route_and_invoke(
+                request=RoutingRequest(
+                    role=Role.TEAM_LEAD,
+                    complexity=Complexity.HIGH,
+                    criticality=Criticality.HIGH,
+                    required_capabilities={"coding"},
+                ),
+                prompt="Lead the team",
+            )
+            self.assertTrue(decision.success)
+            self.assertEqual(decision.channel.value, "api")
 
 
 if __name__ == "__main__":

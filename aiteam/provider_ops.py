@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from aiteam.mailbox import Mailbox
+from aiteam.observability import EventLogger
 from aiteam.model_catalog import load_model_catalog, provider_smoke_details
 
 
@@ -83,6 +85,49 @@ def build_provider_ops_view(runtime_dir: Path) -> dict[str, Any]:
     return payload
 
 
+def sync_provider_ops_alerts(runtime_dir: Path) -> dict[str, Any]:
+    previous = _read_json(runtime_dir / "provider_ops.json")
+    payload = build_provider_ops_view(runtime_dir)
+    changes = _provider_state_changes(previous, payload)
+    if not changes:
+        return {"payload": payload, "changes": [], "emitted": False}
+
+    event_logger = EventLogger(runtime_dir)
+    mailbox = Mailbox(runtime_dir / "mailbox.jsonl")
+    for change in changes:
+        event_logger.emit("provider_ops_alert", change)
+
+    body_lines = ["Cambios detectados en providers/modelos:"]
+    for change in changes:
+        body_lines.append(
+            f"- {change['adapter_name']}: {change['change_type']} ({change['from_state']} -> {change['to_state']})"
+        )
+    mailbox.send(
+        sender="provider-ops-bot",
+        recipient="team_lead",
+        subject="Provider ops alert",
+        body="\n".join(body_lines),
+    )
+    return {"payload": payload, "changes": changes, "emitted": True}
+
+
+def provider_ops_status(runtime_dir: Path | None) -> dict[str, dict[str, Any]]:
+    if runtime_dir is None:
+        return {}
+    path = runtime_dir / "provider_ops.json"
+    if not path.exists():
+        return {}
+    payload = _read_json(path)
+    rows = payload.get("providers", []) if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        return {}
+    return {
+        str(item.get("adapter_name", "")): dict(item)
+        for item in rows
+        if isinstance(item, dict) and str(item.get("adapter_name", "")).strip()
+    }
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -134,3 +179,48 @@ def _provider_alerts(rows: list[dict[str, Any]], summary: dict[str, Any]) -> lis
         )
 
     return alerts
+
+
+def _provider_state_changes(
+    previous: dict[str, Any], current: dict[str, Any]
+) -> list[dict[str, Any]]:
+    prev_rows = {
+        str(item.get("adapter_name", "")): item
+        for item in previous.get("providers", [])
+        if isinstance(item, dict) and str(item.get("adapter_name", "")).strip()
+    }
+    cur_rows = {
+        str(item.get("adapter_name", "")): item
+        for item in current.get("providers", [])
+        if isinstance(item, dict) and str(item.get("adapter_name", "")).strip()
+    }
+    changes: list[dict[str, Any]] = []
+    for name, current_row in cur_rows.items():
+        previous_row = prev_rows.get(name)
+        if previous_row is None:
+            continue
+        prev_state = _row_state(previous_row)
+        cur_state = _row_state(current_row)
+        if prev_state == cur_state:
+            continue
+        changes.append(
+            {
+                "adapter_name": name,
+                "provider": current_row.get("provider", ""),
+                "tier": current_row.get("tier", ""),
+                "change_type": "provider_state_changed",
+                "from_state": prev_state,
+                "to_state": cur_state,
+                "doctor_details": current_row.get("doctor_details", ""),
+                "smoke_details": current_row.get("smoke_details", ""),
+            }
+        )
+    return changes
+
+
+def _row_state(row: dict[str, Any]) -> str:
+    if bool(row.get("operational", False)):
+        return "operational"
+    if bool(row.get("degraded", False)):
+        return "degraded"
+    return "offline"

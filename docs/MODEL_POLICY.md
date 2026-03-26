@@ -9,13 +9,15 @@ Definir un catalogo vivo de modelos con ranking de capacidad, confianza y reglas
 - Default en codigo: `aiteam/model_catalog.py`
 - Override editable por proyecto/maquina: `runtime/model_catalog.json`
 - Ejemplo base: `config/model_catalog.example.json`
+- Vista operativa unificada: `runtime/provider_ops.json`
 
 ## Reglas clave
 
 - `team_lead` solo puede usar modelos `senior_cloud` o `advanced_api`.
 - `team_lead` nunca puede usar modelos `local`.
 - Si los modelos Pro senior fallan en salud real, el relevo permitido es una API avanzada y eficiente.
-- La salud real se toma de `runtime/provider_smoke.json`.
+- La salud real consolidada se toma de `runtime/provider_ops.json`.
+- Las alertas operativas se consolidan en `runtime/provider_ops.json` y pueden emitirse a eventos/mailbox cuando cambie el estado.
 
 ## Campos del catalogo
 

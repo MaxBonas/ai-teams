@@ -72,6 +72,7 @@
     - definir integracion de modelos gratis de Zencoder/OpenCode Zen si son utilizables desde cuenta o custom provider
     - instalar y validar un modelo local de coding en esta maquina (preferencia: Qwen coder via Ollama o runtime equivalente)
     - decidir orden de fallback: suscripcion -> API -> local
+    - consolidar y operar alertas de providers/modelos desde `provider_ops`
   - Archivos clave: `config/routing_policy.example.json`, `config/adapters.example.json`, `aiteam/adapters/`, `aiteam/router.py`.
 
 - [x] **Politica dura de Team Lead y relevo avanzado**
@@ -104,6 +105,17 @@
     - test de degradacion economica en `tests/test_router.py`
   - Verificacion: `venv/Scripts/python.exe -m pytest tests/test_router.py tests/test_cli_providers.py -q`
   - Archivos clave: `aiteam/router.py`, `runtime/model_catalog.json`, `config/model_catalog.example.json`, `docs/MODEL_POLICY.md`, `tests/test_router.py`.
+
+- [x] **Vista operativa unificada y alertas de providers/modelos**
+  - Objetivo: tener una fuente oficial del estado de modelos/providers y alertar cuando cambie.
+  - Como se hizo:
+    - `aiteam/provider_ops.py` unifica `provider_doctor`, `provider_smoke`, `provider_accounts` y `model_catalog`
+    - `provider-ops` genera `runtime/provider_ops.json` y expone `team_lead_candidates`, `operational`, `degraded` y `alerts`
+    - deteccion de cambios de estado entre ejecuciones con emision de `provider_ops_alert` a eventos y mailbox
+    - el router ya consume `provider_ops.json` como fuente operativa principal para elegibilidad de `team_lead`
+    - paneles `Provider Ops Summary`, `Provider Alerts` y tabla `Provider Ops` en dashboard
+  - Verificacion: `venv/Scripts/python.exe -m pytest tests/test_provider_ops.py tests/test_dashboard.py tests/test_router.py tests/test_cli_providers.py -q` -> `35 passed`
+  - Archivos clave: `aiteam/provider_ops.py`, `aiteam/cli.py`, `aiteam/dashboard.py`, `runtime/provider_ops.json`, `tests/test_provider_ops.py`, `tests/test_dashboard.py`.
 
 ## Backlog Prioritario
 

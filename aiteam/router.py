@@ -7,8 +7,9 @@ from pathlib import Path
 from aiteam.adapters.base import ModelAdapter
 from aiteam.config import RouterPolicy
 from aiteam.finops import BudgetManager
-from aiteam.model_catalog import load_model_catalog, provider_smoke_status
+from aiteam.model_catalog import load_model_catalog
 from aiteam.observability import EventLogger
+from aiteam.provider_ops import provider_ops_status
 from aiteam.types import (
     ChannelType,
     Complexity,
@@ -55,11 +56,21 @@ class HybridRouter:
     def _smoke_ok(self, adapter: ModelAdapter) -> bool:
         if self.runtime_dir is None:
             return True
-        status = provider_smoke_status(Path(self.runtime_dir))
+        status = provider_ops_status(Path(self.runtime_dir))
         if not status:
             return True
         if adapter.name in status:
-            return bool(status[adapter.name])
+            return bool(status[adapter.name].get("smoke_healthy", False))
+        return True
+
+    def _operational_ok(self, adapter: ModelAdapter) -> bool:
+        if self.runtime_dir is None:
+            return True
+        status = provider_ops_status(Path(self.runtime_dir))
+        if not status:
+            return True
+        if adapter.name in status:
+            return bool(status[adapter.name].get("operational", False))
         return True
 
     def _team_lead_allowed(self, adapter: ModelAdapter) -> bool:
@@ -155,6 +166,8 @@ class HybridRouter:
             if adapter.role_targets and request.role.value not in adapter.role_targets:
                 continue
             if request.role == Role.TEAM_LEAD and not self._team_lead_allowed(adapter):
+                continue
+            if not self._operational_ok(adapter) and request.role == Role.TEAM_LEAD:
                 continue
             if enforce_role_policy:
                 if (

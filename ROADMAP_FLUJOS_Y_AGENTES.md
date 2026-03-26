@@ -273,7 +273,7 @@ Hacer que cada nueva invocacion del mismo agente recupere su thread previo y res
 
 ### Siguiente tarea importante
 
-- Endurecimiento operativo: unificar salud real de providers, smoke, catalogo de modelos y politica de relevo en una vista operativa unica.
+- Endurecimiento operativo: alertas por cambios de estado, dependencia de fallbacks y degradacion de senior cloud usando la vista unificada `provider_ops`.
 
 ## Politica Team Lead y Relevo
 
@@ -282,6 +282,7 @@ Hacer que cada nueva invocacion del mismo agente recupere su thread previo y res
 - Si los modelos Pro senior no estan sanos, el relevo permitido es una API avanzada y eficiente, no un modelo local.
 - El ranking de relevo debe combinar capacidad de coding, razonamiento, confianza y salud real (`provider_smoke.json`).
 - El catalogo de modelos debe ser editable sin tocar codigo via `runtime/model_catalog.json`.
+- El router debe consumir `runtime/provider_ops.json` como autoridad operativa principal para decisiones de elegibilidad del relevo.
 - Referencias: `aiteam/model_catalog.py`, `config/model_catalog.example.json`, `docs/MODEL_POLICY.md`, `aiteam/router.py`.
 
 ---
