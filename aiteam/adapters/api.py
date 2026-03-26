@@ -56,13 +56,14 @@ class ApiAdapter(ModelAdapter):
         return bool(os.getenv(key_name))
 
     def invoke(
-        self, prompt: str, messages: list[dict[str, str]] | None = None
+        self, prompt: str, messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> AdapterResponse:
         start = time.time()
         normalized_messages = normalize_messages(messages, prompt)
         prompt_text = messages_to_prompt(messages, prompt)
         if self._live_api_enabled():
-            live = self._invoke_live(prompt=prompt_text, messages=normalized_messages)
+            live = self._invoke_live(prompt=prompt_text, messages=normalized_messages, tools=tools)
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
             return live
 
@@ -91,7 +92,7 @@ class ApiAdapter(ModelAdapter):
         return raw in {"1", "true", "yes", "on"}
 
     def _invoke_live(
-        self, prompt: str, messages: list[dict[str, str]] | None = None
+        self, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
     ) -> AdapterResponse:
         provider = self.provider.strip().lower()
         if provider == "openai":
@@ -100,6 +101,7 @@ class ApiAdapter(ModelAdapter):
                 api_key_env="OPENAI_API_KEY",
                 prompt=prompt,
                 messages=messages,
+                tools=tools,
             )
         if provider == "groq":
             return self._invoke_openai_compatible(
@@ -107,9 +109,10 @@ class ApiAdapter(ModelAdapter):
                 api_key_env="GROQ_API_KEY",
                 prompt=prompt,
                 messages=messages,
+                tools=tools,
             )
         if provider == "anthropic":
-            return self._invoke_anthropic(prompt=prompt, messages=messages)
+            return self._invoke_anthropic(prompt=prompt, messages=messages, tools=tools)
         return AdapterResponse(
             success=False,
             content="",
@@ -120,7 +123,7 @@ class ApiAdapter(ModelAdapter):
         )
 
     def _invoke_anthropic(
-        self, *, prompt: str, messages: list[dict[str, str]] | None = None
+        self, *, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
     ) -> AdapterResponse:
         """Invoca Anthropic Messages API."""
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
@@ -139,6 +142,15 @@ class ApiAdapter(ModelAdapter):
             "max_tokens": 4096,
             "messages": normalize_messages(messages, prompt),
         }
+        if tools:
+            body["tools"] = [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.parameters,
+                }
+                for t in tools
+            ]
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
@@ -186,12 +198,24 @@ class ApiAdapter(ModelAdapter):
                 output_tokens=0,
             )
 
+        from aiteam.types import ToolCall
         content_blocks = parsed.get("content", [])
         parts = []
+        tool_calls_out = []
         if isinstance(content_blocks, list):
             for block in content_blocks:
-                if isinstance(block, dict) and block.get("type") == "text":
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text":
                     parts.append(str(block.get("text", "")))
+                elif block.get("type") == "tool_use":
+                    raw_input = block.get("input", {})
+                    args = raw_input if isinstance(raw_input, dict) else {}
+                    tool_calls_out.append(ToolCall(
+                        id=str(block.get("id", "")),
+                        name=str(block.get("name", "")),
+                        arguments=args,
+                    ))
         content = "\n".join(parts)
 
         usage = parsed.get("usage", {})
@@ -200,6 +224,17 @@ class ApiAdapter(ModelAdapter):
         output_tokens = int(
             usage_dict.get("output_tokens", max(1, len(content) // 4 if content else 1))
         )
+
+        if tool_calls_out:
+            return AdapterResponse(
+                success=True,
+                content=content or "",
+                error=None,
+                latency_ms=int((time.time() - started) * 1000),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                tool_calls=tool_calls_out,
+            )
 
         if not content:
             return AdapterResponse(
@@ -226,6 +261,7 @@ class ApiAdapter(ModelAdapter):
         api_key_env: str,
         prompt: str,
         messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> AdapterResponse:
         api_key = os.getenv(api_key_env, "").strip()
         if not api_key:
@@ -243,6 +279,19 @@ class ApiAdapter(ModelAdapter):
             "messages": normalize_messages(messages, prompt),
             "temperature": 0.2,
         }
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in tools
+            ]
+            body["tool_choice"] = "auto"
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
@@ -303,7 +352,7 @@ class ApiAdapter(ModelAdapter):
             first = choices[0] if isinstance(choices[0], dict) else {}
             message = first.get("message", {}) if isinstance(first, dict) else {}
             if isinstance(message, dict):
-                content = str(message.get("content", ""))
+                content = str(message.get("content", "") or "")
 
         usage = parsed.get("usage", {}) if isinstance(parsed, dict) else {}
         usage_dict = usage if isinstance(usage, dict) else {}
@@ -317,6 +366,38 @@ class ApiAdapter(ModelAdapter):
             )
             or 1
         )
+
+        # Parsear tool_calls de la respuesta
+        from aiteam.types import ToolCall
+        tool_calls_out = []
+        if isinstance(choices, list) and choices:
+            first = choices[0] if isinstance(choices[0], dict) else {}
+            message = first.get("message", {}) if isinstance(first, dict) else {}
+            raw_tcs = message.get("tool_calls", []) if isinstance(message, dict) else []
+            for tc in (raw_tcs or []):
+                if not isinstance(tc, dict):
+                    continue
+                fn = tc.get("function", {})
+                try:
+                    args = json.loads(fn.get("arguments", "{}") or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                tool_calls_out.append(ToolCall(
+                    id=str(tc.get("id", "")),
+                    name=str(fn.get("name", "")),
+                    arguments=args,
+                ))
+
+        if tool_calls_out:
+            return AdapterResponse(
+                success=True,
+                content=content or "",
+                latency_ms=int((time.time() - started) * 1000),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                error=None,
+                tool_calls=tool_calls_out,
+            )
 
         if not content:
             return AdapterResponse(

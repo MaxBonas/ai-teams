@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass as _dataclass
 
 from aiteam.types import AdapterResponse, ChannelType
+
+
+@_dataclass
+class NativeToolDefinition:
+    """Definicion de herramienta para function calling nativo via API."""
+    name: str
+    description: str
+    parameters: dict  # JSON Schema: {"type": "object", "properties": {...}}
 
 
 def normalize_messages(
@@ -63,6 +72,8 @@ class ModelAdapter(ABC):
 
     @abstractmethod
     def invoke(
-        self, prompt: str, messages: list[dict[str, str]] | None = None
+        self, prompt: str,
+        messages: list[dict[str, str]] | None = None,
+        tools: "list[NativeToolDefinition] | None" = None,
     ) -> AdapterResponse:
         raise NotImplementedError

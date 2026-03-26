@@ -65,6 +65,14 @@ class RoutingRequest:
 
 
 @dataclass
+class ToolCall:
+    """Llamada a herramienta normalizada desde la respuesta del LLM."""
+    id: str
+    name: str
+    arguments: dict  # ya parseado de JSON
+
+
+@dataclass
 class AdapterResponse:
     success: bool
     content: str
@@ -72,6 +80,7 @@ class AdapterResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     error: str | None = None
+    tool_calls: list["ToolCall"] = field(default_factory=list)
 
 
 @dataclass

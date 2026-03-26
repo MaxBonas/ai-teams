@@ -918,11 +918,13 @@ class AITeamOrchestrator:
             environment=self.environment,
         )
         session.record_action("llm_call", f"route_and_invoke:{task.role.value}")
+        native_tools = self._build_native_tools_for_task(task)
         decision = self.router.route_and_invoke(
             request=request,
             prompt=prompt,
             task_id=task.task_id,
             messages=messages,
+            tools=native_tools if native_tools else None,
         )
         session.record_action(
             "llm_call",
@@ -1046,6 +1048,35 @@ class AITeamOrchestrator:
         self._update_agent_performance(
             assignee=assignee, decision=decision, task_type=task_type
         )
+
+        # ── Native function calling: si el LLM pidio herramientas, ejecutar y re-invocar ──
+        if (
+            decision.success
+            and decision.response.tool_calls
+            and not task.metadata.get("_native_tool_round_done")
+        ):
+            task.metadata["_native_tool_round_done"] = True
+            tc_results = self._execute_native_tool_calls(
+                decision.response.tool_calls, task, assignee, session
+            )
+            tool_summary_lines = []
+            for r in tc_results:
+                status = "OK" if r["success"] else "ERROR"
+                body = r["output"] if r["success"] else r["error"]
+                tool_summary_lines.append(f"[{r['name']}] {status}: {body[:800]}")
+            tool_msg = "Resultados de herramientas:\n" + "\n".join(tool_summary_lines)
+            followup_messages = list(messages or []) + [
+                {"role": "assistant", "content": f"[Usando herramientas: {', '.join(tc.name for tc in decision.response.tool_calls)}]"},
+                {"role": "user", "content": tool_msg + "\n\nContinua con tu tarea usando los resultados anteriores."},
+            ]
+            decision = self.router.route_and_invoke(
+                request=request,
+                prompt=prompt,
+                task_id=task.task_id,
+                messages=followup_messages,
+                tools=None,  # no tools en el segundo round para evitar bucle infinito
+            )
+            session.record_action("llm_call", f"native_tool_followup:{len(tc_results)}_tools")
 
         if decision.success:
             safe_content = self.compliance.redact_text(decision.response.content)
@@ -1298,6 +1329,75 @@ class AITeamOrchestrator:
     )
 
     _MAX_TOOL_CALLS_PER_TASK = 3
+
+    def _build_native_tools_for_task(self, task: WorkTask) -> list:
+        """Convierte herramientas disponibles del task a NativeToolDefinition para function calling."""
+        from aiteam.adapters.base import NativeToolDefinition
+        if self.tool_dispatcher is None:
+            return []
+        try:
+            tools_info = self.tool_dispatcher.build_tool_context_for_agent(
+                role=task.role.value,
+                required_capabilities=set(task.metadata.get("required_capabilities", [])),
+                task_description=f"{task.title}\n{task.description}",
+            )
+        except Exception:
+            return []
+        if not tools_info:
+            return []
+        # Exponer max 5 tools para no inflar el contexto
+        native = []
+        for t in list(self.tool_dispatcher._tools.values())[:5]:
+            if not t.enabled:
+                continue
+            native.append(NativeToolDefinition(
+                name=t.name,
+                description=t.description or f"Herramienta: {t.name}",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "El comando o accion a ejecutar con esta herramienta"
+                        }
+                    },
+                    "required": ["command"],
+                },
+            ))
+        return native[:5]
+
+    def _execute_native_tool_calls(
+        self, tool_calls: list, task: WorkTask, assignee: str, session
+    ) -> list[dict]:
+        """Ejecuta tool_calls nativos y retorna lista de resultados."""
+        results = []
+        for tc in tool_calls[:self._MAX_TOOL_CALLS_PER_TASK]:
+            command = tc.arguments.get("command", tc.name)
+            if self.tool_dispatcher is not None:
+                result = self.tool_dispatcher.invoke_cli_tool(
+                    tool_name=tc.name,
+                    command=str(command)[:500],
+                    session=session,
+                    timeout=60,
+                )
+            else:
+                from aiteam.tool_dispatch import ToolResult
+                result = ToolResult(tool_name=tc.name, success=False, error="no_dispatcher")
+            self.event_logger.emit("agent_tool_invocation", {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "tool": tc.name,
+                "native": True,
+                "success": result.success,
+            })
+            results.append({
+                "id": tc.id,
+                "name": tc.name,
+                "success": result.success,
+                "output": (result.output or "")[:2000],
+                "error": (result.error or "")[:500],
+            })
+        return results
 
     def _parse_and_invoke_tools(
         self, task: WorkTask, assignee: str, output: str, session: AgentSession

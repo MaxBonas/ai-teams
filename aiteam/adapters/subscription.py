@@ -86,7 +86,7 @@ class SubscriptionAdapter(ModelAdapter):
         return True
 
     def invoke(
-        self, prompt: str, messages: list[dict[str, str]] | None = None
+        self, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
     ) -> AdapterResponse:
         start = time.time()
         normalized_messages = normalize_messages(messages, prompt)
@@ -104,7 +104,7 @@ class SubscriptionAdapter(ModelAdapter):
 
         # If live API is enabled and key exists, make real call
         if self._live_api_enabled():
-            live = self._invoke_live(prompt_text, normalized_messages)
+            live = self._invoke_live(prompt_text, normalized_messages, tools=tools)
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
             return live
 
@@ -135,7 +135,7 @@ class SubscriptionAdapter(ModelAdapter):
         return raw in {"1", "true", "yes", "on"}
 
     def _invoke_live(
-        self, prompt: str, messages: list[dict[str, str]] | None = None
+        self, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
     ) -> AdapterResponse:
         """Invoca la API real del provider."""
         provider_key = self.provider.strip().lower()
@@ -163,11 +163,11 @@ class SubscriptionAdapter(ModelAdapter):
 
         fmt = config["format"]
         if fmt == "anthropic":
-            return self._invoke_anthropic(api_key, prompt, messages)
+            return self._invoke_anthropic(api_key, prompt, messages, tools=tools)
         if fmt == "google":
             return self._invoke_google(api_key, prompt, config["url"], messages)
         # openai-compatible (openai, groq)
-        return self._invoke_openai_compatible(config["url"], api_key, prompt, messages)
+        return self._invoke_openai_compatible(config["url"], api_key, prompt, messages, tools=tools)
 
     def _invoke_openai_compatible(
         self,
@@ -175,6 +175,7 @@ class SubscriptionAdapter(ModelAdapter):
         api_key: str,
         prompt: str,
         messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> AdapterResponse:
         """Invoca API compatible con OpenAI (OpenAI, Groq, etc.)."""
         body = {
@@ -182,17 +183,99 @@ class SubscriptionAdapter(ModelAdapter):
             "messages": normalize_messages(messages, prompt),
             "temperature": 0.2,
         }
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in tools
+            ]
+            body["tool_choice"] = "auto"
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
+        if not tools:
+            return self._http_request(
+                url, payload, headers, prompt, self._parse_openai_response
+            )
+        # With tools: use inline parsing to capture tool_calls
         return self._http_request(
-            url, payload, headers, prompt, self._parse_openai_response
+            url, payload, headers, prompt, self._make_openai_tool_parser()
         )
 
+    def _make_openai_tool_parser(self):
+        """Returns a parser function that captures tool_calls from OpenAI responses."""
+        def _parser(parsed: dict, prompt: str, latency_ms: int) -> AdapterResponse:
+            from aiteam.types import ToolCall
+            content = ""
+            choices = parsed.get("choices", [])
+            tool_calls_out = []
+            if isinstance(choices, list) and choices:
+                first = choices[0] if isinstance(choices[0], dict) else {}
+                message = first.get("message", {}) if isinstance(first, dict) else {}
+                if isinstance(message, dict):
+                    content = str(message.get("content", "") or "")
+                    raw_tcs = message.get("tool_calls", []) if isinstance(message, dict) else []
+                    for tc in (raw_tcs or []):
+                        if not isinstance(tc, dict):
+                            continue
+                        fn = tc.get("function", {})
+                        try:
+                            args = json.loads(fn.get("arguments", "{}") or "{}")
+                        except (json.JSONDecodeError, TypeError):
+                            args = {}
+                        tool_calls_out.append(ToolCall(
+                            id=str(tc.get("id", "")),
+                            name=str(fn.get("name", "")),
+                            arguments=args,
+                        ))
+
+            usage = parsed.get("usage", {})
+            usage_dict = usage if isinstance(usage, dict) else {}
+            input_tokens = int(usage_dict.get("prompt_tokens", max(1, len(prompt) // 4)))
+            output_tokens = int(
+                usage_dict.get("completion_tokens", max(1, len(content) // 4 if content else 1))
+            )
+
+            if tool_calls_out:
+                return AdapterResponse(
+                    success=True,
+                    content=content or "",
+                    error=None,
+                    latency_ms=latency_ms,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    tool_calls=tool_calls_out,
+                )
+            if not content:
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error="empty_response_content",
+                    latency_ms=latency_ms,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            return AdapterResponse(
+                success=True,
+                content=content,
+                error=None,
+                latency_ms=latency_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        return _parser
+
     def _invoke_anthropic(
-        self, api_key: str, prompt: str, messages: list[dict[str, str]] | None = None
+        self, api_key: str, prompt: str, messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> AdapterResponse:
         """Invoca API de Anthropic (Messages API)."""
         body = {
@@ -200,19 +283,96 @@ class SubscriptionAdapter(ModelAdapter):
             "max_tokens": 4096,
             "messages": normalize_messages(messages, prompt),
         }
+        if tools:
+            body["tools"] = [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.parameters,
+                }
+                for t in tools
+            ]
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
         }
+        if not tools:
+            return self._http_request(
+                "https://api.anthropic.com/v1/messages",
+                payload,
+                headers,
+                prompt,
+                self._parse_anthropic_response,
+            )
+        # With tools: use inline parsing to capture tool_use blocks
         return self._http_request(
             "https://api.anthropic.com/v1/messages",
             payload,
             headers,
             prompt,
-            self._parse_anthropic_response,
+            self._make_anthropic_tool_parser(),
         )
+
+    def _make_anthropic_tool_parser(self):
+        """Returns a parser function that captures tool_use blocks from Anthropic responses."""
+        def _parser(parsed: dict, prompt: str, latency_ms: int) -> AdapterResponse:
+            from aiteam.types import ToolCall
+            content_blocks = parsed.get("content", [])
+            parts = []
+            tool_calls_out = []
+            if isinstance(content_blocks, list):
+                for block in content_blocks:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text":
+                        parts.append(str(block.get("text", "")))
+                    elif block.get("type") == "tool_use":
+                        raw_input = block.get("input", {})
+                        args = raw_input if isinstance(raw_input, dict) else {}
+                        tool_calls_out.append(ToolCall(
+                            id=str(block.get("id", "")),
+                            name=str(block.get("name", "")),
+                            arguments=args,
+                        ))
+            content = "\n".join(parts)
+
+            usage = parsed.get("usage", {})
+            usage_dict = usage if isinstance(usage, dict) else {}
+            input_tokens = int(usage_dict.get("input_tokens", max(1, len(prompt) // 4)))
+            output_tokens = int(
+                usage_dict.get("output_tokens", max(1, len(content) // 4 if content else 1))
+            )
+
+            if tool_calls_out:
+                return AdapterResponse(
+                    success=True,
+                    content=content or "",
+                    error=None,
+                    latency_ms=latency_ms,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    tool_calls=tool_calls_out,
+                )
+            if not content:
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error="empty_response_content",
+                    latency_ms=latency_ms,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            return AdapterResponse(
+                success=True,
+                content=content,
+                error=None,
+                latency_ms=latency_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        return _parser
 
     def _invoke_google(
         self,

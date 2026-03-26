@@ -430,5 +430,160 @@ class EvidenceGateQualityTests(unittest.TestCase):
         self.assertFalse(has_evidence)
 
 
+class NativeFunctionCallingTests(unittest.TestCase):
+    """Verifica function calling nativo en OpenAI y Anthropic."""
+
+    def _openai_tool_response(self, tool_name: str = "read_file", tool_id: str = "call_abc") -> dict:
+        return {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": tool_id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps({"command": "src/main.py"}),
+                        },
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10},
+        }
+
+    def _anthropic_tool_response(self, tool_name: str = "search", tool_id: str = "toolu_abc") -> dict:
+        return {
+            "content": [
+                {"type": "text", "text": "Voy a buscar informacion."},
+                {"type": "tool_use", "id": tool_id, "name": tool_name, "input": {"command": "query"}},
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 15, "output_tokens": 8},
+        }
+
+    def test_openai_adapter_returns_tool_calls_when_model_requests_tool(self) -> None:
+        from aiteam.adapters import ApiAdapter
+        from aiteam.adapters.base import NativeToolDefinition
+
+        adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
+        tools = [NativeToolDefinition(
+            name="read_file",
+            description="Lee un archivo del proyecto",
+            parameters={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
+        )]
+        captured: dict = {}
+
+        def _urlopen(request, timeout=0):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return _MockHttpResponse(self._openai_tool_response())
+
+        env = {"AITEAM_ENABLE_LIVE_API": "1", "OPENAI_API_KEY": "test-key"}
+        with (
+            patch.dict("os.environ", env, clear=False),
+            patch("urllib.request.urlopen", side_effect=_urlopen),
+        ):
+            response = adapter.invoke("Lee el archivo src/main.py", tools=tools)
+
+        self.assertTrue(response.success)
+        self.assertEqual(len(response.tool_calls), 1)
+        self.assertEqual(response.tool_calls[0].name, "read_file")
+        self.assertEqual(response.tool_calls[0].arguments, {"command": "src/main.py"})
+        self.assertEqual(response.tool_calls[0].id, "call_abc")
+        # tools se envian en el body con formato correcto
+        body_tools = captured["body"].get("tools", [])
+        self.assertEqual(len(body_tools), 1)
+        self.assertEqual(body_tools[0]["type"], "function")
+        self.assertEqual(body_tools[0]["function"]["name"], "read_file")
+        self.assertEqual(captured["body"].get("tool_choice"), "auto")
+
+    def test_anthropic_adapter_returns_tool_calls_on_tool_use_response(self) -> None:
+        from aiteam.adapters import SubscriptionAdapter
+        from aiteam.adapters.base import NativeToolDefinition
+
+        adapter = SubscriptionAdapter(name="claude_pro", provider="anthropic", model="claude-3-5-sonnet-20241022")
+        tools = [NativeToolDefinition(
+            name="search",
+            description="Busca en internet",
+            parameters={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
+        )]
+        captured: dict = {}
+
+        def _urlopen(request, timeout=0):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return _MockHttpResponse(self._anthropic_tool_response())
+
+        env = {"AITEAM_ENABLE_LIVE_API": "1", "ANTHROPIC_API_KEY": "test-key"}
+        with (
+            patch.dict("os.environ", env, clear=False),
+            patch("urllib.request.urlopen", side_effect=_urlopen),
+        ):
+            response = adapter.invoke("Busca informacion sobre asyncio", tools=tools)
+
+        self.assertTrue(response.success)
+        self.assertEqual(len(response.tool_calls), 1)
+        self.assertEqual(response.tool_calls[0].name, "search")
+        self.assertEqual(response.tool_calls[0].arguments, {"command": "query"})
+        # tools en body tienen formato Anthropic (input_schema, no parameters)
+        body_tools = captured["body"].get("tools", [])
+        self.assertEqual(len(body_tools), 1)
+        self.assertIn("input_schema", body_tools[0])
+        self.assertNotIn("parameters", body_tools[0])
+        # El texto previo al tool_use tambien se captura
+        self.assertIn("Voy a buscar", response.content)
+
+    def test_adapter_without_tools_param_gets_no_tools_injected(self) -> None:
+        """Adapters que no declaran tools= no reciben tools (backward compat)."""
+        from aiteam.adapters.base import ModelAdapter, NativeToolDefinition
+        from aiteam.types import AdapterResponse, ChannelType
+
+        class LegacyAdapter(ModelAdapter):
+            def available(self): return True
+            def invoke(self, prompt, messages=None):  # sin tools
+                return AdapterResponse(success=True, content="legacy ok", latency_ms=0)
+
+        legacy = LegacyAdapter(name="legacy", provider="test", model="m", channel=ChannelType.API)
+        tools = [NativeToolDefinition("t", "desc", {})]
+        # No debe fallar aunque tools no este en la firma
+        import inspect
+        params = inspect.signature(legacy.invoke).parameters
+        self.assertNotIn("tools", params)
+        result = legacy.invoke("hola")
+        self.assertTrue(result.success)
+
+    def test_router_passes_tools_to_adapter_when_supported(self) -> None:
+        """El router pasa tools solo si el adapter declara el parametro."""
+        from aiteam.adapters import ApiAdapter
+        from aiteam.adapters.base import NativeToolDefinition
+        from aiteam.config import build_default_router_policy
+        from aiteam.router import HybridRouter
+        from aiteam.types import Role, Complexity, Criticality, RoutingRequest
+
+        received_tools = []
+
+        class ToolAwareAdapter(ApiAdapter):
+            def invoke(self, prompt, messages=None, tools=None):
+                received_tools.extend(tools or [])
+                return __import__("aiteam.types", fromlist=["AdapterResponse"]).AdapterResponse(
+                    success=True, content="ok con tools", latency_ms=0
+                )
+
+        adapter = ToolAwareAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini",
+                                   capabilities={"coding"})
+        router = HybridRouter(adapters=[adapter], policy=build_default_router_policy())
+        tools = [NativeToolDefinition("read_file", "Lee archivo", {})]
+
+        request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+        )
+        decision = router.route_and_invoke(request, "hola", tools=tools)
+        self.assertTrue(decision.success)
+        self.assertEqual(len(received_tools), 1)
+        self.assertEqual(received_tools[0].name, "read_file")
+
+
 if __name__ == "__main__":
     unittest.main()

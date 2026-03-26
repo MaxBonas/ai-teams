@@ -314,6 +314,7 @@ class HybridRouter:
         prompt: str,
         task_id: str = "",
         messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> RoutingDecision:
         attempts: list[str] = []
         attempted_channels: dict[ChannelType, int] = {
@@ -397,10 +398,12 @@ class HybridRouter:
 
             attempted_channels[adapter.channel] += 1
             invoke_params = inspect.signature(adapter.invoke).parameters
+            kwargs = {}
             if "messages" in invoke_params:
-                response = adapter.invoke(prompt, messages=messages)
-            else:
-                response = adapter.invoke(prompt)
+                kwargs["messages"] = messages
+            if "tools" in invoke_params and tools is not None:
+                kwargs["tools"] = tools
+            response = adapter.invoke(prompt, **kwargs)
             attempts.append(
                 f"{adapter.name}:{adapter.channel.value}:{'ok' if response.success else 'fail'}"
             )
