@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, ChevronRight, LoaderCircle, SendHorizontal, Settings, UserRound, PanelTopOpen, PanelTopClose, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle, type PanelImperativeHandle, type PanelSize } from 'react-resizable-panels';
+import { Bot, ChevronRight, LoaderCircle, SendHorizontal, Settings, UserRound, PanelTopOpen, PanelTopClose } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import AgentPanel from './AgentPanel';
 import type { AgentLaneState } from './AgentLane';
+import Modal from './Modal';
 
 interface ChatMessage {
   id: string;
@@ -357,15 +357,13 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const [rememberConfig, setRememberConfig] = useState<boolean>(readRememberConfig);
   const [lastChatRun, setLastChatRun] = useState<LastChatRun | null>(null);
   const [chatProgress, setChatProgress] = useState<TeamChatProgress | null>(null);
-  const [conversationMinimized, setConversationMinimized] = useState(false);
-  const [composerMinimized, setComposerMinimized] = useState(false);
   const [showConfig, setShowConfig] = useState<boolean>(readShowConfig);
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingTaskId, setStreamingTaskId] = useState<string>('');
   const [agentLanes, setAgentLanes] = useState<Map<string, AgentLaneState>>(new Map());
+  const [expandedMessage, setExpandedMessage] = useState<ChatMessage | null>(null);
 
-  const conversationPanelRef = useRef<PanelImperativeHandle | null>(null);
-  const composerPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setInput('');
@@ -479,49 +477,16 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     allowLowProductivityOverride,
   ]);
 
+  // Auto-scroll al final cuando llegan mensajes o streaming
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [messages, streamingText, agentLanes]);
+
   const canSend = useMemo(() => input.trim().length > 0 && !loading, [input, loading]);
   const currentExecutionMode = chatProgress?.execution_mode || lastChatRun?.execution_mode || 'unknown';
   const currentPlaceholderOutputs = chatProgress?.placeholder_outputs ?? lastChatRun?.placeholder_outputs ?? 0;
-  const toPercent = (panelSize: PanelSize): number => Number(panelSize.asPercentage || 0);
-
-  const collapseSubpane = (
-    ref: { current: PanelImperativeHandle | null },
-    setMinimized: (value: boolean) => void,
-  ) => {
-    const panel = ref.current;
-    if (!panel) {
-      return;
-    }
-    panel.collapse();
-    setMinimized(true);
-  };
-
-  const expandSubpane = (
-    ref: { current: PanelImperativeHandle | null },
-    setMinimized: (value: boolean) => void,
-  ) => {
-    const panel = ref.current;
-    if (!panel) {
-      return;
-    }
-    panel.expand();
-    setMinimized(false);
-  };
-
-  const minimizedSubpanes = [
-    ...(conversationMinimized ? [{ id: 'conversation', label: 'Conversation' }] : []),
-    ...(composerMinimized ? [{ id: 'composer', label: 'Input Composer' }] : []),
-  ];
-
-  const restoreSubpane = (id: string) => {
-    if (id === 'conversation') {
-      expandSubpane(conversationPanelRef, setConversationMinimized);
-      return;
-    }
-    if (id === 'composer') {
-      expandSubpane(composerPanelRef, setComposerMinimized);
-    }
-  };
   const sendMessage = async (overrideMessage?: string) => {
     const trimmed = typeof overrideMessage === 'string' ? overrideMessage.trim() : input.trim();
     if (!trimmed || loading) {
@@ -927,6 +892,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     }
   };
 
+  const MSG_TRUNCATE = 600;
+
   return (
     <section className="team-card">
       <header className="team-card-header">
@@ -948,246 +915,206 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
         </div>
       </header>
 
-      {minimizedSubpanes.length > 0 && (
-        <div className="team-chat-minimized-tray">
-          <span className="team-chat-minimized-label">Hidden panes</span>
-          {minimizedSubpanes.map((pane) => (
-            <button
-              key={pane.id}
-              className="team-chat-minimized-btn"
-              onClick={() => restoreSubpane(pane.id)}
-              title={`Restore ${pane.label}`}
-            >
-              {pane.id === 'conversation' ? <PanelLeftOpen size={13} /> : <PanelRightOpen size={13} />}
-              {pane.label}
-            </button>
-          ))}
+      <div className="team-chat-body">
+        {/* ── Conversation log ─────────────────────── */}
+        <div className="team-chat-log" ref={logRef}>
+          {messages.length === 0 ? (
+            <div className="team-empty-state">
+              Your message is always received by a senior Team Lead first. Configure mode and round budget below to control planning depth and delivery window.
+            </div>
+          ) : (
+            messages.map((message) => {
+              const isError = message.meta === 'error';
+              const isJustification = message.meta === 'justification';
+              const isLong = !isError && !isJustification && message.text.length > MSG_TRUNCATE;
+              const displayText = isLong ? message.text.slice(0, MSG_TRUNCATE) + '…' : message.text;
+              return (
+                <article key={message.id} className={`team-msg team-msg-${message.sender} ${isError ? 'msg-error' : ''} ${isJustification ? 'msg-justification' : ''}`}>
+                  <div className="team-msg-icon">
+                    {message.sender === 'user' ? <UserRound size={14} /> : <Bot size={14} />}
+                  </div>
+                  <div className="team-msg-body">
+                    {isJustification ? (
+                      <div className="team-msg-evidence">
+                        <strong style={{ display: 'block', marginBottom: '4px', color: 'var(--accent)' }}>Inspector Decision Trace</strong>
+                        <i>{message.text}</i>
+                      </div>
+                    ) : (
+                      <p style={{ whiteSpace: 'pre-wrap' }}>{displayText}</p>
+                    )}
+                    {isLong && (
+                      <button
+                        className="team-msg-expand-btn"
+                        onClick={() => setExpandedMessage(message)}
+                      >
+                        Ver respuesta completa →
+                      </button>
+                    )}
+                    {message.meta && !isJustification && message.meta !== 'error' && (
+                      <MessageMeta meta={message.meta} />
+                    )}
+                  </div>
+                </article>
+              );
+            })
+          )}
+
+          {/* Agent lanes dentro del thread */}
+          <AgentPanel lanes={agentLanes} visible={loading || agentLanes.size > 0} />
+
+          {streamingText !== null && (
+            <div className="team-chat-message team-chat-message--team team-chat-message--streaming">
+              <div className="team-chat-message-content">
+                <span className="team-chat-streaming-cursor">{streamingText}</span>
+                <span className="team-chat-cursor-blink">&#x258A;</span>
+              </div>
+              <div className="team-chat-message-meta">streaming… {streamingTaskId}</div>
+            </div>
+          )}
         </div>
-      )}
 
-      <PanelGroup orientation="horizontal" id="team-chat-split-v2" style={{ width: '100%', flex: 1, minHeight: 0 }}>
-        <Panel
-          panelRef={conversationPanelRef}
-          defaultSize="58%"
-          minSize="12%"
-          collapsible
-          collapsedSize="0%"
-          className="team-chat-history-panel"
-          onResize={(size) => setConversationMinimized(toPercent(size) <= 1)}
-        >
-          <div className="team-chat-pane">
-            <div className="team-chat-pane-header">
-              <strong>Conversation</strong>
-              <button
-                className="team-chat-pane-toggle"
-                onClick={() => collapseSubpane(conversationPanelRef, setConversationMinimized)}
-                title="Minimize conversation pane"
-              >
-                <PanelLeftClose size={13} />
-              </button>
-            </div>
+        {/* ── Composer ─────────────────────────────── */}
+        <footer className="team-chat-input-wrap">
+          {chatProgress && (
+            <ChatProgressBar progress={chatProgress} loading={loading} />
+          )}
 
-            <div className="team-chat-log">
-              {messages.length === 0 ? (
-                <div className="team-empty-state">
-                  Your message is always received by a senior Team Lead first. Configure mode and round budget below to control planning depth and delivery window.
-                </div>
-              ) : (
-                messages.map((message) => {
-                  const isError = message.meta === 'error';
-                  const isJustification = message.meta === 'justification';
-                  return (
-                    <article key={message.id} className={`team-msg team-msg-${message.sender} ${isError ? 'msg-error' : ''} ${isJustification ? 'msg-justification' : ''}`}>
-                      <div className="team-msg-icon">
-                        {message.sender === 'user' ? <UserRound size={14} /> : <Bot size={14} />}
-                      </div>
-                      <div className="team-msg-body">
-                        {isJustification ? (
-                          <div className="team-msg-evidence">
-                            <strong style={{ display: 'block', marginBottom: '4px', color: 'var(--accent)' }}>Inspector Decision Trace</strong>
-                            <i>{message.text}</i>
-                          </div>
-                        ) : (
-                          <p style={{ whiteSpace: 'pre-wrap' }}>{message.text}</p>
-                        )}
-
-                        {message.meta && !isJustification && message.meta !== 'error' && (
-                          <MessageMeta meta={message.meta} />
-                        )}
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-              {streamingText !== null && (
-                <div className="team-chat-message team-chat-message--team team-chat-message--streaming">
-                  <div className="team-chat-message-content">
-                    <span className="team-chat-streaming-cursor">{streamingText}</span>
-                    <span className="team-chat-cursor-blink">&#x258A;</span>
-                  </div>
-                  <div className="team-chat-message-meta">streaming… {streamingTaskId}</div>
-                </div>
-              )}
-            </div>
+          <div className="team-chat-input-row">
+            <select
+              className="team-mode-select"
+              value={chatMode}
+              onChange={(e) => setChatMode(e.target.value as ChatMode)}
+              disabled={loading}
+              title={chatMode === 'sprint5' ? 'Sprint: plan + execute highest-impact slice' : 'Classic: legacy phased pipeline'}
+            >
+              <option value="sprint5">Sprint</option>
+              <option value="classic">Classic</option>
+            </select>
+            <textarea
+              className="team-chat-input"
+              rows={3}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Describe the coding task or question..."
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  void sendMessage();
+                }
+              }}
+            />
           </div>
-        </Panel>
 
-        <PanelResizeHandle className="resize-handle-v" />
-
-        <Panel
-          panelRef={composerPanelRef}
-          defaultSize="42%"
-          minSize="14%"
-          collapsible
-          collapsedSize="0%"
-          className="team-chat-compose-panel"
-          onResize={(size) => setComposerMinimized(toPercent(size) <= 1)}
-        >
-          <div className="team-chat-pane">
-            <div className="team-chat-pane-header">
-              <strong>Input Composer</strong>
+          <div className="team-chat-actions">
+            <div className="team-chat-actions-left">
               <button
-                className="team-chat-pane-toggle"
-                onClick={() => collapseSubpane(composerPanelRef, setComposerMinimized)}
-                title="Minimize input pane"
+                className="team-chat-settings-toggle"
+                onClick={() => setShowConfig(!showConfig)}
+                title="Toggle advanced settings"
               >
-                <PanelRightClose size={13} />
+                <Settings size={14} />
+                {showConfig ? 'Hide' : 'Settings'}
               </button>
-            </div>
-
-            <AgentPanel lanes={agentLanes} visible={loading || agentLanes.size > 0} />
-
-            <footer className="team-chat-input-wrap">
-              {chatProgress && (
-                <ChatProgressBar progress={chatProgress} loading={loading} />
+              <button
+                className="team-chat-continue"
+                disabled={loading || !lastChatRun?.task_id}
+                onClick={() => {
+                  if (!lastChatRun) return;
+                  void sendMessage(buildContinuePrompt(lastChatRun));
+                }}
+              >
+                Continue
+              </button>
+              {lastChatRun?.task_id && (
+                <span className="team-chat-last-run-badge" title={`Last: ${lastChatRun.task_id} · ${lastChatRun.rounds_used || 0}/${lastChatRun.round_budget || 0} rounds · ${lastChatRun.status || '-'}`}>
+                  {lastChatRun.task_id}
+                </span>
               )}
+            </div>
+            <button className="team-chat-send" disabled={!canSend} onClick={() => void sendMessage()}>
+              {loading ? <LoaderCircle size={16} className="spin" /> : <SendHorizontal size={16} />}
+              Send
+            </button>
+          </div>
 
-              <div className="team-chat-input-row">
-                <select
-                  className="team-mode-select"
-                  value={chatMode}
-                  onChange={(e) => setChatMode(e.target.value as ChatMode)}
-                  disabled={loading}
-                  title={chatMode === 'sprint5' ? 'Sprint: plan + execute highest-impact slice' : 'Classic: legacy phased pipeline'}
-                >
-                  <option value="sprint5">Sprint</option>
-                  <option value="classic">Classic</option>
-                </select>
-                <textarea
-                  className="team-chat-input"
-                  rows={3}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Describe the coding task or question..."
-                  onKeyDown={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                      e.preventDefault();
-                      void sendMessage();
-                    }
-                  }}
-                />
-              </div>
-
-              <div className="team-chat-actions">
-                <div className="team-chat-actions-left">
-                  <button
-                    className="team-chat-settings-toggle"
-                    onClick={() => setShowConfig(!showConfig)}
-                    title="Toggle advanced settings"
-                  >
-                    <Settings size={14} />
-                    {showConfig ? 'Hide' : 'Settings'}
-                  </button>
-                  <button
-                    className="team-chat-continue"
-                    disabled={loading || !lastChatRun?.task_id}
-                    onClick={() => {
-                      if (!lastChatRun) return;
-                      void sendMessage(buildContinuePrompt(lastChatRun));
+          {showConfig && (
+            <div className="team-chat-config">
+              <div className="team-chat-config-row">
+                <label className="team-chat-config-item">
+                  <span>Rounds</span>
+                  <input
+                    className="team-role-select"
+                    type="number"
+                    min={3}
+                    max={80}
+                    step={1}
+                    value={maxRounds}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10);
+                      if (Number.isNaN(parsed)) {
+                        setMaxRounds(TEAM_CHAT_DEFAULTS.rounds);
+                        return;
+                      }
+                      setMaxRounds(clampRounds(parsed));
                     }}
+                    disabled={loading}
+                  />
+                </label>
+                <label className="team-chat-config-item">
+                  <span>Complexity</span>
+                  <select
+                    className="team-role-select"
+                    value={complexity}
+                    onChange={(e) => setComplexity(e.target.value as ChatLevel)}
+                    disabled={loading}
                   >
-                    Continue
-                  </button>
-                  {lastChatRun?.task_id && (
-                    <span className="team-chat-last-run-badge" title={`Last: ${lastChatRun.task_id} · ${lastChatRun.rounds_used || 0}/${lastChatRun.round_budget || 0} rounds · ${lastChatRun.status || '-'}`}>
-                      {lastChatRun.task_id}
-                    </span>
-                  )}
-                </div>
-                <button className="team-chat-send" disabled={!canSend} onClick={() => void sendMessage()}>
-                  {loading ? <LoaderCircle size={16} className="spin" /> : <SendHorizontal size={16} />}
-                  Send
-                </button>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label className="team-chat-config-item">
+                  <span>Criticality</span>
+                  <select
+                    className="team-role-select"
+                    value={criticality}
+                    onChange={(e) => setCriticality(e.target.value as ChatLevel)}
+                    disabled={loading}
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
               </div>
+              <label className="team-chat-remember-row">
+                <input type="checkbox" checked={strictMode} onChange={(e) => setStrictMode(e.target.checked)} disabled={loading} />
+                <span>Strict evidence mode</span>
+              </label>
+              <label className="team-chat-remember-row">
+                <input type="checkbox" checked={allowLowProductivityOverride} onChange={(e) => setAllowLowProductivityOverride(e.target.checked)} disabled={loading} />
+                <span>Allow close below threshold</span>
+              </label>
+              <label className="team-chat-remember-row">
+                <input type="checkbox" checked={rememberConfig} onChange={(e) => setRememberConfig(e.target.checked)} disabled={loading} />
+                <span>Remember per workspace</span>
+              </label>
+            </div>
+          )}
+        </footer>
+      </div>
 
-              {showConfig && (
-                <div className="team-chat-config">
-                  <div className="team-chat-config-row">
-                    <label className="team-chat-config-item">
-                      <span>Rounds</span>
-                      <input
-                        className="team-role-select"
-                        type="number"
-                        min={3}
-                        max={80}
-                        step={1}
-                        value={maxRounds}
-                        onChange={(e) => {
-                          const parsed = Number.parseInt(e.target.value, 10);
-                          if (Number.isNaN(parsed)) {
-                            setMaxRounds(TEAM_CHAT_DEFAULTS.rounds);
-                            return;
-                          }
-                          setMaxRounds(clampRounds(parsed));
-                        }}
-                        disabled={loading}
-                      />
-                    </label>
-                    <label className="team-chat-config-item">
-                      <span>Complexity</span>
-                      <select
-                        className="team-role-select"
-                        value={complexity}
-                        onChange={(e) => setComplexity(e.target.value as ChatLevel)}
-                        disabled={loading}
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                      </select>
-                    </label>
-                    <label className="team-chat-config-item">
-                      <span>Criticality</span>
-                      <select
-                        className="team-role-select"
-                        value={criticality}
-                        onChange={(e) => setCriticality(e.target.value as ChatLevel)}
-                        disabled={loading}
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                      </select>
-                    </label>
-                  </div>
-                  <label className="team-chat-remember-row">
-                    <input type="checkbox" checked={strictMode} onChange={(e) => setStrictMode(e.target.checked)} disabled={loading} />
-                    <span>Strict evidence mode</span>
-                  </label>
-                  <label className="team-chat-remember-row">
-                    <input type="checkbox" checked={allowLowProductivityOverride} onChange={(e) => setAllowLowProductivityOverride(e.target.checked)} disabled={loading} />
-                    <span>Allow close below threshold</span>
-                  </label>
-                  <label className="team-chat-remember-row">
-                    <input type="checkbox" checked={rememberConfig} onChange={(e) => setRememberConfig(e.target.checked)} disabled={loading} />
-                    <span>Remember per workspace</span>
-                  </label>
-                </div>
-              )}
-            </footer>
-          </div>
-        </Panel>
-      </PanelGroup>
+      {/* ── Modal respuesta completa ──────────────── */}
+      {expandedMessage && (
+        <Modal title="Respuesta completa" onClose={() => setExpandedMessage(null)} wide>
+          <pre className="modal-pre">{expandedMessage.text}</pre>
+          {expandedMessage.meta && expandedMessage.meta !== 'error' && expandedMessage.meta !== 'justification' && (
+            <div className="modal-meta-section">
+              <MessageMeta meta={expandedMessage.meta} />
+            </div>
+          )}
+        </Modal>
+      )}
     </section>
   );
 }

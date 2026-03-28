@@ -1142,3 +1142,267 @@
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.5; }
 }
+
+/* ── TeamChat vertical layout ────────────────────────────── */
+.team-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.team-chat-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.team-chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Override: el footer ya no es un panel completo, no necesita height: 100% */
+.team-chat-body .team-chat-input-wrap {
+  height: auto;
+  flex-shrink: 0;
+  overflow-y: visible;
+}
+
+.team-chat-log::-webkit-scrollbar { width: 4px; }
+.team-chat-log::-webkit-scrollbar-track { background: transparent; }
+.team-chat-log::-webkit-scrollbar-thumb { background: var(--border-color, rgba(255,255,255,0.1)); border-radius: 2px; }
+
+/* Expand button for long messages */
+.team-msg-expand-btn {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--accent, #2f81f7);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.team-msg-expand-btn:hover { opacity: 0.75; }
+
+/* ── Modal ───────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  padding: 24px;
+}
+
+.modal-card {
+  background: var(--panel-bg, #161b22);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-radius: 8px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.modal-card--wide { max-width: 860px; }
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary, #e6edf3);
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary, #8b949e);
+  font-size: 16px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.modal-close-btn:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-primary, #e6edf3);
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-pre {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary, #e6edf3);
+  margin: 0;
+}
+
+.modal-meta-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
+}
+
+/* ── StatusPanel ─────────────────────────────────────────── */
+.status-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--panel-bg, #161b22);
+  border-left: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  overflow: hidden;
+}
+
+.status-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  flex-shrink: 0;
+}
+
+.status-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #8b949e);
+}
+
+.status-panel-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary, #8b949e);
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 3px;
+  transition: color 0.15s;
+}
+.status-panel-toggle:hover { color: var(--text-primary, #e6edf3); }
+
+.status-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.status-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.status-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #8b949e);
+}
+
+.status-budget-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.status-budget-spend {
+  font-size: 20px;
+  font-weight: 600;
+  font-family: 'SF Mono', monospace;
+  color: var(--accent, #2f81f7);
+  font-variant-numeric: tabular-nums;
+}
+.status-budget-limit {
+  font-size: 12px;
+  color: var(--text-secondary, #8b949e);
+  font-family: monospace;
+}
+
+.status-counts {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.status-count-ok   { color: var(--status-green, #3fb950); font-weight: 500; }
+.status-count-fail { color: var(--status-red, #f85149);   font-weight: 500; }
+.status-count-total{ color: var(--text-secondary, #8b949e); }
+
+.status-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.status-run-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-family: 'SF Mono', monospace;
+}
+.status-run-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-run-id {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary, #e6edf3);
+  opacity: 0.85;
+}
+.status-run-rounds {
+  color: var(--text-secondary, #8b949e);
+  flex-shrink: 0;
+}
+
+.status-empty-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #8b949e);
+  font-style: italic;
+  line-height: 1.5;
+}
