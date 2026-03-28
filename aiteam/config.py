@@ -62,6 +62,15 @@ class RouterPolicy:
 def build_default_router_policy() -> RouterPolicy:
     policy = RouterPolicy()
 
+    # Límites de intentos por canal — sobreescribibles via env sin romper tests
+    sub_attempts_raw = os.getenv("AITEAM_MAX_SUBSCRIPTION_ATTEMPTS", "").strip()
+    if sub_attempts_raw.isdigit():
+        policy.max_subscription_attempts = max(1, int(sub_attempts_raw))
+
+    api_attempts_raw = os.getenv("AITEAM_MAX_API_ATTEMPTS", "").strip()
+    if api_attempts_raw.isdigit():
+        policy.max_api_attempts = max(1, int(api_attempts_raw))
+
     enforce_raw = os.getenv("AITEAM_ENFORCE_ROLE_MODEL_PREFERENCES", "0").strip().lower()
     if enforce_raw in {"1", "true", "yes", "on"}:
         policy.enforce_role_model_preferences = True

@@ -22,7 +22,8 @@ try:
 
     _root_env = Path(__file__).parent.parent / ".env"
     if _root_env.exists():
-        load_dotenv(_root_env)
+        # override=True: .env gana sobre vars vacías del shell (ej. ANTHROPIC_API_KEY="")
+        load_dotenv(_root_env, override=True)
 except ImportError:
     pass
 
@@ -160,7 +161,7 @@ class TeamChatResponse(BaseModel):
     productivity_threshold: int = 35
     low_productivity_rejected: bool = False
     low_productivity_override: bool = False
-    execution_mode: str = "simulated"
+    execution_mode: str = "unknown"
     placeholder_outputs: int = 0
     placeholder_output_ratio: float = 0.0
     evidence_gate_applied: bool = False
@@ -1414,6 +1415,12 @@ def _assess_execution_mode(
         1 for row in result_texts if _is_placeholder_output_text(row)
     )
     placeholder_ratio = float(placeholder_count) / float(len(result_texts))
+    has_execution_evidence = (
+        execution_steps > 0 or (artifact_created + artifact_modified) > 0
+    )
+
+    if not has_execution_evidence:
+        return "simulated", placeholder_count, placeholder_ratio, len(result_texts)
 
     if placeholder_count == len(result_texts) and execution_steps == 0:
         return "simulated", placeholder_count, placeholder_ratio, len(result_texts)
@@ -1627,10 +1634,14 @@ def _limit_chat_response(text: str, *, limit: int = 12000) -> str:
         prefix_budget = max(1200, limit - suffix_budget - len(marker) - 32)
         compact_prefix = prefix
         if len(compact_prefix) > prefix_budget:
-            compact_prefix = compact_prefix[: max(0, prefix_budget - 15)] + "...\n[truncado]"
+            compact_prefix = (
+                compact_prefix[: max(0, prefix_budget - 15)] + "...\n[truncado]"
+            )
         compact_suffix = suffix
         if len(compact_suffix) > suffix_budget:
-            compact_suffix = compact_suffix[: max(0, suffix_budget - 15)] + "...\n[truncado]"
+            compact_suffix = (
+                compact_suffix[: max(0, suffix_budget - 15)] + "...\n[truncado]"
+            )
         content = compact_prefix + marker + compact_suffix
         if len(content) <= limit:
             return content
@@ -1638,39 +1649,8 @@ def _limit_chat_response(text: str, *, limit: int = 12000) -> str:
     return content[: max(0, limit - 15)] + "...\n[truncado]"
 
 
-def _apply_chat_demo_env(*, strict_mode: bool, environment: str) -> callable:
-    fast_demo_enabled = os.getenv("AITEAM_DEMO_FAST_CHAT", "1").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if (
-        environment != "dev"
-        or strict_mode
-        or _env_bool("AITEAM_REQUIRE_LIVE_MODE", default=False)
-        or not fast_demo_enabled
-    ):
-        return lambda: None
-
-    overrides = {
-        "AITEAM_ENABLE_LIVE_API": "0",
-        "AITEAM_LIVE_API_RETRY_ATTEMPTS": "0",
-        "AITEAM_CHAT_DEMO_FAST": "1",
-    }
-    previous: dict[str, str | None] = {}
-    for key, value in overrides.items():
-        previous[key] = os.environ.get(key)
-        os.environ[key] = value
-
-    def _restore() -> None:
-        for key, old_value in previous.items():
-            if old_value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = old_value
-
-    return _restore
+def _apply_chat_demo_env(*, strict_mode: bool, environment: str):
+    return lambda: None
 
 
 def _stream_display_chunk(task_id: str, chunk: str) -> str:
@@ -1735,7 +1715,9 @@ def _resolve_chat_decision_text(
     if failed_phases:
         failed_with_context: list[str] = []
         for phase in failed_phases[:4]:
-            detail = re.sub(r"\s+", " ", str(phase_results.get(phase, "") or "")).strip()
+            detail = re.sub(
+                r"\s+", " ", str(phase_results.get(phase, "") or "")
+            ).strip()
             if detail:
                 failed_with_context.append(f"{phase} ({detail[:120]})")
             else:
@@ -1877,6 +1859,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         return str(task.metadata.get("result") or task.metadata.get("error") or "")
 
     import queue as _queue_mod
+
     _token_queue: _queue_mod.Queue = _queue_mod.Queue()
 
     def _run_chat() -> TeamChatResponse:
@@ -1896,10 +1879,12 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 _token_queue.put(
                     ("token_chunk", {"task_id": task_id, "chunk": display_chunk})
                 )
+
         orch.token_chunk_callback = _on_chunk
 
         def _on_agent_event(event: dict) -> None:
             _token_queue.put(("agent_event", event))
+
         orch.agent_event_callback = _on_agent_event
         previous_runs = _recent_chat_roots(runtime_dir, max_chats=3)
         previous_root = previous_runs[0] if previous_runs else {}
@@ -1949,9 +1934,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         # ── Constantes de capabilities por rol ─────────────────────────────
         _ROLE_CAPABILITIES = {
             "RESEARCHER": ["analysis"],
-            "ENGINEER":   ["coding"],
-            "REVIEWER":   ["review"],
-            "QA":         ["analysis"],
+            "ENGINEER": ["coding"],
+            "REVIEWER": ["review"],
+            "QA": ["analysis"],
         }
 
         # ── Instruccion de WORKFLOW_PLAN para el prompt del Lead ────────────
@@ -2043,16 +2028,18 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         bootstrap_result = _materialize_game_iteration(workspace, payload.message)
         if bool(bootstrap_result.get("applied", False)):
             raw_bootstrap_files = bootstrap_result.get("files", [])
-            _bfiles = raw_bootstrap_files if isinstance(raw_bootstrap_files, list) else []
+            _bfiles = (
+                raw_bootstrap_files if isinstance(raw_bootstrap_files, list) else []
+            )
             orch.event_logger.emit(
                 "chat_artifact_bootstrap",
                 {
                     "task_id": task_root,
-                    "iteration": _safe_int_value(bootstrap_result.get("iteration", 0), 0),
+                    "iteration": _safe_int_value(
+                        bootstrap_result.get("iteration", 0), 0
+                    ),
                     "files": [
-                        str(item or "")
-                        for item in _bfiles
-                        if str(item or "").strip()
+                        str(item or "") for item in _bfiles if str(item or "").strip()
                     ],
                 },
             )
@@ -2066,7 +2053,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         # ── PASO 2: parsear WORKFLOW_PLAN del lead → fases dinamicas ────────
         _ws = orch._get_workflow_state(task_root)
         _lead_output = _ws.get("phase_outputs", {}).get("lead_intake", "")
-        phases: list[PhaseSpec] = parse_workflow_plan(_lead_output) or default_phases(chat_mode)
+        phases: list[PhaseSpec] = parse_workflow_plan(_lead_output) or default_phases(
+            chat_mode
+        )
 
         # Construir estructuras de fases desde el plan dinamico
         phase_task_ids: dict[str, str] = {"lead_intake": lead_task_id}
@@ -2086,62 +2075,69 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             _is_engineer = _spec.role == "ENGINEER"
             # Dependencias: lead_intake + las que especifica el plan
             _deps = [lead_task_id] + [
-                phase_task_ids[d] for d in _spec.depends_on
+                phase_task_ids[d]
+                for d in _spec.depends_on
                 if d in phase_task_ids and phase_task_ids[d] != lead_task_id
             ]
             if not _deps:
                 _deps = [lead_task_id]
-            orch.submit_task(WorkTask(
-                task_id=phase_task_ids[_spec.phase_id],
-                title=_spec.phase_id.replace("_", " ").title(),
-                description=(
-                    f"{_spec.objective}\n"
-                    f"Solicitud original: {payload.message}\n"
-                    f"Entrega: resultado accionable con evidencia para la siguiente fase."
-                    f"{continuity_block}"
-                ),
-                role=_role_enum,
-                complexity=complexity,
-                criticality=criticality,
-                dependencies=_deps,
-                metadata={
-                    "required_capabilities": _caps,
-                    "interactive_chat": True,
-                    "skip_quality_gates": True,
-                    "require_peer_consultation": True,
-                    "require_execution_plan": require_build_execution_plan if _is_engineer else False,
-                    "phase": _spec.phase_id,
-                    "chat_parent": task_root,
-                    "delegated_by": "team_lead",
-                    "delegation_brief": _spec.objective,
-                    "delegation_from_role": "team_lead",
-                },
-            ))
+            orch.submit_task(
+                WorkTask(
+                    task_id=phase_task_ids[_spec.phase_id],
+                    title=_spec.phase_id.replace("_", " ").title(),
+                    description=(
+                        f"{_spec.objective}\n"
+                        f"Solicitud original: {payload.message}\n"
+                        f"Entrega: resultado accionable con evidencia para la siguiente fase."
+                        f"{continuity_block}"
+                    ),
+                    role=_role_enum,
+                    complexity=complexity,
+                    criticality=criticality,
+                    dependencies=_deps,
+                    metadata={
+                        "required_capabilities": _caps,
+                        "interactive_chat": True,
+                        "skip_quality_gates": True,
+                        "require_peer_consultation": True,
+                        "require_execution_plan": require_build_execution_plan
+                        if _is_engineer
+                        else False,
+                        "phase": _spec.phase_id,
+                        "chat_parent": task_root,
+                        "delegated_by": "team_lead",
+                        "delegation_brief": _spec.objective,
+                        "delegation_from_role": "team_lead",
+                    },
+                )
+            )
 
         # lead_close depende de todas las fases delegadas
         _close_deps = delegated_task_ids if delegated_task_ids else [lead_task_id]
-        orch.submit_task(WorkTask(
-            task_id=phase_task_ids["lead_close"],
-            title="Lead synthesis and response",
-            description=(
-                "Como Team Lead senior, sintetiza el trabajo del equipo y responde al usuario.\n"
-                f"Solicitud original: {payload.message}\n"
-                "Entrega: resumen ejecutivo, decisiones tomadas y proximos pasos."
-                f"{continuity_block}"
-            ),
-            role=Role.TEAM_LEAD,
-            complexity=complexity,
-            criticality=criticality,
-            dependencies=_close_deps,
-            metadata={
-                "required_capabilities": ["reasoning"],
-                "interactive_chat": True,
-                "skip_quality_gates": True,
-                "require_peer_consultation": True,
-                "phase": "lead_close",
-                "chat_parent": task_root,
-            },
-        ))
+        orch.submit_task(
+            WorkTask(
+                task_id=phase_task_ids["lead_close"],
+                title="Lead synthesis and response",
+                description=(
+                    "Como Team Lead senior, sintetiza el trabajo del equipo y responde al usuario.\n"
+                    f"Solicitud original: {payload.message}\n"
+                    "Entrega: resumen ejecutivo, decisiones tomadas y proximos pasos."
+                    f"{continuity_block}"
+                ),
+                role=Role.TEAM_LEAD,
+                complexity=complexity,
+                criticality=criticality,
+                dependencies=_close_deps,
+                metadata={
+                    "required_capabilities": ["reasoning"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "require_peer_consultation": True,
+                    "phase": "lead_close",
+                    "chat_parent": task_root,
+                },
+            )
+        )
 
         workflow_label = " -> ".join(workflow_phase_keys)
         orch.event_logger.emit(
@@ -2452,9 +2448,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "execution_steps": execution_steps,
                 "artifact_created": artifact_created,
                 "artifact_modified": artifact_modified,
-                "live_mode_required": _env_bool(
-                    "AITEAM_REQUIRE_LIVE_MODE", default=False
-                ),
+                "live_mode_required": True,
             },
         )
         demo_fast_chat_active = _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
@@ -2475,10 +2469,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             else:
                 decision_display = "pending synthesis"
 
-        live_mode_required = (
-            _env_bool("AITEAM_REQUIRE_LIVE_MODE", default=False)
-            and not continuation_requested
-        )
+        live_mode_required = True
         live_mode_rejected = False
         if live_mode_required and execution_mode != "live":
             live_mode_rejected = True
@@ -2659,9 +2650,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 )
 
         productivity_threshold = 35
-        low_productivity_override = bool(
-            payload.allow_low_productivity_override
-        ) or bool(continuation_requested) or demo_fast_chat_active
+        low_productivity_override = (
+            bool(payload.allow_low_productivity_override)
+            or bool(continuation_requested)
+            or demo_fast_chat_active
+        )
         low_productivity_rejected = False
         if (
             productivity_score < productivity_threshold
@@ -2746,7 +2739,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             },
         )
 
-        delegation_results_lines = delegated_lines[:12] if delegated_lines else ["- none"]
+        delegation_results_lines = (
+            delegated_lines[:12] if delegated_lines else ["- none"]
+        )
         if delegated_placeholder_count > 0:
             delegation_results_lines = [
                 f"- respuestas demo detectadas: {delegated_placeholder_count}"
@@ -2755,55 +2750,92 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             ] + delegation_results_lines
 
         execution_mode_label = (
-            "demo" if demo_fast_chat_active and execution_mode == "simulated" else execution_mode
+            "demo"
+            if demo_fast_chat_active and execution_mode == "simulated"
+            else execution_mode
         )
         output_count_label = (
-            "demo_outputs"
-            if demo_fast_chat_active
-            else "placeholder_outputs"
+            "demo_outputs" if demo_fast_chat_active else "placeholder_outputs"
         )
 
+        # ── Formato de respuesta: usuario primero, debug después ──────────────
+        # El mensaje al usuario va AL PRINCIPIO para que no quede enterrado.
+        # El bloque técnico va al final, condensado en pocas líneas.
+        verbose_lead = os.getenv("AITEAM_VERBOSE_LEAD_SUMMARY", "0").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+
+        # Bloque de estado técnico compacto (1-3 líneas)
+        status_icon = "✓" if final_state == "completed" else ("✗" if final_state == "rejected" else "~")
+        compact_status = (
+            f"{status_icon} {final_state} | rounds={rounds_used}/{round_budget} | "
+            f"elapsed={elapsed_ms}ms | routes={successful_routes}/{len(route_records)} ok"
+        )
+        if artifact_created or artifact_modified:
+            compact_status += f" | artifacts +{artifact_created}/~{artifact_modified}"
+        if failed_line and failed_line != "none":
+            compact_status += f"\nFallido: {failed_line}"
+        if next_action_hint and final_state != "completed":
+            compact_status += f"\nSiguiente: {next_action_hint}"
+
         response_lines = [
-            "Lead summary:",
-            f"Status={final_state} mode={chat_mode} rounds={rounds_used}/{round_budget} elapsed={elapsed_ms}ms",
-            f"Request: {request_line}",
-            f"Continuity: {continuity_line}",
-            f"Participants (roles): {participants_line}",
-            f"Participants (agents): {agents_line}",
-            f"Decision: {decision_display}",
-            f"Done: {done_line}",
-            f"Pending: {pending_line}",
-            f"Failed: {failed_line}",
-            f"Used: {used_line}",
-            f"Route attempts: {len(route_records)} (success={successful_routes})",
-            f"Execution steps: {execution_steps} (success={execution_steps_success})",
-            f"Execution mode: {execution_mode_label} ({output_count_label}={placeholder_outputs}/{max(1, output_result_count)})",
-            f"Live mode gate: {'rejected' if live_mode_rejected else ('required' if live_mode_required else 'off')}",
-            f"Checks passed: {', '.join(successful_checks) if successful_checks else 'none'}",
-            f"Evidence gate: {'rejected' if evidence_gate_applied else 'pass'} ({', '.join(evidence_gate_failures) if evidence_gate_failures else 'ok'})",
-            f"Artifacts: created={artifact_created} modified={artifact_modified}",
-            f"Quality: productivity={productivity_score}/100 ({productivity_status}) reasoning={reasoning_score}/100",
-            f"Action hint: {next_action_hint}",
-            f"Strict mode: {'blocked_close' if strict_mode_applied else ('on' if payload.strict_mode else 'off')}",
-            f"Low productivity gate: {'rejected' if low_productivity_rejected else ('override' if low_productivity_override and productivity_score < productivity_threshold else 'active')}",
-            f"Auto-extended rounds: +{auto_extended_rounds}",
-            "",
-            "Workflow phases:",
-            workflow_lines,
-            "",
-            "Lead message for user:",
             user_facing_summary,
-            "",
-            "Delegation results:",
-            "\n".join(delegation_results_lines),
         ]
         if artifact_files:
             response_lines.extend(
                 [
                     "",
-                    f"Artifact files: {', '.join(artifact_files[:12])}",
+                    f"Archivos: {', '.join(artifact_files[:12])}",
                 ]
             )
+        # Delegation results solo cuando hay algo no trivial
+        non_trivial_delegation = any(
+            "sin resultado" not in ln and "blocked" not in ln
+            for ln in delegation_results_lines
+        )
+        if non_trivial_delegation and delegation_results_lines != ["- none"]:
+            response_lines.extend(
+                [
+                    "",
+                    "Delegation results:",
+                    "\n".join(delegation_results_lines),
+                ]
+            )
+        # Estado técnico compacto al final
+        response_lines.extend(["", "---", compact_status])
+
+        # Bloque verbose completo solo cuando se pide explícitamente
+        if verbose_lead:
+            response_lines.extend([
+                "",
+                "=== DEBUG LEAD SUMMARY ===",
+                f"Status={final_state} mode={chat_mode} rounds={rounds_used}/{round_budget} elapsed={elapsed_ms}ms",
+                f"Request: {request_line}",
+                f"Continuity: {continuity_line}",
+                f"Participants (roles): {participants_line}",
+                f"Participants (agents): {agents_line}",
+                f"Decision: {decision_display}",
+                f"Done: {done_line}",
+                f"Pending: {pending_line}",
+                f"Failed: {failed_line}",
+                f"Used: {used_line}",
+                f"Route attempts: {len(route_records)} (success={successful_routes})",
+                f"Execution steps: {execution_steps} (success={execution_steps_success})",
+                f"Execution mode: {execution_mode_label} ({output_count_label}={placeholder_outputs}/{max(1, output_result_count)})",
+                f"Live mode gate: {'rejected' if live_mode_rejected else ('required' if live_mode_required else 'off')}",
+                f"Checks passed: {', '.join(successful_checks) if successful_checks else 'none'}",
+                f"Evidence gate: {'rejected' if evidence_gate_applied else 'pass'} ({', '.join(evidence_gate_failures) if evidence_gate_failures else 'ok'})",
+                f"Artifacts: created={artifact_created} modified={artifact_modified}",
+                f"Quality: productivity={productivity_score}/100 ({productivity_status}) reasoning={reasoning_score}/100",
+                f"Action hint: {next_action_hint}",
+                f"Strict mode: {'blocked_close' if strict_mode_applied else ('on' if payload.strict_mode else 'off')}",
+                f"Low productivity gate: {'rejected' if low_productivity_rejected else ('override' if low_productivity_override and productivity_score < productivity_threshold else 'active')}",
+                f"Auto-extended rounds: +{auto_extended_rounds}",
+                "",
+                "Workflow phases:",
+                workflow_lines,
+            ])
+
         if not lead_completed or low_productivity_rejected:
             response_lines.extend(
                 [
@@ -2863,6 +2895,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
 
     async def _event_stream():
         import asyncio as _asyncio
+
         _chat_fut = _asyncio.get_event_loop().run_in_executor(None, _run_chat)
 
         while True:
@@ -2872,13 +2905,21 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 if event_type == "token_chunk":
                     yield f"event: token_chunk\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
                 elif event_type == "agent_event":
-                    evt_name = data.get("type", "agent_event") if isinstance(data, dict) else "agent_event"
+                    evt_name = (
+                        data.get("type", "agent_event")
+                        if isinstance(data, dict)
+                        else "agent_event"
+                    )
                     yield f"event: {evt_name}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
                 elif event_type == "done":
                     # _run_chat already finished — await the future for the result
                     try:
-                        result = await _asyncio.wait_for(_asyncio.wrap_future(_chat_fut), timeout=5.0)
-                        result_dict = result.model_dump() if hasattr(result, "model_dump") else {}
+                        result = await _asyncio.wait_for(
+                            _asyncio.wrap_future(_chat_fut), timeout=5.0
+                        )
+                        result_dict = (
+                            result.model_dump() if hasattr(result, "model_dump") else {}
+                        )
                         yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
                     except Exception as exc:
                         yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
@@ -2888,7 +2929,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 if _chat_fut.done():
                     try:
                         result = _chat_fut.result()
-                        result_dict = result.model_dump() if hasattr(result, "model_dump") else {}
+                        result_dict = (
+                            result.model_dump() if hasattr(result, "model_dump") else {}
+                        )
                         yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
                     except Exception as exc:
                         yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"

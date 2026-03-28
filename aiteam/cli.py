@@ -45,7 +45,8 @@ def _load_dotenv_if_present(path: Path) -> None:
             continue
         key, value = raw.split("=", 1)
         env_key = key.strip()
-        if not env_key or env_key in os.environ:
+        # Sólo saltar si la var existe Y tiene valor — una var vacía debe ser sobreescrita por .env
+        if not env_key or (env_key in os.environ and os.environ[env_key].strip()):
             continue
         clean_value = value.strip().strip('"').strip("'")
         os.environ[env_key] = clean_value
