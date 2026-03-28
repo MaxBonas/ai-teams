@@ -134,6 +134,8 @@ interface TeamChatProgress {
   evidence_gate_failures: string[];
   last_event: string;
   last_event_ts: string;
+  dynamic_phases_ready: boolean;
+  phase_task_ids: Record<string, string>;
 }
 
 const parseNumber = (value: unknown, fallback = 0): number => {
@@ -199,6 +201,18 @@ const parseChatProgress = (payload: unknown, fallbackTaskId: string): TeamChatPr
     evidence_gate_failures: evidenceFailures,
     last_event: typeof row.last_event === 'string' ? row.last_event : '',
     last_event_ts: typeof row.last_event_ts === 'string' ? row.last_event_ts : '',
+    dynamic_phases_ready: Boolean(row.dynamic_phases_ready),
+    phase_task_ids: (() => {
+      const raw = row.phase_task_ids;
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const out: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+          out[String(k)] = String(v ?? '');
+        }
+        return out;
+      }
+      return {};
+    })(),
   };
 };
 
@@ -311,8 +325,13 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
           {progress.evidence_gate_rejected && (
             <div className="team-chat-progress-line">evidence gate rejected · {progress.evidence_gate_failures.slice(0, 4).join(' | ') || 'missing evidence'}</div>
           )}
+          {!progress.dynamic_phases_ready && progress.state !== 'completed' && loading && (
+            <div className="team-chat-progress-line planning-indicator">
+              Team Lead planificando workflow...
+            </div>
+          )}
           {Object.keys(progress.phase_states).length > 0 && (
-            <div className="team-chat-progress-line">phases {Object.entries(progress.phase_states).slice(0, 8).map(([p, s]) => `${p}:${s}`).join(' · ')}</div>
+            <div className="team-chat-progress-line">phases {Object.entries(progress.phase_states).slice(0, 10).map(([p, s]) => `${p}:${s}`).join(' · ')}</div>
           )}
           {progress.last_event && <div className="team-chat-progress-line">latest {progress.last_event}</div>}
         </div>

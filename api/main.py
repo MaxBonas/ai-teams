@@ -32,6 +32,15 @@ from aiteam.cli import build_default_orchestrator, cmd_notebooklm_sync
 from aiteam.persistence import AtomicFileWriter
 from aiteam.pilot import compute_pilot_metrics
 from aiteam.types import Complexity, Criticality, Role, WorkTask
+from aiteam.workflow_planner import (
+    PhaseSpec,
+    default_phases,
+    parse_workflow_plan,
+)
+
+# Rondas maximas para ejecutar SOLO lead_intake en el flujo de dos pasos.
+# Lead_intake es una sola tarea; 5 rondas es mas que suficiente.
+_LEAD_INTAKE_MAX_ROUNDS = 5
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +195,8 @@ class TeamChatProgressResponse(BaseModel):
     evidence_gate_failures: list[str] = []
     last_event: str = ""
     last_event_ts: str = ""
+    dynamic_phases_ready: bool = False
+    phase_task_ids: dict[str, str] = {}
 
 
 class OperatorTimelineItem(BaseModel):
@@ -1045,6 +1056,15 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
     else:
         progress_state = "running"
 
+    # dynamic_phases_ready: True cuando el plan ya fue generado y las tareas
+    # dinamicas estan en el taskboard (mas alla de lead_intake/lead_close).
+    _progress_phase_task_ids = {
+        name: f"{normalized_root}::{name}" for name in phase_states
+    }
+    _dynamic_phases_ready = any(
+        name not in ("lead_intake", "lead_close") for name in phase_states
+    )
+
     return TeamChatProgressResponse(
         task_id=normalized_root,
         exists=True,
@@ -1068,6 +1088,8 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
         evidence_gate_failures=evidence_gate_failures,
         last_event=last_event,
         last_event_ts=last_event_ts,
+        dynamic_phases_ready=_dynamic_phases_ready,
+        phase_task_ids=_progress_phase_task_ids,
     )
 
 
@@ -1920,100 +1942,29 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
         require_build_execution_plan = not bool(continuation_requested)
 
-        def _delegation_brief(phase: str) -> str:
-            mapping = {
-                "discovery": (
-                    "Objetivo: descubrir restricciones, contexto tecnico y riesgos reales antes de implementar.\n"
-                    "Enfocate en dependencias, limites, supuestos y decisiones que afecten al build.\n"
-                    "Entrega: hallazgos accionables, riesgos y recomendaciones concretas para engineer."
-                ),
-                "build": (
-                    "Objetivo: construir la solucion principal de forma ejecutable y revisable.\n"
-                    "Enfocate en decisiones tecnicas, implementacion, tradeoffs y evidencia util.\n"
-                    "Entrega: solucion, decisiones y siguiente accion clara para review/qa."
-                ),
-                "review": (
-                    "Objetivo: tensionar la solucion y detectar defectos, riesgos y deuda.\n"
-                    "Enfocate en calidad, seguridad, mantenibilidad y feedback accionable.\n"
-                    "Entrega: feedback priorizado, claro y verificable para build/team_lead."
-                ),
-                "qa": (
-                    "Objetivo: validar criterios de aceptacion, regresiones y cierre operativo.\n"
-                    "Enfocate en pruebas, edge cases, consistencia y riesgos residuales.\n"
-                    "Entrega: estado de validacion, riesgos residuales y recomendacion de cierre o bloqueo."
-                ),
-                "plan_research": (
-                    "Objetivo: mapear opciones, constraints y riesgos del plan.\n"
-                    "Entrega: investigacion util para plan_engineering y plan_risks."
-                ),
-                "plan_engineering": (
-                    "Objetivo: convertir el input del lead en una estrategia tecnica viable.\n"
-                    "Entrega: arquitectura, secuencia de implementacion y tradeoffs."
-                ),
-                "plan_risks": (
-                    "Objetivo: identificar riesgos de ejecucion, seguridad, coste y bloqueo.\n"
-                    "Entrega: matriz breve de riesgos y mitigaciones."
-                ),
-            }
-            return mapping.get(
-                phase,
-                "Objetivo: ejecutar el trabajo delegado con claridad, evidencia y siguiente accion.",
-            )
+        # ── Constantes de capabilities por rol ─────────────────────────────
+        _ROLE_CAPABILITIES = {
+            "RESEARCHER": ["analysis"],
+            "ENGINEER":   ["coding"],
+            "REVIEWER":   ["review"],
+            "QA":         ["analysis"],
+        }
 
-        if chat_mode == "classic":
-            phase_task_ids = {
-                "lead_intake": f"{task_root}::lead_intake",
-                "discovery": f"{task_root}::discovery",
-                "build": f"{task_root}::build",
-                "review": f"{task_root}::review",
-                "qa": f"{task_root}::qa",
-                "lead_close": f"{task_root}::lead_close",
-            }
-            workflow_phase_keys = [
-                "lead_intake",
-                "discovery",
-                "build",
-                "review",
-                "qa",
-                "lead_close",
-            ]
-            delegated_task_ids = [
-                phase_task_ids["discovery"],
-                phase_task_ids["build"],
-                phase_task_ids["review"],
-                phase_task_ids["qa"],
-            ]
-        else:
-            phase_task_ids = {
-                "lead_intake": f"{task_root}::lead_intake",
-                "plan_research": f"{task_root}::plan_research",
-                "plan_engineering": f"{task_root}::plan_engineering",
-                "plan_risks": f"{task_root}::plan_risks",
-                "build": f"{task_root}::build",
-                "review": f"{task_root}::review",
-                "qa": f"{task_root}::qa",
-                "lead_close": f"{task_root}::lead_close",
-            }
-            workflow_phase_keys = [
-                "lead_intake",
-                "plan_research",
-                "plan_engineering",
-                "plan_risks",
-                "build",
-                "review",
-                "qa",
-                "lead_close",
-            ]
-            delegated_task_ids = [
-                phase_task_ids["plan_research"],
-                phase_task_ids["plan_engineering"],
-                phase_task_ids["plan_risks"],
-                phase_task_ids["build"],
-                phase_task_ids["review"],
-                phase_task_ids["qa"],
-            ]
+        # ── Instruccion de WORKFLOW_PLAN para el prompt del Lead ────────────
+        _WORKFLOW_PLAN_INSTRUCTION = (
+            "\n\nTRAS TU ANALISIS, incluye un bloque [WORKFLOW_PLAN] con las fases"
+            " especificas que este pedido necesita. NO incluyas lead_intake ni"
+            " lead_close (se agregan automaticamente). Usa solo:"
+            " RESEARCHER, ENGINEER, REVIEWER, QA. Maximo 8 fases.\n"
+            "[WORKFLOW_PLAN]\n"
+            "- phase_id: <nombre_corto>\n"
+            "  role: <RESEARCHER|ENGINEER|REVIEWER|QA>\n"
+            "  objective: <objetivo concreto en una linea>\n"
+            "  depends_on: [<phase_ids separados por coma, o vacio>]\n"
+            "[/WORKFLOW_PLAN]"
+        )
 
-        lead_task_id = phase_task_ids["lead_intake"]
+        lead_task_id = f"{task_root}::lead_intake"
         continuity_context = _build_project_continuity_context(runtime_dir)
         continuity_block = f"\n\n{continuity_context}\n" if continuity_context else ""
 
@@ -2045,392 +1996,148 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             tags=["chat", "user_input"],
         )
 
-        staged_tasks: list[WorkTask]
+        # ── Descripcion del lead_intake segun modo ──────────────────────────
         if chat_mode == "classic":
-            staged_tasks = [
-                WorkTask(
-                    task_id=phase_task_ids["lead_intake"],
-                    title="Lead intake and project framing",
-                    description=(
-                        "Eres Team Lead senior. Escucha al usuario, define alcance y estrategia de ejecucion.\n"
-                        f"Solicitud original:\n{payload.message}\n"
-                        "Entrega: objetivos, supuestos, riesgos y orden de trabajo del equipo."
-                        f"{continuity_block}"
-                    ),
-                    role=Role.TEAM_LEAD,
-                    complexity=complexity,
-                    criticality=criticality,
-                    metadata={
-                        "required_capabilities": ["reasoning"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "lead_intake",
-                        "chat_preferred_role": preferred_role.value,
-                        "continuation_requested": continuation_requested,
-                        "continuation_of": continuation_of,
-                        "continuation_snapshot": continuation_snapshot,
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["discovery"],
-                    title="Discovery and constraints",
-                    description=(
-                        "Recopila contexto tecnico y restricciones para ejecutar la solicitud del usuario.\n"
-                        f"Solicitud: {payload.message}\n"
-                        "Entrega hallazgos accionables para implementacion.\n\n"
-                        f"Delegation brief:\n{_delegation_brief('discovery')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.RESEARCHER,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["lead_intake"]],
-                    metadata={
-                        "required_capabilities": ["analysis"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "discovery",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("discovery"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["build"],
-                    title="Build implementation",
-                    description=(
-                        "Implementa la solucion principal solicitada por el usuario con foco en codigo listo para revisar.\n"
-                        f"Solicitud: {payload.message}\n"
-                        "Incluye decisiones tecnicas y tradeoffs.\n\n"
-                        f"Delegation brief:\n{_delegation_brief('build')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.ENGINEER,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["discovery"]],
-                    metadata={
-                        "required_capabilities": ["coding"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "require_execution_plan": require_build_execution_plan,
-                        "phase": "build",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("build"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["review"],
-                    title="Review quality and risks",
-                    description=(
-                        "Revisa la salida de build, valida calidad, seguridad y mantenibilidad.\n"
-                        f"Solicitud: {payload.message}\n\n"
-                        f"Delegation brief:\n{_delegation_brief('review')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.REVIEWER,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["build"]],
-                    metadata={
-                        "required_capabilities": ["review"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "review",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("review"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["qa"],
-                    title="QA verification",
-                    description=(
-                        "Valida criterios de aceptacion y riesgos de regresion sobre la propuesta.\n"
-                        f"Solicitud: {payload.message}\n\n"
-                        f"Delegation brief:\n{_delegation_brief('qa')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.QA,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["review"]],
-                    metadata={
-                        "required_capabilities": ["analysis"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "qa",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("qa"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["lead_close"],
-                    title="Lead synthesis and response",
-                    description=(
-                        "Como Team Lead senior, sintetiza discovery/build/review/qa y responde al usuario con plan final.\n"
-                        f"Solicitud original: {payload.message}\n"
-                        "Incluye justificacion de decisiones y proximos pasos de implementacion."
-                        f"{continuity_block}"
-                    ),
-                    role=Role.TEAM_LEAD,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["qa"]],
-                    metadata={
-                        "required_capabilities": ["reasoning"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "lead_close",
-                        "chat_parent": task_root,
-                    },
-                ),
-            ]
+            lead_intake_description = (
+                "Eres Team Lead senior. Escucha al usuario, define alcance y estrategia de ejecucion.\n"
+                f"Solicitud original:\n{payload.message}\n"
+                "Entrega: objetivos, supuestos, riesgos y orden de trabajo del equipo."
+                f"{_WORKFLOW_PLAN_INSTRUCTION}"
+                f"{continuity_block}"
+            )
         else:
-            staged_tasks = [
-                WorkTask(
-                    task_id=phase_task_ids["lead_intake"],
-                    title="Lead intake and sprint framing",
-                    description=(
-                        "Eres Team Lead senior. Convierte el input en plan de ejecucion de ventana corta.\n"
-                        f"Solicitud original:\n{payload.message}\n"
-                        "Entrega en <=12 lineas: objetivo, backlog priorizado (P0/P1), riesgos y que se intentara completar en esta corrida."
-                        f"{continuity_block}"
-                    ),
-                    role=Role.TEAM_LEAD,
-                    complexity=complexity,
-                    criticality=criticality,
-                    metadata={
-                        "required_capabilities": ["reasoning"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "lead_intake",
-                        "chat_preferred_role": preferred_role.value,
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["plan_research"],
-                    title="Planning research pack",
-                    description=(
-                        "Construye base de decision para el plan: restricciones, riesgos tecnicos y supuestos criticos.\n"
-                        f"Solicitud: {payload.message}\n"
-                        "Entrega: checklist accionable para build en esta ventana.\n\n"
-                        f"Delegation brief:\n{_delegation_brief('plan_research')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.RESEARCHER,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["lead_intake"]],
-                    metadata={
-                        "required_capabilities": ["analysis"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "plan_research",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("plan_research"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["plan_engineering"],
-                    title="Engineering execution plan",
-                    description=(
-                        "Define corte de implementacion para esta ventana.\n"
-                        f"Solicitud: {payload.message}\n"
-                        "Entrega: tareas secuenciadas, criterios de aceptacion y tradeoffs para ejecutar en build.\n\n"
-                        f"Delegation brief:\n{_delegation_brief('plan_engineering')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.ENGINEER,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["lead_intake"]],
-                    metadata={
-                        "required_capabilities": ["coding"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "plan_engineering",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("plan_engineering"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["plan_risks"],
-                    title="Risk and quality plan",
-                    description=(
-                        "Define quality gates, pruebas minimas y riesgos de release para esta ventana.\n"
-                        f"Solicitud: {payload.message}\n"
-                        "Entrega: criterios de revison/QA para validar lo ejecutado.\n\n"
-                        f"Delegation brief:\n{_delegation_brief('plan_risks')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.REVIEWER,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["lead_intake"]],
-                    metadata={
-                        "required_capabilities": ["review"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "plan_risks",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("plan_risks"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["build"],
-                    title="Build highest-impact slice",
-                    description=(
-                        "Ejecuta el slice de mayor impacto definido en planning para esta ventana.\n"
-                        f"Solicitud: {payload.message}\n"
-                        "Entrega: implementado, pendientes explicitos y riesgos abiertos.\n\n"
-                        f"Delegation brief:\n{_delegation_brief('build')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.ENGINEER,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[
-                        phase_task_ids["plan_research"],
-                        phase_task_ids["plan_engineering"],
-                        phase_task_ids["plan_risks"],
-                    ],
-                    metadata={
-                        "required_capabilities": ["coding"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "require_execution_plan": require_build_execution_plan,
-                        "phase": "build",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("build"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["review"],
-                    title="Review quality and maintainability",
-                    description=(
-                        "Revisa el build contra el plan acordado.\n"
-                        f"Solicitud: {payload.message}\n"
-                        "Entrega: hallazgos, bloqueos y decisiones para cerrar o iterar.\n\n"
-                        f"Delegation brief:\n{_delegation_brief('review')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.REVIEWER,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["build"]],
-                    metadata={
-                        "required_capabilities": ["review"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "review",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("review"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["qa"],
-                    title="QA validation",
-                    description=(
-                        "Valida criterios de aceptacion para lo ejecutado en la ventana.\n"
-                        f"Solicitud: {payload.message}\n"
-                        "Entrega: veredicto, cobertura lograda y riesgos de regresion.\n\n"
-                        f"Delegation brief:\n{_delegation_brief('qa')}"
-                        f"{continuity_block}"
-                    ),
-                    role=Role.QA,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["build"]],
-                    metadata={
-                        "required_capabilities": ["analysis"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "qa",
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _delegation_brief("qa"),
-                        "delegation_from_role": "team_lead",
-                    },
-                ),
-                WorkTask(
-                    task_id=phase_task_ids["lead_close"],
-                    title="Lead sprint synthesis",
-                    description=(
-                        "Como Team Lead, sintetiza planning+build+review+qa y responde estado final de la ventana.\n"
-                        f"Solicitud original: {payload.message}\n"
-                        "Entrega: completado, pendiente y siguiente iteracion propuesta."
-                        f"{continuity_block}"
-                    ),
-                    role=Role.TEAM_LEAD,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=[phase_task_ids["review"], phase_task_ids["qa"]],
-                    metadata={
-                        "required_capabilities": ["reasoning"],
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "phase": "lead_close",
-                        "chat_parent": task_root,
-                    },
-                ),
-            ]
+            lead_intake_description = (
+                "Eres Team Lead senior. Convierte el input en plan de ejecucion de ventana corta.\n"
+                f"Solicitud original:\n{payload.message}\n"
+                "Entrega en <=12 lineas: objetivo, backlog priorizado (P0/P1), riesgos y"
+                " que se intentara completar en esta corrida."
+                f"{_WORKFLOW_PLAN_INSTRUCTION}"
+                f"{continuity_block}"
+            )
+
+        lead_intake_task = WorkTask(
+            task_id=lead_task_id,
+            title="Lead intake and planning",
+            description=lead_intake_description,
+            role=Role.TEAM_LEAD,
+            complexity=complexity,
+            criticality=criticality,
+            metadata={
+                "required_capabilities": ["reasoning"],
+                "interactive_chat": True,
+                "skip_quality_gates": True,
+                "require_peer_consultation": True,
+                "phase": "lead_intake",
+                "chat_preferred_role": preferred_role.value,
+                "continuation_requested": continuation_requested,
+                "continuation_of": continuation_of,
+                "continuation_snapshot": continuation_snapshot,
+            },
+        )
 
         artifact_before = _workspace_artifact_snapshot(workspace)
         bootstrap_result = _materialize_game_iteration(workspace, payload.message)
         if bool(bootstrap_result.get("applied", False)):
             raw_bootstrap_files = bootstrap_result.get("files", [])
-            bootstrap_files = (
-                raw_bootstrap_files if isinstance(raw_bootstrap_files, list) else []
-            )
+            _bfiles = raw_bootstrap_files if isinstance(raw_bootstrap_files, list) else []
             orch.event_logger.emit(
                 "chat_artifact_bootstrap",
                 {
                     "task_id": task_root,
-                    "iteration": _safe_int_value(
-                        bootstrap_result.get("iteration", 0), 0
-                    ),
+                    "iteration": _safe_int_value(bootstrap_result.get("iteration", 0), 0),
                     "files": [
                         str(item or "")
-                        for item in bootstrap_files
+                        for item in _bfiles
                         if str(item or "").strip()
                     ],
                 },
             )
 
         started = time.perf_counter()
-        for item in staged_tasks:
-            orch.submit_task(item)
+
+        # ── PASO 1: ejecutar solo lead_intake ───────────────────────────────
+        orch.submit_task(lead_intake_task)
+        orch.run_until_idle(max_rounds=_LEAD_INTAKE_MAX_ROUNDS)
+
+        # ── PASO 2: parsear WORKFLOW_PLAN del lead → fases dinamicas ────────
+        _ws = orch._get_workflow_state(task_root)
+        _lead_output = _ws.get("phase_outputs", {}).get("lead_intake", "")
+        phases: list[PhaseSpec] = parse_workflow_plan(_lead_output) or default_phases(chat_mode)
+
+        # Construir estructuras de fases desde el plan dinamico
+        phase_task_ids: dict[str, str] = {"lead_intake": lead_task_id}
+        for _spec in phases:
+            phase_task_ids[_spec.phase_id] = f"{task_root}::{_spec.phase_id}"
+        phase_task_ids["lead_close"] = f"{task_root}::lead_close"
+
+        workflow_phase_keys: list[str] = (
+            ["lead_intake"] + [s.phase_id for s in phases] + ["lead_close"]
+        )
+        delegated_task_ids: list[str] = [phase_task_ids[s.phase_id] for s in phases]
+
+        # Crear WorkTasks para cada fase dinamica
+        for _spec in phases:
+            _role_enum = Role[_spec.role]  # e.g. Role.ENGINEER
+            _caps = _ROLE_CAPABILITIES.get(_spec.role, ["analysis"])
+            _is_engineer = _spec.role == "ENGINEER"
+            # Dependencias: lead_intake + las que especifica el plan
+            _deps = [lead_task_id] + [
+                phase_task_ids[d] for d in _spec.depends_on
+                if d in phase_task_ids and phase_task_ids[d] != lead_task_id
+            ]
+            if not _deps:
+                _deps = [lead_task_id]
+            orch.submit_task(WorkTask(
+                task_id=phase_task_ids[_spec.phase_id],
+                title=_spec.phase_id.replace("_", " ").title(),
+                description=(
+                    f"{_spec.objective}\n"
+                    f"Solicitud original: {payload.message}\n"
+                    f"Entrega: resultado accionable con evidencia para la siguiente fase."
+                    f"{continuity_block}"
+                ),
+                role=_role_enum,
+                complexity=complexity,
+                criticality=criticality,
+                dependencies=_deps,
+                metadata={
+                    "required_capabilities": _caps,
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "require_peer_consultation": True,
+                    "require_execution_plan": require_build_execution_plan if _is_engineer else False,
+                    "phase": _spec.phase_id,
+                    "chat_parent": task_root,
+                    "delegated_by": "team_lead",
+                    "delegation_brief": _spec.objective,
+                    "delegation_from_role": "team_lead",
+                },
+            ))
+
+        # lead_close depende de todas las fases delegadas
+        _close_deps = delegated_task_ids if delegated_task_ids else [lead_task_id]
+        orch.submit_task(WorkTask(
+            task_id=phase_task_ids["lead_close"],
+            title="Lead synthesis and response",
+            description=(
+                "Como Team Lead senior, sintetiza el trabajo del equipo y responde al usuario.\n"
+                f"Solicitud original: {payload.message}\n"
+                "Entrega: resumen ejecutivo, decisiones tomadas y proximos pasos."
+                f"{continuity_block}"
+            ),
+            role=Role.TEAM_LEAD,
+            complexity=complexity,
+            criticality=criticality,
+            dependencies=_close_deps,
+            metadata={
+                "required_capabilities": ["reasoning"],
+                "interactive_chat": True,
+                "skip_quality_gates": True,
+                "require_peer_consultation": True,
+                "phase": "lead_close",
+                "chat_parent": task_root,
+            },
+        ))
 
         workflow_label = " -> ".join(workflow_phase_keys)
         orch.event_logger.emit(
@@ -2441,6 +2148,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "round_budget": round_budget,
                 "phase_count": len(workflow_phase_keys),
                 "delegated_count": len(delegated_task_ids),
+                "dynamic_phases": [s.phase_id for s in phases],
                 "continuation_requested": continuation_requested,
                 "continuation_of": continuation_of,
                 "continuation_snapshot": continuation_snapshot,
@@ -2458,6 +2166,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             task_id=task_root,
         )
 
+        # ── PASO 3: ejecutar fases dinamicas + lead_close ───────────────────
         orch.run_until_idle(max_rounds=round_budget)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         artifact_after = _workspace_artifact_snapshot(workspace)
