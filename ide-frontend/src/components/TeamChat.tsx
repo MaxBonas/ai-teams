@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, ChevronRight, LoaderCircle, SendHorizontal, Settings, UserRound, PanelTopOpen, PanelTopClose, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle, type PanelImperativeHandle, type PanelSize } from 'react-resizable-panels';
 import { apiFetch } from '../lib/api';
+import AgentPanel from './AgentPanel';
+import type { AgentLaneState } from './AgentLane';
 
 interface ChatMessage {
   id: string;
@@ -360,6 +362,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const [showConfig, setShowConfig] = useState<boolean>(readShowConfig);
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingTaskId, setStreamingTaskId] = useState<string>('');
+  const [agentLanes, setAgentLanes] = useState<Map<string, AgentLaneState>>(new Map());
 
   const conversationPanelRef = useRef<PanelImperativeHandle | null>(null);
   const composerPanelRef = useRef<PanelImperativeHandle | null>(null);
@@ -369,6 +372,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     setMessages([]);
     setLoading(false);
     setChatProgress(null);
+    setAgentLanes(new Map());
     if (!rememberConfig) {
       setChatMode(TEAM_CHAT_DEFAULTS.mode);
       setMaxRounds(TEAM_CHAT_DEFAULTS.rounds);
@@ -578,6 +582,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
       evidence_gate_failures: [],
       last_event: 'Waiting for runtime activity...',
       last_event_ts: '',
+      dynamic_phases_ready: false,
+      phase_task_ids: {},
     });
     void pollProgress();
     progressIntervalId = window.setInterval(() => {
@@ -648,7 +654,102 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                   }
                 } catch { /* ignore malformed chunk */ }
                 currentEventType = '';
+              } else if (currentEventType === 'agent_started') {
+                try {
+                  const ev = JSON.parse(rawData) as {
+                    task_id?: string; agent_id?: string; role?: string;
+                    phase?: string; title?: string;
+                  };
+                  const tid = ev.task_id ?? '';
+                  if (tid) {
+                    setAgentLanes(prev => {
+                      const next = new Map(prev);
+                      next.set(tid, {
+                        taskId: tid,
+                        agentId: ev.agent_id ?? '',
+                        role: ev.role ?? '',
+                        phase: ev.phase ?? '',
+                        title: ev.title ?? '',
+                        status: 'active',
+                        outputText: '',
+                        thinkingText: '',
+                        preview: '',
+                        durationMs: 0,
+                        startedAt: Date.now(),
+                      });
+                      return next;
+                    });
+                  }
+                } catch { /* ignore */ }
+                currentEventType = '';
+              } else if (currentEventType === 'agent_chunk') {
+                try {
+                  const ev = JSON.parse(rawData) as {
+                    task_id?: string; chunk?: string; chunk_type?: string;
+                  };
+                  const tid = ev.task_id ?? '';
+                  const chunk = ev.chunk ?? '';
+                  const chunkType = ev.chunk_type ?? 'output';
+                  if (tid && chunk) {
+                    setAgentLanes(prev => {
+                      const lane = prev.get(tid);
+                      if (!lane) return prev;
+                      const next = new Map(prev);
+                      if (chunkType === 'thinking') {
+                        next.set(tid, { ...lane, thinkingText: lane.thinkingText + chunk });
+                      } else {
+                        next.set(tid, { ...lane, outputText: lane.outputText + chunk });
+                      }
+                      return next;
+                    });
+                  }
+                } catch { /* ignore */ }
+                currentEventType = '';
+              } else if (currentEventType === 'agent_completed') {
+                try {
+                  const ev = JSON.parse(rawData) as {
+                    task_id?: string; preview?: string; duration_ms?: number;
+                  };
+                  const tid = ev.task_id ?? '';
+                  if (tid) {
+                    setAgentLanes(prev => {
+                      const lane = prev.get(tid);
+                      if (!lane) return prev;
+                      const next = new Map(prev);
+                      next.set(tid, {
+                        ...lane,
+                        status: 'completed',
+                        preview: ev.preview ?? '',
+                        durationMs: ev.duration_ms ?? 0,
+                      });
+                      return next;
+                    });
+                  }
+                } catch { /* ignore */ }
+                currentEventType = '';
+              } else if (currentEventType === 'agent_failed') {
+                try {
+                  const ev = JSON.parse(rawData) as {
+                    task_id?: string; error?: string;
+                  };
+                  const tid = ev.task_id ?? '';
+                  if (tid) {
+                    setAgentLanes(prev => {
+                      const lane = prev.get(tid);
+                      if (!lane) return prev;
+                      const next = new Map(prev);
+                      next.set(tid, {
+                        ...lane,
+                        status: 'failed',
+                        preview: ev.error ?? '',
+                      });
+                      return next;
+                    });
+                  }
+                } catch { /* ignore */ }
+                currentEventType = '';
               } else if (currentEventType === 'result') {
+                setAgentLanes(new Map()); // limpiar lanes al terminar
                 setStreamingText(null);
                 setStreamingTaskId('');
                 try {
@@ -744,6 +845,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       : (prev?.evidence_gate_failures ?? []),
                     last_event: typeof json.state === 'string' ? `Run ${json.state}` : (prev?.last_event ?? ''),
                     last_event_ts: new Date().toISOString(),
+                    dynamic_phases_ready: typeof json.dynamic_phases_ready === 'boolean' ? json.dynamic_phases_ready : (prev?.dynamic_phases_ready ?? false),
+                    phase_task_ids: json.phase_task_ids != null && typeof json.phase_task_ids === 'object' ? (json.phase_task_ids as Record<string, string>) : (prev?.phase_task_ids ?? {}),
                   }));
 
                   if (json.decision_justification) {
@@ -951,6 +1054,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                 <PanelRightClose size={13} />
               </button>
             </div>
+
+            <AgentPanel lanes={agentLanes} visible={loading || agentLanes.size > 0} />
 
             <footer className="team-chat-input-wrap">
               {chatProgress && (

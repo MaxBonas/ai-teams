@@ -114,6 +114,7 @@ class AITeamOrchestrator:
         self._load_workflow_state()
         self.session_store = SessionStore(runtime_dir)
         self.token_chunk_callback: "Callable[[str, str], None] | None" = None
+        self.agent_event_callback: "Callable[[dict], None] | None" = None
         self._init_tool_dispatcher()
 
     def _init_tool_dispatcher(self) -> None:
@@ -623,10 +624,19 @@ class AITeamOrchestrator:
             self._execution_order += 1
             return self._execution_order
 
+    def _emit_agent_event(self, event: dict) -> None:
+        """Emite un evento de ciclo de vida de agente al callback registrado (si existe)."""
+        if self.agent_event_callback is not None:
+            try:
+                self.agent_event_callback(event)
+            except Exception:
+                pass
+
     def _run_task(self, task: WorkTask) -> None:
         _task_type = (
             task.task_id.split("::")[-1] if "::" in task.task_id else task.role.value
         )
+        _phase = _task_type  # alias legible para eventos de agente
         assignee = task.assignee or self._assignee_for_role(
             task.role, task_type=_task_type
         )
@@ -942,11 +952,51 @@ class AITeamOrchestrator:
         )
         session.record_action("llm_call", f"route_and_invoke:{task.role.value}")
         native_tools = self._build_native_tools_for_task(task)
+
+        # ── Emitir agent_started antes de la llamada al LLM ──
+        self._emit_agent_event({
+            "type": "agent_started",
+            "task_id": task.task_id,
+            "agent_id": assignee,
+            "role": task.role.value,
+            "phase": _phase,
+            "title": task.title,
+        })
+
         on_chunk = None
-        if self.token_chunk_callback is not None:
-            _task_id_for_chunk = task.task_id
-            _cb = self.token_chunk_callback
-            on_chunk = lambda chunk: _cb(_task_id_for_chunk, chunk)
+        if self.token_chunk_callback is not None or self.agent_event_callback is not None:
+            _tid_for_chunk = task.task_id
+            _role_for_chunk = task.role.value
+            _phase_for_chunk = _phase
+            _agent_for_chunk = assignee
+            _token_cb = self.token_chunk_callback
+            _agent_cb = self.agent_event_callback
+
+            def on_chunk(
+                chunk: str,
+                _tid=_tid_for_chunk,
+                _role=_role_for_chunk,
+                _ph=_phase_for_chunk,
+                _aid=_agent_for_chunk,
+                _tcb=_token_cb,
+                _acb=_agent_cb,
+            ) -> None:
+                if _tcb is not None:
+                    _tcb(_tid, chunk)
+                if _acb is not None:
+                    try:
+                        _acb({
+                            "type": "agent_chunk",
+                            "task_id": _tid,
+                            "agent_id": _aid,
+                            "role": _role,
+                            "phase": _ph,
+                            "chunk": chunk,
+                            "chunk_type": "output",
+                        })
+                    except Exception:
+                        pass
+
         decision = self.router.route_and_invoke(
             request=request,
             prompt=prompt,
@@ -1252,6 +1302,15 @@ class AITeamOrchestrator:
                 return
 
             self.taskboard.mark_completed(task.task_id, details=safe_content)
+            self._emit_agent_event({
+                "type": "agent_completed",
+                "task_id": task.task_id,
+                "agent_id": assignee,
+                "role": task.role.value,
+                "phase": _phase,
+                "preview": safe_content[:200] if safe_content else "",
+                "duration_ms": int(decision.response.latency_ms),
+            })
 
             # ── Agent self-delegation: parsear [REQUEST_TASK] del output ──
             delegated = self._parse_agent_requests(task, assignee, safe_content)
@@ -1324,6 +1383,14 @@ class AITeamOrchestrator:
             tags=["failure"],
         )
         self.taskboard.mark_failed(task.task_id, error=failure_text)
+        self._emit_agent_event({
+            "type": "agent_failed",
+            "task_id": task.task_id,
+            "agent_id": assignee,
+            "role": task.role.value,
+            "phase": _phase,
+            "error": failure_text[:200] if failure_text else "",
+        })
 
         # ── Ledger de fallo ──
         self._update_team_ledger(task, assignee, failure_text, success=False)

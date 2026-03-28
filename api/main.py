@@ -1897,6 +1897,10 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     ("token_chunk", {"task_id": task_id, "chunk": display_chunk})
                 )
         orch.token_chunk_callback = _on_chunk
+
+        def _on_agent_event(event: dict) -> None:
+            _token_queue.put(("agent_event", event))
+        orch.agent_event_callback = _on_agent_event
         previous_runs = _recent_chat_roots(runtime_dir, max_chats=3)
         previous_root = previous_runs[0] if previous_runs else {}
         previous_by_root: dict[str, dict[str, object]] = {
@@ -2867,6 +2871,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 event_type, data = item
                 if event_type == "token_chunk":
                     yield f"event: token_chunk\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                elif event_type == "agent_event":
+                    evt_name = data.get("type", "agent_event") if isinstance(data, dict) else "agent_event"
+                    yield f"event: {evt_name}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
                 elif event_type == "done":
                     # _run_chat already finished — await the future for the result
                     try:

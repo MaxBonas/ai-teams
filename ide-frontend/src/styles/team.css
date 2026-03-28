@@ -948,3 +948,197 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
+
+/* ── Agent Panel ────────────────────────────────────────────────────── */
+
+.agent-panel {
+  border-top: 1px solid var(--border-color, #2a2a2a);
+  background: var(--surface-color, #111);
+  font-size: 0.8em;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.agent-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-secondary, #888);
+  border-bottom: 1px solid var(--border-color, #2a2a2a);
+}
+.agent-panel-header:hover { background: rgba(255,255,255,0.03); }
+
+.agent-panel-title {
+  font-weight: 600;
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #888);
+}
+
+.agent-panel-summary {
+  display: flex;
+  gap: 4px;
+}
+
+.apanel-badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.8em;
+}
+.apanel-active { background: rgba(74,158,255,0.18); color: #4a9eff; }
+.apanel-done   { background: rgba(34,197,94,0.15);  color: #22c55e; }
+.apanel-fail   { background: rgba(239,68,68,0.15);  color: #ef4444; }
+.apanel-total  { background: rgba(255,255,255,0.07); color: #888; }
+
+.agent-panel-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Agent Lane ─────────────────────────────────────────────────────── */
+
+.agent-lane {
+  border-bottom: 1px solid var(--border-color, #1e1e1e);
+  padding: 5px 10px;
+  transition: background 0.15s;
+}
+.agent-lane-active    { background: rgba(74,158,255,0.04); }
+.agent-lane-completed { background: transparent; }
+.agent-lane-failed    { background: rgba(239,68,68,0.04); }
+.agent-lane-waiting   { opacity: 0.5; }
+
+.lane-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.lane-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 0.7em;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.lane-phase {
+  font-weight: 600;
+  color: var(--text-primary, #ccc);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lane-agent-id {
+  font-size: 0.75em;
+  color: var(--text-secondary, #666);
+}
+
+.lane-status-area {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.lane-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 0.75em;
+  border-radius: 50%;
+}
+.lane-dot-active  { color: #4a9eff; animation: pulse-dot 1.2s ease-in-out infinite; }
+.lane-dot-done    { color: #22c55e; }
+.lane-dot-failed  { color: #ef4444; }
+.lane-dot-waiting { color: #555; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.lane-timer {
+  font-size: 0.75em;
+  color: var(--text-secondary, #666);
+  font-variant-numeric: tabular-nums;
+  min-width: 24px;
+  text-align: right;
+}
+
+/* Thinking section */
+.lane-thinking-section {
+  margin-top: 3px;
+  margin-left: 29px;
+}
+.lane-thinking-body {
+  font-size: 0.78em;
+  color: var(--text-secondary, #777);
+  background: rgba(255,200,0,0.05);
+  border-left: 2px solid rgba(255,200,0,0.3);
+  padding: 3px 6px;
+  max-height: 80px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Output section */
+.lane-output-section {
+  margin-top: 3px;
+  margin-left: 29px;
+}
+.lane-output-body {
+  font-size: 0.8em;
+  color: var(--text-primary, #bbb);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 80px;
+  overflow-y: auto;
+}
+.lane-output-streaming {
+  max-height: 60px;
+}
+
+.lane-error-body {
+  margin-top: 3px;
+  margin-left: 29px;
+  font-size: 0.78em;
+  color: #ef4444;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lane-collapse-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.78em;
+  color: var(--text-secondary, #666);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.lane-collapse-btn:hover { color: var(--text-primary, #ccc); background: rgba(255,255,255,0.05); }
+
+/* Planning indicator */
+.planning-indicator {
+  animation: planning-pulse 1.5s ease-in-out infinite;
+  color: #4a9eff !important;
+}
+@keyframes planning-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
