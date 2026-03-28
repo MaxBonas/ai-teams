@@ -1,8 +1,10 @@
 import tempfile
 import unittest
 import json
+import shutil
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from aiteam.adapters import ApiAdapter, SubscriptionAdapter
 from aiteam.adapters.base import ModelAdapter
@@ -20,6 +22,27 @@ from aiteam.types import (
 
 
 class OrchestratorTests(unittest.TestCase):
+    def test_workflow_build_phase_is_not_auto_conversational_from_question(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-TEST::build",
+            title="Build highest-impact slice",
+            description="Solicitud: que juego han creado?",
+            role=Role.ENGINEER,
+            metadata={"phase": "build"},
+        )
+
+        self.assertFalse(AITeamOrchestrator._detect_conversational_task(task))
+
+    def test_assess_output_quality_rejects_placeholder_output_for_reviewer(self) -> None:
+        ok, reason = AITeamOrchestrator._assess_output_quality(
+            "[SIMULADO | openai:gpt-4.1] Respuesta mock para review.",
+            Role.REVIEWER,
+            "review",
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(reason, "placeholder_output")
+
     def test_verify_task_evidence_accepts_non_empty_output_in_mock_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -59,6 +82,48 @@ class OrchestratorTests(unittest.TestCase):
 
             self.assertTrue(has_evidence)
             self.assertEqual(reason, "simulated_mode_accepted")
+
+    def test_verify_task_evidence_rejects_simulated_workflow_build_without_artifacts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "reasoning", "analysis", "review"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-TEST::build",
+                title="Build highest-impact slice",
+                description="Implementa cambios concretos",
+                role=Role.ENGINEER,
+                metadata={
+                    "_last_agent_output": "[SIMULADO | openai:gpt-4.1] Respuesta mock para build."
+                },
+            )
+
+            with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
+                has_evidence, reason = orchestrator._verify_task_evidence(
+                    task, project_root
+                )
+
+            self.assertFalse(has_evidence)
+            self.assertEqual(reason, "simulated_placeholder_blocked:placeholder_output")
 
     def test_non_conversational_engineer_task_completes_in_mock_mode_without_git_diff(
         self,
@@ -105,6 +170,53 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(completed.state.value, "completed")
             self.assertEqual(
                 completed.metadata.get("evidence_reason"), "simulated_mode_accepted"
+            )
+
+    def test_workflow_build_phase_fails_in_simulated_mode_without_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "reasoning", "analysis", "review"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-TEST::build",
+                title="Build highest-impact slice",
+                description="Implementa cambios concretos",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "build",
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                },
+            )
+
+            with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
+                orchestrator.submit_task(task)
+                orchestrator.run_until_idle(max_rounds=4)
+
+            failed = orchestrator.taskboard.get_task("CHAT-TEST::build")
+            assert failed is not None
+            self.assertEqual(failed.state.value, "failed")
+            self.assertIn(
+                "simulated_placeholder_blocked:placeholder_output",
+                str(failed.metadata.get("error", "") or ""),
             )
 
     def test_environment_specific_parallel_limits_are_applied(self) -> None:

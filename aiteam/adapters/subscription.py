@@ -9,6 +9,16 @@ import urllib.request
 from aiteam.adapters.base import ModelAdapter, messages_to_prompt, normalize_messages
 from aiteam.types import AdapterResponse, ChannelType
 
+# requests tiene mejor TLS fingerprint que urllib — necesario para Groq (Cloudflare)
+try:
+    import requests as _requests
+    _REQUESTS_AVAILABLE = True
+except ImportError:
+    _REQUESTS_AVAILABLE = False
+
+# Providers que requieren requests en vez de urllib por TLS fingerprinting de Cloudflare
+_PROVIDERS_REQUIRE_REQUESTS = {"groq"}
+
 
 # ── Provider API configs ──────────────────────────────────────
 
@@ -106,17 +116,59 @@ class SubscriptionAdapter(ModelAdapter):
         if self._live_api_enabled():
             live = self._invoke_live(prompt_text, normalized_messages, tools=tools)
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
+            if (not live.success) and self._allow_simulated_degrade(live.error):
+                return self._simulated_response(
+                    prompt_text,
+                    start=start,
+                    live_error=str(live.error or ""),
+                )
             return live
 
         # Mock fallback — solo activo cuando AITEAM_ENABLE_LIVE_API=0 (tests/demo sin clave).
         # En produccion real, configurar AITEAM_ENABLE_LIVE_API=1 y la API key del provider.
+        return self._simulated_response(prompt_text, start=start)
+
+    def _simulated_response(
+        self,
+        prompt_text: str,
+        *,
+        start: float,
+        live_error: str = "",
+    ) -> AdapterResponse:
+        input_tokens = max(1, len(prompt_text) // 4)
         first_line = (
             prompt_text.splitlines()[0][:80] if prompt_text.strip() else "tarea"
         )
+        demo_fast_mode = os.getenv("AITEAM_CHAT_DEMO_FAST", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if demo_fast_mode:
+            content = (
+                f"[DEMO] Avance preparado para: {first_line!r}. "
+                f"Se mantiene el flujo operativo en modo demostracion."
+            )
+            return AdapterResponse(
+                success=True,
+                content=content,
+                latency_ms=int((time.time() - start) * 1000),
+                input_tokens=input_tokens,
+                output_tokens=max(1, len(content) // 4),
+                error=None,
+            )
+        fallback_note = ""
+        if live_error.strip():
+            compact_error = " ".join(str(live_error).split())[:140]
+            fallback_note = (
+                f" Fallback simulado tras fallo live: {compact_error}."
+            )
         content = (
             f"[SIMULADO | {self.provider}:{self.model}] "
             f"Respuesta mock para: {first_line!r}. "
             f"Tarea procesada correctamente en modo simulacion. "
+            f"{fallback_note}"
             f"Para resultados reales, configura AITEAM_ENABLE_LIVE_API=1 "
             f"y {self.provider.upper()}_API_KEY en .env."
         )
@@ -130,9 +182,61 @@ class SubscriptionAdapter(ModelAdapter):
         )
 
     @staticmethod
+    def _allow_simulated_degrade(error: str | None) -> bool:
+        if os.getenv("AITEAM_REQUIRE_LIVE_MODE", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            return False
+        allow = os.getenv(
+            "AITEAM_ALLOW_SIMULATED_ON_PROVIDER_EXHAUSTION", "1"
+        ).strip().lower()
+        if allow not in {"1", "true", "yes", "on"}:
+            return False
+        normalized = str(error or "").strip().lower()
+        if not normalized:
+            return False
+        quota_markers = (
+            "http_error:429",
+            "rate_limit",
+            "rate_limited",
+            "insufficient_quota",
+            "credit balance",
+            "credit_ba",
+            "quota",
+        )
+        return any(marker in normalized for marker in quota_markers)
+
+    @staticmethod
     def _live_api_enabled() -> bool:
         raw = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower()
         return raw in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _live_retry_attempts() -> int:
+        raw = os.getenv("AITEAM_LIVE_API_RETRY_ATTEMPTS", "2").strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            return 2
+        return max(0, min(value, 4))
+
+    @staticmethod
+    def _is_retryable_http_status(code: int) -> bool:
+        return code in {408, 409, 425, 429, 500, 502, 503, 504}
+
+    @staticmethod
+    def _retry_delay_seconds(attempt_index: int, retry_after: str | None = None) -> float:
+        if retry_after:
+            try:
+                parsed = float(str(retry_after).strip())
+            except ValueError:
+                parsed = 0.0
+            if parsed > 0:
+                return max(0.2, min(parsed, 4.0))
+        return min(0.4 * (2**attempt_index), 4.0)
 
     def _invoke_live(
         self, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
@@ -448,48 +552,112 @@ class SubscriptionAdapter(ModelAdapter):
         prompt: str,
         parser,
     ) -> AdapterResponse:
-        """HTTP POST generico con manejo de errores."""
+        """HTTP POST generico con manejo de errores.
+
+        Usa `requests` para providers con Cloudflare TLS fingerprinting (ej. Groq).
+        Cae a urllib si requests no esta disponible.
+        """
         started = time.time()
         input_tokens = max(1, len(prompt) // 4)
-        try:
-            request = urllib.request.Request(
-                url, data=payload, headers=headers, method="POST"
-            )
-            with urllib.request.urlopen(request, timeout=90) as response:
-                status_code = int(getattr(response, "status", 200))
-                raw = response.read().decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as exc:
-            error_body = ""
+        max_retries = self._live_retry_attempts()
+        use_requests = (
+            _REQUESTS_AVAILABLE
+            and self.provider in _PROVIDERS_REQUIRE_REQUESTS
+        )
+        for attempt_index in range(max_retries + 1):
             try:
-                error_body = exc.read().decode("utf-8", errors="replace")[:500]
-            except Exception:
-                pass
-            return AdapterResponse(
-                success=False,
-                content="",
-                error=f"http_error:{exc.code}:{error_body}",
-                latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens,
-                output_tokens=0,
-            )
-        except urllib.error.URLError as exc:
-            return AdapterResponse(
-                success=False,
-                content="",
-                error=f"connection_error:{exc.reason}",
-                latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens,
-                output_tokens=0,
-            )
-        except Exception as exc:
-            return AdapterResponse(
-                success=False,
-                content="",
-                error=f"request_error:{exc}",
-                latency_ms=int((time.time() - started) * 1000),
-                input_tokens=input_tokens,
-                output_tokens=0,
-            )
+                if use_requests:
+                    resp = _requests.post(
+                        url,
+                        data=payload,
+                        headers=headers,
+                        timeout=90,
+                    )
+                    status_code = resp.status_code
+                    raw = resp.text
+                    if status_code < 200 or status_code >= 300:
+                        error_body = raw[:500]
+                        if (
+                            attempt_index < max_retries
+                            and self._is_retryable_http_status(status_code)
+                        ):
+                            retry_after = resp.headers.get("Retry-After")
+                            time.sleep(
+                                self._retry_delay_seconds(
+                                    attempt_index,
+                                    retry_after=str(retry_after or "").strip() or None,
+                                )
+                            )
+                            continue
+                        return AdapterResponse(
+                            success=False,
+                            content="",
+                            error=f"http_error:{status_code}:{error_body}",
+                            latency_ms=int((time.time() - started) * 1000),
+                            input_tokens=input_tokens,
+                            output_tokens=0,
+                        )
+                else:
+                    request = urllib.request.Request(
+                        url, data=payload, headers=headers, method="POST"
+                    )
+                    with urllib.request.urlopen(request, timeout=90) as response:
+                        status_code = int(getattr(response, "status", 200))
+                        raw = response.read().decode("utf-8", errors="replace")
+                break
+            except urllib.error.HTTPError as exc:
+                error_body = ""
+                try:
+                    error_body = exc.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                if (
+                    attempt_index < max_retries
+                    and self._is_retryable_http_status(int(exc.code or 0))
+                ):
+                    retry_after = None
+                    headers_obj = getattr(exc, "headers", None)
+                    if headers_obj is not None:
+                        retry_after = headers_obj.get("Retry-After")
+                    time.sleep(
+                        self._retry_delay_seconds(
+                            attempt_index,
+                            retry_after=str(retry_after or "").strip() or None,
+                        )
+                    )
+                    continue
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error=f"http_error:{exc.code}:{error_body}",
+                    latency_ms=int((time.time() - started) * 1000),
+                    input_tokens=input_tokens,
+                    output_tokens=0,
+                )
+            except urllib.error.URLError as exc:
+                if attempt_index < max_retries:
+                    time.sleep(self._retry_delay_seconds(attempt_index))
+                    continue
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error=f"connection_error:{exc.reason}",
+                    latency_ms=int((time.time() - started) * 1000),
+                    input_tokens=input_tokens,
+                    output_tokens=0,
+                )
+            except Exception as exc:
+                if attempt_index < max_retries:
+                    time.sleep(self._retry_delay_seconds(attempt_index))
+                    continue
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error=f"request_error:{exc}",
+                    latency_ms=int((time.time() - started) * 1000),
+                    input_tokens=input_tokens,
+                    output_tokens=0,
+                )
 
         if status_code < 200 or status_code >= 300:
             return AdapterResponse(

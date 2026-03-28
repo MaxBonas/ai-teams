@@ -1,11 +1,36 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 import threading
+
+_log = logging.getLogger(__name__)
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Límite de entradas por agente. Cuando se supera por 25%, se compacta al límite.
+_MAX_ENTRIES: int = int(os.getenv("AITEAM_MEMORY_MAX_ENTRIES", "2000"))
+
+# Patrones para redactar secretos en contenido de memoria
+_SECRET_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"sk-[A-Za-z0-9\-_]{20,}", re.IGNORECASE),        # OpenAI/Anthropic keys
+    re.compile(r"gsk_[A-Za-z0-9]{20,}", re.IGNORECASE),          # Groq keys
+    re.compile(r"AIza[A-Za-z0-9\-_]{30,}", re.IGNORECASE),       # Google API keys
+    re.compile(r"(?i)(api[_\-]?key|token|secret|password)\s*[=:]\s*\S{8,}", re.IGNORECASE),
+]
+
+
+def _redact_secrets(text: str) -> str:
+    """Redacta patrones de secretos conocidos del texto antes de persistir."""
+    if not text:
+        return text
+    result = text
+    for pattern in _SECRET_PATTERNS:
+        result = pattern.sub("[REDACTED]", result)
+    return result
 
 
 @dataclass
@@ -43,7 +68,7 @@ class AgentMemoryStore:
             agent_id=agent_id,
             role=role,
             kind=kind,
-            content=content,
+            content=_redact_secrets(content),
             task_id=task_id,
             tags=tags,
             project_key=project_key,
@@ -53,6 +78,7 @@ class AgentMemoryStore:
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(asdict(entry), ensure_ascii=True) + "\n")
                 f.flush()
+            self._compact_if_needed(path)
 
     def recent(
         self,
@@ -195,12 +221,25 @@ class AgentMemoryStore:
                 try:
                     data = json.loads(line)
                 except json.JSONDecodeError:
+                    _log.warning("memory: línea JSON corrupta ignorada en %s", path.name)
                     continue
                 try:
                     entries.append(MemoryEntry(**data))
                 except TypeError:
                     continue
             return entries
+
+    def _compact_if_needed(self, path: Path) -> None:
+        """Si el archivo supera _MAX_ENTRIES * 1.25 líneas, compacta al límite."""
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            threshold = int(_MAX_ENTRIES * 1.25)
+            if len(lines) <= threshold:
+                return
+            kept = [ln for ln in lines if ln.strip()][-_MAX_ENTRIES:]
+            path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        except OSError:
+            pass
 
     @staticmethod
     def _safe_segment(value: str) -> str:

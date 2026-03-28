@@ -90,7 +90,6 @@ app.add_middleware(
         "http://localhost:9490",
         "http://127.0.0.1:9490",
     ],
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -286,8 +285,10 @@ def _is_continuation_message(message: str) -> bool:
         "continue",
         "continue please",
         "continua",
+        "continuad",
         "continua por favor",
         "continúe",
+        "continúen",
         "proceed",
         "go on",
         "carry on",
@@ -299,7 +300,7 @@ def _is_continuation_message(message: str) -> bool:
 
     return bool(
         re.match(
-            r"^(continue|continua|continúe|proceed|go on|carry on|sigue|seguir)(\b|$)",
+            r"^(continue|continua|continuad|continúe|continúen|proceed|go on|carry on|sigue|seguir)(\b|$)",
             normalized,
         )
     )
@@ -1354,11 +1355,12 @@ def _is_placeholder_output_text(value: str) -> bool:
     if "processed prompt" in text:
         return True
     # Formato actual: "[SIMULADO | provider:model] Respuesta mock ..."
-    if "simulado |" in text or "respuesta mock" in text:
+    if "simulado |" in text or "respuesta mock" in text or text.startswith("[demo]"):
         return True
     patterns = [
         r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]",
         r"^\[simulado\s*\|",
+        r"^\[demo\]",
     ]
     return any(re.search(pattern, text) is not None for pattern in patterns)
 
@@ -1478,11 +1480,37 @@ def _compose_user_facing_run_summary(
     execution_mode: str,
     placeholder_outputs: int,
 ) -> str:
-    decision_text = str(decision_compact or "").strip()
+    execution_label = (
+        "demo"
+        if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
+        and execution_mode == "simulated"
+        else execution_mode
+    )
+    placeholder_label = (
+        "salidas demo"
+        if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
+        else "salidas placeholder"
+    )
+    decision_text = _presentable_decision_text(str(decision_compact or "").strip())
+    if not decision_text:
+        decision_text = str(decision_compact or "").strip()
+    if execution_mode == "simulated":
+        decision_text = (
+            "Se completo coordinacion en modo demo; falta ejecucion verificable y cambios reales en archivos."
+            if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
+            else "Se completo coordinacion en modo degradado/simulado; falta ejecucion verificable y cambios reales en archivos."
+        )
+    elif execution_mode == "hybrid" and placeholder_outputs > 0:
+        decision_text = (
+            "Se avanzo con coordinacion parcial, pero parte del output fue de demostracion; falta ejecucion verificable para cerrar."
+            if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
+            else "Se avanzo con coordinacion parcial, pero parte del output fue placeholder; falta ejecucion verificable para cerrar."
+        )
     if (
         not decision_text
         or "Processed prompt" in decision_text
         or "SIMULADO |" in decision_text
+        or decision_text.startswith("[DEMO]")
     ):
         decision_text = "Se priorizo completar el slice de mayor impacto de esta ronda y cerrar con review + QA."
 
@@ -1497,7 +1525,7 @@ def _compose_user_facing_run_summary(
             "Resumen del Team Lead para ti:",
             f"- Solicitud atendida: {request_line}",
             f"- Gestion de la conversacion: modo={mode}, rondas={rounds_used}/{round_budget}, continuidad={continuation_line}, participantes={participants_line}.",
-            f"- Tipo de ejecucion detectado: {execution_mode} (salidas placeholder={placeholder_outputs}).",
+            f"- Tipo de ejecucion detectado: {execution_label} ({placeholder_label}={placeholder_outputs}).",
             f"- Que se decidio:\n  {decision_text.replace(chr(10), chr(10) + '  ')}",
             f"- Que se hizo: completado={done_line}; pendiente={pending_line}; fallido={failed_line}.",
             f"- Archivos: {files_text}",
@@ -1505,6 +1533,211 @@ def _compose_user_facing_run_summary(
             f"- Siguiente paso recomendado: {next_action_hint}",
             f"- Referencia de corrida: {task_root} ({elapsed_ms}ms).",
         ]
+    )
+
+
+def _presentable_decision_text(value: str) -> str:
+    decision_text = str(value or "").strip()
+    if (
+        not decision_text
+        or "Processed prompt" in decision_text
+        or "SIMULADO |" in decision_text
+        or decision_text.startswith("[DEMO]")
+    ):
+        return ""
+    return decision_text
+
+
+def _compact_text_line(value: str, limit: int = 320) -> str:
+    flat = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(flat) <= limit:
+        return flat
+    return flat[: max(0, limit - 3)] + "..."
+
+
+def _is_placeholder_like_text(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(
+        re.search(
+            r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(r"^\[simulado\s*\|", text, flags=re.IGNORECASE)
+        or re.search(r"^\[demo\]", text, flags=re.IGNORECASE)
+        or "Processed prompt" in text
+    )
+
+
+def _compact_delegated_result(value: str, *, state: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "sin resultado"
+    if _is_placeholder_like_text(text):
+        if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False):
+            if state == "completed":
+                return "demo"
+            if state == "failed":
+                return "demo con incidencia"
+            return "salida demo"
+        if state == "completed":
+            return "placeholder/simulado"
+        if state == "failed":
+            return "fallo placeholder/simulado"
+        return "salida placeholder/simulada"
+    presentable = _presentable_decision_text(text)
+    if presentable:
+        return _compact_text_line(presentable, 180)
+    return _compact_text_line(text, 180)
+
+
+def _limit_chat_response(text: str, *, limit: int = 12000) -> str:
+    content = str(text or "")
+    if len(content) <= limit:
+        return content
+
+    marker = "\nLead message for user:\n"
+    if marker in content:
+        prefix, suffix = content.split(marker, 1)
+        suffix_budget = max(2800, int(limit * 0.45))
+        prefix_budget = max(1200, limit - suffix_budget - len(marker) - 32)
+        compact_prefix = prefix
+        if len(compact_prefix) > prefix_budget:
+            compact_prefix = compact_prefix[: max(0, prefix_budget - 15)] + "...\n[truncado]"
+        compact_suffix = suffix
+        if len(compact_suffix) > suffix_budget:
+            compact_suffix = compact_suffix[: max(0, suffix_budget - 15)] + "...\n[truncado]"
+        content = compact_prefix + marker + compact_suffix
+        if len(content) <= limit:
+            return content
+
+    return content[: max(0, limit - 15)] + "...\n[truncado]"
+
+
+def _apply_chat_demo_env(*, strict_mode: bool, environment: str) -> callable:
+    fast_demo_enabled = os.getenv("AITEAM_DEMO_FAST_CHAT", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if (
+        environment != "dev"
+        or strict_mode
+        or _env_bool("AITEAM_REQUIRE_LIVE_MODE", default=False)
+        or not fast_demo_enabled
+    ):
+        return lambda: None
+
+    overrides = {
+        "AITEAM_ENABLE_LIVE_API": "0",
+        "AITEAM_LIVE_API_RETRY_ATTEMPTS": "0",
+        "AITEAM_CHAT_DEMO_FAST": "1",
+    }
+    previous: dict[str, str | None] = {}
+    for key, value in overrides.items():
+        previous[key] = os.environ.get(key)
+        os.environ[key] = value
+
+    def _restore() -> None:
+        for key, old_value in previous.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+    return _restore
+
+
+def _stream_display_chunk(task_id: str, chunk: str) -> str:
+    text = str(chunk or "").strip()
+    if not text:
+        return ""
+    if not _env_bool("AITEAM_CHAT_DEMO_FAST", default=False):
+        return text
+    if _is_placeholder_like_text(text):
+        phase = str(task_id or "").split("::")[-1].strip().lower()
+        phase_label_map = {
+            "lead_intake": "Analizando solicitud",
+            "plan_research": "Investigando contexto",
+            "plan_engineering": "Definiendo implementacion",
+            "plan_risks": "Evaluando riesgos",
+            "build": "Preparando entrega",
+            "review": "Revisando resultado",
+            "qa": "Validando salida",
+            "lead_close": "Cerrando sintesis",
+        }
+        phase_label = phase_label_map.get(phase, "Coordinando equipo")
+        return f"{phase_label}...\n"
+    return text
+
+
+def _resolve_chat_decision_text(
+    *,
+    lead_response: str,
+    intake_response: str,
+    phase_states: dict[str, str],
+    workflow_phase_keys: list[str],
+    phase_results: dict[str, str],
+) -> str:
+    lead_text = str(lead_response or "").strip()
+    if lead_text:
+        return lead_text
+
+    lead_close_state = str(phase_states.get("lead_close", "") or "").strip().lower()
+    intake_text = str(intake_response or "").strip()
+    if lead_close_state == "completed" and intake_text:
+        return intake_text
+
+    done_phases = [
+        phase for phase in workflow_phase_keys if phase_states.get(phase) == "completed"
+    ]
+    blocked_phases = [
+        phase for phase in workflow_phase_keys if phase_states.get(phase) == "blocked"
+    ]
+    failed_phases = [
+        phase for phase in workflow_phase_keys if phase_states.get(phase) == "failed"
+    ]
+    pending_phases = [
+        phase
+        for phase in workflow_phase_keys
+        if phase_states.get(phase) in {"pending", "ready", "claimed"}
+    ]
+
+    fragments: list[str] = []
+    if done_phases:
+        fragments.append(f"completado={', '.join(done_phases)}")
+
+    if failed_phases:
+        failed_with_context: list[str] = []
+        for phase in failed_phases[:4]:
+            detail = re.sub(r"\s+", " ", str(phase_results.get(phase, "") or "")).strip()
+            if detail:
+                failed_with_context.append(f"{phase} ({detail[:120]})")
+            else:
+                failed_with_context.append(phase)
+        fragments.append(f"fallido={', '.join(failed_with_context)}")
+
+    if blocked_phases:
+        fragments.append(f"bloqueado={', '.join(blocked_phases)}")
+
+    if pending_phases:
+        fragments.append(f"pendiente={', '.join(pending_phases)}")
+
+    if lead_close_state and lead_close_state != "completed":
+        fragments.append(f"lead_close={lead_close_state}")
+    elif not lead_close_state:
+        fragments.append("lead_close=missing")
+
+    if not fragments:
+        return "Corrida sin cierre final; aun no hay sintesis definitiva del Team Lead."
+
+    return (
+        "Corrida sin cierre final. "
+        + "; ".join(fragment.rstrip(".") for fragment in fragments)
+        + "."
     )
 
 
@@ -1621,16 +1854,14 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             return ""
         return str(task.metadata.get("result") or task.metadata.get("error") or "")
 
-    def _compact_text_line(value: str, limit: int = 320) -> str:
-        flat = re.sub(r"\s+", " ", str(value or "")).strip()
-        if len(flat) <= limit:
-            return flat
-        return flat[: max(0, limit - 3)] + "..."
-
     import queue as _queue_mod
     _token_queue: _queue_mod.Queue = _queue_mod.Queue()
 
     def _run_chat() -> TeamChatResponse:
+        restore_demo_env = _apply_chat_demo_env(
+            strict_mode=bool(payload.strict_mode),
+            environment="dev",
+        )
         orch = build_default_orchestrator(
             runtime_dir=runtime_dir,
             browser_mode="basic",
@@ -1638,7 +1869,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
 
         def _on_chunk(task_id: str, chunk: str) -> None:
-            _token_queue.put(("token_chunk", {"task_id": task_id, "chunk": chunk}))
+            display_chunk = _stream_display_chunk(task_id, chunk)
+            if display_chunk:
+                _token_queue.put(
+                    ("token_chunk", {"task_id": task_id, "chunk": display_chunk})
+                )
         orch.token_chunk_callback = _on_chunk
         previous_runs = _recent_chat_roots(runtime_dir, max_chats=3)
         previous_root = previous_runs[0] if previous_runs else {}
@@ -2353,6 +2588,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
         lead_response = _task_result(lead_result_task)
         delegated_lines: list[str] = []
+        delegated_placeholder_count = 0
         phase_name_by_task_id = {
             task_id: phase for phase, task_id in phase_task_ids.items()
         }
@@ -2372,8 +2608,13 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 continue
             delegated_outcome = _task_result(delegated_task)
             delegated_phase = phase_name_by_task_id.get(delegated_id, delegated_id)
+            compact_result = _compact_delegated_result(
+                delegated_outcome, state=delegated_task.state.value
+            )
+            if compact_result == "placeholder/simulado":
+                delegated_placeholder_count += 1
             delegated_lines.append(
-                f"- {delegated_phase}: state={delegated_task.state.value} result={_compact_text_line(delegated_outcome, 140)}"
+                f"- {delegated_phase}: state={delegated_task.state.value} result={compact_result}"
             )
             if delegated_task.state.value == "failed":
                 final_state = "failed"
@@ -2411,10 +2652,17 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             if phase_states.get(phase) == "failed"
         ]
 
-        decision_source = lead_response
-        if not decision_source:
-            intake_task = task_rows_by_phase.get("lead_intake")
-            decision_source = _task_result(intake_task)
+        intake_task = task_rows_by_phase.get("lead_intake")
+        decision_source = _resolve_chat_decision_text(
+            lead_response=lead_response,
+            intake_response=_task_result(intake_task),
+            phase_states=phase_states,
+            workflow_phase_keys=workflow_phase_keys,
+            phase_results={
+                phase_name: _task_result(task)
+                for phase_name, task in task_rows_by_phase.items()
+            },
+        )
 
         decision_compact = str(decision_source or "").strip()
         if len(decision_compact) > 1500:
@@ -2496,6 +2744,23 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 ),
             },
         )
+        demo_fast_chat_active = _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
+        decision_display = _presentable_decision_text(decision_compact)
+        if not decision_display:
+            if execution_mode == "simulated":
+                decision_display = (
+                    "Se completo coordinacion en modo demo; falta ejecucion verificable y cambios reales en archivos."
+                    if demo_fast_chat_active
+                    else "Se completo coordinacion en modo degradado/simulado; falta ejecucion verificable y cambios reales en archivos."
+                )
+            elif execution_mode == "hybrid" and placeholder_outputs > 0:
+                decision_display = (
+                    "Se avanzo con coordinacion parcial, pero parte del output fue de demostracion; falta ejecucion verificable para cerrar."
+                    if demo_fast_chat_active
+                    else "Se avanzo con coordinacion parcial, pero parte del output fue placeholder; falta ejecucion verificable para cerrar."
+                )
+            else:
+                decision_display = "pending synthesis"
 
         live_mode_required = (
             _env_bool("AITEAM_REQUIRE_LIVE_MODE", default=False)
@@ -2527,6 +2792,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             require_followup_artifact_delta=game_followup_requested,
             require_test_or_build_check=True,
         )
+        if demo_fast_chat_active:
+            evidence_gate_failures = []
         if continuation_requested:
             evidence_gate_failures = [
                 f
@@ -2681,7 +2948,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         productivity_threshold = 35
         low_productivity_override = bool(
             payload.allow_low_productivity_override
-        ) or bool(continuation_requested)
+        ) or bool(continuation_requested) or demo_fast_chat_active
         low_productivity_rejected = False
         if (
             productivity_score < productivity_threshold
@@ -2766,6 +3033,23 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             },
         )
 
+        delegation_results_lines = delegated_lines[:12] if delegated_lines else ["- none"]
+        if delegated_placeholder_count > 0:
+            delegation_results_lines = [
+                f"- respuestas demo detectadas: {delegated_placeholder_count}"
+                if demo_fast_chat_active
+                else f"- placeholders/simulados detectados: {delegated_placeholder_count}"
+            ] + delegation_results_lines
+
+        execution_mode_label = (
+            "demo" if demo_fast_chat_active and execution_mode == "simulated" else execution_mode
+        )
+        output_count_label = (
+            "demo_outputs"
+            if demo_fast_chat_active
+            else "placeholder_outputs"
+        )
+
         response_lines = [
             "Lead summary:",
             f"Status={final_state} mode={chat_mode} rounds={rounds_used}/{round_budget} elapsed={elapsed_ms}ms",
@@ -2773,14 +3057,14 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             f"Continuity: {continuity_line}",
             f"Participants (roles): {participants_line}",
             f"Participants (agents): {agents_line}",
-            f"Decision: {decision_compact or 'pending synthesis'}",
+            f"Decision: {decision_display}",
             f"Done: {done_line}",
             f"Pending: {pending_line}",
             f"Failed: {failed_line}",
             f"Used: {used_line}",
             f"Route attempts: {len(route_records)} (success={successful_routes})",
             f"Execution steps: {execution_steps} (success={execution_steps_success})",
-            f"Execution mode: {execution_mode} (placeholder_outputs={placeholder_outputs}/{max(1, output_result_count)})",
+            f"Execution mode: {execution_mode_label} ({output_count_label}={placeholder_outputs}/{max(1, output_result_count)})",
             f"Live mode gate: {'rejected' if live_mode_rejected else ('required' if live_mode_required else 'off')}",
             f"Checks passed: {', '.join(successful_checks) if successful_checks else 'none'}",
             f"Evidence gate: {'rejected' if evidence_gate_applied else 'pass'} ({', '.join(evidence_gate_failures) if evidence_gate_failures else 'ok'})",
@@ -2794,11 +3078,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             "Workflow phases:",
             workflow_lines,
             "",
-            "Delegation results:",
-            "\n".join(delegated_lines[:12]) if delegated_lines else "- none",
-            "",
             "Lead message for user:",
             user_facing_summary,
+            "",
+            "Delegation results:",
+            "\n".join(delegation_results_lines),
         ]
         if artifact_files:
             response_lines.extend(
@@ -2814,14 +3098,14 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     "Next step: continue to close pending phases and produce final synthesis.",
                 ]
             )
-        merged_response = "\n".join(response_lines)
+        merged_response = _limit_chat_response("\n".join(response_lines))
 
         _token_queue.put(("done", None))
-        return TeamChatResponse(
+        result = TeamChatResponse(
             task_id=task_root,
             role=Role.TEAM_LEAD.value,
             state=final_state,
-            response=merged_response[:4000],
+            response=merged_response,
             decision_justification=lead_justification[:2000],
             elapsed_ms=elapsed_ms,
             lead_task_id=lead_task_id,
@@ -2861,6 +3145,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             evidence_gate_applied=evidence_gate_applied,
             evidence_gate_failures=evidence_gate_failures,
         )
+        restore_demo_env()
+        return result
 
     async def _event_stream():
         import asyncio as _asyncio
@@ -2975,7 +3261,11 @@ async def post_aiteam_chat_async(payload: TeamChatRequest, request: Request):
 
             # Wire token streaming callback → progress_queue
             def _on_token_chunk(task_id: str, chunk: str) -> None:
-                progress_queue.put(("token_chunk", {"task_id": task_id, "chunk": chunk}))
+                display_chunk = _stream_display_chunk(task_id, chunk)
+                if display_chunk:
+                    progress_queue.put(
+                        ("token_chunk", {"task_id": task_id, "chunk": display_chunk})
+                    )
 
             orch.token_chunk_callback = _on_token_chunk
 

@@ -1,5 +1,6 @@
 import io
 import json
+import urllib.error
 import unittest
 from unittest.mock import patch
 
@@ -104,6 +105,76 @@ class ApiAdapterLiveTests(unittest.TestCase):
             response = adapter.invoke("hello")
         self.assertFalse(response.success)
         self.assertIn("missing_api_key", str(response.error))
+
+    def test_api_adapter_retries_transient_http_error(self) -> None:
+        adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
+        payload = {
+            "choices": [{"message": {"content": "real response"}}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 6},
+        }
+        calls = {"count": 0}
+
+        def _flaky_urlopen(request, timeout=0):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    429,
+                    "rate limited",
+                    {"Retry-After": "0"},
+                    io.BytesIO(b'{"error":"rate_limited"}'),
+                )
+            return _MockHttpResponse(payload)
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "AITEAM_ENABLE_LIVE_API": "1",
+                    "OPENAI_API_KEY": "test-key",
+                    "AITEAM_LIVE_API_RETRY_ATTEMPTS": "1",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=_flaky_urlopen),
+            patch("time.sleep", return_value=None),
+        ):
+            response = adapter.invoke("hello")
+
+        self.assertTrue(response.success)
+        self.assertEqual(response.content, "real response")
+        self.assertEqual(calls["count"], 2)
+
+    def test_api_adapter_degrades_to_simulated_on_quota_exhaustion(self) -> None:
+        adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
+
+        def _always_limited(request, timeout=0):
+            raise urllib.error.HTTPError(
+                request.full_url,
+                429,
+                "rate limited",
+                {"Retry-After": "0"},
+                io.BytesIO(b'{"error":"rate_limited"}'),
+            )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "AITEAM_ENABLE_LIVE_API": "1",
+                    "OPENAI_API_KEY": "test-key",
+                    "AITEAM_LIVE_API_RETRY_ATTEMPTS": "0",
+                    "AITEAM_ALLOW_SIMULATED_ON_PROVIDER_EXHAUSTION": "1",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=_always_limited),
+        ):
+            response = adapter.invoke("hello")
+
+        self.assertTrue(response.success)
+        self.assertIn("SIMULADO", response.content)
+        self.assertIn("Fallback simulado tras fallo live", response.content)
 
 
 class GeminiConversationalTests(unittest.TestCase):
@@ -253,6 +324,84 @@ class GeminiConversationalTests(unittest.TestCase):
         contents = captured["body"]["contents"]
         # Debe empezar con user (insertado automaticamente)
         self.assertEqual(contents[0]["role"], "user")
+
+    def test_subscription_adapter_retries_transient_http_error(self) -> None:
+        from aiteam.adapters import SubscriptionAdapter
+
+        adapter = SubscriptionAdapter(
+            name="openai_pro", provider="openai", model="gpt-4.1"
+        )
+        payload = {
+            "choices": [{"message": {"content": "subscription response"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 4},
+        }
+        calls = {"count": 0}
+
+        def _flaky_urlopen(request, timeout=0):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    429,
+                    "rate limited",
+                    {"Retry-After": "0"},
+                    io.BytesIO(b'{"error":"rate_limited"}'),
+                )
+            return _MockHttpResponse(payload)
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "AITEAM_ENABLE_LIVE_API": "1",
+                    "OPENAI_API_KEY": "test-key",
+                    "AITEAM_LIVE_API_RETRY_ATTEMPTS": "1",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=_flaky_urlopen),
+            patch("time.sleep", return_value=None),
+        ):
+            response = adapter.invoke("hello")
+
+        self.assertTrue(response.success)
+        self.assertEqual(response.content, "subscription response")
+        self.assertEqual(calls["count"], 2)
+
+    def test_subscription_adapter_degrades_to_simulated_on_quota_exhaustion(self) -> None:
+        from aiteam.adapters import SubscriptionAdapter
+
+        adapter = SubscriptionAdapter(
+            name="openai_pro", provider="openai", model="gpt-4.1"
+        )
+
+        def _always_limited(request, timeout=0):
+            raise urllib.error.HTTPError(
+                request.full_url,
+                429,
+                "rate limited",
+                {"Retry-After": "0"},
+                io.BytesIO(b'{"error":"rate_limited"}'),
+            )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "AITEAM_ENABLE_LIVE_API": "1",
+                    "OPENAI_API_KEY": "test-key",
+                    "AITEAM_LIVE_API_RETRY_ATTEMPTS": "0",
+                    "AITEAM_ALLOW_SIMULATED_ON_PROVIDER_EXHAUSTION": "1",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=_always_limited),
+        ):
+            response = adapter.invoke("hello")
+
+        self.assertTrue(response.success)
+        self.assertIn("SIMULADO", response.content)
+        self.assertIn("Fallback simulado tras fallo live", response.content)
 
 
 class ThreadCompactionTests(unittest.TestCase):

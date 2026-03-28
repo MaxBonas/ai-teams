@@ -187,7 +187,17 @@ class LocalCommandExecutor:
         env = os.environ.copy()
         
         # Filtrado agresivo de secretos y tokens en el entorno de la IA
-        blocked_keywords = ["API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIALS", "AWS_ACCESS", "GITHUB_TOKEN"]
+        blocked_keywords = [
+            "API_KEY", "APIKEY", "API-KEY",
+            "TOKEN", "_TOKEN", "ACCESS_TOKEN", "REFRESH_TOKEN", "AUTH_TOKEN",
+            "SECRET", "_SECRET", "CLIENT_SECRET",
+            "PASSWORD", "PASSWD", "_PASS",
+            "CREDENTIALS", "CREDENTIAL",
+            "AWS_ACCESS", "AWS_SECRET",
+            "GITHUB_TOKEN", "GH_TOKEN",
+            "ANTHROPIC_", "OPENAI_", "GOOGLE_API", "GROQ_",
+            "STRIPE_", "TWILIO_", "SENDGRID_",
+        ]
         
         keys_to_remove = []
         for key in env.keys():

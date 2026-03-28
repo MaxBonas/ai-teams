@@ -66,15 +66,56 @@ class ApiAdapter(ModelAdapter):
         if self._live_api_enabled():
             live = self._invoke_live(prompt=prompt_text, messages=normalized_messages, tools=tools)
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
+            if (not live.success) and self._allow_simulated_degrade(live.error):
+                return self._simulated_response(
+                    prompt_text,
+                    start=start,
+                    live_error=str(live.error or ""),
+                )
             return live
 
+        return self._simulated_response(prompt_text, start=start)
+
+    def _simulated_response(
+        self,
+        prompt_text: str,
+        *,
+        start: float,
+        live_error: str = "",
+    ) -> AdapterResponse:
         input_tokens = max(1, len(prompt_text) // 4)
         first_line = (
             prompt_text.splitlines()[0][:80] if prompt_text.strip() else "tarea"
         )
+        demo_fast_mode = os.getenv("AITEAM_CHAT_DEMO_FAST", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if demo_fast_mode:
+            content = (
+                f"[DEMO] Avance preparado para: {first_line!r}. "
+                f"Se mantiene el flujo operativo en modo demostracion."
+            )
+            return AdapterResponse(
+                success=True,
+                content=content,
+                latency_ms=int((time.time() - start) * 1000),
+                input_tokens=input_tokens,
+                output_tokens=max(1, len(content) // 4),
+                error=None,
+            )
+        fallback_note = ""
+        if live_error.strip():
+            compact_error = " ".join(str(live_error).split())[:140]
+            fallback_note = (
+                f" Fallback simulado tras fallo live: {compact_error}."
+            )
         content = (
             f"[SIMULADO | {self.provider}:{self.model}:api] "
             f"Respuesta mock para: {first_line!r}. "
+            f"{fallback_note}"
             f"Para llamadas reales, configura AITEAM_ENABLE_LIVE_API=1 "
             f"y {self.provider.upper()}_API_KEY en .env."
         )
@@ -88,9 +129,141 @@ class ApiAdapter(ModelAdapter):
         )
 
     @staticmethod
+    def _allow_simulated_degrade(error: str | None) -> bool:
+        if os.getenv("AITEAM_REQUIRE_LIVE_MODE", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            return False
+        allow = os.getenv(
+            "AITEAM_ALLOW_SIMULATED_ON_PROVIDER_EXHAUSTION", "1"
+        ).strip().lower()
+        if allow not in {"1", "true", "yes", "on"}:
+            return False
+        normalized = str(error or "").strip().lower()
+        if not normalized:
+            return False
+        quota_markers = (
+            "http_error:429",
+            "rate_limit",
+            "rate_limited",
+            "insufficient_quota",
+            "credit balance",
+            "credit_ba",
+            "quota",
+        )
+        return any(marker in normalized for marker in quota_markers)
+
+    @staticmethod
     def _live_api_enabled() -> bool:
         raw = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower()
         return raw in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _live_retry_attempts() -> int:
+        raw = os.getenv("AITEAM_LIVE_API_RETRY_ATTEMPTS", "2").strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            return 2
+        return max(0, min(value, 4))
+
+    @staticmethod
+    def _is_retryable_http_status(code: int) -> bool:
+        return code in {408, 409, 425, 429, 500, 502, 503, 504}
+
+    @staticmethod
+    def _retry_delay_seconds(
+        attempt_index: int, retry_after: str | None = None
+    ) -> float:
+        if retry_after:
+            try:
+                parsed = float(str(retry_after).strip())
+            except ValueError:
+                parsed = 0.0
+            if parsed > 0:
+                return max(0.2, min(parsed, 4.0))
+        return min(0.4 * (2**attempt_index), 4.0)
+
+    def _request_json_with_retries(
+        self,
+        *,
+        request: urllib.request.Request,
+        prompt: str,
+        timeout: int,
+    ) -> tuple[int, str] | AdapterResponse:
+        started = time.time()
+        input_tokens = max(1, len(prompt) // 4)
+        max_retries = self._live_retry_attempts()
+        for attempt_index in range(max_retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    status_code = int(getattr(response, "status", 200))
+                    raw = response.read().decode("utf-8", errors="replace")
+                return status_code, raw
+            except urllib.error.HTTPError as exc:
+                error_body = ""
+                try:
+                    error_body = exc.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                if (
+                    attempt_index < max_retries
+                    and self._is_retryable_http_status(int(exc.code or 0))
+                ):
+                    retry_after = None
+                    headers_obj = getattr(exc, "headers", None)
+                    if headers_obj is not None:
+                        retry_after = headers_obj.get("Retry-After")
+                    time.sleep(
+                        self._retry_delay_seconds(
+                            attempt_index,
+                            retry_after=str(retry_after or "").strip() or None,
+                        )
+                    )
+                    continue
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error=f"http_error:{exc.code}:{error_body}",
+                    latency_ms=int((time.time() - started) * 1000),
+                    input_tokens=input_tokens,
+                    output_tokens=0,
+                )
+            except urllib.error.URLError as exc:
+                if attempt_index < max_retries:
+                    time.sleep(self._retry_delay_seconds(attempt_index))
+                    continue
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error=f"connection_error:{exc.reason}",
+                    latency_ms=int((time.time() - started) * 1000),
+                    input_tokens=input_tokens,
+                    output_tokens=0,
+                )
+            except Exception as exc:
+                if attempt_index < max_retries:
+                    time.sleep(self._retry_delay_seconds(attempt_index))
+                    continue
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error=f"request_error:{exc}",
+                    latency_ms=int((time.time() - started) * 1000),
+                    input_tokens=input_tokens,
+                    output_tokens=0,
+                )
+        return AdapterResponse(
+            success=False,
+            content="",
+            error="request_exhausted",
+            latency_ms=int((time.time() - started) * 1000),
+            input_tokens=input_tokens,
+            output_tokens=0,
+        )
 
     def invoke_stream(
         self, prompt: str, messages: list[dict[str, str]] | None = None
@@ -276,27 +449,14 @@ class ApiAdapter(ModelAdapter):
             method="POST",
         )
         started = time.time()
-        try:
-            with urllib.request.urlopen(request, timeout=90) as response:
-                raw = response.read().decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as exc:
-            return AdapterResponse(
-                success=False,
-                content="",
-                error=f"http_error:{exc.code}",
-                latency_ms=int((time.time() - started) * 1000),
-                input_tokens=max(1, len(prompt) // 4),
-                output_tokens=0,
-            )
-        except urllib.error.URLError as exc:
-            return AdapterResponse(
-                success=False,
-                content="",
-                error=f"connection_error:{exc.reason}",
-                latency_ms=int((time.time() - started) * 1000),
-                input_tokens=max(1, len(prompt) // 4),
-                output_tokens=0,
-            )
+        result = self._request_json_with_retries(
+            request=request,
+            prompt=prompt,
+            timeout=90,
+        )
+        if isinstance(result, AdapterResponse):
+            return result
+        _, raw = result
 
         try:
             parsed = json.loads(raw)
@@ -413,28 +573,14 @@ class ApiAdapter(ModelAdapter):
             url, data=payload, headers=headers, method="POST"
         )
         started = time.time()
-        try:
-            with urllib.request.urlopen(request, timeout=45) as response:
-                status_code = int(getattr(response, "status", 200))
-                raw = response.read().decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as exc:
-            return AdapterResponse(
-                success=False,
-                content="",
-                latency_ms=int((time.time() - started) * 1000),
-                input_tokens=max(1, len(prompt) // 4),
-                output_tokens=0,
-                error=f"http_error:{exc.code}",
-            )
-        except urllib.error.URLError as exc:
-            return AdapterResponse(
-                success=False,
-                content="",
-                latency_ms=int((time.time() - started) * 1000),
-                input_tokens=max(1, len(prompt) // 4),
-                output_tokens=0,
-                error=f"connection_error:{exc.reason}",
-            )
+        result = self._request_json_with_retries(
+            request=request,
+            prompt=prompt,
+            timeout=45,
+        )
+        if isinstance(result, AdapterResponse):
+            return result
+        status_code, raw = result
 
         if status_code < 200 or status_code >= 300:
             return AdapterResponse(
