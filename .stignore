@@ -1,0 +1,40 @@
+// Syncthing ignore rules — AI Teams project
+// NUNCA sincronizar entre máquinas:
+
+// Entornos virtuales Python (paths internos son específicos por máquina)
+venv/
+.venv/
+env/
+
+// Dependencias Node
+node_modules/
+
+// Cachés Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+// Estado de runtime (memory, tasks, ledger — cada máquina tiene el suyo)
+runtime/
+runtime_*/
+
+// Git (cada máquina tiene su propio estado git)
+.git/
+
+// Secretos y configuración local
+.env
+*.bak
+
+// Temporales y logs
+*.log
+.tmp_*
+nul
+
+// IDE
+.vscode/settings.json
+.idea/
