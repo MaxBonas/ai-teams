@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+# Timeout para quality gates: si Reviewer/QA no completa en este tiempo,
+# se escala automáticamente al Team Lead. Configurable por env var.
+_GATE_TIMEOUT_SECONDS: int = int(os.getenv("AITEAM_GATE_TIMEOUT_SECONDS", "7200"))
 
 from aiteam.adapters.registry import load_external_adapters
 from aiteam.agent_session import ConversationThread, SessionStore, ThreadStore
@@ -302,6 +307,9 @@ class AITeamOrchestrator:
             self.event_logger.emit("mcp_servers_stopped", {})
 
     def submit_task(self, task: WorkTask) -> None:
+        # Sanitizar input de usuario antes de que llegue a cualquier agente
+        task.title = self.compliance.sanitize_context(task.title)
+        task.description = self.compliance.sanitize_context(task.description)
         self.taskboard.add_task(task)
         self.mailbox.send(
             sender="system",
@@ -397,6 +405,9 @@ class AITeamOrchestrator:
         active_round = self._round + 1
         max_sub_iterations = 20
         used_sub_iterations = 0
+
+        # ── Timeout de quality gates: desbloquea tareas atascadas ──
+        self._check_gate_timeouts()
 
         # ── Eager dependency processing: re-check READY tras cada batch ──
         for _sub in range(max_sub_iterations):
@@ -690,9 +701,15 @@ class AITeamOrchestrator:
         require_execution_plan = bool(
             task.metadata.get("require_execution_plan", False)
         )
+        demo_fast_mode = os.getenv("AITEAM_CHAT_DEMO_FAST", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         if require_execution_plan and (
             not isinstance(execution_plan, list) or not execution_plan
-        ):
+        ) and not demo_fast_mode:
             self._fail_task_due_to_compliance(
                 task=task,
                 assignee=assignee,
@@ -852,15 +869,20 @@ class AITeamOrchestrator:
             prev_sessions = self.session_store.sessions_for_task(task.task_id)
             if prev_sessions:
                 last = prev_sessions[-1]
+                raw_actions = last.get("actions") if isinstance(last, dict) else (last.actions or [])
                 actions_summary = "; ".join(
-                    f"{a.action_type}:{a.detail[:60]}"
-                    for a in (last.actions or [])[-5:]
+                    f"{a.get('action_type', '')}:{str(a.get('detail', ''))[:60]}"
+                    if isinstance(a, dict)
+                    else f"{a.action_type}:{a.detail[:60]}"
+                    for a in (raw_actions or [])[-5:]
                 )
+                last_status = last.get("status") if isinstance(last, dict) else last.status
+                last_summary = last.get("summary") if isinstance(last, dict) else last.summary
                 prev_summary = (
                     f"Intento anterior (iteracion {gate_iteration - 1}): "
-                    f"status={last.status or 'unknown'}, "
+                    f"status={last_status or 'unknown'}, "
                     f"acciones=[{actions_summary}], "
-                    f"resumen={self._compact_text(last.summary or '', 200)}"
+                    f"resumen={self._compact_text(last_summary or '', 200)}"
                 )
 
         current_user_turn = self._build_current_task_message(
@@ -1166,7 +1188,7 @@ class AITeamOrchestrator:
                 if self._detect_conversational_task(task):
                     task.metadata["conversational"] = True
             if (
-                task.role in (Role.ENGINEER, Role.QA)
+                task.role in (Role.ENGINEER, Role.REVIEWER, Role.QA)
                 and not task.metadata.get("skip_evidence_gate")
                 and not _is_planning_phase
             ):
@@ -1198,6 +1220,10 @@ class AITeamOrchestrator:
                 self.taskboard.mark_blocked(
                     task.task_id,
                     reason="waiting_quality_gates",
+                )
+                self.taskboard.update_metadata(
+                    task.task_id,
+                    {"gate_opened_at": datetime.now(timezone.utc).isoformat()},
                 )
                 gate_titles = [
                     g.title
@@ -1925,6 +1951,7 @@ class AITeamOrchestrator:
             pass
 
         _agent_output = str(task.metadata.get("_last_agent_output", ""))
+        _phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else ""
 
         # Modo simulado/mock: si el agente produjo alguna salida no vacia,
         # aceptarla como evidencia minima para no cortar el workflow artificialmente.
@@ -1935,15 +1962,27 @@ class AITeamOrchestrator:
             "on",
         }
         if not live_api_enabled and _agent_output.strip():
+            demo_fast_mode = os.getenv("AITEAM_CHAT_DEMO_FAST", "0").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            if _phase_name in {"build", "review", "qa"}:
+                if demo_fast_mode:
+                    return True, "demo_mode_accepted"
+                quality_ok, quality_reason = self._assess_output_quality(
+                    _agent_output, task.role, _phase_name
+                )
+                if not quality_ok:
+                    return False, f"simulated_placeholder_blocked:{quality_reason}"
+                return False, "simulated_workflow_requires_artifacts"
             return True, "simulated_mode_accepted"
 
         # ── Modo live sin git diff: validar calidad minima del output por rol ──
         # Un LLM puede devolver "Tarea completada." y no hacer nada. Se exige
         # contenido tecnico minimo apropiado al rol antes de aceptar como evidencia.
         if live_api_enabled and _agent_output.strip():
-            _phase_name = (
-                task.task_id.split("::")[-1] if "::" in task.task_id else ""
-            )
             quality_ok, quality_reason = self._assess_output_quality(
                 _agent_output, task.role, _phase_name
             )
@@ -2005,6 +2044,12 @@ class AITeamOrchestrator:
             return False, "output_vacio"
 
         lower = text.lower()
+        placeholder_patterns = [
+            r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]",
+            r"^\[simulado\s*\|",
+        ]
+        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in placeholder_patterns):
+            return False, "placeholder_output"
 
         # Detectar respuestas triviales sin contenido tecnico real (cualquier longitud).
         trivial_patterns = [
@@ -2131,12 +2176,55 @@ class AITeamOrchestrator:
     @classmethod
     def _detect_conversational_task(cls, task: "WorkTask") -> bool:  # type: ignore[name-defined]
         """Detecta si una tarea es conversacional/teorica (no requiere artefactos)."""
+        phase = str(task.metadata.get("phase", "") or "").strip().lower()
+        if phase in {"build", "review", "qa"}:
+            return False
         blob = f"{task.title} {task.description}".lower()
         # Si contiene signo de interrogacion → pregunta directa
         if "?" in blob:
             return True
         # Si contiene keywords conversacionales
         return any(kw in blob for kw in cls._CONVERSATIONAL_KEYWORDS)
+
+    def _check_gate_timeouts(self) -> None:
+        """Escala al Team Lead las tareas bloqueadas en quality gates que exceden el timeout."""
+        now = datetime.now(timezone.utc)
+        for task in self.taskboard.list_tasks():
+            if task.metadata.get("blocked_reason") != "waiting_quality_gates":
+                continue
+            opened_raw = task.metadata.get("gate_opened_at")
+            if not opened_raw:
+                continue
+            try:
+                opened_at = datetime.fromisoformat(opened_raw)
+            except ValueError:
+                continue
+            elapsed = (now - opened_at).total_seconds()
+            if elapsed < _GATE_TIMEOUT_SECONDS:
+                continue
+            # Timeout alcanzado: cancelar gate tasks pendientes y desbloquear
+            self._cleanup_gate_tasks(
+                [
+                    t.task_id
+                    for t in self.taskboard.list_tasks()
+                    if t.metadata.get("parent_task") == task.task_id
+                    and t.state not in {TaskState.COMPLETED, TaskState.FAILED}
+                ]
+            )
+            timeout_msg = (
+                f"Quality gate timeout tras {int(elapsed // 60)} min "
+                f"(límite: {_GATE_TIMEOUT_SECONDS // 60} min). "
+                "Tarea aprobada automáticamente por timeout — revisar manualmente."
+            )
+            self.taskboard.update_metadata(
+                task.task_id,
+                {"gate_timeout": True, "gate_timeout_reason": timeout_msg},
+            )
+            self.taskboard.mark_completed(task.task_id, details=timeout_msg)
+            self.event_logger.emit(
+                "gate_timeout_escalated",
+                {"task_id": task.task_id, "elapsed_seconds": int(elapsed)},
+            )
 
     @staticmethod
     def _should_open_quality_gates(task: WorkTask) -> bool:
@@ -2563,11 +2651,30 @@ class AITeamOrchestrator:
         charter = role_charter_for(task.role)
         consulted = ", ".join(peer_report.consulted_roles) or "none"
         unavailable = ", ".join(peer_report.unavailable_roles) or "none"
+        output_text = str(output or "").strip()
+        demo_fast_mode = os.getenv("AITEAM_CHAT_DEMO_FAST", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if re.search(r"^\[demo\]", output_text, flags=re.IGNORECASE):
+            output_summary = "demo"
+        elif re.search(r"^\[simulado\s*\|", output_text, flags=re.IGNORECASE):
+            output_summary = "demo" if demo_fast_mode else "placeholder/simulado"
+        elif re.search(
+            r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]",
+            output_text,
+            flags=re.IGNORECASE,
+        ):
+            output_summary = "placeholder/adapter"
+        else:
+            output_summary = self._compact_text(output_text, 420)
         justification = (
             f"decision_rank=R{charter.decision_rank}/5 assignee={assignee} role={task.role.value}; "
             f"consulted={consulted}; unavailable={unavailable}; "
             f"provider={decision.provider} model={decision.model} channel={decision.channel.value}; "
-            f"attempts={decision.attempts}; output_excerpt={output[:240]}"
+            f"attempts={self._compact_text(str(decision.attempts), 280)}; output_summary={output_summary}"
         )
         self.taskboard.update_metadata(
             task.task_id,

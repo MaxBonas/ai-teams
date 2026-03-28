@@ -32,6 +32,13 @@ def _neutral_test_env():
         "AITEAM_PROVIDER_GOOGLE_DEGRADED": "0",
         "AITEAM_PROVIDER_ANTHROPIC_DEGRADED": "0",
         "AITEAM_PROVIDER_GROQ_DEGRADED": "0",
+        # Evitar que límites/estado de producción bloqueen adapters en tests
+        "AITEAM_SUBSCRIPTION_OPENAI_LIMIT_REACHED": "0",
+        "AITEAM_SUBSCRIPTION_ANTHROPIC_LIMIT_REACHED": "0",
+        "AITEAM_SUBSCRIPTION_GOOGLE_LIMIT_REACHED": "0",
+        # Evitar que el modo demo omita los quality gates en tests de evidencia
+        "AITEAM_CHAT_DEMO_FAST": "0",
+        "AITEAM_DEMO_FAST_CHAT": "0",
         # Limpiar claves API para tests que verifican comportamiento sin claves
         "OPENAI_API_KEY": "",
         "ANTHROPIC_API_KEY": "",

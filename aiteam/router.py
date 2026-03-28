@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import inspect
+import os
 from pathlib import Path
+import threading
+import time
 
 from aiteam.adapters.base import ModelAdapter
 from aiteam.config import RouterPolicy
@@ -43,6 +46,12 @@ class HybridRouter:
         self.budget_manager = budget_manager
         self.event_logger = event_logger
         self.runtime_dir = None
+        # Cache TTL para provider_ops_status — evita I/O en cada routing
+        self._ops_cache: dict = {}
+        self._ops_cache_populated: bool = False
+        self._ops_cache_ts: float = 0.0
+        self._ops_cache_ttl: float = 30.0
+        self._ops_cache_lock = threading.Lock()
         if self.budget_manager is not None:
             self.runtime_dir = self.budget_manager.runtime_dir
         project_root = None
@@ -53,10 +62,37 @@ class HybridRouter:
             Path(self.runtime_dir) if self.runtime_dir is not None else None,
         )
 
-    def _smoke_ok(self, adapter: ModelAdapter) -> bool:
+    def _profile_for(self, adapter: ModelAdapter):
+        profile = self.model_catalog.get(adapter.name)
+        if profile is not None:
+            return profile
+        provider = adapter.provider.strip().lower()
+        model = adapter.model.strip().lower()
+        matches = [
+            item
+            for item in self.model_catalog.values()
+            if item.provider == provider and item.model.strip().lower() == model
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def _cached_ops_status(self) -> dict:
+        """Devuelve provider_ops_status con TTL cache de 30s para evitar I/O por routing."""
         if self.runtime_dir is None:
-            return True
-        status = provider_ops_status(Path(self.runtime_dir))
+            return {}
+        now = time.monotonic()
+        with self._ops_cache_lock:
+            if now - self._ops_cache_ts < self._ops_cache_ttl and self._ops_cache_populated:
+                return self._ops_cache
+            status = provider_ops_status(Path(self.runtime_dir)) or {}
+            self._ops_cache = status
+            self._ops_cache_populated = True
+            self._ops_cache_ts = now
+            return status
+
+    def _smoke_ok(self, adapter: ModelAdapter) -> bool:
+        status = self._cached_ops_status()
         if not status:
             return True
         if adapter.name in status:
@@ -64,9 +100,7 @@ class HybridRouter:
         return True
 
     def _operational_ok(self, adapter: ModelAdapter) -> bool:
-        if self.runtime_dir is None:
-            return True
-        status = provider_ops_status(Path(self.runtime_dir))
+        status = self._cached_ops_status()
         if not status:
             return True
         if adapter.name in status:
@@ -74,7 +108,7 @@ class HybridRouter:
         return True
 
     def _team_lead_allowed(self, adapter: ModelAdapter) -> bool:
-        profile = self.model_catalog.get(adapter.name)
+        profile = self._profile_for(adapter)
         if profile is None:
             return False
         if profile.tier == "senior_cloud":
@@ -84,7 +118,7 @@ class HybridRouter:
         return False
 
     def _role_rank(self, adapter: ModelAdapter, role_key: str) -> int:
-        profile = self.model_catalog.get(adapter.name)
+        profile = self._profile_for(adapter)
         if profile is None:
             return 999
         if role_key == "team_lead":
@@ -104,7 +138,7 @@ class HybridRouter:
         return max(signal.daily_utilization_ratio, signal.monthly_utilization_ratio)
 
     def _tier_rank(self, adapter: ModelAdapter, request: RoutingRequest) -> int:
-        profile = self.model_catalog.get(adapter.name)
+        profile = self._profile_for(adapter)
         if profile is None:
             return 50
         if request.role == Role.TEAM_LEAD:
@@ -192,6 +226,12 @@ class HybridRouter:
                 continue
             if not adapter.available():
                 continue
+            # Skip local-tier adapters si la maquina no tiene inferencia local disponible
+            # (AITEAM_PROVIDER_LOCAL_DEGRADED=1 en ORCH-01; 0 en max-gamingpc con Ollama)
+            profile = self._profile_for(adapter)
+            if profile and profile.tier == "local":
+                if os.getenv("AITEAM_PROVIDER_LOCAL_DEGRADED", "0") == "1":
+                    continue
             eligible.append(adapter)
         return eligible
 
@@ -248,6 +288,15 @@ class HybridRouter:
             )
 
         return sorted(adapters, key=key)
+
+    @staticmethod
+    def _attempt_error_hint(error: str | None) -> str:
+        text = str(error or "").strip()
+        if not text:
+            return ""
+        compact = text.splitlines()[0].strip()
+        compact = compact.replace(" ", "_")
+        return compact[:96]
 
     def _must_include_api(self, request: RoutingRequest) -> bool:
         if not self.policy.pro_first:
@@ -435,9 +484,15 @@ class HybridRouter:
                 if "tools" in invoke_params and tools is not None:
                     kwargs["tools"] = tools
                 response = adapter.invoke(prompt, **kwargs)
-            attempts.append(
-                f"{adapter.name}:{adapter.channel.value}:{'ok' if response.success else 'fail'}"
+            attempt = (
+                f"{adapter.name}:{adapter.channel.value}:"
+                f"{'ok' if response.success else 'fail'}"
             )
+            if not response.success:
+                error_hint = self._attempt_error_hint(response.error)
+                if error_hint:
+                    attempt = f"{attempt}:{error_hint}"
+            attempts.append(attempt)
             if response.success:
                 decision = RoutingDecision(
                     success=True,

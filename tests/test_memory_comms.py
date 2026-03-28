@@ -287,5 +287,34 @@ class MemoryAndCommsTests(unittest.TestCase):
             self.assertEqual(messages[0].subject, "ok")
 
 
+    def test_memory_compacts_when_over_limit(self) -> None:
+        """remember() compacta el archivo cuando supera MAX_ENTRIES * 1.25."""
+        import aiteam.memory as mem_module
+
+        original_max = mem_module._MAX_ENTRIES
+        mem_module._MAX_ENTRIES = 10  # límite bajo para el test
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                store = AgentMemoryStore(Path(tmp) / "memory")
+                # Escribir 16 entradas — dispara 2 compactaciones (1ª en 13, 2ª en 13 tras reset)
+                for i in range(16):
+                    store.remember("agent-1", "engineer", "task", f"entry {i}")
+                path = Path(tmp) / "memory" / "agent-1.jsonl"
+                lines = [ln for ln in path.read_text().splitlines() if ln.strip()]
+                self.assertLessEqual(len(lines), 10, "Debe haber compactado a MAX_ENTRIES")
+        finally:
+            mem_module._MAX_ENTRIES = original_max
+
+    def test_memory_redacts_api_key_patterns(self) -> None:
+        """remember() redacta patrones de API keys antes de persistir."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AgentMemoryStore(Path(tmp) / "memory")
+            store.remember("agent-1", "engineer", "task", "key=sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX")
+            path = Path(tmp) / "memory" / "agent-1.jsonl"
+            content = path.read_text()
+            self.assertNotIn("sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX", content)
+            self.assertIn("[REDACTED]", content)
+
+
 if __name__ == "__main__":
     unittest.main()

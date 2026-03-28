@@ -1,8 +1,11 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -26,53 +29,157 @@ def _parse_sse_result(response) -> dict:
 
 
 class APITeamChatTests(unittest.TestCase):
+    def test_continuation_message_accepts_spanish_continuad(self) -> None:
+        self.assertTrue(api_main._is_continuation_message("continuad"))
+
+    def test_presentable_decision_text_hides_placeholder_payloads(self) -> None:
+        self.assertEqual(
+            api_main._presentable_decision_text(
+                "[SIMULADO | openai:gpt-4.1] Respuesta mock"
+            ),
+            "",
+        )
+
+    def test_compact_delegated_result_collapses_placeholder_output(self) -> None:
+        self.assertEqual(
+            api_main._compact_delegated_result(
+                "[SIMULADO | openai:gpt-4.1] Respuesta mock para build.",
+                state="completed",
+            ),
+            "placeholder/simulado",
+        )
+
+    def test_demo_placeholder_is_hidden_with_demo_label(self) -> None:
+        with patch.dict(os.environ, {"AITEAM_CHAT_DEMO_FAST": "1"}, clear=False):
+            self.assertEqual(
+                api_main._compact_delegated_result(
+                    "[DEMO] Avance preparado para: 'build'.",
+                    state="completed",
+                ),
+                "demo",
+            )
+            self.assertEqual(
+                api_main._presentable_decision_text(
+                    "[DEMO] Avance preparado para: 'lead'."
+                ),
+                "",
+            )
+
+    def test_limit_chat_response_preserves_user_summary_section(self) -> None:
+        response = "\n".join(
+            [
+                "Lead summary:",
+                "Delegation results:",
+                *[f"- item {idx}: {'x' * 120}" for idx in range(40)],
+                "",
+                "Lead message for user:",
+                "Resumen del Team Lead para ti:",
+                "Linea importante " * 80,
+            ]
+        )
+
+        limited = api_main._limit_chat_response(response, limit=2400)
+
+        self.assertLessEqual(len(limited), 2400)
+        self.assertIn("Lead message for user:", limited)
+        self.assertIn("Resumen del Team Lead para ti:", limited)
+
+    def test_decision_fallback_summarizes_blocked_run_without_reusing_intake_text(
+        self,
+    ) -> None:
+        decision = api_main._resolve_chat_decision_text(
+            lead_response="",
+            intake_response=(
+                "Objetivo inmediato\nEntregar un prototipo funcional de un juego original."
+            ),
+            phase_states={
+                "lead_intake": "completed",
+                "plan_research": "failed",
+                "plan_engineering": "failed",
+                "plan_risks": "failed",
+                "build": "blocked",
+                "review": "pending",
+                "qa": "pending",
+                "lead_close": "pending",
+            },
+            workflow_phase_keys=[
+                "lead_intake",
+                "plan_research",
+                "plan_engineering",
+                "plan_risks",
+                "build",
+                "review",
+                "qa",
+                "lead_close",
+            ],
+            phase_results={
+                "lead_intake": "Objetivo inmediato\nEntregar un prototipo funcional.",
+                "plan_research": "All adapter attempts failed",
+                "plan_engineering": "All adapter attempts failed",
+                "plan_risks": "All adapter attempts failed",
+                "build": "",
+                "review": "",
+                "qa": "",
+                "lead_close": "",
+            },
+        )
+
+        self.assertIn("Corrida sin cierre final.", decision)
+        self.assertIn("completado=lead_intake", decision)
+        self.assertIn("plan_research (All adapter attempts failed)", decision)
+        self.assertIn("bloqueado=build", decision)
+        self.assertIn("pendiente=review, qa, lead_close", decision)
+        self.assertNotIn("Objetivo inmediato", decision)
+
     def test_chat_is_led_by_team_lead_and_returns_delegation(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            workspace = Path(tmp)
-            previous_workspace = api_main.get_current_workspace()
-            try:
-                api_main.set_current_workspace(workspace)
-                client = TestClient(api_main.app)
-                response = client.post(
-                    "/api/aiteam/chat",
-                    json={
-                        "message": "Implement tests and refactor auth flow",
-                        "role": "qa",
-                        "complexity": "medium",
-                        "criticality": "medium",
-                    },
-                )
-                self.assertEqual(response.status_code, 200)
-                payload = _parse_sse_result(response)
-                self.assertEqual(payload.get("role"), "team_lead")
-                self.assertTrue(
-                    str(payload.get("lead_task_id", "")).endswith("::lead_intake")
-                )
-                self.assertGreaterEqual(len(payload.get("delegated_task_ids", [])), 4)
-                phase_task_ids = payload.get("phase_task_ids", {})
-                self.assertIn("lead_intake", phase_task_ids)
-                self.assertIn("lead_close", phase_task_ids)
-                self.assertIn("Lead summary", payload.get("response", ""))
-                self.assertIn("Workflow phases", payload.get("response", ""))
-                self.assertGreaterEqual(int(payload.get("productivity_score", 0)), 0)
-                self.assertLessEqual(int(payload.get("productivity_score", 0)), 100)
-                self.assertGreaterEqual(int(payload.get("reasoning_score", 0)), 0)
-                self.assertLessEqual(int(payload.get("reasoning_score", 0)), 100)
-                self.assertIn(
-                    str(payload.get("productivity_status", "")),
-                    {"weak", "moderate", "strong"},
-                )
-                self.assertIn(
-                    str(payload.get("execution_mode", "")),
-                    {"simulated", "hybrid", "live"},
-                )
-                self.assertGreaterEqual(int(payload.get("placeholder_outputs", 0)), 0)
-                self.assertTrue(isinstance(payload.get("evidence_gate_applied"), bool))
-                self.assertTrue(
-                    isinstance(payload.get("evidence_gate_failures", []), list)
-                )
-            finally:
-                api_main.set_current_workspace(previous_workspace)
+        temp_root = Path.cwd() / ".tmp_api_team_chat_tests"
+        workspace = temp_root / f"case_{uuid4().hex}"
+        previous_workspace = api_main.get_current_workspace()
+        try:
+            workspace.mkdir(parents=True, exist_ok=True)
+            api_main.set_current_workspace(workspace)
+            client = TestClient(api_main.app)
+            response = client.post(
+                "/api/aiteam/chat",
+                json={
+                    "message": "Implement tests and refactor auth flow",
+                    "role": "qa",
+                    "complexity": "medium",
+                    "criticality": "medium",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = _parse_sse_result(response)
+            self.assertEqual(payload.get("role"), "team_lead")
+            self.assertTrue(
+                str(payload.get("lead_task_id", "")).endswith("::lead_intake")
+            )
+            self.assertGreaterEqual(len(payload.get("delegated_task_ids", [])), 4)
+            phase_task_ids = payload.get("phase_task_ids", {})
+            self.assertIn("lead_intake", phase_task_ids)
+            self.assertIn("lead_close", phase_task_ids)
+            self.assertIn("Lead summary", payload.get("response", ""))
+            self.assertIn("Workflow phases", payload.get("response", ""))
+            self.assertGreaterEqual(int(payload.get("productivity_score", 0)), 0)
+            self.assertLessEqual(int(payload.get("productivity_score", 0)), 100)
+            self.assertGreaterEqual(int(payload.get("reasoning_score", 0)), 0)
+            self.assertLessEqual(int(payload.get("reasoning_score", 0)), 100)
+            self.assertIn(
+                str(payload.get("productivity_status", "")),
+                {"weak", "moderate", "strong"},
+            )
+            self.assertIn(
+                str(payload.get("execution_mode", "")),
+                {"simulated", "hybrid", "live"},
+            )
+            self.assertGreaterEqual(int(payload.get("placeholder_outputs", 0)), 0)
+            self.assertTrue(isinstance(payload.get("evidence_gate_applied"), bool))
+            self.assertTrue(
+                isinstance(payload.get("evidence_gate_failures", []), list)
+            )
+        finally:
+            api_main.set_current_workspace(previous_workspace)
+            shutil.rmtree(workspace, ignore_errors=True)
 
     def test_chat_persists_lead_and_delegated_tasks_to_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -343,7 +450,7 @@ class APITeamChatTests(unittest.TestCase):
                         "message": "Create a conceptual architecture note for telemetry improvements",
                         "mode": "sprint5",
                         "max_rounds": 4,
-                        "strict_mode": False,
+                        "strict_mode": True,
                         "auto_extend_weak_runs": False,
                         "allow_low_productivity_override": False,
                     },
@@ -399,7 +506,7 @@ class APITeamChatTests(unittest.TestCase):
                         "message": "Plan and implement a robust auth module",
                         "mode": "sprint5",
                         "max_rounds": 4,
-                        "strict_mode": False,
+                        "strict_mode": True,
                         "auto_extend_weak_runs": False,
                         "allow_low_productivity_override": True,
                     },
@@ -426,7 +533,7 @@ class APITeamChatTests(unittest.TestCase):
                         "message": "Implement backend endpoint with tests",
                         "mode": "sprint5",
                         "max_rounds": 4,
-                        "strict_mode": False,
+                        "strict_mode": True,
                         "auto_extend_weak_runs": False,
                         "allow_low_productivity_override": True,
                     },
@@ -677,7 +784,7 @@ class APITeamChatTests(unittest.TestCase):
                         "message": "Create an arcade game with an original style",
                         "mode": "sprint5",
                         "max_rounds": 4,
-                        "strict_mode": False,
+                        "strict_mode": True,
                     },
                 )
                 self.assertEqual(first.status_code, 200)
@@ -690,7 +797,7 @@ class APITeamChatTests(unittest.TestCase):
                         "message": f"Continue from {first_root}. Start the next highest-impact slice and improve visual design.",
                         "mode": "sprint5",
                         "max_rounds": 4,
-                        "strict_mode": False,
+                        "strict_mode": True,
                         "allow_low_productivity_override": True,
                     },
                 )

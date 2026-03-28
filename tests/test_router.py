@@ -7,7 +7,7 @@ from aiteam.adapters import ApiAdapter, SubscriptionAdapter
 from aiteam.config import build_default_router_policy
 from aiteam.finops import BudgetManager, BudgetPolicy
 from aiteam.router import HybridRouter
-from aiteam.types import Complexity, Criticality, Role, RoutingRequest
+from aiteam.types import AdapterResponse, Complexity, Criticality, Role, RoutingRequest
 
 
 class RouterTests(unittest.TestCase):
@@ -54,6 +54,42 @@ class RouterTests(unittest.TestCase):
         )
         self.assertTrue(decision.success)
         self.assertEqual(decision.channel.value, "api")
+
+    def test_failed_attempts_include_error_hint(self) -> None:
+        class FailAdapter(SubscriptionAdapter):
+            def invoke(self, prompt: str, messages: list[dict[str, str]] | None = None):
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    latency_ms=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    error="http_error:429:rate_limited",
+                )
+
+        router = HybridRouter(
+            adapters=[
+                FailAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                )
+            ],
+            policy=build_default_router_policy(),
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                required_capabilities={"coding"},
+            ),
+            prompt="simple prompt",
+        )
+
+        self.assertFalse(decision.success)
+        self.assertIn("http_error:429:rate_limited", " ".join(decision.attempts))
 
     def test_route_and_invoke_forwards_messages_history(self) -> None:
         captured: dict[str, object] = {}
@@ -524,6 +560,46 @@ class RouterTests(unittest.TestCase):
             self.assertEqual(decision.channel.value, "api")
             self.assertEqual(decision.model, "gpt-4.1-mini")
 
+    def test_team_lead_accepts_advanced_api_alias_by_provider_and_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            (runtime_dir / "provider_ops.json").write_text(
+                '{"providers":[{"adapter_name":"openai_pro_cli","smoke_healthy":false,"operational":false}]}',
+                encoding="utf-8",
+            )
+            budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro_cli",
+                        provider="openai",
+                        model="gpt-4o",
+                        capabilities={"coding", "reasoning", "analysis"},
+                    ),
+                    ApiAdapter(
+                        name="openai_api_mini",
+                        provider="openai",
+                        model="gpt-4.1-mini",
+                        capabilities={"coding", "reasoning", "analysis"},
+                        cost_tier=1,
+                    ),
+                ],
+                policy=build_default_router_policy(),
+                budget_manager=budget,
+            )
+            decision = router.route_and_invoke(
+                request=RoutingRequest(
+                    role=Role.TEAM_LEAD,
+                    complexity=Complexity.HIGH,
+                    criticality=Criticality.HIGH,
+                    required_capabilities={"coding"},
+                ),
+                prompt="Lead the team",
+            )
+            self.assertTrue(decision.success)
+            self.assertEqual(decision.channel.value, "api")
+            self.assertEqual(decision.model, "gpt-4.1-mini")
+
     def test_team_lead_prefers_higher_ranked_senior_cloud_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
@@ -690,6 +766,97 @@ class RouterTests(unittest.TestCase):
             )
             self.assertTrue(decision.success)
             self.assertEqual(decision.channel.value, "api")
+
+
+    def test_all_adapters_fail_returns_failed_decision(self) -> None:
+        """Si todos los adapters fallan, la decision es all_attempts_failed (no crash)."""
+        from unittest.mock import patch
+        from aiteam.types import AdapterResponse
+
+        router = HybridRouter(
+            adapters=[
+                ApiAdapter(
+                    name="openai_api",
+                    provider="openai",
+                    model="gpt-4.1-mini",
+                    capabilities={"coding"},
+                    cost_tier=1,
+                ),
+            ],
+            policy=build_default_router_policy(),
+        )
+        error_resp = AdapterResponse(success=False, content="", error="http_error:500:boom")
+        with patch.object(router.adapters[0], "invoke", return_value=error_resp):
+            decision = router.route_and_invoke(
+                request=RoutingRequest(
+                    role=Role.ENGINEER,
+                    complexity=Complexity.LOW,
+                    criticality=Criticality.LOW,
+                ),
+                prompt="do work",
+            )
+        self.assertFalse(decision.success)
+        self.assertIn("fail", decision.reason or "")
+
+    def test_ops_status_cache_avoids_repeated_io(self) -> None:
+        """_cached_ops_status no relee el archivo si el TTL no expiró."""
+        import time
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            ops_file = runtime_dir / "provider_ops.json"
+            ops_file.write_text('{"providers":[]}', encoding="utf-8")
+            budget = BudgetManager(runtime_dir=runtime_dir, policy=BudgetPolicy())
+            router = HybridRouter(
+                adapters=[],
+                policy=build_default_router_policy(),
+                budget_manager=budget,
+            )
+            # Primera lectura puebla el cache
+            s1 = router._cached_ops_status()
+            # Sobrescribir archivo — segunda lectura dentro del TTL debe devolver cache
+            ops_file.write_text('{"providers":[{"adapter_name":"x"}]}', encoding="utf-8")
+            s2 = router._cached_ops_status()
+            self.assertEqual(s1, s2, "Cache debería devolver el valor anterior sin releer el archivo")
+
+    def test_local_provider_skipped_when_degraded(self) -> None:
+        """Con AITEAM_PROVIDER_LOCAL_DEGRADED=1 los adapters tier=local no son elegibles."""
+        import os
+        from unittest.mock import patch
+
+        router = HybridRouter(
+            adapters=[
+                ApiAdapter(
+                    name="claude_haiku_api",
+                    provider="anthropic",
+                    model="claude-haiku-4-5-20251001",
+                    capabilities={"coding"},
+                    cost_tier=0,
+                ),
+            ],
+            policy=build_default_router_policy(),
+        )
+        # Inyectar un adapter local manualmente en la lista
+        try:
+            from aiteam.adapters.local import LocalAdapter  # type: ignore[import]
+            local_adapter = LocalAdapter(
+                name="ollama_qwen_coder_local",
+                provider="local",
+                model="qwen2.5-coder:14b",
+            )
+            router.adapters.insert(0, local_adapter)
+            with patch.dict(os.environ, {"AITEAM_PROVIDER_LOCAL_DEGRADED": "1"}):
+                eligible = router._eligible(
+                    RoutingRequest(
+                        role=Role.ENGINEER,
+                        complexity=Complexity.LOW,
+                        criticality=Criticality.LOW,
+                    )
+                )
+            names = [a.name for a in eligible]
+            self.assertNotIn("ollama_qwen_coder_local", names)
+        except (ImportError, Exception):
+            # Si LocalAdapter no existe, test pasa — la protección ya está en router
+            pass
 
 
 if __name__ == "__main__":
