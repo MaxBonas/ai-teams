@@ -81,21 +81,21 @@ def build_default_orchestrator(
         SubscriptionAdapter(
             name="gemini_pro",
             provider="google",
-            model="gemini-2.0-flash",  # 2.0 Flash — rapido, multimodal, sin coste extra en Pro
+            model="gemini-2.5-flash",  # 2.5 Flash — más rápido y con mayor contexto que 2.0
             capabilities={"analysis", "summarization", "reasoning", "coding"},
             routing_priority=20,
         ),
         SubscriptionAdapter(
             name="claude_pro",
             provider="anthropic",
-            model="claude-3-5-sonnet-20241022",  # Sonnet — mejor para coding y razonamiento complejo
+            model="claude-sonnet-4-5",  # Sonnet 4.5 — mejor coding y razonamiento
             capabilities={"reasoning", "coding", "analysis", "review"},
             routing_priority=30,
         ),
         SubscriptionAdapter(
             name="claude_haiku",
             provider="anthropic",
-            model="claude-3-5-haiku-20241022",  # Haiku — rapido y barato para tasks simples
+            model="claude-haiku-4-5",  # Haiku 4.5 — rápido para tasks ligeras
             capabilities={"reasoning", "coding", "analysis"},
             routing_priority=40,
             cost_tier=0,

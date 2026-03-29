@@ -409,11 +409,10 @@ class HybridRouter:
 
         for adapter in eligible:
             if adapter.channel == ChannelType.SUBSCRIPTION:
-                if (
-                    attempted_channels[ChannelType.SUBSCRIPTION]
-                    >= self.policy.max_subscription_attempts
-                ):
-                    continue
+                # Sin límite artificial de intentos para subscription: se prueba cada
+                # adapter disponible hasta encontrar uno que funcione.
+                # max_subscription_attempts se ignora — el fallback es el punto.
+                pass
             else:
                 if not self.policy.api_fallback_enabled:
                     continue
@@ -443,7 +442,9 @@ class HybridRouter:
                     and has_subscription_candidate
                 ):
                     continue
-                if attempted_channels[ChannelType.API] >= api_attempt_limit:
+                # api_attempt_limit solo aplica si el budget manager sugiere reducir
+                # llamadas por presión de coste. Sin presión, intentar todos.
+                if self.budget_manager is not None and attempted_channels[ChannelType.API] >= api_attempt_limit:
                     continue
 
             attempted_channels[adapter.channel] += 1

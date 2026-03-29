@@ -12,6 +12,7 @@ from aiteam.types import AdapterResponse, ChannelType
 # requests tiene mejor TLS fingerprint que urllib — necesario para Groq (Cloudflare)
 try:
     import requests as _requests
+
     _REQUESTS_AVAILABLE = True
 except ImportError:
     _REQUESTS_AVAILABLE = False
@@ -96,7 +97,10 @@ class SubscriptionAdapter(ModelAdapter):
         return True
 
     def invoke(
-        self, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
+        self,
+        prompt: str,
+        messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> AdapterResponse:
         start = time.time()
         normalized_messages = normalize_messages(messages, prompt)
@@ -116,17 +120,16 @@ class SubscriptionAdapter(ModelAdapter):
         if self._live_api_enabled():
             live = self._invoke_live(prompt_text, normalized_messages, tools=tools)
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
-            if (not live.success) and self._allow_simulated_degrade(live.error):
-                return self._simulated_response(
-                    prompt_text,
-                    start=start,
-                    live_error=str(live.error or ""),
-                )
             return live
 
-        # Mock fallback — solo activo cuando AITEAM_ENABLE_LIVE_API=0 (tests/demo sin clave).
-        # En produccion real, configurar AITEAM_ENABLE_LIVE_API=1 y la API key del provider.
-        return self._simulated_response(prompt_text, start=start)
+        return AdapterResponse(
+            success=False,
+            content="",
+            latency_ms=int((time.time() - start) * 1000),
+            input_tokens=input_tokens,
+            output_tokens=0,
+            error="live_api_disabled",
+        )
 
     def _simulated_response(
         self,
@@ -161,9 +164,7 @@ class SubscriptionAdapter(ModelAdapter):
         fallback_note = ""
         if live_error.strip():
             compact_error = " ".join(str(live_error).split())[:140]
-            fallback_note = (
-                f" Fallback simulado tras fallo live: {compact_error}."
-            )
+            fallback_note = f" Fallback simulado tras fallo live: {compact_error}."
         content = (
             f"[SIMULADO | {self.provider}:{self.model}] "
             f"Respuesta mock para: {first_line!r}. "
@@ -183,31 +184,7 @@ class SubscriptionAdapter(ModelAdapter):
 
     @staticmethod
     def _allow_simulated_degrade(error: str | None) -> bool:
-        if os.getenv("AITEAM_REQUIRE_LIVE_MODE", "0").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }:
-            return False
-        allow = os.getenv(
-            "AITEAM_ALLOW_SIMULATED_ON_PROVIDER_EXHAUSTION", "1"
-        ).strip().lower()
-        if allow not in {"1", "true", "yes", "on"}:
-            return False
-        normalized = str(error or "").strip().lower()
-        if not normalized:
-            return False
-        quota_markers = (
-            "http_error:429",
-            "rate_limit",
-            "rate_limited",
-            "insufficient_quota",
-            "credit balance",
-            "credit_ba",
-            "quota",
-        )
-        return any(marker in normalized for marker in quota_markers)
+        return False
 
     @staticmethod
     def _live_api_enabled() -> bool:
@@ -228,7 +205,9 @@ class SubscriptionAdapter(ModelAdapter):
         return code in {408, 409, 425, 429, 500, 502, 503, 504}
 
     @staticmethod
-    def _retry_delay_seconds(attempt_index: int, retry_after: str | None = None) -> float:
+    def _retry_delay_seconds(
+        attempt_index: int, retry_after: str | None = None
+    ) -> float:
         if retry_after:
             try:
                 parsed = float(str(retry_after).strip())
@@ -239,7 +218,10 @@ class SubscriptionAdapter(ModelAdapter):
         return min(0.4 * (2**attempt_index), 4.0)
 
     def _invoke_live(
-        self, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
+        self,
+        prompt: str,
+        messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> AdapterResponse:
         """Invoca la API real del provider."""
         provider_key = self.provider.strip().lower()
@@ -271,7 +253,9 @@ class SubscriptionAdapter(ModelAdapter):
         if fmt == "google":
             return self._invoke_google(api_key, prompt, config["url"], messages)
         # openai-compatible (openai, groq)
-        return self._invoke_openai_compatible(config["url"], api_key, prompt, messages, tools=tools)
+        return self._invoke_openai_compatible(
+            config["url"], api_key, prompt, messages, tools=tools
+        )
 
     def _invoke_openai_compatible(
         self,
@@ -316,8 +300,10 @@ class SubscriptionAdapter(ModelAdapter):
 
     def _make_openai_tool_parser(self):
         """Returns a parser function that captures tool_calls from OpenAI responses."""
+
         def _parser(parsed: dict, prompt: str, latency_ms: int) -> AdapterResponse:
             from aiteam.types import ToolCall
+
             content = ""
             choices = parsed.get("choices", [])
             tool_calls_out = []
@@ -326,8 +312,12 @@ class SubscriptionAdapter(ModelAdapter):
                 message = first.get("message", {}) if isinstance(first, dict) else {}
                 if isinstance(message, dict):
                     content = str(message.get("content", "") or "")
-                    raw_tcs = message.get("tool_calls", []) if isinstance(message, dict) else []
-                    for tc in (raw_tcs or []):
+                    raw_tcs = (
+                        message.get("tool_calls", [])
+                        if isinstance(message, dict)
+                        else []
+                    )
+                    for tc in raw_tcs or []:
                         if not isinstance(tc, dict):
                             continue
                         fn = tc.get("function", {})
@@ -335,17 +325,23 @@ class SubscriptionAdapter(ModelAdapter):
                             args = json.loads(fn.get("arguments", "{}") or "{}")
                         except (json.JSONDecodeError, TypeError):
                             args = {}
-                        tool_calls_out.append(ToolCall(
-                            id=str(tc.get("id", "")),
-                            name=str(fn.get("name", "")),
-                            arguments=args,
-                        ))
+                        tool_calls_out.append(
+                            ToolCall(
+                                id=str(tc.get("id", "")),
+                                name=str(fn.get("name", "")),
+                                arguments=args,
+                            )
+                        )
 
             usage = parsed.get("usage", {})
             usage_dict = usage if isinstance(usage, dict) else {}
-            input_tokens = int(usage_dict.get("prompt_tokens", max(1, len(prompt) // 4)))
+            input_tokens = int(
+                usage_dict.get("prompt_tokens", max(1, len(prompt) // 4))
+            )
             output_tokens = int(
-                usage_dict.get("completion_tokens", max(1, len(content) // 4 if content else 1))
+                usage_dict.get(
+                    "completion_tokens", max(1, len(content) // 4 if content else 1)
+                )
             )
 
             if tool_calls_out:
@@ -375,18 +371,45 @@ class SubscriptionAdapter(ModelAdapter):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
+
         return _parser
 
     def _invoke_anthropic(
-        self, api_key: str, prompt: str, messages: list[dict[str, str]] | None = None,
+        self,
+        api_key: str,
+        prompt: str,
+        messages: list[dict[str, str]] | None = None,
         tools=None,
     ) -> AdapterResponse:
-        """Invoca API de Anthropic (Messages API)."""
-        body = {
+        """Invoca API de Anthropic (Messages API).
+
+        Anthropic Messages API solo acepta role user/assistant en messages[].
+        Los mensajes con role=system se extraen y se pasan en el campo 'system'
+        de nivel raíz (string); si hay varios, se concatenan.
+        """
+        normalized = normalize_messages(messages, prompt)
+        # Separar system messages del historial conversacional
+        system_parts: list[str] = []
+        conversation: list[dict[str, str]] = []
+        for msg in normalized:
+            role = msg.get("role", "user")
+            content = str(msg.get("content", "") or "").strip()
+            if not content:
+                continue
+            if role == "system":
+                system_parts.append(content)
+            else:
+                conversation.append({"role": role, "content": content})
+        if not conversation:
+            conversation = [{"role": "user", "content": prompt}]
+
+        body: dict = {
             "model": self.model,
             "max_tokens": 4096,
-            "messages": normalize_messages(messages, prompt),
+            "messages": conversation,
         }
+        if system_parts:
+            body["system"] = "\n\n".join(system_parts)
         if tools:
             body["tools"] = [
                 {
@@ -421,8 +444,10 @@ class SubscriptionAdapter(ModelAdapter):
 
     def _make_anthropic_tool_parser(self):
         """Returns a parser function that captures tool_use blocks from Anthropic responses."""
+
         def _parser(parsed: dict, prompt: str, latency_ms: int) -> AdapterResponse:
             from aiteam.types import ToolCall
+
             content_blocks = parsed.get("content", [])
             parts = []
             tool_calls_out = []
@@ -435,18 +460,22 @@ class SubscriptionAdapter(ModelAdapter):
                     elif block.get("type") == "tool_use":
                         raw_input = block.get("input", {})
                         args = raw_input if isinstance(raw_input, dict) else {}
-                        tool_calls_out.append(ToolCall(
-                            id=str(block.get("id", "")),
-                            name=str(block.get("name", "")),
-                            arguments=args,
-                        ))
+                        tool_calls_out.append(
+                            ToolCall(
+                                id=str(block.get("id", "")),
+                                name=str(block.get("name", "")),
+                                arguments=args,
+                            )
+                        )
             content = "\n".join(parts)
 
             usage = parsed.get("usage", {})
             usage_dict = usage if isinstance(usage, dict) else {}
             input_tokens = int(usage_dict.get("input_tokens", max(1, len(prompt) // 4)))
             output_tokens = int(
-                usage_dict.get("output_tokens", max(1, len(content) // 4 if content else 1))
+                usage_dict.get(
+                    "output_tokens", max(1, len(content) // 4 if content else 1)
+                )
             )
 
             if tool_calls_out:
@@ -476,6 +505,7 @@ class SubscriptionAdapter(ModelAdapter):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
+
         return _parser
 
     def _invoke_google(
@@ -561,8 +591,7 @@ class SubscriptionAdapter(ModelAdapter):
         input_tokens = max(1, len(prompt) // 4)
         max_retries = self._live_retry_attempts()
         use_requests = (
-            _REQUESTS_AVAILABLE
-            and self.provider in _PROVIDERS_REQUIRE_REQUESTS
+            _REQUESTS_AVAILABLE and self.provider in _PROVIDERS_REQUIRE_REQUESTS
         )
         for attempt_index in range(max_retries + 1):
             try:
@@ -611,9 +640,8 @@ class SubscriptionAdapter(ModelAdapter):
                     error_body = exc.read().decode("utf-8", errors="replace")[:500]
                 except Exception:
                     pass
-                if (
-                    attempt_index < max_retries
-                    and self._is_retryable_http_status(int(exc.code or 0))
+                if attempt_index < max_retries and self._is_retryable_http_status(
+                    int(exc.code or 0)
                 ):
                     retry_after = None
                     headers_obj = getattr(exc, "headers", None)
