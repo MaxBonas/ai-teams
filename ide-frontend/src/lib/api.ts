@@ -3,6 +3,7 @@ import {
   setWorkspacePath,
   getRecentWorkspaces,
   pushRecentWorkspace,
+  removeRecentWorkspace,
   getPinnedWorkspaces,
   togglePinnedWorkspace,
 } from '../services/workspaceService';
@@ -53,6 +54,7 @@ export {
   setWorkspacePath,
   getRecentWorkspaces,
   pushRecentWorkspace,
+  removeRecentWorkspace,
   getPinnedWorkspaces,
   togglePinnedWorkspace,
 };

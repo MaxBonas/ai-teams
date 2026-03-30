@@ -717,9 +717,11 @@ class AITeamOrchestrator:
             "yes",
             "on",
         }
-        if require_execution_plan and (
-            not isinstance(execution_plan, list) or not execution_plan
-        ) and not demo_fast_mode:
+        if (
+            require_execution_plan
+            and (not isinstance(execution_plan, list) or not execution_plan)
+            and not demo_fast_mode
+        ):
             self._fail_task_due_to_compliance(
                 task=task,
                 assignee=assignee,
@@ -879,15 +881,23 @@ class AITeamOrchestrator:
             prev_sessions = self.session_store.sessions_for_task(task.task_id)
             if prev_sessions:
                 last = prev_sessions[-1]
-                raw_actions = last.get("actions") if isinstance(last, dict) else (last.actions or [])
+                raw_actions = (
+                    last.get("actions")
+                    if isinstance(last, dict)
+                    else (last.actions or [])
+                )
                 actions_summary = "; ".join(
                     f"{a.get('action_type', '')}:{str(a.get('detail', ''))[:60]}"
                     if isinstance(a, dict)
                     else f"{a.action_type}:{a.detail[:60]}"
                     for a in (raw_actions or [])[-5:]
                 )
-                last_status = last.get("status") if isinstance(last, dict) else last.status
-                last_summary = last.get("summary") if isinstance(last, dict) else last.summary
+                last_status = (
+                    last.get("status") if isinstance(last, dict) else last.status
+                )
+                last_summary = (
+                    last.get("summary") if isinstance(last, dict) else last.summary
+                )
                 prev_summary = (
                     f"Intento anterior (iteracion {gate_iteration - 1}): "
                     f"status={last_status or 'unknown'}, "
@@ -954,17 +964,22 @@ class AITeamOrchestrator:
         native_tools = self._build_native_tools_for_task(task)
 
         # ── Emitir agent_started antes de la llamada al LLM ──
-        self._emit_agent_event({
-            "type": "agent_started",
-            "task_id": task.task_id,
-            "agent_id": assignee,
-            "role": task.role.value,
-            "phase": _phase,
-            "title": task.title,
-        })
+        self._emit_agent_event(
+            {
+                "type": "agent_started",
+                "task_id": task.task_id,
+                "agent_id": assignee,
+                "role": task.role.value,
+                "phase": _phase,
+                "title": task.title,
+            }
+        )
 
         on_chunk = None
-        if self.token_chunk_callback is not None or self.agent_event_callback is not None:
+        if (
+            self.token_chunk_callback is not None
+            or self.agent_event_callback is not None
+        ):
             _tid_for_chunk = task.task_id
             _role_for_chunk = task.role.value
             _phase_for_chunk = _phase
@@ -985,15 +1000,17 @@ class AITeamOrchestrator:
                     _tcb(_tid, chunk)
                 if _acb is not None:
                     try:
-                        _acb({
-                            "type": "agent_chunk",
-                            "task_id": _tid,
-                            "agent_id": _aid,
-                            "role": _role,
-                            "phase": _ph,
-                            "chunk": chunk,
-                            "chunk_type": "output",
-                        })
+                        _acb(
+                            {
+                                "type": "agent_chunk",
+                                "task_id": _tid,
+                                "agent_id": _aid,
+                                "role": _role,
+                                "phase": _ph,
+                                "chunk": chunk,
+                                "chunk_type": "output",
+                            }
+                        )
                     except Exception:
                         pass
 
@@ -1145,8 +1162,15 @@ class AITeamOrchestrator:
                 tool_summary_lines.append(f"[{r['name']}] {status}: {body[:800]}")
             tool_msg = "Resultados de herramientas:\n" + "\n".join(tool_summary_lines)
             followup_messages = list(messages or []) + [
-                {"role": "assistant", "content": f"[Usando herramientas: {', '.join(tc.name for tc in decision.response.tool_calls)}]"},
-                {"role": "user", "content": tool_msg + "\n\nContinua con tu tarea usando los resultados anteriores."},
+                {
+                    "role": "assistant",
+                    "content": f"[Usando herramientas: {', '.join(tc.name for tc in decision.response.tool_calls)}]",
+                },
+                {
+                    "role": "user",
+                    "content": tool_msg
+                    + "\n\nContinua con tu tarea usando los resultados anteriores.",
+                },
             ]
             decision = self.router.route_and_invoke(
                 request=request,
@@ -1155,7 +1179,9 @@ class AITeamOrchestrator:
                 messages=followup_messages,
                 tools=None,  # no tools en el segundo round para evitar bucle infinito
             )
-            session.record_action("llm_call", f"native_tool_followup:{len(tc_results)}_tools")
+            session.record_action(
+                "llm_call", f"native_tool_followup:{len(tc_results)}_tools"
+            )
 
         if decision.success:
             safe_content = self.compliance.redact_text(decision.response.content)
@@ -1302,15 +1328,17 @@ class AITeamOrchestrator:
                 return
 
             self.taskboard.mark_completed(task.task_id, details=safe_content)
-            self._emit_agent_event({
-                "type": "agent_completed",
-                "task_id": task.task_id,
-                "agent_id": assignee,
-                "role": task.role.value,
-                "phase": _phase,
-                "preview": safe_content[:200] if safe_content else "",
-                "duration_ms": int(decision.response.latency_ms),
-            })
+            self._emit_agent_event(
+                {
+                    "type": "agent_completed",
+                    "task_id": task.task_id,
+                    "agent_id": assignee,
+                    "role": task.role.value,
+                    "phase": _phase,
+                    "preview": safe_content[:200] if safe_content else "",
+                    "duration_ms": int(decision.response.latency_ms),
+                }
+            )
 
             # ── Agent self-delegation: parsear [REQUEST_TASK] del output ──
             delegated = self._parse_agent_requests(task, assignee, safe_content)
@@ -1383,14 +1411,16 @@ class AITeamOrchestrator:
             tags=["failure"],
         )
         self.taskboard.mark_failed(task.task_id, error=failure_text)
-        self._emit_agent_event({
-            "type": "agent_failed",
-            "task_id": task.task_id,
-            "agent_id": assignee,
-            "role": task.role.value,
-            "phase": _phase,
-            "error": failure_text[:200] if failure_text else "",
-        })
+        self._emit_agent_event(
+            {
+                "type": "agent_failed",
+                "task_id": task.task_id,
+                "agent_id": assignee,
+                "role": task.role.value,
+                "phase": _phase,
+                "error": failure_text[:200] if failure_text else "",
+            }
+        )
 
         # ── Ledger de fallo ──
         self._update_team_ledger(task, assignee, failure_text, success=False)
@@ -1433,12 +1463,15 @@ class AITeamOrchestrator:
     def _build_native_tools_for_task(self, task: WorkTask) -> list:
         """Convierte herramientas disponibles del task a NativeToolDefinition para function calling."""
         from aiteam.adapters.base import NativeToolDefinition
+
         if self.tool_dispatcher is None:
             return []
         try:
             tools_info = self.tool_dispatcher.build_tool_context_for_agent(
                 role=task.role.value,
-                required_capabilities=set(task.metadata.get("required_capabilities", [])),
+                required_capabilities=set(
+                    task.metadata.get("required_capabilities", [])
+                ),
                 task_description=f"{task.title}\n{task.description}",
             )
         except Exception:
@@ -1450,20 +1483,22 @@ class AITeamOrchestrator:
         for t in list(self.tool_dispatcher._tools.values())[:5]:
             if not t.enabled:
                 continue
-            native.append(NativeToolDefinition(
-                name=t.name,
-                description=t.description or f"Herramienta: {t.name}",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string",
-                            "description": "El comando o accion a ejecutar con esta herramienta"
-                        }
+            native.append(
+                NativeToolDefinition(
+                    name=t.name,
+                    description=t.description or f"Herramienta: {t.name}",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "El comando o accion a ejecutar con esta herramienta",
+                            }
+                        },
+                        "required": ["command"],
                     },
-                    "required": ["command"],
-                },
-            ))
+                )
+            )
         return native[:5]
 
     def _execute_native_tool_calls(
@@ -1471,7 +1506,7 @@ class AITeamOrchestrator:
     ) -> list[dict]:
         """Ejecuta tool_calls nativos y retorna lista de resultados."""
         results = []
-        for tc in tool_calls[:self._MAX_TOOL_CALLS_PER_TASK]:
+        for tc in tool_calls[: self._MAX_TOOL_CALLS_PER_TASK]:
             command = tc.arguments.get("command", tc.name)
             if self.tool_dispatcher is not None:
                 result = self.tool_dispatcher.invoke_cli_tool(
@@ -1482,21 +1517,29 @@ class AITeamOrchestrator:
                 )
             else:
                 from aiteam.tool_dispatch import ToolResult
-                result = ToolResult(tool_name=tc.name, success=False, error="no_dispatcher")
-            self.event_logger.emit("agent_tool_invocation", {
-                "task_id": task.task_id,
-                "assignee": assignee,
-                "tool": tc.name,
-                "native": True,
-                "success": result.success,
-            })
-            results.append({
-                "id": tc.id,
-                "name": tc.name,
-                "success": result.success,
-                "output": (result.output or "")[:2000],
-                "error": (result.error or "")[:500],
-            })
+
+                result = ToolResult(
+                    tool_name=tc.name, success=False, error="no_dispatcher"
+                )
+            self.event_logger.emit(
+                "agent_tool_invocation",
+                {
+                    "task_id": task.task_id,
+                    "assignee": assignee,
+                    "tool": tc.name,
+                    "native": True,
+                    "success": result.success,
+                },
+            )
+            results.append(
+                {
+                    "id": tc.id,
+                    "name": tc.name,
+                    "success": result.success,
+                    "output": (result.output or "")[:2000],
+                    "error": (result.error or "")[:500],
+                }
+            )
         return results
 
     def _parse_and_invoke_tools(
@@ -2020,8 +2063,7 @@ class AITeamOrchestrator:
         _agent_output = str(task.metadata.get("_last_agent_output", ""))
         _phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else ""
 
-        # Modo simulado/mock: si el agente produjo alguna salida no vacia,
-        # aceptarla como evidencia minima para no cortar el workflow artificialmente.
+        # Si no hay modo live real, no aceptar nunca salida textual como evidencia.
         live_api_enabled = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower() in {
             "1",
             "true",
@@ -2029,22 +2071,7 @@ class AITeamOrchestrator:
             "on",
         }
         if not live_api_enabled and _agent_output.strip():
-            demo_fast_mode = os.getenv("AITEAM_CHAT_DEMO_FAST", "0").strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }
-            if _phase_name in {"build", "review", "qa"}:
-                if demo_fast_mode:
-                    return True, "demo_mode_accepted"
-                quality_ok, quality_reason = self._assess_output_quality(
-                    _agent_output, task.role, _phase_name
-                )
-                if not quality_ok:
-                    return False, f"simulated_placeholder_blocked:{quality_reason}"
-                return False, "simulated_workflow_requires_artifacts"
-            return True, "simulated_mode_accepted"
+            return False, "live_mode_required_no_simulated_evidence"
 
         # ── Modo live sin git diff: validar calidad minima del output por rol ──
         # Un LLM puede devolver "Tarea completada." y no hacer nada. Se exige
@@ -2097,9 +2124,7 @@ class AITeamOrchestrator:
         )
 
     @staticmethod
-    def _assess_output_quality(
-        output: str, role: Role, phase: str
-    ) -> tuple[bool, str]:
+    def _assess_output_quality(output: str, role: Role, phase: str) -> tuple[bool, str]:
         """Valida calidad minima del output LLM en modo live (sin git diff).
 
         Evita que respuestas triviales como "Tarea completada." pasen el gate.
@@ -2115,14 +2140,24 @@ class AITeamOrchestrator:
             r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]",
             r"^\[simulado\s*\|",
         ]
-        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in placeholder_patterns):
+        if any(
+            re.search(pattern, text, flags=re.IGNORECASE)
+            for pattern in placeholder_patterns
+        ):
             return False, "placeholder_output"
 
         # Detectar respuestas triviales sin contenido tecnico real (cualquier longitud).
         trivial_patterns = [
-            "tarea completada", "task completed", "done.", "listo.",
-            "completado.", "finalizado.", "he completado", "he realizado",
-            "he implementado", "como se solicito",
+            "tarea completada",
+            "task completed",
+            "done.",
+            "listo.",
+            "completado.",
+            "finalizado.",
+            "he completado",
+            "he realizado",
+            "he implementado",
+            "como se solicito",
         ]
         is_trivial = any(p in lower for p in trivial_patterns) and len(text) < 200
         if is_trivial:
@@ -2131,9 +2166,23 @@ class AITeamOrchestrator:
         if role == Role.REVIEWER:
             # Un reviewer debe producir observaciones accionables.
             reviewer_signals = [
-                "issue", "problema", "error", "bug", "sugerencia", "mejora",
-                "recomendacion", "fix:", "correc", "falta", "observacion",
-                "nota:", "- ", "* ", "1.", "2.", "•",
+                "issue",
+                "problema",
+                "error",
+                "bug",
+                "sugerencia",
+                "mejora",
+                "recomendacion",
+                "fix:",
+                "correc",
+                "falta",
+                "observacion",
+                "nota:",
+                "- ",
+                "* ",
+                "1.",
+                "2.",
+                "•",
             ]
             has_signal = any(s in lower for s in reviewer_signals)
             if has_signal or len(text) >= 300:
@@ -2145,9 +2194,22 @@ class AITeamOrchestrator:
         if role == Role.QA:
             # QA debe reportar resultados de tests o analisis de calidad.
             qa_signals = [
-                "passed", "failed", "error", "test", "prueba", "resultado",
-                "pass", "fail", "assert", "verificado", "ok:", "✓", "✗",
-                "coverage", "cobertura", "suite",
+                "passed",
+                "failed",
+                "error",
+                "test",
+                "prueba",
+                "resultado",
+                "pass",
+                "fail",
+                "assert",
+                "verificado",
+                "ok:",
+                "✓",
+                "✗",
+                "coverage",
+                "cobertura",
+                "suite",
             ]
             has_signal = any(s in lower for s in qa_signals)
             if has_signal:
@@ -2736,7 +2798,7 @@ class AITeamOrchestrator:
         ):
             output_summary = "placeholder/adapter"
         else:
-            output_summary = self._compact_text(output_text, 420)
+            output_summary = self._compact_text(output_text, 1500)
         justification = (
             f"decision_rank=R{charter.decision_rank}/5 assignee={assignee} role={task.role.value}; "
             f"consulted={consulted}; unavailable={unavailable}; "

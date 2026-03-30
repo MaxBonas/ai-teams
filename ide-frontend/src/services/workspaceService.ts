@@ -91,6 +91,21 @@ export function getPinnedWorkspaces(): string[] {
 }
 
 /**
+ * Remove a workspace path from the recent list.
+ */
+export function removeRecentWorkspace(path: string): string[] {
+  const value = path.trim();
+  const existing = getRecentWorkspaces();
+  const next = existing.filter((item) => item !== value);
+  try {
+    window.localStorage.setItem(RECENT_WORKSPACES_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage errors
+  }
+  return next;
+}
+
+/**
  * Toggle a workspace in the pinned list (add if absent, remove if present).
  */
 export function togglePinnedWorkspace(path: string): string[] {

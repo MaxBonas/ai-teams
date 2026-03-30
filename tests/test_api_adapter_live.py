@@ -23,13 +23,12 @@ class _MockHttpResponse:
 
 
 class ApiAdapterLiveTests(unittest.TestCase):
-    def test_api_adapter_uses_simulation_when_live_mode_disabled(self) -> None:
+    def test_api_adapter_fails_when_live_mode_disabled(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
         with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
             response = adapter.invoke("hello")
-        self.assertTrue(response.success)
-        # El mock incluye el marcador [SIMULADO | ...] para indicar que es una respuesta simulada
-        self.assertIn("SIMULADO", response.content)
+        self.assertFalse(response.success)
+        self.assertIn("live_api_disabled", str(response.error))
 
     def test_api_adapter_calls_openai_compatible_endpoint_in_live_mode(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
@@ -145,7 +144,9 @@ class ApiAdapterLiveTests(unittest.TestCase):
         self.assertEqual(response.content, "real response")
         self.assertEqual(calls["count"], 2)
 
-    def test_api_adapter_degrades_to_simulated_on_quota_exhaustion(self) -> None:
+    def test_api_adapter_fails_on_quota_exhaustion_without_simulated_fallback(
+        self,
+    ) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
 
         def _always_limited(request, timeout=0):
@@ -164,7 +165,6 @@ class ApiAdapterLiveTests(unittest.TestCase):
                     "AITEAM_ENABLE_LIVE_API": "1",
                     "OPENAI_API_KEY": "test-key",
                     "AITEAM_LIVE_API_RETRY_ATTEMPTS": "0",
-                    "AITEAM_ALLOW_SIMULATED_ON_PROVIDER_EXHAUSTION": "1",
                 },
                 clear=False,
             ),
@@ -172,9 +172,8 @@ class ApiAdapterLiveTests(unittest.TestCase):
         ):
             response = adapter.invoke("hello")
 
-        self.assertTrue(response.success)
-        self.assertIn("SIMULADO", response.content)
-        self.assertIn("Fallback simulado tras fallo live", response.content)
+        self.assertFalse(response.success)
+        self.assertIn("http_error:429", str(response.error))
 
 
 class GeminiConversationalTests(unittest.TestCase):
@@ -182,9 +181,7 @@ class GeminiConversationalTests(unittest.TestCase):
 
     def _make_gemini_response(self, text: str = "respuesta gemini") -> dict:
         return {
-            "candidates": [
-                {"content": {"role": "model", "parts": [{"text": text}]}}
-            ],
+            "candidates": [{"content": {"role": "model", "parts": [{"text": text}]}}],
             "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
         }
 
@@ -245,7 +242,7 @@ class GeminiConversationalTests(unittest.TestCase):
         # Debe tener 3 turnos con roles correctos
         self.assertEqual(len(contents), 3)
         self.assertEqual(contents[0]["role"], "user")
-        self.assertEqual(contents[1]["role"], "model")   # "assistant" → "model"
+        self.assertEqual(contents[1]["role"], "model")  # "assistant" → "model"
         self.assertEqual(contents[2]["role"], "user")
         self.assertEqual(contents[1]["parts"][0]["text"], "primera respuesta")
 
@@ -368,7 +365,9 @@ class GeminiConversationalTests(unittest.TestCase):
         self.assertEqual(response.content, "subscription response")
         self.assertEqual(calls["count"], 2)
 
-    def test_subscription_adapter_degrades_to_simulated_on_quota_exhaustion(self) -> None:
+    def test_subscription_adapter_fails_on_quota_exhaustion_without_simulated_fallback(
+        self,
+    ) -> None:
         from aiteam.adapters import SubscriptionAdapter
 
         adapter = SubscriptionAdapter(
@@ -391,7 +390,6 @@ class GeminiConversationalTests(unittest.TestCase):
                     "AITEAM_ENABLE_LIVE_API": "1",
                     "OPENAI_API_KEY": "test-key",
                     "AITEAM_LIVE_API_RETRY_ATTEMPTS": "0",
-                    "AITEAM_ALLOW_SIMULATED_ON_PROVIDER_EXHAUSTION": "1",
                 },
                 clear=False,
             ),
@@ -399,9 +397,8 @@ class GeminiConversationalTests(unittest.TestCase):
         ):
             response = adapter.invoke("hello")
 
-        self.assertTrue(response.success)
-        self.assertIn("SIMULADO", response.content)
-        self.assertIn("Fallback simulado tras fallo live", response.content)
+        self.assertFalse(response.success)
+        self.assertIn("http_error:429", str(response.error))
 
 
 class ThreadCompactionTests(unittest.TestCase):
@@ -437,7 +434,9 @@ class ThreadCompactionTests(unittest.TestCase):
             # Bypass deduplication alternando roles
             role = "user" if i % 2 == 0 else "assistant"
             thread.turns.append(
-                __import__("aiteam.agent_session", fromlist=["ConversationTurn"]).ConversationTurn(
+                __import__(
+                    "aiteam.agent_session", fromlist=["ConversationTurn"]
+                ).ConversationTurn(
                     ts="2026-01-01T00:00:00+00:00",
                     role=role,
                     content=big_content + f" {i}",
@@ -479,12 +478,16 @@ class EvidenceGateQualityTests(unittest.TestCase):
         project_root.mkdir(parents=True, exist_ok=True)
         adapters = [
             SubscriptionAdapter(
-                name="openai_pro", provider="openai", model="gpt-pro",
+                name="openai_pro",
+                provider="openai",
+                model="gpt-pro",
                 capabilities={"coding", "reasoning", "analysis", "review"},
             )
         ]
         router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
-        return AITeamOrchestrator(router=router, runtime_dir=runtime_dir, project_root=project_root)
+        return AITeamOrchestrator(
+            router=router, runtime_dir=runtime_dir, project_root=project_root
+        )
 
     def test_assess_output_quality_rejects_trivial_engineer_output(self) -> None:
         import tempfile
@@ -529,7 +532,8 @@ class EvidenceGateQualityTests(unittest.TestCase):
             orch = self._make_orchestrator(tmp)
             ok, reason = orch._assess_output_quality(
                 "- Issue: falta manejo de error en linea 42\n- Sugerencia: extraer logica a funcion auxiliar",
-                Role.REVIEWER, "review",
+                Role.REVIEWER,
+                "review",
             )
         self.assertTrue(ok)
         self.assertIn("observaciones", reason)
@@ -582,31 +586,44 @@ class EvidenceGateQualityTests(unittest.TestCase):
 class NativeFunctionCallingTests(unittest.TestCase):
     """Verifica function calling nativo en OpenAI y Anthropic."""
 
-    def _openai_tool_response(self, tool_name: str = "read_file", tool_id: str = "call_abc") -> dict:
+    def _openai_tool_response(
+        self, tool_name: str = "read_file", tool_id: str = "call_abc"
+    ) -> dict:
         return {
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": tool_id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_name,
-                            "arguments": json.dumps({"command": "src/main.py"}),
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": tool_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": json.dumps({"command": "src/main.py"}),
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "usage": {"prompt_tokens": 20, "completion_tokens": 10},
         }
 
-    def _anthropic_tool_response(self, tool_name: str = "search", tool_id: str = "toolu_abc") -> dict:
+    def _anthropic_tool_response(
+        self, tool_name: str = "search", tool_id: str = "toolu_abc"
+    ) -> dict:
         return {
             "content": [
                 {"type": "text", "text": "Voy a buscar informacion."},
-                {"type": "tool_use", "id": tool_id, "name": tool_name, "input": {"command": "query"}},
+                {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": tool_name,
+                    "input": {"command": "query"},
+                },
             ],
             "stop_reason": "tool_use",
             "usage": {"input_tokens": 15, "output_tokens": 8},
@@ -617,11 +634,17 @@ class NativeFunctionCallingTests(unittest.TestCase):
         from aiteam.adapters.base import NativeToolDefinition
 
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
-        tools = [NativeToolDefinition(
-            name="read_file",
-            description="Lee un archivo del proyecto",
-            parameters={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
-        )]
+        tools = [
+            NativeToolDefinition(
+                name="read_file",
+                description="Lee un archivo del proyecto",
+                parameters={
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
+            )
+        ]
         captured: dict = {}
 
         def _urlopen(request, timeout=0):
@@ -651,12 +674,20 @@ class NativeFunctionCallingTests(unittest.TestCase):
         from aiteam.adapters import SubscriptionAdapter
         from aiteam.adapters.base import NativeToolDefinition
 
-        adapter = SubscriptionAdapter(name="claude_pro", provider="anthropic", model="claude-3-5-sonnet-20241022")
-        tools = [NativeToolDefinition(
-            name="search",
-            description="Busca en internet",
-            parameters={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
-        )]
+        adapter = SubscriptionAdapter(
+            name="claude_pro", provider="anthropic", model="claude-3-5-sonnet-20241022"
+        )
+        tools = [
+            NativeToolDefinition(
+                name="search",
+                description="Busca en internet",
+                parameters={
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
+            )
+        ]
         captured: dict = {}
 
         def _urlopen(request, timeout=0):
@@ -688,14 +719,19 @@ class NativeFunctionCallingTests(unittest.TestCase):
         from aiteam.types import AdapterResponse, ChannelType
 
         class LegacyAdapter(ModelAdapter):
-            def available(self): return True
+            def available(self):
+                return True
+
             def invoke(self, prompt, messages=None):  # sin tools
                 return AdapterResponse(success=True, content="legacy ok", latency_ms=0)
 
-        legacy = LegacyAdapter(name="legacy", provider="test", model="m", channel=ChannelType.API)
+        legacy = LegacyAdapter(
+            name="legacy", provider="test", model="m", channel=ChannelType.API
+        )
         tools = [NativeToolDefinition("t", "desc", {})]
         # No debe fallar aunque tools no este en la firma
         import inspect
+
         params = inspect.signature(legacy.invoke).parameters
         self.assertNotIn("tools", params)
         result = legacy.invoke("hola")
@@ -714,12 +750,16 @@ class NativeFunctionCallingTests(unittest.TestCase):
         class ToolAwareAdapter(ApiAdapter):
             def invoke(self, prompt, messages=None, tools=None):
                 received_tools.extend(tools or [])
-                return __import__("aiteam.types", fromlist=["AdapterResponse"]).AdapterResponse(
-                    success=True, content="ok con tools", latency_ms=0
-                )
+                return __import__(
+                    "aiteam.types", fromlist=["AdapterResponse"]
+                ).AdapterResponse(success=True, content="ok con tools", latency_ms=0)
 
-        adapter = ToolAwareAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini",
-                                   capabilities={"coding"})
+        adapter = ToolAwareAdapter(
+            name="openai_api",
+            provider="openai",
+            model="gpt-4.1-mini",
+            capabilities={"coding"},
+        )
         router = HybridRouter(adapters=[adapter], policy=build_default_router_policy())
         tools = [NativeToolDefinition("read_file", "Lee archivo", {})]
 
@@ -737,14 +777,12 @@ class NativeFunctionCallingTests(unittest.TestCase):
 class StreamingInvokeTests(unittest.TestCase):
     """Tests para invoke_stream en adapters."""
 
-    def test_base_adapter_stream_falls_back_to_invoke(self):
-        """invoke_stream del base adapter hace yield del contenido de invoke() completo."""
+    def test_base_adapter_stream_returns_no_chunks_when_invoke_fails(self):
+        """invoke_stream del base adapter no emite chunks si invoke() falla."""
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
         with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
             chunks = list(adapter.invoke_stream("hello world"))
-        # En modo mock, debe devolver exactamente un chunk con el contenido simulado
-        self.assertEqual(len(chunks), 1)
-        self.assertIn("SIMULADO", chunks[0])
+        self.assertEqual(chunks, [])
 
     def test_invoke_stream_openai_yields_chunks(self):
         """_stream_openai_compatible parsea SSE y hace yield de chunks."""
@@ -755,10 +793,12 @@ class StreamingInvokeTests(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.__enter__ = lambda s: s
         mock_response.__exit__ = MagicMock(return_value=False)
-        mock_response.__iter__ = lambda s: iter([
-            b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
-            b'data: [DONE]\n',
-        ])
+        mock_response.__iter__ = lambda s: iter(
+            [
+                b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
+                b"data: [DONE]\n",
+            ]
+        )
 
         with (
             patch.dict(
@@ -776,15 +816,21 @@ class StreamingInvokeTests(unittest.TestCase):
         """_stream_anthropic parsea SSE de Anthropic y hace yield de chunks."""
         from unittest.mock import MagicMock
 
-        adapter = ApiAdapter(name="anthropic_api", provider="anthropic", model="claude-3-5-haiku-20241022")
+        adapter = ApiAdapter(
+            name="anthropic_api",
+            provider="anthropic",
+            model="claude-3-5-haiku-20241022",
+        )
 
         mock_response = MagicMock()
         mock_response.__enter__ = lambda s: s
         mock_response.__exit__ = MagicMock(return_value=False)
-        mock_response.__iter__ = lambda s: iter([
-            b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}\n',
-            b'data: {"type":"message_stop"}\n',
-        ])
+        mock_response.__iter__ = lambda s: iter(
+            [
+                b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}\n',
+                b'data: {"type":"message_stop"}\n',
+            ]
+        )
 
         with (
             patch.dict(

@@ -282,6 +282,12 @@
   background: rgba(47, 129, 247, 0.1);
 }
 
+.workspace-recent-remove:hover {
+  color: var(--status-red, #f85149);
+  border-color: rgba(248, 81, 73, 0.45);
+  background: rgba(248, 81, 73, 0.1);
+}
+
 .workspace-empty-note {
   font-size: 11px;
   color: var(--text-secondary);

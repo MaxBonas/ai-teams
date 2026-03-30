@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ExternalLink, FolderOpen, Pin, PinOff, PlusCircle, Settings2 } from 'lucide-react';
+import { ExternalLink, FolderOpen, Pin, PinOff, PlusCircle, Settings2, X } from 'lucide-react';
 import {
     apiFetch,
     getPinnedWorkspaces,
     getRecentWorkspaces,
     pushRecentWorkspace,
+    removeRecentWorkspace,
     togglePinnedWorkspace,
 } from '../lib/api';
 
@@ -77,6 +78,10 @@ export default function WorkspaceSelector({ currentWorkspace, onWorkspaceChange 
 
     const handleTogglePinned = (path: string) => {
         setPinnedWorkspaces(togglePinnedWorkspace(path));
+    };
+
+    const handleRemoveRecent = (path: string) => {
+        setRecentWorkspaces(removeRecentWorkspace(path));
     };
 
     const createNewProject = async () => {
@@ -241,6 +246,14 @@ export default function WorkspaceSelector({ currentWorkspace, onWorkspaceChange 
                                             title="Open in new window"
                                         >
                                             <ExternalLink size={12} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="workspace-recent-action workspace-recent-remove"
+                                            onClick={() => handleRemoveRecent(path)}
+                                            title="Remove from recent"
+                                        >
+                                            <X size={12} />
                                         </button>
                                     </div>
                                 ))}

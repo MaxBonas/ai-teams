@@ -57,24 +57,29 @@ class ApiAdapter(ModelAdapter):
         return bool(os.getenv(key_name))
 
     def invoke(
-        self, prompt: str, messages: list[dict[str, str]] | None = None,
+        self,
+        prompt: str,
+        messages: list[dict[str, str]] | None = None,
         tools=None,
     ) -> AdapterResponse:
         start = time.time()
         normalized_messages = normalize_messages(messages, prompt)
         prompt_text = messages_to_prompt(messages, prompt)
         if self._live_api_enabled():
-            live = self._invoke_live(prompt=prompt_text, messages=normalized_messages, tools=tools)
+            live = self._invoke_live(
+                prompt=prompt_text, messages=normalized_messages, tools=tools
+            )
             live.latency_ms = max(live.latency_ms, int((time.time() - start) * 1000))
-            if (not live.success) and self._allow_simulated_degrade(live.error):
-                return self._simulated_response(
-                    prompt_text,
-                    start=start,
-                    live_error=str(live.error or ""),
-                )
             return live
 
-        return self._simulated_response(prompt_text, start=start)
+        return AdapterResponse(
+            success=False,
+            content="",
+            latency_ms=int((time.time() - start) * 1000),
+            input_tokens=max(1, len(prompt_text) // 4),
+            output_tokens=0,
+            error="live_api_disabled",
+        )
 
     def _simulated_response(
         self,
@@ -109,9 +114,7 @@ class ApiAdapter(ModelAdapter):
         fallback_note = ""
         if live_error.strip():
             compact_error = " ".join(str(live_error).split())[:140]
-            fallback_note = (
-                f" Fallback simulado tras fallo live: {compact_error}."
-            )
+            fallback_note = f" Fallback simulado tras fallo live: {compact_error}."
         content = (
             f"[SIMULADO | {self.provider}:{self.model}:api] "
             f"Respuesta mock para: {first_line!r}. "
@@ -130,31 +133,7 @@ class ApiAdapter(ModelAdapter):
 
     @staticmethod
     def _allow_simulated_degrade(error: str | None) -> bool:
-        if os.getenv("AITEAM_REQUIRE_LIVE_MODE", "0").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }:
-            return False
-        allow = os.getenv(
-            "AITEAM_ALLOW_SIMULATED_ON_PROVIDER_EXHAUSTION", "1"
-        ).strip().lower()
-        if allow not in {"1", "true", "yes", "on"}:
-            return False
-        normalized = str(error or "").strip().lower()
-        if not normalized:
-            return False
-        quota_markers = (
-            "http_error:429",
-            "rate_limit",
-            "rate_limited",
-            "insufficient_quota",
-            "credit balance",
-            "credit_ba",
-            "quota",
-        )
-        return any(marker in normalized for marker in quota_markers)
+        return False
 
     @staticmethod
     def _live_api_enabled() -> bool:
@@ -209,9 +188,8 @@ class ApiAdapter(ModelAdapter):
                     error_body = exc.read().decode("utf-8", errors="replace")[:500]
                 except Exception:
                     pass
-                if (
-                    attempt_index < max_retries
-                    and self._is_retryable_http_status(int(exc.code or 0))
+                if attempt_index < max_retries and self._is_retryable_http_status(
+                    int(exc.code or 0)
                 ):
                     retry_after = None
                     headers_obj = getattr(exc, "headers", None)
@@ -314,7 +292,9 @@ class ApiAdapter(ModelAdapter):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
-        request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        request = urllib.request.Request(
+            url, data=payload, headers=headers, method="POST"
+        )
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
                 for raw_line in response:
@@ -377,7 +357,10 @@ class ApiAdapter(ModelAdapter):
             return
 
     def _invoke_live(
-        self, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
+        self,
+        prompt: str,
+        messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> AdapterResponse:
         provider = self.provider.strip().lower()
         if provider == "openai":
@@ -408,7 +391,11 @@ class ApiAdapter(ModelAdapter):
         )
 
     def _invoke_anthropic(
-        self, *, prompt: str, messages: list[dict[str, str]] | None = None, tools=None,
+        self,
+        *,
+        prompt: str,
+        messages: list[dict[str, str]] | None = None,
+        tools=None,
     ) -> AdapterResponse:
         """Invoca Anthropic Messages API."""
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
@@ -471,6 +458,7 @@ class ApiAdapter(ModelAdapter):
             )
 
         from aiteam.types import ToolCall
+
         content_blocks = parsed.get("content", [])
         parts = []
         tool_calls_out = []
@@ -483,11 +471,13 @@ class ApiAdapter(ModelAdapter):
                 elif block.get("type") == "tool_use":
                     raw_input = block.get("input", {})
                     args = raw_input if isinstance(raw_input, dict) else {}
-                    tool_calls_out.append(ToolCall(
-                        id=str(block.get("id", "")),
-                        name=str(block.get("name", "")),
-                        arguments=args,
-                    ))
+                    tool_calls_out.append(
+                        ToolCall(
+                            id=str(block.get("id", "")),
+                            name=str(block.get("name", "")),
+                            arguments=args,
+                        )
+                    )
         content = "\n".join(parts)
 
         usage = parsed.get("usage", {})
@@ -627,12 +617,13 @@ class ApiAdapter(ModelAdapter):
 
         # Parsear tool_calls de la respuesta
         from aiteam.types import ToolCall
+
         tool_calls_out = []
         if isinstance(choices, list) and choices:
             first = choices[0] if isinstance(choices[0], dict) else {}
             message = first.get("message", {}) if isinstance(first, dict) else {}
             raw_tcs = message.get("tool_calls", []) if isinstance(message, dict) else []
-            for tc in (raw_tcs or []):
+            for tc in raw_tcs or []:
                 if not isinstance(tc, dict):
                     continue
                 fn = tc.get("function", {})
@@ -640,11 +631,13 @@ class ApiAdapter(ModelAdapter):
                     args = json.loads(fn.get("arguments", "{}") or "{}")
                 except (json.JSONDecodeError, TypeError):
                     args = {}
-                tool_calls_out.append(ToolCall(
-                    id=str(tc.get("id", "")),
-                    name=str(fn.get("name", "")),
-                    arguments=args,
-                ))
+                tool_calls_out.append(
+                    ToolCall(
+                        id=str(tc.get("id", "")),
+                        name=str(fn.get("name", "")),
+                        arguments=args,
+                    )
+                )
 
         if tool_calls_out:
             return AdapterResponse(

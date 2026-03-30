@@ -93,6 +93,8 @@ interface TeamChatProps {
   workspacePath: string;
   minimized?: boolean;
   onToggleMinimize?: () => void;
+  chatToLoad?: string | null;
+  onChatLoaded?: () => void;
 }
 
 interface LastChatRun {
@@ -248,43 +250,94 @@ const readShowConfig = (): boolean => {
 };
 
 /** Extract a short summary from the raw meta string for collapsed view. */
-const extractMetaSummary = (meta: string): string => {
-  if (!meta || meta === 'error') return '';
-  const parts: string[] = [];
-  const modeMatch = meta.match(/mode\s+(\S+)/);
-  if (modeMatch) parts.push(modeMatch[1]);
-  const execMatch = meta.match(/exec\s+(\S+)/);
-  if (execMatch) parts.push(execMatch[1]);
-  const roundsMatch = meta.match(/rounds\s+(\d+\/\d+)/);
-  if (roundsMatch) parts.push(`R${roundsMatch[1]}`);
-  const doneMatch = meta.match(/done\s+(\d+)/);
-  if (doneMatch) parts.push(`${doneMatch[1]} done`);
-  const stateMatch = meta.match(/state\s+(\S+)/);
-  if (stateMatch) parts.push(stateMatch[1]);
-  const msMatch = meta.match(/(\d+)ms$/);
-  if (msMatch) {
-    const ms = Number(msMatch[1]);
-    parts.push(ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
-  }
-  return parts.length > 0 ? parts.join(' · ') : meta.slice(0, 80);
-};
+function parseRunMeta(meta: string) {
+  const field = (key: string) => meta.match(new RegExp(`(?:^|·\\s*)${key}\\s+([^·]+)`))?.[1]?.trim() ?? '';
+  const state = field('state');
+  const mode = field('mode');
+  const exec = field('exec');
+  const rounds = field('rounds');
+  const autoExt = meta.match(/\(\+(\d+)\)/)?.[1] ?? '0';
+  const done = field('done').replace(/\D.*/, '');
+  const pending = field('pending').replace(/\D.*/, '');
+  const delegated = field('delegated').replace(/\D.*/, '');
+  const quality = field('quality');
+  const qm = quality.match(/P(\d+)\/R(\d+)\s*\((\w+)\)/);
+  const evidence = field('evidence');
+  const evRejected = evidence.startsWith('rejected');
+  const evDetails = (evidence.match(/\(([^)]+)\)/)?.[1] ?? '').replace(/\|/g, ', ');
+  const msRaw = meta.match(/(\d+)ms(?:\s*$|·)/)?.[1];
+  const elapsedMs = msRaw ? Number(msRaw) : 0;
+  const elapsedStr = elapsedMs >= 1000 ? `${(elapsedMs / 1000).toFixed(1)}s` : `${elapsedMs}ms`;
+  const stateIcon = state === 'completed' ? '✓' : state === 'failed' || state === 'rejected' ? '✗' : '~';
+  const stateColor = state === 'completed' ? 'var(--success, #3fb950)' : state === 'failed' || state === 'rejected' ? 'var(--error, #f85149)' : 'var(--text-secondary)';
+  return { state, mode, exec, rounds, autoExt, done, pending, delegated,
+    qualityP: qm?.[1] ?? '', qualityR: qm?.[2] ?? '', qualityLabel: qm?.[3] ?? quality,
+    evRejected, evDetails, stateIcon, stateColor, elapsedStr };
+}
+
+function parseDecision(text: string) {
+  const field = (key: string) => text.match(new RegExp(`${key}=([^;]+)`))?.[1]?.trim() ?? '';
+  const rank = field('decision_rank');
+  const assignee = field('assignee');
+  const role = field('role');
+  const consulted = field('consulted');
+  const provider = field('provider');
+  const modelRaw = text.match(/model=([^\s;]+)/)?.[1] ?? '';
+  const channel = field('channel');
+  const attemptRaw = field('attempts');
+  const attempts = attemptRaw.replace(/[\[\]']/g, '');
+  const summaryIdx = text.indexOf('output_summary=');
+  const outputSummary = summaryIdx >= 0 ? text.slice(summaryIdx + 'output_summary='.length).trim() : '';
+  return { rank, assignee, role, consulted, provider, model: modelRaw, channel, attempts, outputSummary };
+}
 
 function MessageMeta({ meta }: { meta: string }) {
   const [expanded, setExpanded] = useState(false);
-  const summary = extractMetaSummary(meta);
+  const p = parseRunMeta(meta);
   return (
-    <div
-      className="team-msg-meta"
-      onClick={() => setExpanded(!expanded)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}
-    >
-      <div className="team-msg-meta-summary">
-        <ChevronRight size={12} className={`team-msg-meta-chevron ${expanded ? 'is-expanded' : ''}`} />
-        <span>{summary}</span>
+    <div className="run-meta" onClick={() => setExpanded(!expanded)} role="button" tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}>
+      <div className="run-meta-bar">
+        <span className="run-meta-state" style={{ color: p.stateColor }}>{p.stateIcon} {p.state}</span>
+        <span className="run-meta-pill">{p.mode}</span>
+        {p.exec !== 'live' && <span className="run-meta-pill run-meta-pill--dim">{p.exec}</span>}
+        <span className="run-meta-pill">R{p.rounds}{p.autoExt !== '0' ? `+${p.autoExt}` : ''}</span>
+        {p.qualityP && <span className={`run-meta-pill ${Number(p.qualityP) < 40 ? 'run-meta-pill--warn' : ''}`}>P{p.qualityP}</span>}
+        <span className="run-meta-pill run-meta-pill--dim">{p.elapsedStr}</span>
+        <ChevronRight size={11} className={`run-meta-chevron ${expanded ? 'is-expanded' : ''}`} />
       </div>
-      {expanded && <pre className="team-msg-meta-detail">{meta}</pre>}
+      {expanded && (
+        <div className="run-meta-detail">
+          <div className="run-meta-row"><span>Fases</span><span>{p.done !== '' ? `✓ ${p.done} ok` : '—'}{p.pending !== '' ? ` · ⏳ ${p.pending} pendiente` : ''}</span></div>
+          {p.delegated !== '' && p.delegated !== '0' && <div className="run-meta-row"><span>Delegados</span><span>{p.delegated} tareas</span></div>}
+          {p.qualityP && <div className="run-meta-row"><span>Calidad</span><span>P{p.qualityP}/100 · R{p.qualityR}/100 ({p.qualityLabel})</span></div>}
+          {p.evRejected && <div className="run-meta-row run-meta-row--warn"><span>Evidencia</span><span>rechazada — {p.evDetails || 'sin detalles'}</span></div>}
+          <div className="run-meta-row"><span>Tiempo</span><span>{p.elapsedStr}</span></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InspectorTrace({ text, onExpand }: { text: string; onExpand: () => void }) {
+  const d = parseDecision(text);
+  return (
+    <div className="inspector-card">
+      <div className="inspector-header">
+        <span className="inspector-icon">🔍</span>
+        <span className="inspector-title">
+          {d.rank} · {d.assignee} ({d.role}) · {d.provider}/{d.model}
+        </span>
+      </div>
+      {d.consulted && <div className="inspector-row"><span>Consultó</span><span>{d.consulted}</span></div>}
+      {d.attempts && <div className="inspector-row"><span>Ruta</span><span>{d.attempts}</span></div>}
+      {d.outputSummary && (
+        <div className="inspector-output">
+          <div className="inspector-output-label">Salida</div>
+          <div className="inspector-output-text">{d.outputSummary.slice(0, 300)}{d.outputSummary.length > 300 ? '…' : ''}</div>
+        </div>
+      )}
+      <button className="team-msg-expand-btn" onClick={onExpand}>Ver completo →</button>
     </div>
   );
 }
@@ -321,7 +374,7 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
       </div>
       {expanded && (
         <div className="progress-detail">
-          <div className="team-chat-progress-line">state {progress.state} · execution attempts {progress.execution_attempts} · steps {progress.execution_steps} (ok {progress.execution_steps_success}) · placeholders {progress.placeholder_outputs}</div>
+          <div className="team-chat-progress-line">state {progress.state} · execution attempts {progress.execution_attempts} · steps {progress.execution_steps} (ok {progress.execution_steps_success})</div>
           <div className="team-chat-progress-line">checks passed {progress.successful_check_count} · {progress.successful_checks.join(', ') || 'none'}</div>
           <div className="team-chat-progress-line">live mode gate {progress.live_mode_rejected ? 'rejected' : (progress.live_mode_required ? 'required' : 'off')}</div>
           {progress.evidence_gate_rejected && (
@@ -342,7 +395,7 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
   );
 }
 
-export default function TeamChat({ workspacePath, minimized = false, onToggleMinimize }: TeamChatProps) {
+export default function TeamChat({ workspacePath, minimized = false, onToggleMinimize, chatToLoad, onChatLoaded }: TeamChatProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -358,12 +411,39 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const [lastChatRun, setLastChatRun] = useState<LastChatRun | null>(null);
   const [chatProgress, setChatProgress] = useState<TeamChatProgress | null>(null);
   const [showConfig, setShowConfig] = useState<boolean>(readShowConfig);
+  const [roundsInput, setRoundsInput] = useState<string>(String(TEAM_CHAT_DEFAULTS.rounds));
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingTaskId, setStreamingTaskId] = useState<string>('');
   const [agentLanes, setAgentLanes] = useState<Map<string, AgentLaneState>>(new Map());
   const [expandedMessage, setExpandedMessage] = useState<ChatMessage | null>(null);
 
   const logRef = useRef<HTMLDivElement>(null);
+
+  // Cargar chat histórico cuando se selecciona desde el panel de estado
+  useEffect(() => {
+    if (!chatToLoad || !workspacePath) return;
+    const taskId = chatToLoad;
+    apiFetch(`/api/aiteam/chat/load/${encodeURIComponent(taskId)}`, {
+      headers: { 'x-workspace-path': workspacePath },
+    })
+      .then(r => r.json())
+      .then((data: unknown) => {
+        const d = data as { messages?: Array<{ sender: string; text: string }> };
+        if (!d.messages?.length) return;
+        setMessages(
+          d.messages.map((m, i) => ({
+            id: `history-${taskId}-${i}`,
+            sender: m.sender as 'user' | 'team',
+            text: m.text,
+          }))
+        );
+        setStreamingText(null);
+        setAgentLanes(new Map());
+      })
+      .catch(() => { /* ignore */ })
+      .finally(() => onChatLoaded?.());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatToLoad]);
 
   useEffect(() => {
     setInput('');
@@ -374,6 +454,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     if (!rememberConfig) {
       setChatMode(TEAM_CHAT_DEFAULTS.mode);
       setMaxRounds(TEAM_CHAT_DEFAULTS.rounds);
+      setRoundsInput(String(TEAM_CHAT_DEFAULTS.rounds));
       setComplexity(TEAM_CHAT_DEFAULTS.complexity);
       setCriticality(TEAM_CHAT_DEFAULTS.criticality);
       setStrictMode(TEAM_CHAT_DEFAULTS.strictMode);
@@ -384,6 +465,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     if (!stored) {
       setChatMode(TEAM_CHAT_DEFAULTS.mode);
       setMaxRounds(TEAM_CHAT_DEFAULTS.rounds);
+      setRoundsInput(String(TEAM_CHAT_DEFAULTS.rounds));
       setComplexity(TEAM_CHAT_DEFAULTS.complexity);
       setCriticality(TEAM_CHAT_DEFAULTS.criticality);
       setStrictMode(TEAM_CHAT_DEFAULTS.strictMode);
@@ -392,6 +474,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     }
     setChatMode(stored.mode);
     setMaxRounds(stored.rounds);
+    setRoundsInput(String(stored.rounds));
     setComplexity(stored.complexity);
     setCriticality(stored.criticality);
     setStrictMode(stored.strictMode);
@@ -486,7 +569,6 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
 
   const canSend = useMemo(() => input.trim().length > 0 && !loading, [input, loading]);
   const currentExecutionMode = chatProgress?.execution_mode || lastChatRun?.execution_mode || 'unknown';
-  const currentPlaceholderOutputs = chatProgress?.placeholder_outputs ?? lastChatRun?.placeholder_outputs ?? 0;
   const sendMessage = async (overrideMessage?: string) => {
     const trimmed = typeof overrideMessage === 'string' ? overrideMessage.trim() : input.trim();
     if (!trimmed || loading) {
@@ -744,16 +826,24 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                   const checkList = Array.isArray(json.successful_checks)
                     ? (json.successful_checks as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
                     : [];
-                  const outputMeta = executionMode === 'demo'
-                    ? `demo-outputs=${placeholderOutputs}`
-                    : `placeholder=${placeholderOutputs}`;
-                  const evidenceMeta = executionMode === 'demo'
-                    ? 'evidence demo'
-                    : (evidenceRejected ? `rejected(${evidenceFailures.slice(0, 2).join('|') || 'fail'})` : 'ok');
-                  const statusMeta = `mode ${modeUsed} · exec ${executionMode} (${outputMeta}) · live-gate ${liveModeRejected ? 'rejected' : (liveModeRequired ? 'required' : 'off')} · checks ${checkList.join(',') || 'none'} · evidence ${evidenceMeta} · rounds ${roundsUsed}/${roundBudget} (+${autoExtendedRounds}) · done ${completedTasks} · pending ${pendingTasks} · delegated ${(Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids : []).length} · artifacts +${artifactCreated}/~${artifactModified} · quality P${productivityScore}/R${reasoningScore} (${productivityStatus}) · strict ${strictModeApplied ? 'blocked_close' : (strictMode ? 'on' : 'off')} · low-gate ${lowGateRejected ? `rejected(<${productivityThreshold})` : (allowLowProductivityOverride ? 'override' : 'active')} · state ${String(json.state || '-')} · ${Number(json.elapsed_ms) || 0}ms`;
-                  const answer = typeof json.response === 'string' && json.response.trim().length > 0
-                    ? json.response
-                    : (String(json.error || '') || 'No response content returned by AI Team.');
+                  const evidenceMeta = evidenceRejected ? `rejected(${evidenceFailures.slice(0, 2).join('|') || 'fail'})` : 'ok';
+                  const statusMeta = `mode ${modeUsed} · exec ${executionMode} · live-gate ${liveModeRejected ? 'rejected' : (liveModeRequired ? 'required' : 'off')} · checks ${checkList.join(',') || 'none'} · evidence ${evidenceMeta} · rounds ${roundsUsed}/${roundBudget} (+${autoExtendedRounds}) · done ${completedTasks} · pending ${pendingTasks} · delegated ${(Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids : []).length} · artifacts +${artifactCreated}/~${artifactModified} · quality P${productivityScore}/R${reasoningScore} (${productivityStatus}) · strict ${strictModeApplied ? 'blocked_close' : (strictMode ? 'on' : 'off')} · low-gate ${lowGateRejected ? `rejected(<${productivityThreshold})` : (allowLowProductivityOverride ? 'override' : 'active')} · state ${String(json.state || '-')} · ${Number(json.elapsed_ms) || 0}ms`;
+                  // Preferir el contenido streameado real (accumulated) sobre el summary estructurado.
+                  // accumulated contiene el output completo de todas las fases (lead_intake, research, etc.)
+                  // json.response es un resumen compacto que puede ser plantilla si lead_close fue bloqueado.
+                  const streamedBody = accumulated.trim();
+                  let answer: string;
+                  if (streamedBody.length > 80) {
+                    // Usar el contenido real streameado; extraer solo el footer de metadata de json.response
+                    const responseStr = typeof json.response === 'string' ? json.response : '';
+                    const dashIdx = responseStr.lastIndexOf('\n---\n');
+                    const footer = dashIdx >= 0 ? responseStr.slice(dashIdx) : '';
+                    answer = footer ? streamedBody + footer : streamedBody;
+                  } else {
+                    answer = typeof json.response === 'string' && json.response.trim().length > 0
+                      ? json.response
+                      : (String(json.error || '') || 'No response content returned by AI Team.');
+                  }
                   const teamMessage: ChatMessage = {
                     id: `team-${Date.now()}`,
                     sender: 'team',
@@ -820,7 +910,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       {
                         id: `team-just-${Date.now()}`,
                         sender: 'team',
-                        text: `Decision trace: ${String(json.decision_justification)}`,
+                        text: String(json.decision_justification),
                         meta: 'justification',
                       },
                     ]);
@@ -901,7 +991,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
         <div className="team-chat-header-actions">
           <div className="team-chat-intake-pill">Lead intake · {workspacePath.split(/[\\/]/).pop() || 'workspace'}</div>
           <div className={`team-execution-badge mode-${currentExecutionMode}`}>
-            {currentExecutionMode.toUpperCase()} · placeholder {currentPlaceholderOutputs}
+            {currentExecutionMode.toUpperCase()}
           </div>
           {onToggleMinimize && (
             <button
@@ -926,7 +1016,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
             messages.map((message) => {
               const isError = message.meta === 'error';
               const isJustification = message.meta === 'justification';
-              const isLong = !isError && !isJustification && message.text.length > MSG_TRUNCATE;
+              const isLong = !isError && message.text.length > MSG_TRUNCATE;
               const displayText = isLong ? message.text.slice(0, MSG_TRUNCATE) + '…' : message.text;
               return (
                 <article key={message.id} className={`team-msg team-msg-${message.sender} ${isError ? 'msg-error' : ''} ${isJustification ? 'msg-justification' : ''}`}>
@@ -935,20 +1025,19 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                   </div>
                   <div className="team-msg-body">
                     {isJustification ? (
-                      <div className="team-msg-evidence">
-                        <strong style={{ display: 'block', marginBottom: '4px', color: 'var(--accent)' }}>Inspector Decision Trace</strong>
-                        <i>{message.text}</i>
-                      </div>
+                      <InspectorTrace text={message.text} onExpand={() => setExpandedMessage(message)} />
                     ) : (
-                      <p style={{ whiteSpace: 'pre-wrap' }}>{displayText}</p>
-                    )}
-                    {isLong && (
-                      <button
-                        className="team-msg-expand-btn"
-                        onClick={() => setExpandedMessage(message)}
-                      >
-                        Ver respuesta completa →
-                      </button>
+                      <>
+                        <p style={{ whiteSpace: 'pre-wrap' }}>{displayText}</p>
+                        {isLong && (
+                          <button
+                            className="team-msg-expand-btn"
+                            onClick={() => setExpandedMessage(message)}
+                          >
+                            Ver respuesta completa →
+                          </button>
+                        )}
+                      </>
                     )}
                     {message.meta && !isJustification && message.meta !== 'error' && (
                       <MessageMeta meta={message.meta} />
@@ -962,15 +1051,29 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
           {/* Agent lanes dentro del thread */}
           <AgentPanel lanes={agentLanes} visible={loading || agentLanes.size > 0} />
 
-          {streamingText !== null && (
-            <div className="team-chat-message team-chat-message--team team-chat-message--streaming">
-              <div className="team-chat-message-content">
-                <span className="team-chat-streaming-cursor">{streamingText}</span>
-                <span className="team-chat-cursor-blink">&#x258A;</span>
+          {streamingText !== null && (() => {
+            // Mientras el buffer está vacío, mostrar la fase activa del agente
+            const activePhase = streamingText === ''
+              ? [...agentLanes.values()].find(l => l.status === 'active')
+              : null;
+            return (
+              <div className="team-chat-message team-chat-message--team team-chat-message--streaming">
+                <div className="team-chat-message-content">
+                  {streamingText === '' ? (
+                    <span className="team-chat-streaming-placeholder">
+                      {activePhase ? activePhase.title || activePhase.phase : 'Procesando…'}
+                    </span>
+                  ) : (
+                    <span className="team-chat-streaming-cursor" style={{ whiteSpace: 'pre-wrap' }}>{streamingText}</span>
+                  )}
+                  <span className="team-chat-cursor-blink">&#x258A;</span>
+                </div>
+                <div className="team-chat-message-meta">
+                  {streamingTaskId ? streamingTaskId.split('::').pop() : 'streaming…'}
+                </div>
               </div>
-              <div className="team-chat-message-meta">streaming… {streamingTaskId}</div>
-            </div>
-          )}
+            );
+          })()}
         </div>
 
         {/* ── Composer ─────────────────────────────── */}
@@ -1044,18 +1147,15 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                   <span>Rounds</span>
                   <input
                     className="team-role-select"
-                    type="number"
-                    min={3}
-                    max={80}
-                    step={1}
-                    value={maxRounds}
-                    onChange={(e) => {
-                      const parsed = Number.parseInt(e.target.value, 10);
-                      if (Number.isNaN(parsed)) {
-                        setMaxRounds(TEAM_CHAT_DEFAULTS.rounds);
-                        return;
-                      }
-                      setMaxRounds(clampRounds(parsed));
+                    type="text"
+                    inputMode="numeric"
+                    value={roundsInput}
+                    onChange={(e) => setRoundsInput(e.target.value)}
+                    onBlur={() => {
+                      const parsed = Number.parseInt(roundsInput, 10);
+                      const clamped = Number.isNaN(parsed) ? TEAM_CHAT_DEFAULTS.rounds : clampRounds(parsed);
+                      setMaxRounds(clamped);
+                      setRoundsInput(String(clamped));
                     }}
                     disabled={loading}
                   />
@@ -1106,8 +1206,28 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
 
       {/* ── Modal respuesta completa ──────────────── */}
       {expandedMessage && (
-        <Modal title="Respuesta completa" onClose={() => setExpandedMessage(null)} wide>
-          <pre className="modal-pre">{expandedMessage.text}</pre>
+        <Modal title={expandedMessage.meta === 'justification' ? 'Inspector Decision Trace' : 'Respuesta completa'} onClose={() => setExpandedMessage(null)} wide>
+          {expandedMessage.meta === 'justification' ? (() => {
+            const d = parseDecision(expandedMessage.text);
+            return (
+              <div className="inspector-modal">
+                <div className="inspector-modal-grid">
+                  <span>Rol</span><span>{d.role} ({d.rank})</span>
+                  <span>Agente</span><span>{d.assignee}</span>
+                  <span>Consultó</span><span>{d.consulted || '—'}</span>
+                  <span>Proveedor</span><span>{d.provider} / {d.model}</span>
+                  <span>Canal</span><span>{d.channel}</span>
+                  <span>Intentos</span><span>{d.attempts || '—'}</span>
+                </div>
+                {d.outputSummary && (
+                  <div className="inspector-modal-output">
+                    <div className="inspector-modal-output-label">Salida del agente</div>
+                    <pre className="modal-pre">{d.outputSummary}</pre>
+                  </div>
+                )}
+              </div>
+            );
+          })() : <pre className="modal-pre">{expandedMessage.text}</pre>}
           {expandedMessage.meta && expandedMessage.meta !== 'error' && expandedMessage.meta !== 'justification' && (
             <div className="modal-meta-section">
               <MessageMeta meta={expandedMessage.meta} />

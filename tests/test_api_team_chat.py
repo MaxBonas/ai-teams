@@ -174,9 +174,7 @@ class APITeamChatTests(unittest.TestCase):
             )
             self.assertGreaterEqual(int(payload.get("placeholder_outputs", 0)), 0)
             self.assertTrue(isinstance(payload.get("evidence_gate_applied"), bool))
-            self.assertTrue(
-                isinstance(payload.get("evidence_gate_failures", []), list)
-            )
+            self.assertTrue(isinstance(payload.get("evidence_gate_failures", []), list))
         finally:
             api_main.set_current_workspace(previous_workspace)
             shutil.rmtree(workspace, ignore_errors=True)
@@ -220,9 +218,7 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertIsNotNone(review_task)
                 # La descripcion incluye el objetivo de la fase (puede ser como
                 # "Delegation brief:" o directo desde spec.objective en modo dinamico)
-                self.assertTrue(
-                    str((build_task or {}).get("description", "")).strip()
-                )
+                self.assertTrue(str((build_task or {}).get("description", "")).strip())
                 self.assertTrue(
                     str(
                         ((build_task or {}).get("metadata", {}) or {}).get(
@@ -573,7 +569,7 @@ class APITeamChatTests(unittest.TestCase):
             workspace = Path(tmp)
             previous_workspace = api_main.get_current_workspace()
             previous_env = os.environ.get("AITEAM_REQUIRE_LIVE_MODE")
-            # Force mock mode so live_mode_rejected can trigger (test checks gate, not real API)
+            # Force disabled live mode so chat is rejected explicitly.
             previous_live_api = os.environ.get("AITEAM_ENABLE_LIVE_API")
             try:
                 os.environ["AITEAM_REQUIRE_LIVE_MODE"] = "1"

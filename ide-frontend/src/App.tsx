@@ -13,6 +13,7 @@ export default function App() {
   const [backendOffline, setBackendOffline] = useState(true);
   const [chatMinimized, setChatMinimized] = useState(false);
   const [statusMinimized, setStatusMinimized] = useState(false);
+  const [chatToLoad, setChatToLoad] = useState<string | null>(null);
 
   const chatPanelRef = useRef<PanelImperativeHandle | null>(null);
   const statusPanelRef = useRef<PanelImperativeHandle | null>(null);
@@ -77,7 +78,7 @@ export default function App() {
 
   const minimizedWindows: Array<{ id: MinimizedPanelKey; label: string }> = [
     ...(chatMinimized ? [{ id: 'chat' as const, label: 'AI Chat' }] : []),
-    ...(statusMinimized ? [{ id: 'status' as const, label: 'Estado' }] : []),
+    ...(statusMinimized ? [{ id: 'status' as const, label: 'Workspace' }] : []),
   ];
 
   const handleRestorePanel = (key: string) => {
@@ -99,7 +100,7 @@ export default function App() {
 
       {backendOffline && (
         <div className="backend-offline-banner">
-          Backend no disponible — arranca el proyecto con <code>npm start</code> o <code>start_ide.bat</code>
+          Backend no disponible — arranca backend + frontend reales con <code>start_ide.bat</code>
         </div>
       )}
 
@@ -116,7 +117,15 @@ export default function App() {
             <TeamChat
               workspacePath={workspacePath}
               minimized={chatMinimized}
-              onToggleMinimize={() => collapsePanel(chatPanelRef, setChatMinimized)}
+              onToggleMinimize={() => {
+                if (chatMinimized) {
+                  expandPanel(chatPanelRef, setChatMinimized);
+                  return;
+                }
+                collapsePanel(chatPanelRef, setChatMinimized);
+              }}
+              chatToLoad={chatToLoad}
+              onChatLoaded={() => setChatToLoad(null)}
             />
           </Panel>
 
@@ -126,7 +135,6 @@ export default function App() {
             panelRef={statusPanelRef}
             defaultSize="32%"
             minSize="10%"
-            maxSize="50%"
             collapsible
             collapsedSize="0%"
             onResize={(size) => setStatusMinimized(toPercent(size) <= 1)}
@@ -134,7 +142,17 @@ export default function App() {
             <StatusPanel
               workspacePath={workspacePath}
               minimized={statusMinimized}
-              onToggleMinimize={() => collapsePanel(statusPanelRef, setStatusMinimized)}
+              onToggleMinimize={() => {
+                if (statusMinimized) {
+                  expandPanel(statusPanelRef, setStatusMinimized);
+                  return;
+                }
+                collapsePanel(statusPanelRef, setStatusMinimized);
+              }}
+              onLoadChat={(taskId) => {
+                setChatToLoad(taskId);
+                if (chatMinimized) expandPanel(chatPanelRef, setChatMinimized);
+              }}
             />
           </Panel>
         </PanelGroup>

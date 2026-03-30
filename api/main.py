@@ -1371,21 +1371,27 @@ def _classify_check_from_command(command: str) -> str:
 
 
 def _is_placeholder_output_text(value: str) -> bool:
-    text = str(value or "").strip().lower()
+    """
+    Detecta si un texto es output de placeholder/mock generado por el sistema.
+    Solo hace matching en el INICIO del string para evitar falsos positivos
+    en texto real del LLM que pueda contener esas palabras.
+    """
+    text = str(value or "").strip()
     if not text:
         return False
-    # Formato legacy: "[provider:model:api] Processed prompt ..."
-    if "processed prompt" in text:
+    lower = text.lower()
+    # Formato legacy: "[provider:model:channel] Processed prompt ..."
+    if re.match(r"^\[[a-z0-9_\-]+:[a-z0-9_.\-]+:(subscription|api)\]", lower):
         return True
-    # Formato actual: "[SIMULADO | provider:model] Respuesta mock ..."
-    if "simulado |" in text or "respuesta mock" in text or text.startswith("[demo]"):
+    # Formato actual: "[SIMULADO | ...]" o "[DEMO]" al inicio
+    if re.match(r"^\[simulado\s*\|", lower):
         return True
-    patterns = [
-        r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]",
-        r"^\[simulado\s*\|",
-        r"^\[demo\]",
-    ]
-    return any(re.search(pattern, text) is not None for pattern in patterns)
+    if lower.startswith("[demo]"):
+        return True
+    # Marcador explícito de respuesta mock al inicio
+    if lower.startswith("respuesta mock"):
+        return True
+    return False
 
 
 def _assess_execution_mode(
@@ -1520,59 +1526,36 @@ def _compose_user_facing_run_summary(
         if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
         else "salidas placeholder"
     )
+    # Usar output real del LLM; solo caer a fallback si genuinamente no hay nada
     decision_text = _presentable_decision_text(str(decision_compact or "").strip())
     if not decision_text:
-        decision_text = str(decision_compact or "").strip()
-    if execution_mode == "simulated":
-        decision_text = (
-            "Se completo coordinacion en modo demo; falta ejecucion verificable y cambios reales en archivos."
-            if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
-            else "Se completo coordinacion en modo degradado/simulado; falta ejecucion verificable y cambios reales en archivos."
-        )
-    elif execution_mode == "hybrid" and placeholder_outputs > 0:
-        decision_text = (
-            "Se avanzo con coordinacion parcial, pero parte del output fue de demostracion; falta ejecucion verificable para cerrar."
-            if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
-            else "Se avanzo con coordinacion parcial, pero parte del output fue placeholder; falta ejecucion verificable para cerrar."
-        )
-    if (
-        not decision_text
-        or "Processed prompt" in decision_text
-        or "SIMULADO |" in decision_text
-        or decision_text.startswith("[DEMO]")
-    ):
-        decision_text = "Se priorizo completar el slice de mayor impacto de esta ronda y cerrar con review + QA."
+        if execution_mode == "simulated":
+            decision_text = (
+                "Sin output del Team Lead; modo simulado (sin pasos de ejecucion verificables)."
+            )
+        elif execution_mode == "hybrid" and placeholder_outputs > 0:
+            decision_text = (
+                "Coordinacion parcial completada; parte del output fue placeholder."
+            )
+        else:
+            decision_text = "Sin sintesis del Team Lead en esta ronda."
 
+    meta_parts = [f"fases: hecho={done_line} | pendiente={pending_line} | fallido={failed_line}"]
     if artifact_files:
-        files_line = ", ".join(artifact_files[:10])
-        files_text = f"Se detectaron cambios en archivos (creados={artifact_created}, modificados={artifact_modified}): {files_line}."
-    else:
-        files_text = "No se detectaron cambios de archivos en esta ronda; se requiere ejecutar implementacion concreta en la siguiente iteracion."
+        files_line = ", ".join(artifact_files[:8])
+        meta_parts.append(f"archivos({artifact_created}+{artifact_modified}): {files_line}")
+    if execution_mode != "live":
+        meta_parts.append(f"modo={execution_label}")
+    meta_parts.append(f"calidad={productivity_score}/100 | {elapsed_ms}ms | {task_root}")
 
-    return "\n".join(
-        [
-            "Resumen del Team Lead para ti:",
-            f"- Solicitud atendida: {request_line}",
-            f"- Gestion de la conversacion: modo={mode}, rondas={rounds_used}/{round_budget}, continuidad={continuation_line}, participantes={participants_line}.",
-            f"- Tipo de ejecucion detectado: {execution_label} ({placeholder_label}={placeholder_outputs}).",
-            f"- Que se decidio:\n  {decision_text.replace(chr(10), chr(10) + '  ')}",
-            f"- Que se hizo: completado={done_line}; pendiente={pending_line}; fallido={failed_line}.",
-            f"- Archivos: {files_text}",
-            f"- Calidad de ejecucion: productividad={productivity_score}/100 ({productivity_status}), razonamiento={reasoning_score}/100.",
-            f"- Siguiente paso recomendado: {next_action_hint}",
-            f"- Referencia de corrida: {task_root} ({elapsed_ms}ms).",
-        ]
-    )
+    lines: list[str] = [decision_text, "", "---", " | ".join(meta_parts)]
+    return "\n".join(lines)
 
 
 def _presentable_decision_text(value: str) -> str:
+    """Retorna el texto si es output real del LLM, vacío si es placeholder."""
     decision_text = str(value or "").strip()
-    if (
-        not decision_text
-        or "Processed prompt" in decision_text
-        or "SIMULADO |" in decision_text
-        or decision_text.startswith("[DEMO]")
-    ):
+    if not decision_text or _is_placeholder_output_text(decision_text):
         return ""
     return decision_text
 
@@ -1585,41 +1568,29 @@ def _compact_text_line(value: str, limit: int = 320) -> str:
 
 
 def _is_placeholder_like_text(value: str) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    return bool(
-        re.search(
-            r"^\[[a-z0-9_\-]+:[a-z0-9_\.\-]+:(subscription|api)\]",
-            text,
-            flags=re.IGNORECASE,
-        )
-        or re.search(r"^\[simulado\s*\|", text, flags=re.IGNORECASE)
-        or re.search(r"^\[demo\]", text, flags=re.IGNORECASE)
-        or "Processed prompt" in text
-    )
+    """Alias de _is_placeholder_output_text para compatibilidad."""
+    return _is_placeholder_output_text(value)
 
 
 def _compact_delegated_result(value: str, *, state: str) -> str:
     text = str(value or "").strip()
     if not text:
         return "sin resultado"
-    if _is_placeholder_like_text(text):
-        if _env_bool("AITEAM_CHAT_DEMO_FAST", default=False):
-            if state == "completed":
-                return "demo"
-            if state == "failed":
-                return "demo con incidencia"
-            return "salida demo"
-        if state == "completed":
-            return "placeholder/simulado"
-        if state == "failed":
-            return "fallo placeholder/simulado"
-        return "salida placeholder/simulada"
-    presentable = _presentable_decision_text(text)
-    if presentable:
-        return _compact_text_line(presentable, 180)
-    return _compact_text_line(text, 180)
+    if _is_placeholder_output_text(text):
+        return "[placeholder]" if state == "completed" else f"[placeholder/{state}]"
+    return _compact_text_line(_presentable_decision_text(text) or text, 220)
+
+
+def _trim_at_boundary(text: str, limit: int) -> str:
+    """Trunca al límite intentando respetar párrafos, luego oraciones, luego palabras."""
+    if len(text) <= limit:
+        return text
+    chunk = text[:limit]
+    for sep in ("\n\n", ". ", "\n", " "):
+        idx = chunk.rfind(sep)
+        if idx > limit * 0.80:
+            return chunk[:idx + len(sep)].rstrip()
+    return chunk.rstrip()
 
 
 def _limit_chat_response(text: str, *, limit: int = 12000) -> str:
@@ -1627,26 +1598,19 @@ def _limit_chat_response(text: str, *, limit: int = 12000) -> str:
     if len(content) <= limit:
         return content
 
+    # Si el contenido tiene el marcador legacy de sección, preservar el cuerpo principal
     marker = "\nLead message for user:\n"
     if marker in content:
         prefix, suffix = content.split(marker, 1)
-        suffix_budget = max(2800, int(limit * 0.45))
-        prefix_budget = max(1200, limit - suffix_budget - len(marker) - 32)
-        compact_prefix = prefix
-        if len(compact_prefix) > prefix_budget:
-            compact_prefix = (
-                compact_prefix[: max(0, prefix_budget - 15)] + "...\n[truncado]"
-            )
-        compact_suffix = suffix
-        if len(compact_suffix) > suffix_budget:
-            compact_suffix = (
-                compact_suffix[: max(0, suffix_budget - 15)] + "...\n[truncado]"
-            )
+        suffix_budget = max(3500, int(limit * 0.60))
+        prefix_budget = max(800, limit - suffix_budget - len(marker) - 20)
+        compact_prefix = _trim_at_boundary(prefix, prefix_budget)
+        compact_suffix = _trim_at_boundary(suffix, suffix_budget)
         content = compact_prefix + marker + compact_suffix
         if len(content) <= limit:
             return content
 
-    return content[: max(0, limit - 15)] + "...\n[truncado]"
+    return _trim_at_boundary(content, limit - 20) + "\n[... truncado]"
 
 
 def _apply_chat_demo_env(*, strict_mode: bool, environment: str):
@@ -2374,8 +2338,13 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
 
         decision_compact = str(decision_source or "").strip()
-        if len(decision_compact) > 1500:
-            decision_compact = decision_compact[:1490] + "...\n[truncado]"
+        if len(decision_compact) > 4000:
+            # Truncar en límite de párrafo/oración si es posible
+            cutoff = decision_compact[:3980]
+            last_para = cutoff.rfind("\n\n")
+            last_sent = cutoff.rfind(". ")
+            trim_at = last_para if last_para > 3000 else (last_sent if last_sent > 3000 else 3980)
+            decision_compact = decision_compact[:trim_at].rstrip() + "\n\n[... respuesta parcial]"
 
         route_records: list[tuple[str, str, str, bool]] = []
         execution_steps = 0
@@ -2452,24 +2421,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             },
         )
         demo_fast_chat_active = _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
-        decision_display = _presentable_decision_text(decision_compact)
-        if not decision_display:
-            if execution_mode == "simulated":
-                decision_display = (
-                    "Se completo coordinacion en modo demo; falta ejecucion verificable y cambios reales en archivos."
-                    if demo_fast_chat_active
-                    else "Se completo coordinacion en modo degradado/simulado; falta ejecucion verificable y cambios reales en archivos."
-                )
-            elif execution_mode == "hybrid" and placeholder_outputs > 0:
-                decision_display = (
-                    "Se avanzo con coordinacion parcial, pero parte del output fue de demostracion; falta ejecucion verificable para cerrar."
-                    if demo_fast_chat_active
-                    else "Se avanzo con coordinacion parcial, pero parte del output fue placeholder; falta ejecucion verificable para cerrar."
-                )
-            else:
-                decision_display = "pending synthesis"
+        decision_display = _presentable_decision_text(decision_compact) or decision_compact or "—"
 
-        live_mode_required = True
+        live_mode_required = _env_bool("AITEAM_LIVE_MODE_REQUIRED", default=False)
         live_mode_rejected = False
         if live_mode_required and execution_mode != "live":
             live_mode_rejected = True
@@ -2836,13 +2790,6 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 workflow_lines,
             ])
 
-        if not lead_completed or low_productivity_rejected:
-            response_lines.extend(
-                [
-                    "",
-                    "Next step: continue to close pending phases and produce final synthesis.",
-                ]
-            )
         merged_response = _limit_chat_response("\n".join(response_lines))
 
         _token_queue.put(("done", None))
@@ -2851,7 +2798,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             role=Role.TEAM_LEAD.value,
             state=final_state,
             response=merged_response,
-            decision_justification=lead_justification[:2000],
+            decision_justification=lead_justification,
             elapsed_ms=elapsed_ms,
             lead_task_id=lead_task_id,
             delegated_task_ids=delegated_task_ids,
@@ -2952,6 +2899,36 @@ async def get_aiteam_chat_progress(task_id: str, request: Request):
     if not runtime_dir.exists():
         return TeamChatProgressResponse(task_id=normalized_root, exists=False)
     return await asyncio.to_thread(_build_chat_progress, runtime_dir, normalized_root)
+
+
+@app.get("/api/aiteam/chat/load/{task_id}")
+async def get_aiteam_chat_load(task_id: str, request: Request):
+    """Devuelve los mensajes reconstruidos de un chat pasado (user + lead response)."""
+    _require_api_auth_request(request)
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    runtime_dir = workspace / "runtime"
+    normalized_root = _normalize_task_root(task_id)
+    if not normalized_root or not runtime_dir.exists():
+        return {"task_id": normalized_root or task_id, "messages": []}
+
+    def _load():
+        tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
+        roots = _group_chat_roots(tasks_payload)
+        row = roots.get(normalized_root)
+        if not row:
+            return {"task_id": normalized_root, "messages": []}
+        messages = []
+        user_msg = str(row.get("user_message", "") or "").strip()
+        if user_msg:
+            messages.append({"sender": "user", "text": user_msg})
+        lead_resp = str(row.get("lead_close_result", "") or "").strip()
+        if lead_resp:
+            messages.append({"sender": "team", "text": lead_resp})
+        phase_states = row.get("phase_states", {})
+        state = "completed" if phase_states.get("lead_close") == "completed" else "partial"
+        return {"task_id": normalized_root, "state": state, "messages": messages}
+
+    return await asyncio.to_thread(_load)
 
 
 # ── Background chat runs with SSE streaming ───────────────────
