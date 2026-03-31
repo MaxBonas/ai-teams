@@ -17,6 +17,7 @@ class TaskState(str, Enum):
     BLOCKED = "blocked"
     COMPLETED = "completed"
     FAILED = "failed"
+    WAITING_USER = "waiting_user"  # E7-D4: pausa mid-run esperando respuesta del usuario
 
 
 class Role(str, Enum):
@@ -25,6 +26,7 @@ class Role(str, Enum):
     ENGINEER = "engineer"
     REVIEWER = "reviewer"
     QA = "qa"
+    SCOUT = "scout"  # Tier-3: modelo barato, solo investiga y resume, nunca delega
 
 
 class Complexity(str, Enum):
@@ -59,7 +61,15 @@ class RoutingRequest:
     complexity: Complexity
     criticality: Criticality
     required_capabilities: set[str] = field(default_factory=set)
+    tool_specialist: str = ""
+    tool_rewiring_preferred_specialist: str = ""
+    prefer_economic_routing: bool = False
+    preferred_tool_tier: str = ""
+    skill_targets: set[str] = field(default_factory=set)
+    lsp_targets: set[str] = field(default_factory=set)
     approved_adapters: set[str] = field(default_factory=set)
+    excluded_adapters: set[str] = field(default_factory=set)
+    excluded_providers: set[str] = field(default_factory=set)
     sensitive_approval: bool = False
     environment: str = "dev"
 

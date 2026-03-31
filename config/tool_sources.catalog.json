@@ -98,9 +98,14 @@
         "engineer"
       ],
       "priority": "secondary",
-      "enabled": true,
+      "enabled": false,
       "requires_approval": false,
       "uses_internet": true,
+      "fallback_strategy": "prefer_skill_or_cli",
+      "replacement_candidates": [
+        "semgrep_security_skill"
+      ],
+      "availability_note": "Deshabilitado por defecto mientras el paquete npm siga devolviendo E404 en este entorno.",
       "description": "Seguridad-by-design con reglas semanticas"
     },
     {
@@ -118,7 +123,7 @@
         "engineer"
       ],
       "priority": "secondary",
-      "enabled": true,
+      "enabled": false,
       "requires_approval": false,
       "uses_internet": true,
       "description": "Documentacion tecnica en tiempo real"
@@ -138,9 +143,15 @@
         "reviewer"
       ],
       "priority": "secondary",
-      "enabled": true,
+      "enabled": false,
       "requires_approval": false,
       "uses_internet": true,
+      "fallback_strategy": "prefer_skill_or_cli",
+      "replacement_candidates": [
+        "context7_mcp",
+        "context7_research_skill"
+      ],
+      "availability_note": "Mantener deshabilitado por defecto hasta validar un paquete MCP instalable y sano.",
       "description": "Busqueda tecnica avanzada en web"
     },
     {
@@ -196,9 +207,15 @@
         "engineer"
       ],
       "priority": "secondary",
-      "enabled": true,
+      "enabled": false,
       "requires_approval": false,
       "uses_internet": true,
+      "fallback_strategy": "prefer_skill_or_cli",
+      "replacement_candidates": [
+        "playwright_qa_skill",
+        "playwright"
+      ],
+      "availability_note": "Preferir Playwright por skill/CLI hasta confirmar un MCP mantenido e instalable.",
       "description": "Automatizacion web robusta para agentes"
     },
     {

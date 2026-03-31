@@ -854,6 +854,26 @@
   font-size: 12px;
 }
 
+.team-chat-clarify-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 200, 50, 0.07);
+  border: 1px solid rgba(255, 200, 50, 0.3);
+  border-radius: 8px;
+}
+
+.team-chat-clarify-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.team-chat-clarify-label strong {
+  color: var(--text-primary);
+}
+
 .team-chat-send {
   background: var(--accent);
   color: #fff;

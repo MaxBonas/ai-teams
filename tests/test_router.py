@@ -1,13 +1,39 @@
 import unittest
 import tempfile
+import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
-from aiteam.adapters import ApiAdapter, SubscriptionAdapter
+from aiteam.adapters import (
+    ApiAdapter as RealApiAdapter,
+    FakeSuccessAdapter,
+    SubscriptionAdapter as RealSubscriptionAdapter,
+)
 from aiteam.config import build_default_router_policy
 from aiteam.finops import BudgetManager, BudgetPolicy
 from aiteam.router import HybridRouter
-from aiteam.types import AdapterResponse, Complexity, Criticality, Role, RoutingRequest
+from aiteam.types import (
+    AdapterResponse,
+    ChannelType,
+    Complexity,
+    Criticality,
+    Role,
+    RoutingRequest,
+)
+
+
+class SubscriptionAdapter(FakeSuccessAdapter):
+    def __init__(self, *args, **kwargs) -> None:
+        kwargs.setdefault("channel", ChannelType.SUBSCRIPTION)
+        super().__init__(*args, **kwargs)
+
+
+class ApiAdapter(FakeSuccessAdapter):
+    def __init__(self, *args, **kwargs) -> None:
+        kwargs.setdefault("channel", ChannelType.API)
+        super().__init__(*args, **kwargs)
 
 
 class RouterTests(unittest.TestCase):
@@ -42,13 +68,30 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(decision.channel.value, "subscription")
 
     def test_fallback_to_api(self) -> None:
+        router = HybridRouter(
+            adapters=[
+                RealSubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                ),
+                ApiAdapter(
+                    name="openai_api",
+                    provider="openai",
+                    model="gpt-api",
+                    capabilities={"coding"},
+                ),
+            ],
+            policy=build_default_router_policy(),
+        )
         request = RoutingRequest(
             role=Role.ENGINEER,
             complexity=Complexity.HIGH,
             criticality=Criticality.HIGH,
             required_capabilities={"coding"},
         )
-        decision = self.router.route_and_invoke(
+        decision = router.route_and_invoke(
             request=request,
             prompt="FORCE_API_FALLBACK this should fail pro path",
         )
@@ -130,6 +173,218 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(captured.get("messages"), messages)
         self.assertEqual(captured.get("prompt"), "fallback prompt")
 
+    def test_tool_specialist_prefers_budget_api_before_subscription(self) -> None:
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"browser_test"},
+                    response_content="subscription",
+                ),
+                ApiAdapter(
+                    name="openai_api_budget",
+                    provider="openai",
+                    model="gpt-cheap",
+                    capabilities={"browser_test"},
+                    cost_tier=1,
+                    response_content="budget",
+                ),
+            ],
+            policy=build_default_router_policy(),
+        )
+        request = RoutingRequest(
+            role=Role.QA,
+            complexity=Complexity.LOW,
+            criticality=Criticality.LOW,
+            required_capabilities={"browser_test"},
+            tool_specialist="browser_operator",
+            prefer_economic_routing=True,
+            preferred_tool_tier="budget_api",
+        )
+
+        decision = router.route_and_invoke(
+            request=request,
+            prompt="reproduce ui issue and summarize",
+        )
+
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.channel, ChannelType.API)
+        self.assertEqual(decision.response.content, "budget")
+
+    def test_route_and_invoke_respects_excluded_providers(self) -> None:
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                    response_content="openai",
+                ),
+                SubscriptionAdapter(
+                    name="anthropic_pro",
+                    provider="anthropic",
+                    model="claude-sonnet",
+                    capabilities={"coding"},
+                    response_content="anthropic",
+                ),
+            ],
+            policy=build_default_router_policy(),
+        )
+        request = RoutingRequest(
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            required_capabilities={"coding"},
+            excluded_providers={"openai"},
+        )
+
+        decision = router.route_and_invoke(
+            request=request,
+            prompt="simple prompt",
+        )
+
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.provider, "anthropic")
+
+    def test_tool_specialist_prefers_lower_api_cost_tier(self) -> None:
+        router = HybridRouter(
+            adapters=[
+                ApiAdapter(
+                    name="openai_api_advanced",
+                    provider="openai",
+                    model="gpt-advanced",
+                    capabilities={"test_execute"},
+                    cost_tier=2,
+                    response_content="advanced",
+                ),
+                ApiAdapter(
+                    name="openai_api_budget",
+                    provider="openai",
+                    model="gpt-budget",
+                    capabilities={"test_execute"},
+                    cost_tier=1,
+                    response_content="budget",
+                ),
+            ],
+            policy=build_default_router_policy(),
+        )
+        request = RoutingRequest(
+            role=Role.QA,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            required_capabilities={"test_execute"},
+            tool_specialist="test_runner",
+            prefer_economic_routing=True,
+            preferred_tool_tier="budget_api",
+        )
+
+        decision = router.route_and_invoke(
+            request=request,
+            prompt="run tests and summarize failures",
+        )
+
+        self.assertTrue(decision.success)
+        self.assertEqual(decision.response.content, "budget")
+
+    def test_tool_specialist_autotune_escalates_to_advanced_api_when_delegate_economics_are_weak(self) -> None:
+        runtime_dir = Path.cwd() / "runtime" / f"router_econ_{uuid4().hex[:8]}"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            budget = BudgetManager(
+                runtime_dir=runtime_dir,
+                policy=BudgetPolicy(
+                    daily_api_budget_usd=10.0,
+                    monthly_api_budget_usd=100.0,
+                ),
+            )
+            events_path = runtime_dir / "events.jsonl"
+            weak_events = [
+                {
+                    "ts": "2026-03-31T12:00:00+00:00",
+                    "event_id": "evt-1",
+                    "event_type": "delegate_economics_estimated",
+                    "payload": {
+                        "task_id": "CHAT-1",
+                        "quorum_met": False,
+                        "specialist_breakdown": {
+                            "browser_operator": {
+                                "count": 1,
+                                "completed": 0,
+                                "failed": 1,
+                                "estimated_net_tokens_saved": 120,
+                                "estimated_cost_units_saved": 1,
+                            }
+                        },
+                    },
+                },
+                {
+                    "ts": "2026-03-31T12:10:00+00:00",
+                    "event_id": "evt-2",
+                    "event_type": "delegate_economics_estimated",
+                    "payload": {
+                        "task_id": "CHAT-2",
+                        "quorum_met": False,
+                        "specialist_breakdown": {
+                            "browser_operator": {
+                                "count": 1,
+                                "completed": 0,
+                                "failed": 1,
+                                "estimated_net_tokens_saved": 80,
+                                "estimated_cost_units_saved": 1,
+                            }
+                        },
+                    },
+                },
+            ]
+            events_path.write_text(
+                "\n".join(json.dumps(row) for row in weak_events) + "\n",
+                encoding="utf-8",
+            )
+            router = HybridRouter(
+                adapters=[
+                    ApiAdapter(
+                        name="openai_api_advanced",
+                        provider="openai",
+                        model="gpt-advanced",
+                        capabilities={"browser_test"},
+                        cost_tier=2,
+                        response_content="advanced",
+                    ),
+                    ApiAdapter(
+                        name="openai_api_budget",
+                        provider="openai",
+                        model="gpt-budget",
+                        capabilities={"browser_test"},
+                        cost_tier=1,
+                        response_content="budget",
+                    ),
+                ],
+                policy=build_default_router_policy(),
+                budget_manager=budget,
+            )
+            request = RoutingRequest(
+                role=Role.QA,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                required_capabilities={"browser_test"},
+                tool_specialist="browser_operator",
+                prefer_economic_routing=True,
+                preferred_tool_tier="budget_api",
+            )
+
+            decision = router.route_and_invoke(
+                request=request,
+                prompt="reproduce browser issue and summarize",
+            )
+
+            self.assertTrue(decision.success)
+            self.assertEqual(decision.response.content, "advanced")
+        finally:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+
     def test_api_budget_blocks_api_channel(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             policy = build_default_router_policy()
@@ -141,7 +396,7 @@ class RouterTests(unittest.TestCase):
             )
             router = HybridRouter(
                 adapters=[
-                    SubscriptionAdapter(
+                    RealSubscriptionAdapter(
                         name="openai_pro",
                         provider="openai",
                         model="gpt-pro",
@@ -187,7 +442,7 @@ class RouterTests(unittest.TestCase):
 
             router = HybridRouter(
                 adapters=[
-                    SubscriptionAdapter(
+                    RealSubscriptionAdapter(
                         name="openai_pro",
                         provider="openai",
                         model="gpt-pro",

@@ -1,6 +1,7 @@
 import unittest
 
-from aiteam.profiles import build_prompt, role_charter_for
+from aiteam.profiles import build_prompt, build_system_prompt, role_charter_for
+from aiteam.tool_specialists import build_tool_specialist_metadata
 from aiteam.types import Role
 
 
@@ -21,6 +22,23 @@ class ProfileGovernanceTests(unittest.TestCase):
             role_charter_for(Role.QA).decision_rank,
         }
         self.assertGreaterEqual(len(ranks), 3)
+
+    def test_build_system_prompt_includes_specialist_block_when_metadata_declares_it(self) -> None:
+        prompt = build_system_prompt(
+            Role.SCOUT,
+            task_metadata=build_tool_specialist_metadata(
+                specialist="repo_scout",
+                required_capabilities=["analysis"],
+                reason="leer repo",
+            ),
+        )
+        self.assertIn("Especializacion activa: Repo Scout", prompt)
+        self.assertIn("No arbitres producto", prompt)
+
+    def test_team_lead_system_prompt_documents_evidence_plan_directive(self) -> None:
+        prompt = build_system_prompt(Role.TEAM_LEAD)
+        self.assertIn("[EVIDENCE_PLAN]", prompt)
+        self.assertIn("WAIT_POLICY", prompt)
 
 
 if __name__ == "__main__":

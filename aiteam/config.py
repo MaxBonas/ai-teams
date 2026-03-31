@@ -55,6 +55,7 @@ class RouterPolicy:
             "qa": ["anthropic", "openai", "google", "groq"],
         }
     )
+    peer_consultation_diversity_required: bool = True
     enforce_role_model_preferences: bool = False
     strict_role_policy_environments: list[str] = field(default_factory=lambda: ["prod"])
 
@@ -74,6 +75,15 @@ def build_default_router_policy() -> RouterPolicy:
     enforce_raw = os.getenv("AITEAM_ENFORCE_ROLE_MODEL_PREFERENCES", "0").strip().lower()
     if enforce_raw in {"1", "true", "yes", "on"}:
         policy.enforce_role_model_preferences = True
+
+    peer_diversity_raw = os.getenv(
+        "AITEAM_PEER_CONSULTATION_DIVERSITY_REQUIRED",
+        "",
+    ).strip().lower()
+    if peer_diversity_raw in {"1", "true", "yes", "on"}:
+        policy.peer_consultation_diversity_required = True
+    elif peer_diversity_raw in {"0", "false", "no", "off"}:
+        policy.peer_consultation_diversity_required = False
 
     envs_raw = os.getenv("AITEAM_STRICT_ROLE_POLICY_ENVS", "").strip()
     if envs_raw:

@@ -12,6 +12,7 @@ from aiteam.config import RouterPolicy
 from aiteam.finops import BudgetManager
 from aiteam.model_catalog import load_model_catalog
 from aiteam.observability import EventLogger
+from aiteam.persistence import AtomicFileWriter
 from aiteam.provider_ops import provider_ops_status
 from aiteam.types import (
     ChannelType,
@@ -52,6 +53,11 @@ class HybridRouter:
         self._ops_cache_ts: float = 0.0
         self._ops_cache_ttl: float = 30.0
         self._ops_cache_lock = threading.Lock()
+        self._tool_economics_cache: dict[str, dict[str, float]] = {}
+        self._tool_economics_cache_populated: bool = False
+        self._tool_economics_cache_ts: float = 0.0
+        self._tool_economics_cache_ttl: float = 30.0
+        self._tool_economics_cache_lock = threading.Lock()
         if self.budget_manager is not None:
             self.runtime_dir = self.budget_manager.runtime_dir
         project_root = None
@@ -129,6 +135,9 @@ class HybridRouter:
             return -(profile.reasoning_rank + profile.trust_rank)
         if role_key == "researcher":
             return -(profile.reasoning_rank + profile.intelligence_rank)
+        if role_key == "scout":
+            # Scout prioriza velocidad y bajo coste sobre calidad
+            return -profile.intelligence_rank
         return -(profile.trust_rank + profile.reasoning_rank)
 
     def _api_pressure(self) -> float:
@@ -138,6 +147,8 @@ class HybridRouter:
         return max(signal.daily_utilization_ratio, signal.monthly_utilization_ratio)
 
     def _tier_rank(self, adapter: ModelAdapter, request: RoutingRequest) -> int:
+        if self._prefer_tool_economy(request):
+            return self._tool_economy_tier_rank(adapter, request)
         profile = self._profile_for(adapter)
         if profile is None:
             return 50
@@ -147,6 +158,15 @@ class HybridRouter:
                 "advanced_api": 1,
                 "budget_api": 9,
                 "local": 99,
+            }
+            return order.get(profile.tier, 50)
+        if request.role.value == "scout":
+            # Scout SIEMPRE usa el modelo mas barato disponible
+            order = {
+                "budget_api": 0,
+                "local": 1,
+                "advanced_api": 8,
+                "senior_cloud": 99,
             }
             return order.get(profile.tier, 50)
         pressure = self._api_pressure()
@@ -174,6 +194,150 @@ class HybridRouter:
         }
         return order.get(profile.tier, 50)
 
+    def _adapter_tier_label(self, adapter: ModelAdapter) -> str:
+        profile = self._profile_for(adapter)
+        if profile is not None:
+            return profile.tier
+        if adapter.channel == ChannelType.SUBSCRIPTION:
+            return "senior_cloud"
+        if adapter.cost_tier <= 1:
+            return "budget_api"
+        if adapter.cost_tier <= 2:
+            return "advanced_api"
+        return "budget_api"
+
+    @staticmethod
+    def _preferred_tool_tier(request: RoutingRequest) -> str:
+        return str(getattr(request, "preferred_tool_tier", "") or "").strip().lower()
+
+    def _cached_tool_economics(self) -> dict[str, dict[str, float]]:
+        if self.runtime_dir is None:
+            return {}
+        now = time.monotonic()
+        with self._tool_economics_cache_lock:
+            if (
+                now - self._tool_economics_cache_ts < self._tool_economics_cache_ttl
+                and self._tool_economics_cache_populated
+            ):
+                return self._tool_economics_cache
+            events_path = Path(self.runtime_dir) / "events.jsonl"
+            if not events_path.exists():
+                self._tool_economics_cache = {}
+                self._tool_economics_cache_populated = True
+                self._tool_economics_cache_ts = now
+                return {}
+            records = AtomicFileWriter.read_jsonl_with_dedup(events_path)
+            specialist_rows: dict[str, dict[str, float]] = {}
+            for record in records:
+                if str(record.get("event_type", "")) != "delegate_economics_estimated":
+                    continue
+                payload = record.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+                quorum_met = bool(payload.get("quorum_met", False))
+                specialist_breakdown = payload.get("specialist_breakdown", {})
+                if not isinstance(specialist_breakdown, dict):
+                    continue
+                for raw_name, raw_values in specialist_breakdown.items():
+                    if not isinstance(raw_values, dict):
+                        continue
+                    specialist_name = str(raw_name or "").strip().lower()
+                    if not specialist_name:
+                        continue
+                    row = specialist_rows.setdefault(
+                        specialist_name,
+                        {
+                            "batches": 0.0,
+                            "count": 0.0,
+                            "completed": 0.0,
+                            "failed": 0.0,
+                            "quorum_met_count": 0.0,
+                            "estimated_net_tokens_saved": 0.0,
+                            "estimated_cost_units_saved": 0.0,
+                        },
+                    )
+                    row["batches"] += 1.0
+                    row["count"] += float(raw_values.get("count", 0) or 0)
+                    row["completed"] += float(raw_values.get("completed", 0) or 0)
+                    row["failed"] += float(raw_values.get("failed", 0) or 0)
+                    row["estimated_net_tokens_saved"] += float(
+                        raw_values.get("estimated_net_tokens_saved", 0) or 0
+                    )
+                    row["estimated_cost_units_saved"] += float(
+                        raw_values.get("estimated_cost_units_saved", 0) or 0
+                    )
+                    if quorum_met:
+                        row["quorum_met_count"] += 1.0
+            for row in specialist_rows.values():
+                batches = max(1.0, row["batches"])
+                count = max(1.0, row["count"])
+                row["quorum_met_ratio"] = round(row["quorum_met_count"] / batches, 4)
+                row["avg_net_tokens_saved"] = round(
+                    row["estimated_net_tokens_saved"] / count,
+                    2,
+                )
+                row["avg_cost_units_saved"] = round(
+                    row["estimated_cost_units_saved"] / count,
+                    2,
+                )
+            self._tool_economics_cache = specialist_rows
+            self._tool_economics_cache_populated = True
+            self._tool_economics_cache_ts = now
+            return self._tool_economics_cache
+
+    def _effective_tool_tier(self, request: RoutingRequest) -> str:
+        preferred_tier = self._preferred_tool_tier(request)
+        specialist_name = str(
+            getattr(request, "tool_rewiring_preferred_specialist", "") or ""
+        ).strip().lower() or str(getattr(request, "tool_specialist", "") or "").strip().lower()
+        if not specialist_name:
+            return preferred_tier
+        specialist_metrics = self._cached_tool_economics().get(specialist_name, {})
+        batches = int(specialist_metrics.get("batches", 0.0))
+        quorum_ratio = float(specialist_metrics.get("quorum_met_ratio", 0.0) or 0.0)
+        avg_net_saved = float(
+            specialist_metrics.get("avg_net_tokens_saved", 0.0) or 0.0
+        )
+        if batches >= 2 and (quorum_ratio < 0.5 or avg_net_saved < 250.0):
+            return "advanced_api"
+        return preferred_tier
+
+    def _prefer_tool_economy(self, request: RoutingRequest) -> bool:
+        if request.role == Role.TEAM_LEAD:
+            return False
+        if bool(getattr(request, "prefer_economic_routing", False)):
+            return True
+        return bool(
+            str(getattr(request, "tool_specialist", "") or "").strip()
+            or str(getattr(request, "tool_rewiring_preferred_specialist", "") or "").strip()
+        )
+
+    def _tool_economy_tier_rank(self, adapter: ModelAdapter, request: RoutingRequest) -> int:
+        tier = self._adapter_tier_label(adapter)
+        preferred_tier = self._effective_tool_tier(request)
+        if preferred_tier == "local":
+            order = {
+                "local": 0,
+                "budget_api": 1,
+                "advanced_api": 2,
+                "senior_cloud": 9,
+            }
+        elif preferred_tier == "advanced_api":
+            order = {
+                "advanced_api": 0,
+                "budget_api": 1,
+                "local": 2,
+                "senior_cloud": 9,
+            }
+        else:
+            order = {
+                "budget_api": 0,
+                "local": 1,
+                "advanced_api": 2,
+                "senior_cloud": 9,
+            }
+        return order.get(tier, 50)
+
     def _eligible(self, request: RoutingRequest) -> list[ModelAdapter]:
         eligible = []
         role_key = request.role.value
@@ -197,6 +361,10 @@ class HybridRouter:
             if str(item).strip()
         }
         for adapter in self.adapters:
+            if adapter.name in request.excluded_adapters:
+                continue
+            if adapter.provider.strip().lower() in request.excluded_providers:
+                continue
             if adapter.role_targets and request.role.value not in adapter.role_targets:
                 continue
             if request.role == Role.TEAM_LEAD and not self._team_lead_allowed(adapter):
@@ -234,6 +402,10 @@ class HybridRouter:
                     continue
             eligible.append(adapter)
         return eligible
+
+    def eligible_adapters(self, request: RoutingRequest) -> list[ModelAdapter]:
+        """Expone el pool elegible ya ordenado para capas de orquestación."""
+        return self._sort_adapters(self._eligible(request), request)
 
     def _sort_adapters(
         self, adapters: list[ModelAdapter], request: RoutingRequest
@@ -275,6 +447,18 @@ class HybridRouter:
             role_provider_rank = role_provider_priority.get(
                 adapter.provider.strip().lower(), 999
             )
+            if self._prefer_tool_economy(request):
+                return (
+                    self._tier_rank(adapter, request),
+                    channel_rank,
+                    self._role_rank(adapter, role_key),
+                    role_model_rank,
+                    role_provider_rank,
+                    adapter.routing_priority,
+                    provider_rank,
+                    adapter.cost_tier,
+                    adapter.name,
+                )
             return (
                 channel_rank,
                 self._tier_rank(adapter, request),
@@ -299,6 +483,8 @@ class HybridRouter:
         return compact[:96]
 
     def _must_include_api(self, request: RoutingRequest) -> bool:
+        if self._prefer_tool_economy(request):
+            return True
         if not self.policy.pro_first:
             return True
         return self._meets_complexity_threshold(
@@ -372,7 +558,7 @@ class HybridRouter:
             ChannelType.API: 0,
         }
 
-        eligible = self._sort_adapters(self._eligible(request), request)
+        eligible = self.eligible_adapters(request)
         if not eligible:
             decision = RoutingDecision(
                 success=False,

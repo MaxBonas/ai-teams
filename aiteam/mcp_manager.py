@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import subprocess
 import threading
 import time
@@ -38,7 +40,9 @@ class MCPServerConfig:
     capabilities: list[str] = field(default_factory=list)
     role_targets: list[str] = field(default_factory=list)
     health_status: str = "unknown"
+    health_reason: str = ""
     last_checked: str = ""
+    bootstrap_source: str = ""
 
 
 @dataclass
@@ -419,6 +423,413 @@ class MCPServerManager:
         self._event_log_path = runtime_dir / "mcp_events.jsonl"
         self._load_configs()
 
+    @staticmethod
+    def _current_username() -> str:
+        username = str(os.getenv("USERNAME", "") or "").strip()
+        if username:
+            return username
+        try:
+            return Path.home().name.strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def current_machine_profile() -> dict[str, str]:
+        machine_name = (
+            str(os.getenv("COMPUTERNAME", "") or "").strip()
+            or str(os.getenv("HOSTNAME", "") or "").strip()
+        )
+        username = MCPServerManager._current_username()
+        userprofile = str(os.getenv("USERPROFILE", "") or "").strip()
+        return {
+            "machine_name": machine_name,
+            "username": username,
+            "userprofile": userprofile,
+        }
+
+    @staticmethod
+    def _normalize_path_placeholders(value: str) -> str:
+        text = str(value or "")
+        username = MCPServerManager._current_username()
+        userprofile = str(os.getenv("USERPROFILE", "") or "").strip()
+        output = text
+        if username:
+            output = output.replace("${USERNAME}", username)
+            output = output.replace("%USERNAME%", username)
+        if userprofile:
+            output = output.replace("%USERPROFILE%", userprofile)
+        if output.startswith("~") and userprofile:
+            output = output.replace("~", userprofile, 1)
+        return output
+
+    @staticmethod
+    def _auto_repair_user_path_string(value: str) -> tuple[str, dict[str, str] | None]:
+        text = MCPServerManager._normalize_path_placeholders(str(value or ""))
+        if not text:
+            return text, None
+
+        current_user = MCPServerManager._current_username()
+        if not current_user:
+            return text, None
+
+        repaired = text
+        details: dict[str, str] | None = None
+
+        windows_match = re.search(r"([A-Za-z]:\\Users\\)([^\\]+)(\\)", text)
+        posix_match = re.search(r"(/Users/)([^/]+)(/)", text)
+
+        if windows_match:
+            wrong_user = str(windows_match.group(2) or "").strip()
+            if wrong_user and wrong_user.lower() != current_user.lower():
+                repaired = (
+                    text[: windows_match.start(2)]
+                    + current_user
+                    + text[windows_match.end(2):]
+                )
+                details = {
+                    "path_style": "windows",
+                    "from_user": wrong_user,
+                    "to_user": current_user,
+                }
+        elif posix_match:
+            wrong_user = str(posix_match.group(2) or "").strip()
+            if wrong_user and wrong_user.lower() != current_user.lower():
+                repaired = (
+                    text[: posix_match.start(2)]
+                    + current_user
+                    + text[posix_match.end(2):]
+                )
+                details = {
+                    "path_style": "posix",
+                    "from_user": wrong_user,
+                    "to_user": current_user,
+                }
+
+        return repaired, details
+
+    def auto_repair_user_paths(self) -> list[dict[str, str]]:
+        """Normaliza rutas hardcodeadas con otro usuario al usuario actual."""
+        repairs: list[dict[str, str]] = []
+        changed = False
+
+        for config in self._configs.values():
+            command, command_details = self._auto_repair_user_path_string(config.command)
+            if command_details is not None and command != config.command:
+                repairs.append(
+                    {
+                        "server": config.name,
+                        "field": "command",
+                        "before": config.command,
+                        "after": command,
+                        **command_details,
+                    }
+                )
+                config.command = command
+                changed = True
+
+            repaired_args: list[str] = []
+            for index, arg in enumerate(config.args):
+                repaired_arg, arg_details = self._auto_repair_user_path_string(str(arg or ""))
+                repaired_args.append(repaired_arg)
+                if arg_details is not None and repaired_arg != str(arg or ""):
+                    repairs.append(
+                        {
+                            "server": config.name,
+                            "field": f"args[{index}]",
+                            "before": str(arg or ""),
+                            "after": repaired_arg,
+                            **arg_details,
+                        }
+                    )
+                    changed = True
+            config.args = repaired_args
+
+            repaired_env: dict[str, str] = {}
+            for key, raw_value in config.env.items():
+                repaired_value, env_details = self._auto_repair_user_path_string(str(raw_value or ""))
+                repaired_env[str(key)] = repaired_value
+                if env_details is not None and repaired_value != str(raw_value or ""):
+                    repairs.append(
+                        {
+                            "server": config.name,
+                            "field": f"env.{key}",
+                            "before": str(raw_value or ""),
+                            "after": repaired_value,
+                            **env_details,
+                        }
+                    )
+                    changed = True
+            config.env = repaired_env
+
+            source, source_details = self._auto_repair_user_path_string(config.source)
+            if source_details is not None and source != config.source:
+                repairs.append(
+                    {
+                        "server": config.name,
+                        "field": "source",
+                        "before": config.source,
+                        "after": source,
+                        **source_details,
+                    }
+                )
+                config.source = source
+                changed = True
+
+        if changed:
+            self._save_configs()
+            for repair in repairs:
+                self._log_event(
+                    "mcp_path_auto_repaired",
+                    str(repair.get("server", "") or ""),
+                    {
+                        "field": str(repair.get("field", "") or ""),
+                        "before": str(repair.get("before", "") or ""),
+                        "after": str(repair.get("after", "") or ""),
+                        "from_user": str(repair.get("from_user", "") or ""),
+                        "to_user": str(repair.get("to_user", "") or ""),
+                    },
+                )
+        return repairs
+
+    @staticmethod
+    def portability_status(config: MCPServerConfig) -> tuple[str, str]:
+        machine = MCPServerManager.current_machine_profile()
+        username = str(machine.get("username", "") or "").strip().lower()
+        values: list[str] = [str(config.command or ""), str(config.source or "")]
+        values.extend(str(arg or "") for arg in list(config.args or []))
+        values.extend(str(value or "") for value in dict(config.env or {}).values())
+        joined = "\n".join(values)
+        lowered = joined.lower()
+        if any(token in joined for token in ("${USERNAME}", "%USERNAME%", "%USERPROFILE%", "~")):
+            return "portable", "uses_placeholders"
+        path_match = re.search(r"c:\\users\\([^\\/\s]+)", lowered)
+        if not path_match:
+            return "portable", "no_user_bound_paths"
+        bound_user = str(path_match.group(1) or "").strip().lower()
+        if username and bound_user == username:
+            return "user_bound", f"bound_to_current_user:{bound_user}"
+        if bound_user:
+            return "user_bound", f"bound_to_other_user:{bound_user}"
+        return "portable", "unknown"
+
+    @staticmethod
+    def _parse_iso_ts(value: str) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            normalized = text.replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized)
+        except Exception:
+            return None
+
+    @staticmethod
+    def classify_health_reason(reason: str, status: str = "unknown") -> str:
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status == "healthy":
+            return "healthy"
+
+        text = str(reason or "").strip().lower()
+        if not text:
+            return "unknown"
+        if "enoent" in text or "no such file or directory" in text or "error accessing directory" in text:
+            return "path_missing"
+        if "please set " in text or "environment variable" in text or "api key" in text or "token" in text:
+            return "credentials_missing"
+        if "please provide" in text or "command-line argument" in text or "missing required" in text:
+            return "configuration_required"
+        if "e404" in text or "404 not found" in text or "not found - get https://registry.npmjs.org" in text:
+            return "package_unavailable"
+        if text.startswith("probe_error:") or "winerror" in text or "start_failed:" in text:
+            return "command_unavailable"
+        if "timeout" in text:
+            return "timeout"
+        return "runtime_failure"
+
+    @staticmethod
+    def health_recommendation(
+        *,
+        category: str,
+        enabled: bool,
+        requires_approval: bool,
+        source_type: str,
+    ) -> str:
+        normalized = str(category or "unknown").strip().lower()
+        if normalized == "healthy":
+            return "usable_now" if enabled else "enable_when_needed"
+        if normalized == "path_missing":
+            return "repair_path_or_workspace"
+        if normalized == "credentials_missing":
+            return "configure_credentials"
+        if normalized == "configuration_required":
+            return "provide_required_arguments"
+        if normalized == "package_unavailable":
+            return "replace_or_disable_catalog_entry"
+        if normalized == "command_unavailable":
+            return (
+                "install_runtime_or_binary"
+                if str(source_type or "").strip().lower() in {"npm", "uvx", "custom"}
+                else "verify_command_path"
+            )
+        if normalized == "timeout":
+            return "retry_with_longer_timeout"
+        if requires_approval and not enabled:
+            return "enable_and_request_approval_when_needed"
+        return "inspect_runtime_logs"
+
+    def _maybe_retry_unhealthy_servers(self, *, retry_after_seconds: int = 900, timeout: int = 10) -> None:
+        """Intenta reactivar servidores unhealthy habilitados si ya pasó la ventana de retry."""
+        now = datetime.now(timezone.utc)
+        pending_retries: list[str] = []
+
+        with self._lock:
+            for name, config in self._configs.items():
+                if not config.enabled or str(config.health_status or "").strip().lower() != "unhealthy":
+                    continue
+                last_checked = self._parse_iso_ts(config.last_checked)
+                if last_checked is not None:
+                    elapsed = (now - last_checked).total_seconds()
+                    if elapsed < max(0, int(retry_after_seconds)):
+                        continue
+                pending_retries.append(name)
+
+        for name in pending_retries:
+            self._log_event(
+                "mcp_health_retry_attempted",
+                name,
+                {"retry_after_seconds": int(retry_after_seconds)},
+            )
+            self.start_server(name, timeout=timeout)
+
+    @staticmethod
+    def _opencode_mcp_list_candidates() -> list[Path]:
+        override = str(os.getenv("AITEAM_OPENCODE_MCP_LIST_PATH", "") or "").strip()
+        candidates: list[Path] = []
+        if override:
+            candidates.append(Path(override))
+
+        local_appdata = str(os.getenv("LOCALAPPDATA", "") or "").strip()
+        appdata = str(os.getenv("APPDATA", "") or "").strip()
+        userprofile = str(os.getenv("USERPROFILE", "") or "").strip()
+
+        known_paths = [
+            Path(local_appdata) / "OpenCode" / "mcp_list.txt" if local_appdata else None,
+            Path(appdata) / "ai.opencode.desktop" / "mcp_list.txt" if appdata else None,
+            Path(appdata) / "OpenCode" / "mcp_list.txt" if appdata else None,
+            Path(userprofile) / ".cache" / "opencode" / "mcp_list.txt" if userprofile else None,
+        ]
+        for item in known_paths:
+            if item is None:
+                continue
+            candidates.append(item)
+
+        output: list[Path] = []
+        seen: set[str] = set()
+        for path in candidates:
+            key = str(path).strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            output.append(path)
+        return output
+
+    @staticmethod
+    def parse_opencode_mcp_list(text: str) -> list[dict[str, Any]]:
+        cleaned_lines: list[str] = []
+        ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
+        for raw_line in str(text or "").splitlines():
+            line = ansi_pattern.sub("", str(raw_line or "")).strip()
+            if line:
+                cleaned_lines.append(line)
+
+        entries: list[dict[str, Any]] = []
+        current: dict[str, Any] | None = None
+        status_pattern = re.compile(r"([A-Za-z0-9_.-]+)\s+(connected|failed)\s*$", re.IGNORECASE)
+        for line in cleaned_lines:
+            status_match = status_pattern.search(line)
+            if status_match:
+                if current and current.get("name") and current.get("command"):
+                    entries.append(current)
+                current = {
+                    "name": status_match.group(1).strip().lower(),
+                    "health_status": (
+                        "healthy"
+                        if status_match.group(2).strip().lower() == "connected"
+                        else "unhealthy"
+                    ),
+                }
+                continue
+
+            if current is None:
+                continue
+            if current.get("command"):
+                continue
+            if line.lower().startswith("mcp error"):
+                continue
+            if line.startswith("npx ") or line.startswith("node ") or line.startswith("python ") or line.startswith("uvx ") or line.startswith("bunx "):
+                try:
+                    parts = shlex.split(line, posix=False)
+                except ValueError:
+                    parts = [item for item in line.split(" ") if item.strip()]
+                if not parts:
+                    continue
+                current["command"] = parts[0]
+                current["args"] = parts[1:]
+                source_type = "npm" if parts[0].lower() in {"npx", "npx.cmd", "bunx", "bunx.cmd"} else "custom"
+                current["source_type"] = source_type
+                current["source"] = MCPServerManager._infer_opencode_source(parts)
+                current["capabilities"] = MCPServerManager._infer_opencode_capabilities(
+                    name=str(current.get("name", "") or ""),
+                    source=str(current.get("source", "") or ""),
+                )
+                current["role_targets"] = MCPServerManager._infer_opencode_role_targets(
+                    capabilities=list(current.get("capabilities", []) or [])
+                )
+                current["transport"] = "stdio"
+                current["enabled"] = bool(current.get("health_status") == "healthy")
+                current["requires_approval"] = False
+                current["bootstrap_source"] = "opencode_mcp_list"
+                continue
+
+        if current and current.get("name") and current.get("command"):
+            entries.append(current)
+        return entries
+
+    @staticmethod
+    def _infer_opencode_source(parts: list[str]) -> str:
+        lowered = [str(item or "").strip() for item in parts]
+        if not lowered:
+            return ""
+        if lowered[0].lower() in {"npx", "npx.cmd", "bunx", "bunx.cmd"}:
+            for item in lowered[1:]:
+                if not item or item.startswith("-"):
+                    continue
+                return item
+        return lowered[0]
+
+    @staticmethod
+    def _infer_opencode_capabilities(*, name: str, source: str) -> list[str]:
+        blob = f"{name} {source}".lower()
+        capabilities = {"external_mcp"}
+        if "filesystem" in blob:
+            capabilities.update({"repo_read"})
+        if "fetch" in blob:
+            capabilities.update({"documentation"})
+        if "memory" in blob:
+            capabilities.update({"analysis"})
+        if "puppeteer" in blob or "playwright" in blob or "browser" in blob:
+            capabilities.update({"browser_nav", "browser_test"})
+        return sorted(capabilities)
+
+    @staticmethod
+    def _infer_opencode_role_targets(*, capabilities: list[str]) -> list[str]:
+        normalized = {str(item or "").strip().lower() for item in capabilities}
+        if {"browser_nav", "browser_test"} & normalized:
+            return ["qa", "researcher"]
+        if "repo_read" in normalized:
+            return ["scout", "researcher", "engineer"]
+        return []
+
     def _load_configs(self) -> None:
         """Carga configuraciones desde mcp_servers.json."""
         if not self._mcp_config_path.exists():
@@ -444,7 +855,11 @@ class MCPServerManager:
                     capabilities=item.get("capabilities", []),
                     role_targets=item.get("role_targets", []),
                     health_status=str(item.get("health_status", "unknown")),
+                    health_reason=str(item.get("health_reason", "") or "").strip(),
+                    last_checked=str(item.get("last_checked", "") or "").strip(),
+                    bootstrap_source=str(item.get("bootstrap_source", "") or "").strip(),
                 )
+            self.auto_repair_user_paths()
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -502,6 +917,59 @@ class MCPServerManager:
 
         return new_count
 
+    def bootstrap_from_opencode(self) -> int:
+        """Importa MCPs visibles en OpenCode al runtime local.
+
+        Fuente actual: salida textual previamente exportada por `opencode mcp list`,
+        por ejemplo `C:\\Users\\<user>\\AppData\\Local\\OpenCode\\mcp_list.txt`.
+        Solo agrega servidores nuevos; no pisa configuraciones ya presentes.
+        """
+        for candidate in self._opencode_mcp_list_candidates():
+            if not candidate.exists():
+                continue
+            try:
+                raw = candidate.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            imported = self.parse_opencode_mcp_list(raw)
+            if not imported:
+                continue
+
+            new_count = 0
+            for item in imported:
+                name = str(item.get("name", "")).strip()
+                if not name or name in self._configs:
+                    continue
+                self._configs[name] = MCPServerConfig(
+                    name=name,
+                    command=str(item.get("command", "")).strip(),
+                    args=list(item.get("args", []) or []),
+                    env={},
+                    transport=str(item.get("transport", "stdio") or "stdio").strip(),
+                    enabled=bool(item.get("enabled", False)),
+                    requires_approval=bool(item.get("requires_approval", False)),
+                    source_type=str(item.get("source_type", "custom") or "custom").strip(),
+                    source=str(item.get("source", "") or "").strip(),
+                    capabilities=list(item.get("capabilities", []) or []),
+                    role_targets=list(item.get("role_targets", []) or []),
+                    health_status=str(item.get("health_status", "unknown") or "unknown").strip(),
+                    bootstrap_source=str(item.get("bootstrap_source", "opencode_mcp_list") or "opencode_mcp_list").strip(),
+                )
+                new_count += 1
+
+            if new_count > 0:
+                self._save_configs()
+                self._log_event(
+                    "opencode_bootstrap_imported",
+                    "opencode",
+                    {
+                        "count": new_count,
+                        "path": str(candidate),
+                    },
+                )
+            return new_count
+        return 0
+
     def enable_servers(self, names: list[str]) -> list[str]:
         """Habilita servidores MCP por nombre. Retorna los habilitados."""
         enabled = []
@@ -541,17 +1009,40 @@ class MCPServerManager:
 
             proc = MCPServerProcess(config)
             ok, reason = proc.start(timeout=timeout)
+            config.last_checked = datetime.now(timezone.utc).isoformat()
 
             if ok:
                 self._servers[name] = proc
                 config.health_status = "healthy"
+                config.health_reason = "started"
                 self._log_event("server_started", name, {"tools": len(proc.list_tools())})
             else:
                 config.health_status = "unhealthy"
+                config.health_reason = str(reason or "")[:500]
                 self._log_event("server_start_failed", name, {"reason": reason})
 
             self._save_configs()
             return ok, reason
+
+    def list_healthy(self, *, retry_unhealthy: bool = True, retry_after_seconds: int = 900, timeout: int = 10) -> list[str]:
+        """Lista nombres de servidores MCP saludables y habilitados.
+
+        Si `retry_unhealthy=True`, intenta reactivar servidores `unhealthy`
+        cuya última comprobación ya quedó suficientemente atrás.
+        """
+        if retry_unhealthy:
+            self._maybe_retry_unhealthy_servers(
+                retry_after_seconds=retry_after_seconds,
+                timeout=timeout,
+            )
+        with self._lock:
+            return sorted(
+                [
+                    name
+                    for name, config in self._configs.items()
+                    if config.enabled and str(config.health_status or "").strip().lower() == "healthy"
+                ]
+            )
 
     def stop_server(self, name: str) -> None:
         """Detiene un servidor MCP."""
@@ -695,6 +1186,11 @@ class MCPServerManager:
                 proc = self._servers.get(name)
                 running = proc is not None and proc.is_running
                 tool_count = len(proc.list_tools()) if running and proc else 0
+                health_category = self.classify_health_reason(
+                    config.health_reason,
+                    config.health_status,
+                )
+                portability_status, portability_reason = self.portability_status(config)
                 status_list.append({
                     "name": name,
                     "enabled": config.enabled,
@@ -704,11 +1200,56 @@ class MCPServerManager:
                     "capabilities": config.capabilities,
                     "role_targets": config.role_targets,
                     "health_status": config.health_status,
+                    "health_reason": config.health_reason,
+                    "health_category": health_category,
+                    "health_recommendation": self.health_recommendation(
+                        category=health_category,
+                        enabled=config.enabled,
+                        requires_approval=config.requires_approval,
+                        source_type=config.source_type,
+                    ),
+                    "portability_status": portability_status,
+                    "portability_reason": portability_reason,
+                    "bootstrap_source": config.bootstrap_source,
                     "requires_approval": config.requires_approval,
                     "tool_count": tool_count,
                     "tools": [t.name for t in proc.list_tools()] if running and proc else [],
                 })
         return status_list
+
+    def opencode_bootstrap_status(self) -> dict[str, Any]:
+        candidates = self._opencode_mcp_list_candidates()
+        existing_candidates: list[str] = []
+        for path in candidates:
+            try:
+                if path.exists():
+                    existing_candidates.append(str(path))
+            except OSError:
+                continue
+        bootstrapped = [
+            config.name
+            for config in self._configs.values()
+            if str(config.bootstrap_source or "").strip().lower() == "opencode_mcp_list"
+        ]
+        latest = {}
+        history = self.event_history(server_name="opencode", limit=20)
+        for entry in reversed(history):
+            if str(entry.get("event", "") or "") != "opencode_bootstrap_imported":
+                continue
+            latest = {
+                "ts": str(entry.get("ts", "") or ""),
+                "count": int(entry.get("count", 0) or 0),
+                "path": str(entry.get("path", "") or ""),
+            }
+            break
+        return {
+            "candidate_paths": [str(path) for path in candidates],
+            "existing_candidate_paths": existing_candidates,
+            "available": bool(existing_candidates),
+            "bootstrapped_servers": sorted(bootstrapped),
+            "bootstrapped_count": len(bootstrapped),
+            "last_import": latest,
+        }
 
     def _save_configs(self) -> None:
         """Persiste la configuracion de servidores MCP."""
@@ -727,7 +1268,9 @@ class MCPServerManager:
                 "capabilities": config.capabilities,
                 "role_targets": config.role_targets,
                 "health_status": config.health_status,
+                "health_reason": config.health_reason,
                 "last_checked": config.last_checked,
+                "bootstrap_source": config.bootstrap_source,
             })
 
         payload = {"servers": servers}

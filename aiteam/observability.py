@@ -51,11 +51,36 @@ class EventLogger:
         channel_counts = Counter()
         task_execution_total = 0
         task_execution_success = 0
+        delegate_economics_events = 0
+        delegate_estimated_lead_tokens_avoided = 0
+        delegate_estimated_operator_tokens_used = 0
+        delegate_estimated_cost_units_saved = 0
+        tool_rewiring_events = 0
+        tool_rewiring_by_specialist = Counter()
 
         records = self.events_windowed(hours=window_hours)
 
         for record in records:
             event_types[str(record.get("event_type", "unknown"))] += 1
+            if str(record.get("event_type", "")) == "tool_rewiring_applied":
+                payload = record.get("payload", {})
+                if isinstance(payload, dict):
+                    tool_rewiring_events += 1
+                    specialist = str(payload.get("preferred_specialist", "") or "").strip().lower() or "unknown"
+                    tool_rewiring_by_specialist[specialist] += 1
+            if str(record.get("event_type", "")) == "delegate_economics_estimated":
+                payload = record.get("payload", {})
+                if isinstance(payload, dict):
+                    delegate_economics_events += 1
+                    delegate_estimated_lead_tokens_avoided += int(
+                        payload.get("estimated_lead_tokens_avoided", 0) or 0
+                    )
+                    delegate_estimated_operator_tokens_used += int(
+                        payload.get("estimated_operator_tokens_used", 0) or 0
+                    )
+                    delegate_estimated_cost_units_saved += int(
+                        payload.get("estimated_cost_units_saved", 0) or 0
+                    )
             if str(record.get("event_type", "")) != "task_execution":
                 continue
 
@@ -119,6 +144,17 @@ class EventLogger:
             "api_share_percent": api_share,
             "compliance_violations": compliance_violations,
             "quality_gates_opened": quality_gates_opened,
+            "delegate_economics_events": delegate_economics_events,
+            "delegate_estimated_lead_tokens_avoided": delegate_estimated_lead_tokens_avoided,
+            "delegate_estimated_operator_tokens_used": delegate_estimated_operator_tokens_used,
+            "delegate_estimated_net_tokens_saved": max(
+                0,
+                delegate_estimated_lead_tokens_avoided
+                - delegate_estimated_operator_tokens_used,
+            ),
+            "delegate_estimated_cost_units_saved": delegate_estimated_cost_units_saved,
+            "tool_rewiring_events": tool_rewiring_events,
+            "tool_rewiring_by_specialist": dict(tool_rewiring_by_specialist),
             "alerts": alerts,
             "alert_count": len(alerts),
         }

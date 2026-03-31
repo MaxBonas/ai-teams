@@ -1,7 +1,10 @@
 import os
 import re
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+
+from aiteam.context_curator import ContextCuratorStore
 
 # Add PROJECT_ROOT here to avoid circular imports
 # Resolved dynamically from the location of this file (api/utils.py → project root)
@@ -51,6 +54,296 @@ def _read_jsonl_records(path: Path) -> list[dict]:
     except Exception:
         return []
     return [item for item in records if isinstance(item, dict)]
+
+
+def _coerce_specialist_report_entry(
+    payload: object,
+    *,
+    source_task_id: str,
+    phase: str,
+    source: str,
+) -> dict[str, object] | None:
+    if not isinstance(payload, dict):
+        return None
+    specialist = str(payload.get("specialist", "") or "").strip().lower()
+    summary = str(payload.get("summary", "") or "").strip()
+    if not specialist and not summary:
+        return None
+    validation_status = str(payload.get("validation_status", "unknown") or "unknown").strip().lower() or "unknown"
+    report = {
+        "specialist": specialist,
+        "summary": _truncate_text(summary, limit=220),
+        "recommendation": _truncate_text(payload.get("recommendation", ""), limit=180),
+        "provider": str(payload.get("provider", "") or "").strip(),
+        "model": str(payload.get("model", "") or "").strip(),
+        "validation_status": validation_status,
+        "validation_errors": [
+            str(item).strip()
+            for item in list(payload.get("validation_errors", []) or [])
+            if str(item).strip()
+        ][:6],
+        "report_version": str(payload.get("report_version", "") or "").strip(),
+        "source_task_id": source_task_id,
+        "phase": phase,
+        "source": source,
+    }
+    return report
+
+
+def _load_chat_specialist_insights(
+    runtime_dir: Path,
+    task_root: str,
+    *,
+    limit: int = 8,
+) -> dict[str, object]:
+    normalized_root = str(task_root or "").strip().upper()
+    if not normalized_root:
+        return {
+            "specialist_reports": [],
+            "specialist_report_summary": {
+                "count": 0,
+                "valid_count": 0,
+                "invalid_count": 0,
+                "by_specialist": {},
+            },
+        }
+
+    tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
+    reports: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    by_specialist: dict[str, dict[str, int]] = {}
+    valid_count = 0
+    invalid_count = 0
+
+    if isinstance(tasks_payload, list):
+        for item in tasks_payload:
+            if not isinstance(item, dict):
+                continue
+            task_id = str(item.get("task_id", "") or "")
+            if not task_id.upper().startswith(f"{normalized_root}::"):
+                continue
+            metadata = item.get("metadata", {})
+            if not isinstance(metadata, dict):
+                continue
+            phase = task_id.split("::", 1)[1] if "::" in task_id else "root"
+            for field_name, source_name in (
+                ("specialist_prefetch_reports", "prefetch"),
+                ("specialist_reports", "task"),
+            ):
+                raw_reports = list(metadata.get(field_name, []) or [])
+                for raw in raw_reports:
+                    report = _coerce_specialist_report_entry(
+                        raw,
+                        source_task_id=task_id,
+                        phase=phase,
+                        source=source_name,
+                    )
+                    if report is None:
+                        continue
+                    dedupe_key = (
+                        str(report.get("specialist", "")),
+                        str(report.get("summary", "")),
+                        str(report.get("source_task_id", "")),
+                        str(report.get("source", "")),
+                    )
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+                    reports.append(report)
+                    specialist = str(report.get("specialist", "") or "unknown").strip() or "unknown"
+                    bucket = by_specialist.setdefault(
+                        specialist,
+                        {"count": 0, "valid": 0, "invalid": 0},
+                    )
+                    bucket["count"] += 1
+                    if str(report.get("validation_status", "")) == "valid":
+                        valid_count += 1
+                        bucket["valid"] += 1
+                    else:
+                        invalid_count += 1
+                        bucket["invalid"] += 1
+
+    reports = reports[: max(1, int(limit or 8))]
+    return {
+        "specialist_reports": reports,
+        "specialist_report_summary": {
+            "count": len(reports),
+            "valid_count": valid_count,
+            "invalid_count": invalid_count,
+            "by_specialist": by_specialist,
+        },
+    }
+
+
+def _load_chat_rewiring_insights(
+    runtime_dir: Path,
+    task_root: str,
+) -> dict[str, object]:
+    normalized_root = str(task_root or "").strip().upper()
+    if not normalized_root:
+        return {
+            "tool_rewiring_summary": {
+                "count": 0,
+                "by_specialist": {},
+                "replacements": {},
+            }
+        }
+
+    tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
+    count = 0
+    by_specialist: dict[str, int] = {}
+    replacements: dict[str, int] = {}
+    if isinstance(tasks_payload, list):
+        for item in tasks_payload:
+            if not isinstance(item, dict):
+                continue
+            task_id = str(item.get("task_id", "") or "")
+            if not task_id.upper().startswith(f"{normalized_root}::"):
+                continue
+            metadata = item.get("metadata", {})
+            if not isinstance(metadata, dict):
+                continue
+            if not bool(metadata.get("tool_rewiring_active", False)):
+                continue
+            count += 1
+            specialist = str(metadata.get("tool_rewiring_preferred_specialist", "") or "").strip().lower() or "unknown"
+            by_specialist[specialist] = int(by_specialist.get(specialist, 0)) + 1
+            for name in list(metadata.get("tool_rewiring_replacement_for", []) or []):
+                normalized = str(name or "").strip().lower()
+                if not normalized:
+                    continue
+                replacements[normalized] = int(replacements.get(normalized, 0)) + 1
+    return {
+        "tool_rewiring_summary": {
+            "count": count,
+            "by_specialist": by_specialist,
+            "replacements": replacements,
+        }
+    }
+
+
+def _parse_iso_ts(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+
+
+def _layer_counts(payload: object) -> dict[str, int]:
+    if not isinstance(payload, dict):
+        return {
+            "working_set": 0,
+            "durable_facts": 0,
+            "decisions": 0,
+            "open_questions": 0,
+            "invalidations": 0,
+            "next_actions": 0,
+        }
+    return {
+        "working_set": len(list(payload.get("working_set", []) or [])),
+        "durable_facts": len(list(payload.get("durable_facts", []) or [])),
+        "decisions": len(list(payload.get("decisions", []) or [])),
+        "open_questions": len(list(payload.get("open_questions", []) or [])),
+        "invalidations": len(list(payload.get("invalidations", []) or [])),
+        "next_actions": len(list(payload.get("next_actions", []) or [])),
+    }
+
+
+def _freshness_status(updated_at: object) -> str:
+    ts = _parse_iso_ts(updated_at)
+    if ts is None:
+        return "unknown"
+    now = datetime.now(timezone.utc)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    age_seconds = max(0, int((now - ts).total_seconds()))
+    if age_seconds <= 3600:
+        return "fresh"
+    if age_seconds <= 21600:
+        return "warm"
+    return "stale"
+
+
+def _load_chat_context_curator_insights(
+    runtime_dir: Path,
+    task_root: str,
+) -> dict[str, object]:
+    raw_root = str(task_root or "").strip()
+    normalized_root = raw_root.upper()
+    if not raw_root:
+        return {
+            "context_pressure": {},
+            "context_curator_summary": {},
+        }
+
+    workflow_state = _read_json_payload(runtime_dir / "workflow_state.json", fallback={})
+    workflow_entry = {}
+    if isinstance(workflow_state, dict):
+        candidate = workflow_state.get(raw_root, {})
+        if not isinstance(candidate, dict):
+            candidate = workflow_state.get(normalized_root, {})
+        if isinstance(candidate, dict):
+            workflow_entry = candidate
+
+    curator_store = ContextCuratorStore(runtime_dir)
+    project_key = str(runtime_dir.parent.resolve())
+    project_context = curator_store.load_project_context(project_key)
+    chat_context = curator_store.load_chat_context(raw_root, project_key=project_key)
+
+    project_updated_at = str(project_context.get("updated_at", "") or "")
+    chat_updated_at = str(chat_context.get("updated_at", "") or "")
+    context_pressure = dict(workflow_entry.get("context_pressure", {}) or {})
+    phase_outputs = dict(workflow_entry.get("phase_outputs", {}) or {})
+    phase_context_summaries = dict(workflow_entry.get("phase_context_summaries", {}) or {})
+    project_summary = str(workflow_entry.get("project_context_summary", "") or "")
+    chat_summary = str(workflow_entry.get("chat_context_summary", "") or "")
+    raw_context_chars = sum(
+        len(str(value or ""))
+        for value in phase_outputs.values()
+        if str(value or "").strip()
+    )
+    compact_context_chars = (
+        len(project_summary)
+        + len(chat_summary)
+        + sum(
+            len(str(value or ""))
+            for value in phase_context_summaries.values()
+            if str(value or "").strip()
+        )
+    )
+    estimated_chars_saved = max(0, raw_context_chars - compact_context_chars)
+    estimated_tokens_saved = max(0, estimated_chars_saved // 4)
+    compression_ratio = round(
+        (compact_context_chars / raw_context_chars),
+        4,
+    ) if raw_context_chars > 0 else 0.0
+
+    return {
+        "context_pressure": context_pressure,
+        "context_curator_summary": {
+            "project_updated_at": project_updated_at,
+            "chat_updated_at": chat_updated_at,
+            "freshness_status": _freshness_status(chat_updated_at or project_updated_at),
+            "project_layer_counts": _layer_counts(project_context),
+            "chat_layer_counts": _layer_counts(chat_context),
+            "project_summary": project_summary,
+            "chat_summary": chat_summary,
+            "context_curator_recommended": bool(
+                workflow_entry.get("context_curator_recommended", False)
+            ),
+            "invalidation_count": len(list(chat_context.get("invalidations", []) or [])),
+            "open_question_count": len(list(chat_context.get("open_questions", []) or [])),
+            "estimated_context_chars_saved": estimated_chars_saved,
+            "estimated_context_tokens_saved": estimated_tokens_saved,
+            "raw_context_chars": raw_context_chars,
+            "compact_context_chars": compact_context_chars,
+            "compression_ratio": compression_ratio,
+        },
+    }
 
 
 def _event_summary(event_type: str, payload: dict) -> str:
@@ -231,7 +524,12 @@ def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> 
     tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
     events = _read_jsonl_records(runtime_dir / "events.jsonl")
     roots = _group_chat_roots(tasks_payload)
-    if not roots:
+    curator_store = ContextCuratorStore(runtime_dir)
+    project_context_summary = curator_store.build_summary(
+        curator_store.load_project_context(str(runtime_dir.parent.resolve())),
+        max_items_per_section=2,
+    )
+    if not roots and not project_context_summary:
         return ""
 
     task_started_ts: dict[str, str] = {}
@@ -259,9 +557,11 @@ def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> 
         reverse=True,
     )[: max(1, max_chats)]
 
-    lines = [
-        "Continuidad de proyecto (sesiones previas):",
-    ]
+    lines = ["Continuidad de proyecto (sesiones previas):"]
+    if project_context_summary:
+        lines.append("Context curator:")
+        for line in project_context_summary.splitlines():
+            lines.append(f"  {line}")
     for row in ordered:
         root_id = str(row.get("root_id", ""))
         message = _truncate_text(row.get("user_message", ""), limit=220)
@@ -275,6 +575,115 @@ def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> 
             lines.append(f"  states={state_view}")
         if lead_close:
             lines.append(f"  close={lead_close}")
+
+    return "\n".join(lines)
+
+
+def _build_scout_project_state_context(workspace: Path) -> str:
+    """Construye contexto crudo de estado del proyecto para el scout de estado.
+
+    Recoge: git status, últimos 5 commits, archivos clave presentes.
+    No llama a ningún LLM — solo shell/filesystem. El scout LLM resume esto.
+    """
+    import subprocess
+
+    lines: list[str] = ["=== ESTADO DEL PROYECTO ==="]
+
+    # Git status
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        git_status = result.stdout.strip()
+        lines.append(f"git status:\n{git_status[:600] if git_status else '(limpio)'}")
+    except Exception:
+        lines.append("git status: no disponible")
+
+    # Últimos 3 commits
+    try:
+        result = subprocess.run(
+            ["git", "log", "--oneline", "-5"],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        git_log = result.stdout.strip()
+        if git_log:
+            lines.append(f"últimos commits:\n{git_log[:400]}")
+    except Exception:
+        pass
+
+    # Archivos de primer nivel relevantes
+    try:
+        entries = sorted(workspace.iterdir(), key=lambda p: p.name)
+        visible = [
+            e.name + ("/" if e.is_dir() else "")
+            for e in entries
+            if not e.name.startswith(".")
+            and e.name not in {"venv", "node_modules", "__pycache__", ".git"}
+        ]
+        lines.append(f"estructura: {', '.join(visible[:30])}")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
+def _build_scout_session_history_context(runtime_dir: Path, max_chats: int = 3) -> str:
+    """Construye contexto crudo del historial de sesiones para el scout de historial.
+
+    Extrae las últimas N sesiones con mensaje del usuario y síntesis del lead_close.
+    No llama a ningún LLM. El scout LLM resume lo relevante.
+    """
+    tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
+    events = _read_jsonl_records(runtime_dir / "events.jsonl")
+    roots = _group_chat_roots(tasks_payload)
+    if not roots:
+        return "Sin sesiones previas."
+
+    task_started_ts: dict[str, str] = {}
+    for event in events:
+        if str(event.get("event_type", "")) != "task_started":
+            continue
+        payload = event.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        task_id = str(payload.get("task_id", "") or "")
+        if not task_id.startswith("CHAT-"):
+            continue
+        root = task_id.split("::", 1)[0]
+        ts = str(event.get("ts", "") or "")
+        if ts > task_started_ts.get(root, ""):
+            task_started_ts[root] = ts
+
+    for root_id, item in roots.items():
+        item["latest_ts"] = task_started_ts.get(root_id, "")
+
+    ordered = sorted(
+        roots.values(),
+        key=lambda row: str(row.get("latest_ts", "")),
+        reverse=True,
+    )[:max_chats]
+
+    lines = ["=== HISTORIAL DE SESIONES ==="]
+    for row in ordered:
+        root_id = str(row.get("root_id", ""))
+        message = _truncate_text(row.get("user_message", ""), limit=200)
+        lead_close = _truncate_text(row.get("lead_close_result", ""), limit=300)
+        phase_states = row.get("phase_states", {})
+        failed = [k for k, v in (phase_states.items() if isinstance(phase_states, dict) else []) if v == "failed"]
+        lines.append(f"\n[{root_id}]")
+        if message:
+            lines.append(f"  pedido: {message}")
+        if lead_close:
+            lines.append(f"  resultado: {lead_close}")
+        if failed:
+            lines.append(f"  fases fallidas: {', '.join(failed)}")
 
     return "\n".join(lines)
 

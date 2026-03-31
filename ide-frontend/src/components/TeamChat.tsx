@@ -416,6 +416,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const [streamingTaskId, setStreamingTaskId] = useState<string>('');
   const [agentLanes, setAgentLanes] = useState<Map<string, AgentLaneState>>(new Map());
   const [expandedMessage, setExpandedMessage] = useState<ChatMessage | null>(null);
+  const [pendingClarification, setPendingClarification] = useState<{ chatId: string; question: string } | null>(null);
+  const [clarificationInput, setClarificationInput] = useState('');
 
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -569,6 +571,44 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
 
   const canSend = useMemo(() => input.trim().length > 0 && !loading, [input, loading]);
   const currentExecutionMode = chatProgress?.execution_mode || lastChatRun?.execution_mode || 'unknown';
+
+  const sendClarification = async () => {
+    if (!pendingClarification || !clarificationInput.trim() || loading) return;
+    const { chatId } = pendingClarification;
+    setMessages((prev) => [
+      ...prev,
+      { id: `user-clarify-${Date.now()}`, sender: 'user', text: clarificationInput.trim(), meta: 'clarification' },
+    ]);
+    setPendingClarification(null);
+    setClarificationInput('');
+    setLoading(true);
+    try {
+      const res = await apiFetch('/api/aiteam/chat/clarify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-path': workspacePath },
+        body: JSON.stringify({ chat_id: chatId, clarification: clarificationInput.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(err || `HTTP ${res.status}`);
+      }
+      const json = await res.json() as Record<string, unknown>;
+      // Reutilizar la misma lógica de muestra que el path normal
+      const answer = typeof json.response === 'string' && json.response.trim() ? json.response : 'Respuesta del equipo recibida.';
+      setMessages((prev) => [
+        ...prev,
+        { id: `team-${Date.now()}`, sender: 'team', text: answer, meta: `state ${String(json.state ?? '-')}` },
+      ]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { id: `team-err-${Date.now()}`, sender: 'team', text: `Error al reanudar: ${err instanceof Error ? err.message : String(err)}`, meta: 'error' },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const sendMessage = async (overrideMessage?: string) => {
     const trimmed = typeof overrideMessage === 'string' ? overrideMessage.trim() : input.trim();
     if (!trimmed || loading) {
@@ -844,13 +884,30 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       ? json.response
                       : (String(json.error || '') || 'No response content returned by AI Team.');
                   }
-                  const teamMessage: ChatMessage = {
-                    id: `team-${Date.now()}`,
-                    sender: 'team',
-                    text: answer,
-                    meta: statusMeta,
-                  };
-                  setMessages((prev) => [...prev, teamMessage]);
+                  // ── Pausa conversacional ─────────────────────────────────
+                  if (json.waiting_user === true && typeof json.clarification_question === 'string') {
+                    setPendingClarification({
+                      chatId: String(json.task_id ?? ''),
+                      question: json.clarification_question,
+                    });
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id: `team-clarify-${Date.now()}`,
+                        sender: 'team',
+                        text: `El agente necesita aclaración: "${json.clarification_question}"`,
+                        meta: 'waiting_user',
+                      },
+                    ]);
+                  } else {
+                    const teamMessage: ChatMessage = {
+                      id: `team-${Date.now()}`,
+                      sender: 'team',
+                      text: answer,
+                      meta: statusMeta,
+                    };
+                    setMessages((prev) => [...prev, teamMessage]);
+                  }
 
                   const latestRun = typeof json.task_id === 'string' && json.task_id
                     ? {
@@ -1093,19 +1150,41 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
               <option value="sprint5">Sprint</option>
               <option value="classic">Classic</option>
             </select>
-            <textarea
-              className="team-chat-input"
-              rows={3}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Describe the coding task or question..."
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                  e.preventDefault();
-                  void sendMessage();
-                }
-              }}
-            />
+            {pendingClarification ? (
+              <div className="team-chat-clarify-box">
+                <div className="team-chat-clarify-label">
+                  El agente pregunta: <strong>{pendingClarification.question}</strong>
+                </div>
+                <textarea
+                  className="team-chat-input"
+                  rows={2}
+                  value={clarificationInput}
+                  onChange={(e) => setClarificationInput(e.target.value)}
+                  placeholder="Tu respuesta..."
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      void sendClarification();
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <textarea
+                className="team-chat-input"
+                rows={3}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Describe the coding task or question..."
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    void sendMessage();
+                  }
+                }}
+              />
+            )}
           </div>
 
           <div className="team-chat-actions">
@@ -1134,7 +1213,11 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                 </span>
               )}
             </div>
-            <button className="team-chat-send" disabled={!canSend} onClick={() => void sendMessage()}>
+            <button
+              className="team-chat-send"
+              disabled={loading || (pendingClarification ? !clarificationInput.trim() : !canSend)}
+              onClick={() => pendingClarification ? void sendClarification() : void sendMessage()}
+            >
               {loading ? <LoaderCircle size={16} className="spin" /> : <SendHorizontal size={16} />}
               Send
             </button>

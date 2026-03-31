@@ -16,11 +16,21 @@ interface ConversationResponse {
   total?: number;
   items?: ConversationItem[];
   last_chat_run?: {
+    task_id?: string;
     execution_mode?: string;
     placeholder_outputs?: number;
     successful_check_count?: number;
     live_mode_required?: boolean;
     live_mode_rejected?: boolean;
+    delegate_economics?: {
+      estimated_net_tokens_saved?: number;
+      estimated_cost_units_saved?: number;
+      quorum_met_ratio?: number;
+      batch_count?: number;
+      specialist_breakdown?: Record<string, {
+        estimated_net_tokens_saved?: number;
+      }>;
+    };
   };
   error?: string;
   detail?: string;
@@ -55,6 +65,10 @@ export default function TeamConversationViewer({ workspacePath }: TeamConversati
   const [placeholderOutputs, setPlaceholderOutputs] = useState(0);
   const [successfulCheckCount, setSuccessfulCheckCount] = useState(0);
   const [liveGate, setLiveGate] = useState('off');
+  const [delegateNetSaved, setDelegateNetSaved] = useState(0);
+  const [delegateBatchCount, setDelegateBatchCount] = useState(0);
+  const [delegateQuorumRatio, setDelegateQuorumRatio] = useState(0);
+  const [topSpecialist, setTopSpecialist] = useState('');
   const [inboxMode, setInboxMode] = useState<InboxMode>('all');
   const [recipientFilter, setRecipientFilter] = useState('');
   const [senderFilter, setSenderFilter] = useState('');
@@ -111,6 +125,12 @@ export default function TeamConversationViewer({ workspacePath }: TeamConversati
         const liveRejected = Boolean(json.last_chat_run?.live_mode_rejected);
         const liveRequired = Boolean(json.last_chat_run?.live_mode_required);
         setLiveGate(liveRejected ? 'rejected' : (liveRequired ? 'required' : 'off'));
+        setDelegateNetSaved(Number(json.last_chat_run?.delegate_economics?.estimated_net_tokens_saved || 0));
+        setDelegateBatchCount(Number(json.last_chat_run?.delegate_economics?.batch_count || 0));
+        setDelegateQuorumRatio(Number(json.last_chat_run?.delegate_economics?.quorum_met_ratio || 0));
+        const specialistEntries = Object.entries(json.last_chat_run?.delegate_economics?.specialist_breakdown || {});
+        specialistEntries.sort((a, b) => Number((b[1]?.estimated_net_tokens_saved || 0)) - Number((a[1]?.estimated_net_tokens_saved || 0)));
+        setTopSpecialist(specialistEntries[0]?.[0] || '');
         // Also fetch unread count
         void loadInbox(true);
       } else {
@@ -154,6 +174,10 @@ export default function TeamConversationViewer({ workspacePath }: TeamConversati
         setPlaceholderOutputs(0);
         setSuccessfulCheckCount(0);
         setLiveGate('off');
+        setDelegateNetSaved(0);
+        setDelegateBatchCount(0);
+        setDelegateQuorumRatio(0);
+        setTopSpecialist('');
       }
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Unknown request failure';
@@ -195,6 +219,10 @@ export default function TeamConversationViewer({ workspacePath }: TeamConversati
           {total}
         </button>
       </header>
+
+      <div className="team-viewer-note" style={{ padding: '0 12px 8px' }}>
+        {`delegate net=${delegateNetSaved} · batches=${delegateBatchCount} · quorum=${Math.round(delegateQuorumRatio * 100)}%${topSpecialist ? ` · top=${topSpecialist}` : ''}`}
+      </div>
 
       <div className="team-operator-controls" style={{ padding: '4px 8px', gap: 6 }}>
         <button

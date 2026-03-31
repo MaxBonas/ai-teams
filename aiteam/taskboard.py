@@ -114,6 +114,22 @@ class TaskBoard:
             task.metadata["blocked_reason"] = reason
             self._save()
 
+    def mark_waiting_user(self, task_id: str, question: str) -> None:
+        """E7-D4: Pausa una tarea mid-run esperando respuesta del usuario.
+
+        La tarea queda en estado WAITING_USER hasta que el usuario responda
+        via POST /api/aiteam/chat/clarify. _refresh_readiness ignora este estado,
+        por lo que las tareas downstream permanecen PENDING hasta que se reanude.
+        """
+        with self._lock:
+            task = self._require(task_id)
+            self._file_locks.release_for_task(task_id)
+            task.state = TaskState.WAITING_USER
+            task.metadata["clarify_question"] = question
+            import datetime as _dt
+            task.metadata["waiting_since"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+            self._save()
+
     def update_metadata(self, task_id: str, patch: dict) -> None:
         with self._lock:
             task = self._require(task_id)
@@ -147,7 +163,10 @@ class TaskBoard:
 
     def _refresh_readiness(self) -> None:
         for task in self._tasks.values():
-            if task.state in (TaskState.COMPLETED, TaskState.CLAIMED, TaskState.FAILED):
+            if task.state in (
+                TaskState.COMPLETED, TaskState.CLAIMED, TaskState.FAILED,
+                TaskState.WAITING_USER,  # E7-D4: no propagar ni resetear tareas en pausa
+            ):
                 continue
             if task.state == TaskState.BLOCKED:
                 if task.metadata.get("blocked_by_files"):

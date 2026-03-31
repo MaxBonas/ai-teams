@@ -6,6 +6,9 @@ from api.utils import (
     _workspace_from_request,
     _build_project_continuity_context,
     _detect_notebooklm_status,
+    _load_chat_context_curator_insights,
+    _load_chat_rewiring_insights,
+    _load_chat_specialist_insights,
     _read_jsonl_records,
     _read_json_payload,
     _extract_user_message_from_task_description,
@@ -17,8 +20,124 @@ from api.utils import (
 from aiteam.dashboard import build_dashboard_payload
 from aiteam.cli import build_default_orchestrator
 from aiteam.pilot import compute_pilot_metrics
+from aiteam.autotools import AutoToolIntegrator
 
 router = APIRouter()
+
+
+def _load_chat_workflow_insights(
+    runtime_dir: Path,
+    task_id: str,
+) -> dict[str, object]:
+    normalized_task_id = str(task_id or "").strip()
+    if not normalized_task_id:
+        return {}
+    workflow_state = _read_json_payload(runtime_dir / "workflow_state.json", fallback={})
+    if not isinstance(workflow_state, dict):
+        return {}
+    entry = workflow_state.get(normalized_task_id, {})
+    if not isinstance(entry, dict):
+        return {}
+    return {
+        "phase_evidence_plan": dict(entry.get("phase_evidence_plan", {}) or {}),
+        "delegate_batches": list(entry.get("delegate_batches", []) or []),
+        "delegate_economics": dict(entry.get("delegate_economics_summary", {}) or {}),
+        "lead_run_mode": str(entry.get("lead_run_mode", "") or ""),
+        **_load_chat_context_curator_insights(runtime_dir, normalized_task_id),
+        **_load_chat_rewiring_insights(runtime_dir, normalized_task_id),
+        **_load_chat_specialist_insights(runtime_dir, normalized_task_id),
+    }
+
+
+def _load_tool_catalog_index(workspace: Path) -> dict[str, dict[str, object]]:
+    catalog_path = workspace / "config" / "tool_sources.catalog.json"
+    payload = _read_json_payload(catalog_path, fallback={"tools": []})
+    if not isinstance(payload, dict):
+        return {}
+    items = payload.get("tools", [])
+    if not isinstance(items, list):
+        return {}
+    output: dict[str, dict[str, object]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "") or "").strip()
+        if not name:
+            continue
+        output[name] = dict(item)
+    return output
+
+
+def _load_mcp_overview(request: Request) -> dict[str, object]:
+    try:
+        workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+        mgr = _get_mcp_manager(request)
+        catalog_index = _load_tool_catalog_index(workspace)
+        servers = []
+        replacement_counts: dict[str, int] = {}
+        fallback_counts: dict[str, int] = {}
+        for item in mgr.server_status():
+            row = dict(item)
+            name = str(row.get("name", "") or "").strip()
+            catalog_entry = catalog_index.get(name, {})
+            replacements = [
+                str(candidate).strip()
+                for candidate in list(catalog_entry.get("replacement_candidates", []) or [])
+                if str(candidate).strip()
+            ]
+            fallback_strategy = str(catalog_entry.get("fallback_strategy", "") or "").strip()
+            availability_note = str(catalog_entry.get("availability_note", "") or "").strip()
+            row["catalog_enabled"] = bool(catalog_entry.get("enabled", row.get("enabled", False)))
+            row["catalog_fallback_strategy"] = fallback_strategy
+            row["catalog_replacement_candidates"] = replacements
+            row["catalog_availability_note"] = availability_note
+            if fallback_strategy:
+                fallback_counts[fallback_strategy] = int(fallback_counts.get(fallback_strategy, 0)) + 1
+            for candidate in replacements:
+                replacement_counts[candidate] = int(replacement_counts.get(candidate, 0)) + 1
+            servers.append(row)
+        opencode = mgr.opencode_bootstrap_status()
+        machine_profile = mgr.current_machine_profile()
+        total = len(servers)
+        enabled = sum(1 for item in servers if bool(item.get("enabled", False)))
+        healthy = sum(
+            1
+            for item in servers
+            if str(item.get("health_status", "") or "").strip().lower() == "healthy"
+        )
+        running = sum(1 for item in servers if bool(item.get("running", False)))
+        bootstrapped = sum(
+            1
+            for item in servers
+            if str(item.get("bootstrap_source", "") or "").strip().lower() == "opencode_mcp_list"
+        )
+        portability_counts: dict[str, int] = {}
+        health_categories: dict[str, int] = {}
+        health_recommendations: dict[str, int] = {}
+        for item in servers:
+            category = str(item.get("health_category", "unknown") or "unknown").strip().lower() or "unknown"
+            health_categories[category] = int(health_categories.get(category, 0)) + 1
+            recommendation = str(item.get("health_recommendation", "inspect_runtime_logs") or "inspect_runtime_logs").strip().lower()
+            health_recommendations[recommendation] = int(health_recommendations.get(recommendation, 0)) + 1
+            portability = str(item.get("portability_status", "unknown") or "unknown").strip().lower() or "unknown"
+            portability_counts[portability] = int(portability_counts.get(portability, 0)) + 1
+        return {
+            "total_servers": total,
+            "enabled_servers": enabled,
+            "healthy_servers": healthy,
+            "running_servers": running,
+            "bootstrapped_servers": bootstrapped,
+            "machine_profile": machine_profile,
+            "portability_counts": portability_counts,
+            "health_categories": health_categories,
+            "health_recommendations": health_recommendations,
+            "fallback_counts": fallback_counts,
+            "replacement_counts": replacement_counts,
+            "servers": servers,
+            "opencode": opencode,
+        }
+    except Exception as exc:
+        return {"error": str(exc), "servers": []}
 
 
 def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
@@ -283,6 +402,13 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
             # chat_plan_created events are found even in long sessions with many events.
             all_events = _read_jsonl_records(runtime_dir / "events.jsonl")
             latest_chat_run = _latest_chat_run_summary(all_events if isinstance(all_events, list) else [])
+            latest_chat_run = {
+                **latest_chat_run,
+                **_load_chat_workflow_insights(
+                    runtime_dir,
+                    str(latest_chat_run.get("task_id", "") or ""),
+                ),
+            }
             latest_lead_summary = _latest_lead_user_summary(runtime_dir, str(latest_chat_run.get("task_id", "") or ""))
             return {
                 "task_total": payload.get("task_total", 0),
@@ -297,6 +423,7 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
                 "last_lead_user_summary": latest_lead_summary,
                 "notebooklm_status": _detect_notebooklm_status(runtime_dir, PROJECT_ROOT),
                 "project_continuity": continuity,
+                "mcp_overview": _load_mcp_overview(request),
             }
 
         return await asyncio.to_thread(_load_state)
@@ -377,10 +504,18 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
         sorted_items = sorted(items, key=lambda item: str(item.get("timestamp", "")), reverse=True)
         top = sorted_items[: max(1, min(limit, 300))]
         latest_chat_run = _latest_chat_run_summary(events if isinstance(events, list) else [])
+        latest_chat_run = {
+            **latest_chat_run,
+            **_load_chat_workflow_insights(
+                runtime_dir,
+                str(latest_chat_run.get("task_id", "") or ""),
+            ),
+        }
         return {
             "total": len(items),
             "items": top,
             "last_chat_run": latest_chat_run,
+            "mcp_overview": _load_mcp_overview(request),
         }
     except Exception as e:
         import logging
@@ -725,6 +860,52 @@ async def sync_mcp_catalog(request: Request):
         mgr = _get_mcp_manager(request)
         new_count = mgr.sync_from_catalog()
         return {"synced": new_count, "total": len(mgr._configs)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/api/aiteam/mcp/bootstrap-opencode")
+async def bootstrap_mcp_from_opencode(request: Request):
+    """Importa MCPs visibles en OpenCode al runtime local."""
+    _require_api_auth_request(request)
+    try:
+        mgr = _get_mcp_manager(request)
+        imported = mgr.bootstrap_from_opencode()
+        return {
+            "imported": imported,
+            "total": len(mgr._configs),
+            "opencode": mgr.opencode_bootstrap_status(),
+            "servers": mgr.server_status(),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/api/aiteam/mcp/refresh-health")
+async def refresh_mcp_health(request: Request):
+    """Re-ejecuta probes MCP y devuelve overview actualizado."""
+    _require_api_auth_request(request)
+    try:
+        workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+        runtime_dir = workspace / "runtime"
+        integrator = AutoToolIntegrator(
+            runtime_dir=runtime_dir,
+            project_root=PROJECT_ROOT,
+            catalog_path=workspace / "config" / "tool_sources.catalog.json",
+        )
+        report = integrator.mcp_doctor(
+            timeout=12,
+            enable_healthy=False,
+            enable_sensitive=False,
+            quarantine_package_unavailable=True,
+        )
+        mgr = _get_mcp_manager(request)
+        return {
+            "refreshed": True,
+            "report": report,
+            "overview": _load_mcp_overview(request),
+            "servers": mgr.server_status(),
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

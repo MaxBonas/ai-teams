@@ -13,6 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from aiteam.tool_inventory import (
+    normalize_lsp_targets,
+    normalize_skill_targets,
+    write_effective_inventory_snapshot,
+)
+
 
 @dataclass
 class ToolIntegrationReport:
@@ -40,6 +46,7 @@ class AutoToolIntegrator:
         self.adapters_path = self.runtime_dir / "adapters.json"
         self.mcp_path = self.runtime_dir / "mcp_servers.json"
         self.registry_path = self.runtime_dir / "tool_registry.json"
+        self.effective_inventory_path = self.runtime_dir / "effective_tool_inventory.json"
         self.skills_registry_path = self.runtime_dir / "skills_registry.json"
         self.skills_root = self.project_root / ".cloud" / "skills"
         self.skills_root_agents = self.project_root / ".agents" / "skills"
@@ -350,11 +357,20 @@ class AutoToolIntegrator:
         role: str,
         description: str,
         required_capabilities: set[str],
+        preferred_skills: list[str] | set[str] | tuple[str, ...] | None = None,
+        lsp_targets: list[str] | set[str] | tuple[str, ...] | None = None,
+        guidance_mode: str = "operator",
         limit: int = 4,
     ) -> dict[str, Any]:
         role_key = role.strip().lower()
         required = {item.strip().lower() for item in required_capabilities if item.strip()}
         text_blob = description.lower()
+        normalized_skill_targets = normalize_skill_targets(preferred_skills)
+        normalized_lsp_targets = normalize_lsp_targets(lsp_targets)
+        mode = str(guidance_mode or "operator").strip().lower() or "operator"
+        if mode not in {"operator", "coordinator"}:
+            mode = "operator"
+        lsp_target_set = set(normalized_lsp_targets)
 
         # Build success rate map from usage stats
         usage_stats = self.skill_usage_stats(limit=50)
@@ -371,6 +387,7 @@ class AutoToolIntegrator:
             capabilities = _to_lower_set(entry.get("capabilities", []))
             roles = _to_lower_set(entry.get("roles", []))
             keywords = _to_lower_set(entry.get("keywords", []))
+            skill_name = str(entry.get("name", "")).strip().lower()
 
             score = 0.0
             score += len(required.intersection(capabilities)) * 3
@@ -378,9 +395,10 @@ class AutoToolIntegrator:
                 score += 2
             if any(keyword and keyword in text_blob for keyword in keywords):
                 score += 1
+            if skill_name and skill_name in set(normalized_skill_targets):
+                score += 5
 
             # Boost/penalize by success rate
-            skill_name = str(entry.get("name", "")).strip().lower()
             if skill_name in success_map and uses_map.get(skill_name, 0) >= 2:
                 rate = success_map[skill_name]
                 if rate >= 80:
@@ -391,8 +409,30 @@ class AutoToolIntegrator:
             if score > 0:
                 scored.append((score, entry))
 
+        entries_by_name = {
+            str(entry.get("name", "")).strip().lower(): entry
+            for entry in self.skill_library_entries()
+            if str(entry.get("name", "")).strip()
+        }
+        targeted_entries: list[dict[str, Any]] = []
+        seen_skill_names: set[str] = set()
+        for skill_name in normalized_skill_targets:
+            entry = entries_by_name.get(skill_name)
+            if entry is None or skill_name in seen_skill_names:
+                continue
+            targeted_entries.append(entry)
+            seen_skill_names.add(skill_name)
+
         scored.sort(key=lambda row: row[0], reverse=True)
-        selected = [row[1] for row in scored[: max(1, limit)]]
+        selected: list[dict[str, Any]] = list(targeted_entries)
+        for _, entry in scored:
+            skill_name = str(entry.get("name", "")).strip().lower()
+            if not skill_name or skill_name in seen_skill_names:
+                continue
+            selected.append(entry)
+            seen_skill_names.add(skill_name)
+            if len(selected) >= max(1, limit):
+                break
 
         recommended_mcp: set[str] = set()
         for entry in selected:
@@ -422,32 +462,89 @@ class AutoToolIntegrator:
                     active_mcp.add(name)
 
         lines: list[str] = []
-        if selected:
-            lines.append("Skills aplicables:")
-            for entry in selected:
-                name = str(entry.get("name", "")).strip().lower()
-                purpose = str(entry.get("purpose", entry.get("description", ""))).strip()
-                # Annotate with success rate ranking
-                rate = success_map.get(name)
-                uses = uses_map.get(name, 0)
-                if rate is not None and uses >= 2:
-                    if rate >= 80:
-                        tag = " [RECOMENDADO - {:.0f}% exito]".format(rate)
-                    elif rate < 40:
-                        tag = " [USAR CON PRECAUCION - {:.0f}% exito]".format(rate)
+        if mode == "coordinator":
+            lines.append(
+                "Coordina mediante especialistas y pide informe compacto; evita cargar transcripts crudos."
+            )
+            if normalized_skill_targets:
+                lines.append(
+                    "Skills objetivo para delegar: "
+                    + ", ".join(normalized_skill_targets)
+                )
+            if normalized_lsp_targets:
+                lines.append(
+                    "Objetivos LSP para delegar: "
+                    + ", ".join(normalized_lsp_targets)
+                )
+            if selected:
+                lines.append(
+                    "Playbooks/especialistas sugeridos: "
+                    + ", ".join(
+                        str(item.get("name", "")).strip().lower()
+                        for item in selected
+                        if str(item.get("name", "")).strip()
+                    )
+                )
+            if recommended_mcp:
+                lines.append(
+                    "MCP sugeridos para el operador: "
+                    + ", ".join(sorted(recommended_mcp))
+                )
+            if normalized_lsp_targets:
+                lines.append(
+                    "Pide salida breve con symbols/references/impact solo cuando haga falta para decidir."
+                )
+        else:
+            if normalized_skill_targets:
+                lines.append(
+                    "Skills objetivo declaradas: "
+                    + ", ".join(normalized_skill_targets)
+                )
+            if normalized_lsp_targets:
+                lines.append(
+                    "Objetivos LSP declarados: "
+                    + ", ".join(normalized_lsp_targets)
+                )
+                lsp_playbook: list[str] = []
+                if "symbols" in lsp_target_set:
+                    lsp_playbook.append("mapear simbolos y puntos de entrada")
+                if "references" in lsp_target_set:
+                    lsp_playbook.append("seguir referencias y fan-out")
+                if "impact" in lsp_target_set:
+                    lsp_playbook.append("delimitar impacto y dependencias")
+                if lsp_playbook:
+                    lines.append("Playbook LSP sugerido:")
+                    for step in lsp_playbook:
+                        lines.append(f"- {step}")
+            if selected:
+                lines.append("Skills aplicables:")
+                for entry in selected:
+                    name = str(entry.get("name", "")).strip().lower()
+                    purpose = str(entry.get("purpose", entry.get("description", ""))).strip()
+                    # Annotate with success rate ranking
+                    rate = success_map.get(name)
+                    uses = uses_map.get(name, 0)
+                    if rate is not None and uses >= 2:
+                        if rate >= 80:
+                            tag = " [RECOMENDADO - {:.0f}% exito]".format(rate)
+                        elif rate < 40:
+                            tag = " [USAR CON PRECAUCION - {:.0f}% exito]".format(rate)
+                        else:
+                            tag = " [{:.0f}% exito]".format(rate)
                     else:
-                        tag = " [{:.0f}% exito]".format(rate)
-                else:
-                    tag = ""
-                lines.append(f"- {name}: {purpose}{tag}")
+                        tag = ""
+                    lines.append(f"- {name}: {purpose}{tag}")
 
-        if recommended_mcp:
-            lines.append("MCP recomendados:")
-            for item in sorted(recommended_mcp):
-                status = "activo" if item in active_mcp else "registrar"
-                lines.append(f"- {item} ({status})")
+            if recommended_mcp:
+                lines.append("MCP recomendados:")
+                for item in sorted(recommended_mcp):
+                    status = "activo" if item in active_mcp else "registrar"
+                    lines.append(f"- {item} ({status})")
 
         return {
+            "guidance_mode": mode,
+            "preferred_skills": normalized_skill_targets,
+            "lsp_targets": normalized_lsp_targets,
             "skills": [str(item.get("name", "")).strip().lower() for item in selected],
             "recommended_mcp": sorted(recommended_mcp),
             "active_mcp": sorted(active_mcp),
@@ -460,6 +557,7 @@ class AutoToolIntegrator:
         timeout: int = 20,
         enable_healthy: bool = False,
         enable_sensitive: bool = False,
+        quarantine_package_unavailable: bool = False,
     ) -> dict[str, Any]:
         payload = _load_json(self.mcp_path, default={"servers": []})
         servers = payload.get("servers", [])
@@ -471,6 +569,7 @@ class AutoToolIntegrator:
         healthy_count = 0
         enabled_count = 0
         auto_enabled = 0
+        auto_disabled = 0
         skipped_sensitive = 0
 
         for item in servers:
@@ -481,6 +580,21 @@ class AutoToolIntegrator:
             args_list = [str(arg) for arg in args] if isinstance(args, list) else []
             health_ok, reason = self._probe_mcp_command(command=command, args=args_list, timeout=timeout)
             status = "healthy" if health_ok else "unhealthy"
+            category = "healthy" if health_ok else "runtime_failure"
+            if not health_ok:
+                reason_text = str(reason or "").lower()
+                if "enoent" in reason_text or "no such file or directory" in reason_text or "error accessing directory" in reason_text:
+                    category = "path_missing"
+                elif "please set " in reason_text or "environment variable" in reason_text or "api key" in reason_text or "token" in reason_text:
+                    category = "credentials_missing"
+                elif "please provide" in reason_text or "command-line argument" in reason_text or "missing required" in reason_text:
+                    category = "configuration_required"
+                elif "e404" in reason_text or "404 not found" in reason_text or "not found - get https://registry.npmjs.org" in reason_text:
+                    category = "package_unavailable"
+                elif reason_text.startswith("probe_error:") or "winerror" in reason_text or "start_failed:" in reason_text:
+                    category = "command_unavailable"
+                elif "timeout" in reason_text:
+                    category = "timeout"
 
             if health_ok:
                 healthy_count += 1
@@ -492,18 +606,24 @@ class AutoToolIntegrator:
                         if not _to_bool(item.get("enabled", False)):
                             auto_enabled += 1
                         item["enabled"] = True
+            elif quarantine_package_unavailable and category == "package_unavailable":
+                if _to_bool(item.get("enabled", False)):
+                    auto_disabled += 1
+                item["enabled"] = False
 
             if _to_bool(item.get("enabled", False)):
                 enabled_count += 1
 
             item["health_status"] = status
             item["health_reason"] = reason
+            item["health_category"] = category
             item["last_checked"] = checked_at
 
             reports.append(
                 {
                     "name": str(item.get("name", "")).strip().lower(),
                     "status": status,
+                    "category": category,
                     "reason": reason,
                     "enabled": _to_bool(item.get("enabled", False)),
                 }
@@ -518,6 +638,7 @@ class AutoToolIntegrator:
             "healthy": healthy_count,
             "enabled": enabled_count,
             "auto_enabled": auto_enabled,
+            "auto_disabled": auto_disabled,
             "skipped_sensitive": skipped_sensitive,
             "reports": reports,
         }
@@ -742,7 +863,7 @@ class AutoToolIntegrator:
             else:
                 report.messages.append(f"optional_failed:{unknown}")
 
-        self._append_registry(task_id=task_id, report=report)
+        self._append_registry(task_id=task_id, report=report, metadata=metadata)
         return report
 
     def suggest_requirements(
@@ -755,16 +876,92 @@ class AutoToolIntegrator:
             return []
 
         items = self._catalog_items()
-        scored: list[tuple[int, dict[str, Any]]] = []
+        scored_by_name: dict[str, tuple[int, dict[str, Any]]] = {}
         required = {item.strip().lower() for item in required_capabilities if item.strip()}
         for item in items:
             capabilities = _to_lower_set(item.get("capabilities", []))
             overlap = len(required.intersection(capabilities))
             if overlap <= 0:
                 continue
-            scored.append((overlap, dict(item)))
-        scored.sort(key=lambda row: row[0], reverse=True)
+            current = dict(item)
+            fallback_strategy = str(current.get("fallback_strategy", "")).strip().lower()
+            if (
+                str(current.get("category", "")).strip().lower() == "mcp"
+                and fallback_strategy == "prefer_skill_or_cli"
+            ):
+                replacements = self._replacement_requirements_for_catalog_item(current)
+                if replacements:
+                    for index, replacement in enumerate(replacements):
+                        self._record_suggestion_candidate(
+                            scored_by_name,
+                            score=overlap + 2 - min(index, 1),
+                            item=replacement,
+                        )
+                    continue
+            self._record_suggestion_candidate(scored_by_name, score=overlap, item=current)
+        scored = sorted(scored_by_name.values(), key=lambda row: row[0], reverse=True)
         return [row[1] for row in scored[: max(1, limit)]]
+
+    @staticmethod
+    def _record_suggestion_candidate(
+        scored_by_name: dict[str, tuple[int, dict[str, Any]]],
+        *,
+        score: int,
+        item: dict[str, Any],
+    ) -> None:
+        name = str(item.get("name", "")).strip().lower()
+        if not name:
+            return
+        existing = scored_by_name.get(name)
+        if existing is None or score > existing[0]:
+            scored_by_name[name] = (score, dict(item))
+
+    def _replacement_requirements_for_catalog_item(
+        self,
+        item: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        replacements: list[dict[str, Any]] = []
+        original_name = str(item.get("name", "")).strip().lower()
+        for candidate in list(item.get("replacement_candidates", []) or []):
+            name = str(candidate or "").strip().lower()
+            if not name:
+                continue
+            catalog_item = self._catalog_by_name().get(name)
+            if isinstance(catalog_item, dict):
+                row = dict(catalog_item)
+                row.setdefault("replacement_for", original_name)
+                replacements.append(row)
+                continue
+            skill_item = self._skill_requirement_from_library(name)
+            if skill_item:
+                skill_item.setdefault("replacement_for", original_name)
+                replacements.append(skill_item)
+        return replacements
+
+    def _skill_requirement_from_library(self, name: str) -> dict[str, Any]:
+        normalized = str(name or "").strip().lower()
+        if not normalized:
+            return {}
+        for item in self.skill_library_entries():
+            if not isinstance(item, dict):
+                continue
+            item_name = str(item.get("name", "")).strip().lower()
+            if item_name != normalized:
+                continue
+            return {
+                "name": normalized,
+                "category": "skill",
+                "source_type": "builtin",
+                "source": "builtin",
+                "description": str(
+                    item.get("description", item.get("purpose", "Skill recomendada por catalogo"))
+                    or "Skill recomendada por catalogo"
+                ).strip(),
+                "capabilities": list(item.get("capabilities", []) or []),
+                "role_targets": list(item.get("roles", []) or []),
+                "enabled": True,
+            }
+        return {}
 
     def _normalize_requirement(self, requirement: Any) -> dict[str, Any]:
         if isinstance(requirement, str):
@@ -1144,7 +1341,13 @@ class AutoToolIntegrator:
             "- Priorizar cambios pequenos, verificables y con evidencia.\n"
         )
 
-    def _append_registry(self, *, task_id: str, report: ToolIntegrationReport) -> None:
+    def _append_registry(
+        self,
+        *,
+        task_id: str,
+        report: ToolIntegrationReport,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         payload = _load_json(self.registry_path, default={"entries": []})
         entries = payload.get("entries", [])
         if not isinstance(entries, list):
@@ -1162,6 +1365,116 @@ class AutoToolIntegrator:
         )
         payload["entries"] = entries[-200:]
         _write_json(self.registry_path, payload)
+        self._append_effective_inventory_snapshot(
+            task_id=task_id,
+            report=report,
+            metadata=metadata or {},
+        )
+
+    def _append_effective_inventory_snapshot(
+        self,
+        *,
+        task_id: str,
+        report: ToolIntegrationReport,
+        metadata: dict[str, Any],
+    ) -> None:
+        required_capabilities = sorted(
+            {
+                str(item or "").strip().lower()
+                for item in list(metadata.get("required_capabilities", []) or [])
+                if str(item or "").strip()
+            }
+        )
+        selected_tools = self._effective_tools_for_report(report)
+        write_effective_inventory_snapshot(
+            output_path=self.effective_inventory_path,
+            project_root=self.project_root,
+            task_id=task_id,
+            required_capabilities=required_capabilities,
+            skill_targets=list(metadata.get("skill_targets", []) or []),
+            lsp_targets=list(metadata.get("lsp_targets", []) or []),
+            selected_tools=selected_tools,
+        )
+
+    def _effective_tools_for_report(
+        self,
+        report: ToolIntegrationReport,
+    ) -> list[dict[str, Any]]:
+        catalog = self._catalog_by_name()
+        adapters_payload = _load_json(self.adapters_path, default={"external_adapters": []})
+        mcp_payload = _load_json(self.mcp_path, default={"servers": []})
+        skills_payload = _load_json(self.skills_registry_path, default={"skills": []})
+
+        adapter_by_name = {
+            str(item.get("name", "")).strip().lower(): item
+            for item in list(adapters_payload.get("external_adapters", []) or [])
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        }
+        mcp_by_name = {
+            str(item.get("name", "")).strip().lower(): item
+            for item in list(mcp_payload.get("servers", []) or [])
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        }
+        skill_by_name = {
+            str(item.get("name", "")).strip().lower(): item
+            for item in list(skills_payload.get("skills", []) or [])
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        }
+
+        selected: list[dict[str, Any]] = []
+        for name in report.integrated_adapters:
+            key = str(name or "").strip().lower()
+            item = dict(catalog.get(key, {}))
+            item.update(adapter_by_name.get(key, {}))
+            selected.append(
+                {
+                    "name": key,
+                    "category": str(item.get("category", "cli") or "cli").strip().lower(),
+                    "source": str(item.get("source", item.get("provider", "adapter")) or "adapter").strip(),
+                    "capabilities": list(item.get("capabilities", []) or []),
+                    "tags": list(item.get("tags", []) or []),
+                    "cost_tier": _cost_tier_label(item.get("cost_tier", "medium")),
+                    "latency_tier": str(item.get("latency_tier", "medium") or "medium").strip().lower(),
+                    "risk_tier": str(item.get("risk_tier", "medium") or "medium").strip().lower(),
+                    "environment_targets": list(item.get("environment_targets", ["dev"]) or ["dev"]),
+                }
+            )
+
+        for name in report.integrated_mcp_servers:
+            key = str(name or "").strip().lower()
+            item = dict(catalog.get(key, {}))
+            item.update(mcp_by_name.get(key, {}))
+            selected.append(
+                {
+                    "name": key,
+                    "category": "mcp",
+                    "source": str(item.get("source", item.get("source_type", "mcp")) or "mcp").strip(),
+                    "capabilities": list(item.get("capabilities", []) or []),
+                    "tags": ["mcp"],
+                    "cost_tier": _cost_tier_label(item.get("cost_tier", "low")),
+                    "latency_tier": str(item.get("latency_tier", "medium") or "medium").strip().lower(),
+                    "risk_tier": str(item.get("risk_tier", "medium") or "medium").strip().lower(),
+                    "environment_targets": list(item.get("environment_targets", ["dev", "stage"]) or ["dev", "stage"]),
+                }
+            )
+
+        for name in report.integrated_skills:
+            key = str(name or "").strip().lower()
+            item = dict(skill_by_name.get(key, {}))
+            selected.append(
+                {
+                    "name": key,
+                    "category": "skill",
+                    "source": str(item.get("source_repo", "skill") or "skill").strip(),
+                    "capabilities": list(item.get("capabilities", []) or []),
+                    "tags": ["skill"],
+                    "cost_tier": _cost_tier_label(item.get("cost_tier", "low")),
+                    "latency_tier": str(item.get("latency_tier", "low") or "low").strip().lower(),
+                    "risk_tier": str(item.get("risk_tier", "low") or "low").strip().lower(),
+                    "environment_targets": list(item.get("environment_targets", ["dev", "stage"]) or ["dev", "stage"]),
+                }
+            )
+        return selected
 
 
 def _load_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
@@ -1177,6 +1490,19 @@ def _load_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return dict(default)
     return payload
+
+
+def _cost_tier_label(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        if int(value) <= 1:
+            return "low"
+        if int(value) == 2:
+            return "medium"
+        return "high"
+    text = str(value or "").strip().lower()
+    if text in {"low", "medium", "high"}:
+        return text
+    return "medium"
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

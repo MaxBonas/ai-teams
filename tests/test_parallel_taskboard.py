@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from aiteam.adapters import SubscriptionAdapter
+from aiteam.adapters import FakeSuccessAdapter, SubscriptionAdapter
 from aiteam.adapters.base import ModelAdapter
 from aiteam.config import build_default_router_policy
 from aiteam.orchestrator import AITeamOrchestrator
@@ -117,10 +117,8 @@ class ParallelTaskBoardTests(unittest.TestCase):
             runtime_dir.mkdir(parents=True)
             project_root.mkdir(parents=True)
 
-            adapter = SubscriptionAdapter(
+            adapter = FakeSuccessAdapter(
                 name="test_adapter",
-                provider="openai",
-                model="gpt-4.1",
                 capabilities={"coding", "reasoning", "analysis", "review"},
             )
             router = HybridRouter(

@@ -90,5 +90,67 @@ class FinOpsTests(unittest.TestCase):
         manager.ledger_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
 
+class BudgetAtomicityTests(unittest.TestCase):
+    """M2: Dos agentes escriben al ledger en paralelo sin pérdida de registros."""
+
+    def _make_routing_decision(self, cost_usd: float):
+        from unittest.mock import MagicMock
+        from aiteam.types import RoutingDecision, AdapterResponse, RoutingChannel
+
+        resp = MagicMock(spec=AdapterResponse)
+        resp.input_tokens = 100
+        resp.output_tokens = 100
+
+        decision = MagicMock(spec=RoutingDecision)
+        decision.provider = "openai"
+        decision.model = "gpt-4o-mini"
+        decision.channel = RoutingChannel.API
+        decision.reason = "test"
+        decision.success = True
+        decision.response = resp
+        return decision
+
+    def test_concurrent_ledger_writes_no_loss(self) -> None:
+        """Dos hilos escriben 50 registros cada uno → 100 en el ledger, sin corrupción."""
+        import threading
+        from aiteam.finops import BudgetManager, BudgetPolicy
+        from aiteam.persistence import AtomicFileWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "cost_ledger.jsonl"
+            errors: list[Exception] = []
+            n_writes = 50
+
+            def write_records():
+                try:
+                    for i in range(n_writes):
+                        AtomicFileWriter.append_jsonl_with_checksum(
+                            ledger_path,
+                            {"ts": f"2026-01-01T00:00:{i:02d}Z", "cost_usd": 0.001, "thread": threading.current_thread().name},
+                        )
+                except Exception as exc:
+                    errors.append(exc)
+
+            t1 = threading.Thread(target=write_records, name="agent-1")
+            t2 = threading.Thread(target=write_records, name="agent-2")
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            self.assertFalse(errors, f"Errores durante escritura concurrente: {errors}")
+
+            records = AtomicFileWriter.read_jsonl_with_dedup(ledger_path)
+            # Cada hilo escribió n_writes registros; pueden deduplicarse por checksum
+            # si tienen el mismo contenido, pero los ts únicos evitan eso.
+            self.assertEqual(len(records), n_writes * 2,
+                             f"Se esperaban {n_writes * 2} registros, se leyeron {len(records)}")
+
+            # Cada registro debe tener sus campos originales (read_jsonl_with_dedup
+            # ya elimina el campo _checksum interno de validación — eso es correcto)
+            for rec in records:
+                self.assertIn("cost_usd", rec, "Registro incompleto indica corrupción")
+
+
 if __name__ == "__main__":
     unittest.main()

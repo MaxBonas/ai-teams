@@ -1,95 +1,79 @@
-# AI Team Documentation Index
+# AI Team — Índice de Documentación
 
-**Last Updated**: 2026-03-26
-**Current Phase**: Roadmap activo de flujo, continuidad y agentes conversacionales
-**Status**: Sistema operativo con documentacion historica y roadmap vivo
-
----
-
-## Estado real verificado
-
-- Suite completa: **282 passing**
-- Comando verificado: `venv/Scripts/python.exe -m pytest tests/ -q --tb=short`
-- Fuente de verdad para trabajo activo: `ROADMAP_FLUJOS_Y_AGENTES.md`
-- Backlog operativo consolidado: `TASKS.md`
+**Actualizado**: 2026-03-31
+**Tests**: 386 passing | 28 fallos pre-existentes (infraestructura, ver T-F en TASKS)
+**Visión del proyecto**: IDE multimodelo con equipo de agentes (Team Lead, Researcher, Engineer, Reviewer, QA, Scout) que delega a modelos baratos, celebra reuniones multimodelo donde cada modelo aporta su perspectiva, y el Lead tiene la última palabra pero debe justificar los desacuerdos.
 
 ---
 
-## Lectura recomendada segun objetivo
+## Documentos activos (fuentes de verdad)
 
-### Quiero entender el estado actual
-1. `README.md`
-2. `ROADMAP_FLUJOS_Y_AGENTES.md`
-3. `TASKS.md`
-4. `docs/CONVERSATIONAL_AGENTS_PLAN.md`
-5. `docs/TEAM_FLOW_ANALYSIS.md`
-
-### Quiero trabajar en el roadmap activo
-1. `ROADMAP_FLUJOS_Y_AGENTES.md`
-2. `TASKS.md`
-3. `docs/BATCH2_SPEC.md`
-4. `docs/CONVERSATIONAL_AGENTS_PLAN.md`
-
-### Quiero revisar documentacion historica
-1. `docs/SPRINT_ROADMAP_Q1_2026.md`
-2. `docs/EXECUTION_QUICK_START.md`
-3. `docs/TEST_MATRIX_SPRINTS_1_2_3.md`
-4. `docs/DEEP_AUDIT_AND_IMPROVEMENTS_PHASE_2.md`
-
-### Quiero entender arquitectura y operacion
-1. `docs/ARCHITECTURE.md`
-2. `docs/SECURITY_COMPLIANCE.md`
-3. `docs/PRODUCTION_ROLLOUT_RUNBOOK.md`
-4. `docs/LLM_CONNECTION_SYSTEM.md`
+| Documento | Qué contiene |
+|---|---|
+| `TASKS_2026_03_28.md` | **Backlog principal** — epics completados, tareas pendientes, definición de done |
+| `DESIGN_2026_03_31.md` | Diseño de scoring, scout layer, WAITING_USER, LCP directives (implementado) |
+| `DESIGN_2026_03_28.md` | Diseño de Agent Lanes y Dynamic Phases (implementado) |
+| `ARCHITECTURE.md` | Arquitectura del sistema: módulos, roles, flujo de fases, calidad gates |
+| `MODEL_POLICY.md` | Catálogo de modelos, tiers, reglas de ruteo Pro-first + fallback |
+| `CONVERSATIONAL_AGENTS_PLAN.md` | Objetivo de agentes con continuidad conversacional real por proyecto |
+| `SECURITY_COMPLIANCE.md` | Políticas de compliance: guardrails, redacción, doble aprobación prod |
+| `PRODUCTION_ROLLOUT_RUNBOOK.md` | Despliegue en stage/prod, health checks, rollback |
 
 ---
 
-## Mapa rapido
+## Documentos de referencia (no activos, pero útiles)
 
-| Documento | Estado | Uso recomendado |
-|---|---|---|
-| `README.md` | vigente | overview funcional del proyecto |
-| `ROADMAP_FLUJOS_Y_AGENTES.md` | vigente | roadmap vivo por batches/fixes |
-| `TASKS.md` | vigente | backlog y estado de ejecucion |
-| `docs/CONVERSATIONAL_AGENTS_PLAN.md` | vigente | objetivo de agentes conversacionales reales |
-| `docs/TEAM_FLOW_ANALYSIS.md` | vigente | diagnostico de problemas de flujo |
-| `docs/BATCH2_SPEC.md` | vigente | especificacion del tramo de paralelismo |
-| `docs/SPRINT_ROADMAP_Q1_2026.md` | historico | referencia del hardening Q1 completado |
-| `docs/EXECUTION_QUICK_START.md` | historico | guia de ejecucion del plan Q1 |
-| `docs/TEST_MATRIX_SPRINTS_1_2_3.md` | historico | matriz de tests del plan Q1 |
-
----
-
-## Implementado / Parcial / Planificado
-
-### Implementado
-- Evidence gate robusto en mock
-- Dependencias fallidas en `BLOCKED`
-- Rounds y sub-iteraciones visibles
-- Barreras de sub-iteracion y claim guard
-- Meetings con menos ruido
-- Mailbox conversacional basico Team Lead -> agente -> Team Lead
-- Contexto por proyecto con `project_key`
-- Observabilidad del flujo en dashboard, API y timeline UI
-
-### Parcial
-- Threads conversacionales persistentes por agente/proyecto
-- Continuidad multi-turn basada en prompt enriquecido con thread
-- Separacion memoria global vs proyecto, con compaction minima
-
-### Planificado
-- Adapters nativos con `messages[]`
-- Conversacion mas profunda TL <-> agentes
-- Cierre documental total y E2E del modelo multi-LLM
+| Documento | Qué contiene |
+|---|---|
+| `INTERNAL_QUALITIES_ROADMAP.md` | Cualidades no negociables del producto (valores del sistema) |
+| `MCP_CLI_SKILLS_ROADMAP.md` | Fases de integración de herramientas externas vía MCP/CLI |
+| `INTEGRATION_GUIDE.md` | Contrato de adaptadores, prioridades, wrapping de programas externos |
+| `SECURITY_AUDIT.md` | 5 categorías de control de seguridad (referencia defensiva) |
+| `EXTERNAL_TOOLS_INVENTORY.md` | Inventario de herramientas externas candidatas (WhatsApp, Remotion, etc.) |
+| `LEARNING_REGISTRY_SCHEMA.md` | Schema JSONL para el registro de aprendizaje del sistema |
+| `PROJECT_LEARNING_GUIDE.md` | Guía para capturar fallos y aprendizajes del sistema |
+| `DECISION_LOG.md` | Registro ADR de decisiones arquitectónicas |
 
 ---
 
-## Nota sobre documentos historicos
+## Lectura recomendada según objetivo
 
-`docs/SPRINT_ROADMAP_Q1_2026.md`, `docs/EXECUTION_QUICK_START.md` y `docs/TEST_MATRIX_SPRINTS_1_2_3.md` siguen siendo utiles como referencia, pero ya no describen el trabajo activo del proyecto. Usarlos como contexto historico, no como fuente de verdad operativa.
+### Quiero entender el estado actual y el backlog
+→ `TASKS_2026_03_28.md` + `DESIGN_2026_03_31.md`
+
+### Quiero implementar una nueva feature
+→ `DESIGN_2026_03_31.md` → `ARCHITECTURE.md` → `TASKS_2026_03_28.md` (buscar el epic)
+
+### Quiero entender cómo funciona el routing multimodelo
+→ `MODEL_POLICY.md` → `ARCHITECTURE.md#router`
+
+### Quiero entender la visión de agentes conversacionales
+→ `CONVERSATIONAL_AGENTS_PLAN.md` → `DESIGN_2026_03_28.md`
+
+### Quiero desplegar a producción
+→ `PRODUCTION_ROLLOUT_RUNBOOK.md` → `SECURITY_COMPLIANCE.md`
+
+### Quiero integrar una herramienta externa
+→ `MCP_CLI_SKILLS_ROADMAP.md` → `INTEGRATION_GUIDE.md` → `EXTERNAL_TOOLS_INVENTORY.md`
 
 ---
 
-## Siguiente accion recomendada
+## Archivos eliminados (2026-03-31)
 
-Empieza por `ROADMAP_FLUJOS_Y_AGENTES.md` y `TASKS.md`.
+Los siguientes 22 archivos fueron eliminados por ser legacy, superseded o redundantes:
+
+- `AGENT_FLOW_IMPROVEMENT_PLAN.md` — análisis histórico de frameworks (crewAI, LangGraph, etc.)
+- `AUDIT_2026_03_27.md` — auditoría histórica, issues incorporados en TASKS
+- `BATCH2_SPEC.md` — spec de paralelismo (implementado en EPIC-1)
+- `DEEP_AUDIT_AND_IMPROVEMENTS_PHASE_2.md` — auditoría fase 2 (supersedida)
+- `EXECUTION_QUICK_START.md` — guía Q1 (marcada como histórica por su propio autor)
+- `LLM_CONNECTION_SYSTEM.md` — supersedida por MODEL_POLICY.md + ARCHITECTURE.md
+- `NOTEBOOKLM_AND_LEARNING_IMPLEMENTATION.md` + 7 `NOTEBOOKLM_*.md` — integración NotebookLM (no alineada con visión IDE multimodelo)
+- `PLAN_PRODUCCION_CONSOLIDADO.md` — consolidación supersedida por TASKS
+- `PROJECT_AUDIT_AND_HARDENING_PLAN.md` — plan de hardening (completado)
+- `SPRINT_ROADMAP_Q1_2026.md` — todos los sprints completados, histórico
+- `TASKS_AI_TEAM.md` — supersedida por `TASKS_2026_03_28.md`
+- `TEAM_FLOW_ANALYSIS.md` — diagnóstico incorporado en DESIGN_2026_03_31.md
+- `TEAMS_DEEP_IMPLEMENTATION_PLAN.md` — plan wave (supersedido por TASKS)
+- `TEST_MATRIX_SPRINTS_1_2_3.md` — matriz Q1 (sprints completados)
+- `UI_REDESIGN_2026_03_28.md` — spec del rediseño (implementado en EPIC-3)
