@@ -29,10 +29,39 @@ except ImportError:
 
 # Import AI Team Dashboard requirements
 from aiteam.dashboard import build_dashboard_payload
+from aiteam.autotools import AutoToolIntegrator
 from aiteam.cli import build_default_orchestrator, cmd_notebooklm_sync
+from aiteam.chat_runtime import ChatRunState
+from aiteam.context_curator import (
+    ContextCuratorStore,
+    estimate_context_compaction_value,
+    estimate_context_pressure,
+)
+from aiteam.chat_policy import (
+    CHAT_VALIDATION_OWNER,
+    ChatPolicyInput,
+    build_chat_task_policy_metadata,
+    evaluate_chat_policy,
+    resolve_run_type_policy,
+)
+from aiteam.lead_control import (
+    extract_clarify_directive as _lead_control_extract_clarify_directive,
+    extract_delegate_directive as _lead_control_extract_delegate_directive,
+    extract_delegate_request as _lead_control_extract_delegate_request,
+    extract_evidence_plan as _lead_control_extract_evidence_plan,
+    extract_lcp_directives as _lead_control_extract_lcp_directives,
+    iter_lead_checkpoint_directives as _lead_control_iter_lead_checkpoint_directives,
+    resolve_lead_intake as _lead_control_resolve_lead_intake,
+    strip_selected_lcp_directives as _lead_control_strip_selected_lcp_directives,
+    strip_lcp_directives as _lead_control_strip_lcp_directives,
+)
 from aiteam.persistence import AtomicFileWriter
 from aiteam.pilot import compute_pilot_metrics
-from aiteam.types import Complexity, Criticality, Role, WorkTask
+from aiteam.tool_specialists import (
+    build_tool_specialist_metadata,
+    replacement_specialists_from_metadata,
+)
+from aiteam.types import Complexity, Criticality, Role, TaskState, WorkTask
 from aiteam.workflow_planner import (
     PhaseSpec,
     default_phases,
@@ -171,6 +200,20 @@ class TeamChatResponse(BaseModel):
     successful_check_count: int = 0
     live_mode_required: bool = False
     live_mode_rejected: bool = False
+    advisory_mode: bool = False
+    advisory_reason: str = ""
+    policy_review_required: bool = False
+    validation_owner: str = ""
+    policy_signals: list[str] = []
+    phase_evidence_plan: dict[str, dict[str, object]] = {}
+    delegate_batches: list[dict[str, object]] = []
+    delegate_economics: dict[str, object] = {}
+    specialist_reports: list[dict[str, object]] = []
+    specialist_report_summary: dict[str, object] = {}
+    specialist_reports: list[dict[str, object]] = []
+    specialist_report_summary: dict[str, object] = {}
+    waiting_user: bool = False
+    clarification_question: str = ""
 
 
 class TeamChatProgressResponse(BaseModel):
@@ -198,6 +241,13 @@ class TeamChatProgressResponse(BaseModel):
     last_event_ts: str = ""
     dynamic_phases_ready: bool = False
     phase_task_ids: dict[str, str] = {}
+    phase_evidence_plan: dict[str, dict[str, object]] = {}
+    delegate_batches: list[dict[str, object]] = []
+    delegate_economics: dict[str, object] = {}
+    specialist_reports: list[dict[str, object]] = []
+    specialist_report_summary: dict[str, object] = {}
+    waiting_user: bool = False                # E7-D4: alguna tarea mid-run está pausada esperando al usuario
+    clarification_question: str = ""          # pregunta emitida por el agente pausado
 
 
 class OperatorTimelineItem(BaseModel):
@@ -401,6 +451,1504 @@ def _is_game_followup_request(workspace: Path, message: str) -> bool:
         "iteración",
     ]
     return any(token in normalized for token in followup_hints)
+
+
+def _extract_lcp_directives(text: str) -> dict:
+    return _lead_control_extract_lcp_directives(text)
+
+
+def _strip_lcp_directives(text: str) -> str:
+    return _lead_control_strip_lcp_directives(text)
+
+
+def _extract_clarify_directive(text: str) -> str | None:
+    return _lead_control_extract_clarify_directive(text)
+
+
+def _extract_delegate_directive(text: str) -> str | None:
+    return _lead_control_extract_delegate_directive(text)
+
+
+def _extract_delegate_request(text: str):
+    return _lead_control_extract_delegate_request(text)
+
+
+def _extract_evidence_plan(text: str) -> dict[str, dict[str, object]]:
+    return _lead_control_extract_evidence_plan(text)
+
+
+def _resolve_delegate_plan(delegate_request) -> dict[str, object]:
+    intent = str(getattr(delegate_request, "intent", "delegate") or "delegate").strip().lower()
+    plans: dict[str, dict[str, object]] = {
+        "delegate": {
+            "role": Role.SCOUT,
+            "specialist": "repo_scout",
+            "required_capabilities": ["repo_read"],
+            "phase_prefix": "delegate_scout",
+            "title_prefix": "Delegate scout",
+            "instruction": "Inspecciona el repositorio y el contexto local para responder con hechos concretos.",
+        },
+        "delegate_repo_scan": {
+            "role": Role.SCOUT,
+            "specialist": "repo_scout",
+            "required_capabilities": ["repo_read"],
+            "phase_prefix": "delegate_repo_scan",
+            "title_prefix": "Delegate repo scan",
+            "instruction": "Recorre archivos, estructura, git y pistas locales; devuelve un mapa corto y factual.",
+        },
+        "delegate_browser_repro": {
+            "role": Role.QA,
+            "specialist": "browser_operator",
+            "required_capabilities": ["browser_test", "browser_nav"],
+            "phase_prefix": "delegate_browser_repro",
+            "title_prefix": "Delegate browser repro",
+            "instruction": "Reproduce el flujo en navegador, Playwright o MCP UI y devuelve solo pasos, resultado y evidencia compacta.",
+        },
+        "delegate_lsp_impact": {
+            "role": Role.RESEARCHER,
+            "specialist": "lsp_navigator",
+            "required_capabilities": ["lsp_symbols", "lsp_references"],
+            "phase_prefix": "delegate_lsp_impact",
+            "title_prefix": "Delegate LSP impact",
+            "instruction": "Usa navegacion semantica y referencias para resumir impacto, hotspots y dependencias.",
+        },
+        "delegate_test_run": {
+            "role": Role.QA,
+            "specialist": "test_runner",
+            "required_capabilities": ["test_execute", "build_execute"],
+            "phase_prefix": "delegate_test_run",
+            "title_prefix": "Delegate test run",
+            "instruction": "Ejecuta checks o tests relevantes y resume fallos, evidencia y cobertura util.",
+        },
+        "delegate_mcp_probe": {
+            "role": Role.SCOUT,
+            "specialist": "mcp_operator",
+            "required_capabilities": ["external_mcp"],
+            "phase_prefix": "delegate_mcp_probe",
+            "title_prefix": "Delegate MCP probe",
+            "instruction": "Usa el MCP o integracion externa asignada y devuelve resultados estructurados y compactos.",
+        },
+    }
+    return dict(plans.get(intent, plans["delegate"]))
+
+
+def _resolve_delegate_round_budget(delegate_request) -> int:
+    requested = _safe_int_value(getattr(delegate_request, "delegate_budget", 3), 3)
+    wait_policy = str(getattr(delegate_request, "wait_policy", "all") or "all").strip().lower()
+    budget = max(1, min(requested, 6))
+    if wait_policy == "best_effort":
+        budget = max(1, min(budget, 2))
+    elif wait_policy == "quorum":
+        budget = max(2, min(budget, 4))
+    return budget
+
+
+def _is_delegate_phase_name(phase_name: str) -> bool:
+    return str(phase_name or "").strip().lower().startswith("delegate_")
+
+
+def _is_supporting_control_phase(phase_name: str) -> bool:
+    normalized = str(phase_name or "").strip().lower()
+    return normalized == "lead_intake" or _is_delegate_phase_name(normalized)
+
+
+def _delegate_specialist_plan(specialist: str) -> dict[str, object]:
+    catalog: dict[str, dict[str, object]] = {
+        "repo_scout": {
+            "role": Role.SCOUT,
+            "specialist": "repo_scout",
+            "required_capabilities": ["repo_read"],
+            "instruction": "Inspecciona repositorio, archivos, git y contexto local; devuelve hechos compactos.",
+        },
+        "browser_operator": {
+            "role": Role.QA,
+            "specialist": "browser_operator",
+            "required_capabilities": ["browser_test", "browser_nav"],
+            "instruction": "Opera navegador, Playwright o MCP UI y resume pasos reproducidos, resultado y evidencia compacta.",
+        },
+        "lsp_navigator": {
+            "role": Role.RESEARCHER,
+            "specialist": "lsp_navigator",
+            "required_capabilities": ["lsp_symbols", "lsp_references"],
+            "instruction": "Usa navegacion semantica para resumir impacto, referencias y hotspots.",
+        },
+        "test_runner": {
+            "role": Role.QA,
+            "specialist": "test_runner",
+            "required_capabilities": ["test_execute", "build_execute"],
+            "instruction": "Ejecuta checks o tests relevantes y resume fallos, evidencia y regresiones.",
+        },
+        "mcp_operator": {
+            "role": Role.SCOUT,
+            "specialist": "mcp_operator",
+            "required_capabilities": ["external_mcp"],
+            "instruction": "Usa MCPs o integraciones externas y devuelve resultados estructurados, compactos y sin transcripts crudos.",
+        },
+        "skill_worker": {
+            "role": Role.SCOUT,
+            "specialist": "skill_worker",
+            "required_capabilities": ["skill_run"],
+            "instruction": "Ejecuta la skill o playbook asignado y devuelve evidencia compacta, hallazgos y recomendacion operativa.",
+        },
+    }
+    return dict(catalog.get(specialist, catalog["repo_scout"]))
+
+
+def _delegate_specialist_targets(
+    *,
+    intent: str,
+    specialist: str,
+) -> tuple[list[str], list[str]]:
+    normalized_intent = str(intent or "").strip().lower()
+    normalized_specialist = str(specialist or "").strip().lower()
+    skill_targets: list[str] = []
+    lsp_targets: list[str] = []
+
+    if normalized_specialist == "browser_operator" or normalized_intent == "delegate_browser_repro":
+        skill_targets.append("playwright_qa_skill")
+    if normalized_specialist == "lsp_navigator" or normalized_intent == "delegate_lsp_impact":
+        lsp_targets.extend(["symbols", "references", "impact"])
+
+    return list(dict.fromkeys(skill_targets)), list(dict.fromkeys(lsp_targets))
+
+
+def _delegate_report_contract(
+    *,
+    intent: str,
+    specialist: str,
+) -> str:
+    normalized_intent = str(intent or "").strip().lower()
+    normalized_specialist = str(specialist or "").strip().lower()
+    if normalized_specialist == "browser_operator" or normalized_intent == "delegate_browser_repro":
+        return (
+            "Formato obligatorio: summary, steps_reproduced, result, evidence, artifacts, risks, recommendation. "
+            "Si usas navegador, Playwright o MCP UI, devuelve solo pasos reproducidos y evidencia compacta; no pegues transcripts crudos."
+        )
+    if normalized_specialist == "mcp_operator" or normalized_intent == "delegate_mcp_probe":
+        return (
+            "Formato obligatorio: summary, result, evidence, artifacts, risks, recommendation. "
+            "Si operas un MCP de UI, incluye tambien steps_reproduced compactos; no pegues transcripts crudos."
+        )
+    return "Formato obligatorio: summary, evidence, artifacts, risks, recommendation compactos."
+
+
+def _delegate_catalog_capabilities(
+    *,
+    intent: str,
+    specialist: str,
+    required_capabilities: list[str] | tuple[str, ...] | set[str] | None = None,
+    query: str = "",
+) -> set[str]:
+    normalized_intent = str(intent or "").strip().lower()
+    normalized_specialist = str(specialist or "").strip().lower()
+    normalized_query = str(query or "").strip().lower()
+    caps: set[str] = set()
+
+    for capability in list(required_capabilities or []):
+        capability_name = str(capability or "").strip().lower()
+        if capability_name in {"browser_nav", "browser_test"}:
+            caps.update({"browser_testing", "e2e", "web_automation"})
+        elif capability_name in {"test_execute", "build_execute"}:
+            caps.update({"code_quality"})
+        elif capability_name == "repo_read":
+            caps.update({"research"})
+
+    if normalized_intent == "delegate_browser_repro":
+        caps.update({"browser_testing", "e2e", "web_automation"})
+    if normalized_intent == "delegate_lsp_impact":
+        caps.update({"research"})
+    if normalized_intent == "delegate_test_run":
+        caps.update({"code_quality"})
+    if normalized_specialist == "mcp_operator" or normalized_intent == "delegate_mcp_probe":
+        if any(token in normalized_query for token in ("semgrep", "sast", "security", "vulnerability")):
+            caps.update({"security_scan", "sast", "code_quality"})
+        if any(token in normalized_query for token in ("playwright", "browser", "ui", "e2e", "web")):
+            caps.update({"browser_testing", "e2e", "web_automation"})
+        if any(token in normalized_query for token in ("perplexity", "context7", "docs", "documentation", "research")):
+            caps.update({"research", "documentation", "ground_truth"})
+    return caps
+
+
+def _resolve_delegate_rewiring(
+    *,
+    workspace: Path | None,
+    intent: str,
+    specialist: str,
+    required_capabilities: list[str] | tuple[str, ...] | set[str] | None = None,
+    query: str = "",
+) -> dict[str, object]:
+    normalized_specialist = str(specialist or "").strip().lower()
+    if normalized_specialist != "mcp_operator":
+        return {}
+
+    project_root = Path(workspace or PROJECT_ROOT)
+    integrator = AutoToolIntegrator(
+        runtime_dir=project_root / "runtime",
+        project_root=project_root,
+    )
+    discovery_caps = _delegate_catalog_capabilities(
+        intent=intent,
+        specialist=specialist,
+        required_capabilities=required_capabilities,
+        query=query,
+    )
+    if not discovery_caps:
+        return {}
+
+    suggestions = integrator.suggest_requirements(discovery_caps, limit=3)
+    replacements = [row for row in suggestions if str(row.get("replacement_for", "") or "").strip()]
+    if not replacements:
+        return {}
+
+    candidate_names = [
+        str(row.get("name", "") or "").strip().lower()
+        for row in replacements
+        if str(row.get("name", "") or "").strip()
+    ]
+    replacement_for = sorted(
+        {
+            str(row.get("replacement_for", "") or "").strip().lower()
+            for row in replacements
+            if str(row.get("replacement_for", "") or "").strip()
+        }
+    )
+    replacement_specialists = replacement_specialists_from_metadata(
+        {"tool_rewiring_candidates": candidate_names}
+    )
+    preferred_specialist = replacement_specialists[0] if replacement_specialists else ""
+    skill_targets = [name for name in candidate_names if name.endswith("_skill")]
+    lsp_targets: list[str] = []
+    if not preferred_specialist:
+        return {}
+
+    return {
+        "tool_rewiring_active": True,
+        "tool_rewiring_candidates": candidate_names,
+        "tool_rewiring_replacement_for": replacement_for,
+        "tool_rewiring_preferred_specialist": preferred_specialist,
+        "tool_rewiring_suppress_mcp_operator": True,
+        "tool_rewiring_reason": "delegate_catalog_replacement_preferred_over_mcp_operator",
+        "skill_targets": list(dict.fromkeys(skill_targets)),
+        "lsp_targets": lsp_targets,
+    }
+
+
+def _build_delegate_request(intent: str, *, query: str, wait_policy: str, delegate_budget: int):
+    class _DelegateRequest:
+        def __init__(self, intent: str, query: str, wait_policy: str, delegate_budget: int) -> None:
+            self.intent = intent
+            self.query = query
+            self.wait_policy = wait_policy
+            self.delegate_budget = delegate_budget
+
+    return _DelegateRequest(
+        intent=str(intent or "").strip().lower(),
+        query=str(query or "").strip(),
+        wait_policy=str(wait_policy or "all").strip().lower(),
+        delegate_budget=max(1, int(delegate_budget or 3)),
+    )
+
+
+def _resolve_delegate_assignments(
+    delegate_request,
+    *,
+    workspace: Path | None = None,
+) -> list[dict[str, object]]:
+    primary = _resolve_delegate_plan(delegate_request)
+    intent = str(getattr(delegate_request, "intent", "delegate") or "delegate").strip().lower()
+    wait_policy = str(getattr(delegate_request, "wait_policy", "all") or "all").strip().lower()
+    delegate_query = str(getattr(delegate_request, "query", "") or "").strip()
+    roster_by_intent: dict[str, list[str]] = {
+        "delegate": ["repo_scout", "lsp_navigator"],
+        "delegate_repo_scan": ["repo_scout", "lsp_navigator"],
+        "delegate_browser_repro": ["browser_operator", "mcp_operator", "test_runner", "repo_scout"],
+        "delegate_lsp_impact": ["lsp_navigator", "repo_scout", "test_runner"],
+        "delegate_test_run": ["test_runner", "repo_scout", "lsp_navigator"],
+        "delegate_mcp_probe": ["mcp_operator", "repo_scout"],
+    }
+    roster = list(roster_by_intent.get(intent, [str(primary.get("specialist", "repo_scout"))]))
+    if wait_policy == "best_effort":
+        selected = roster[:1]
+    elif wait_policy == "quorum":
+        selected = roster[: min(len(roster), 3)]
+    else:
+        selected = roster
+
+    assignments: list[dict[str, object]] = []
+    for specialist_name in selected:
+        specialist_plan = _delegate_specialist_plan(specialist_name)
+        rewiring = _resolve_delegate_rewiring(
+            workspace=workspace,
+            intent=intent,
+            specialist=specialist_name,
+            required_capabilities=list(specialist_plan.get("required_capabilities", []) or []),
+            query=delegate_query,
+        )
+        effective_specialist = str(
+            rewiring.get("tool_rewiring_preferred_specialist", specialist_name) or specialist_name
+        ).strip().lower()
+        if effective_specialist != str(specialist_name or "").strip().lower():
+            specialist_plan = _delegate_specialist_plan(effective_specialist)
+        skill_targets, lsp_targets = _delegate_specialist_targets(
+            intent=intent,
+            specialist=effective_specialist,
+        )
+        skill_targets = list(
+            dict.fromkeys(
+                list(skill_targets)
+                + [
+                    str(item).strip()
+                    for item in list(rewiring.get("skill_targets", []) or [])
+                    if str(item).strip()
+                ]
+            )
+        )
+        lsp_targets = list(
+            dict.fromkeys(
+                list(lsp_targets)
+                + [
+                    str(item).strip()
+                    for item in list(rewiring.get("lsp_targets", []) or [])
+                    if str(item).strip()
+                ]
+            )
+        )
+        base_instruction = str(
+            specialist_plan.get("instruction") or primary.get("instruction", "Responde con hechos concretos.")
+        )
+        if rewiring:
+            base_instruction = (
+                "El catalogo marca un replacement preferente sobre MCP para esta consulta. "
+                "Opera la ruta de replacement asignada y devuelve evidencia compacta.\n"
+                f"{base_instruction}"
+            )
+        assignments.append(
+            {
+                **specialist_plan,
+                "phase_prefix": primary.get("phase_prefix", "delegate_scout"),
+                "title_prefix": primary.get("title_prefix", "Delegate specialist"),
+                "instruction": base_instruction,
+                "skill_targets": skill_targets,
+                "lsp_targets": lsp_targets,
+                "rewired_from_specialist": (
+                    str(specialist_name or "").strip().lower()
+                    if rewiring and effective_specialist != str(specialist_name or "").strip().lower()
+                    else ""
+                ),
+                **rewiring,
+            }
+        )
+    return assignments
+
+
+def _delegate_quorum_target(wait_policy: str, assignment_count: int) -> int:
+    if assignment_count <= 0:
+        return 0
+    normalized = str(wait_policy or "all").strip().lower()
+    if normalized == "best_effort":
+        return 1
+    if normalized == "all":
+        return assignment_count
+    if assignment_count == 1:
+        return 1
+    return max(2, (assignment_count // 2) + 1)
+
+
+def _aggregate_delegate_results(
+    entries: list[dict[str, object]],
+    *,
+    wait_policy: str,
+) -> tuple[str, bool]:
+    total = len(entries)
+    quorum_target = _delegate_quorum_target(wait_policy, total)
+    completed = sum(
+        1
+        for entry in entries
+        if str(entry.get("state", "") or "").strip().lower() == "completed"
+    )
+    quorum_met = completed >= quorum_target if quorum_target > 0 else False
+    header = (
+        f"Delegacion especializada agregada "
+        f"(wait_policy={wait_policy}, completed={completed}/{total}, quorum_target={quorum_target}, quorum_met={'yes' if quorum_met else 'no'})"
+    )
+    lines = [header]
+    for entry in entries:
+        specialist = str(entry.get("specialist", "") or "").strip()
+        phase = str(entry.get("phase", "") or "").strip()
+        state = str(entry.get("state", "") or "missing").strip()
+        result = _compact_delegated_result(
+            str(entry.get("result", "") or ""),
+            state=state,
+        )
+        contract = str(entry.get("report_contract_version", "") or "").strip()
+        contract_suffix = f" contract={contract}" if contract else ""
+        lines.append(
+            f"- {phase} [{specialist}] state={state}{contract_suffix} result={result}"
+        )
+    return "\n".join(lines), quorum_met
+
+
+def _execute_delegate_request(
+    *,
+    orch,
+    task_root: str,
+    workspace: Path,
+    runtime_dir: Path,
+    delegate_request,
+    source_task_id: str,
+    source_phase: str,
+    delegate_cycle: int,
+    rerun_budget: int,
+) -> dict[str, object]:
+    delegate_plan = _resolve_delegate_plan(delegate_request)
+    delegate_assignments = _resolve_delegate_assignments(delegate_request, workspace=workspace)
+    delegate_round_budget = _resolve_delegate_round_budget(delegate_request)
+    delegate_wait_policy = str(delegate_request.wait_policy or "all").strip().lower()
+    delegate_query = str(delegate_request.query or "").strip()
+    raw_context = (
+        _build_scout_project_state_context(workspace)
+        + "\n\n"
+        + _build_scout_session_history_context(runtime_dir)
+    )
+    delegate_entries: list[dict[str, object]] = []
+
+    for assignment in delegate_assignments:
+        delegate_phase_prefix = str(
+            assignment.get("phase_prefix", delegate_plan.get("phase_prefix", "delegate_scout"))
+        )
+        delegate_specialist = str(assignment.get("specialist", "repo_scout"))
+        delegate_caps = list(assignment.get("required_capabilities", []) or [])
+        delegate_skill_targets = [
+            str(item).strip()
+            for item in list(assignment.get("skill_targets", []) or [])
+            if str(item).strip()
+        ]
+        delegate_lsp_targets = [
+            str(item).strip()
+            for item in list(assignment.get("lsp_targets", []) or [])
+            if str(item).strip()
+        ]
+        if not delegate_skill_targets and not delegate_lsp_targets:
+            delegate_skill_targets, delegate_lsp_targets = _delegate_specialist_targets(
+                intent=str(delegate_request.intent or ""),
+                specialist=delegate_specialist,
+            )
+        delegate_report_contract = _delegate_report_contract(
+            intent=str(delegate_request.intent or ""),
+            specialist=delegate_specialist,
+        )
+        delegate_phase = f"{delegate_phase_prefix}_{delegate_cycle}_{delegate_specialist}"
+        delegate_task_id = f"{task_root}::{delegate_phase}"
+        delegate_entries.append(
+            {
+                "task_id": delegate_task_id,
+                "phase": delegate_phase,
+                "specialist": delegate_specialist,
+                "report_contract_version": "operator_report_v1",
+            }
+        )
+        orch.submit_task(
+            WorkTask(
+                task_id=delegate_task_id,
+                title=f"{assignment.get('title_prefix', 'Delegate specialist')}: {delegate_query[:60]}",
+                description=(
+                    f"{assignment.get('instruction', 'Responde con hechos concretos.')}\n\n"
+                    f"Consulta del Team Lead (maximo 8 lineas de respuesta compacta):\n"
+                    f"{delegate_query}\n\n"
+                    "Contexto disponible:\n"
+                    f"{raw_context}\n\n"
+                    "Solo hechos, evidencia compacta y recomendacion operativa breve. "
+                    "Sin arbitraje de producto.\n"
+                    f"{delegate_report_contract}"
+                ),
+                role=assignment.get("role", Role.SCOUT),
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "is_scout": assignment.get("role", Role.SCOUT) == Role.SCOUT,
+                    "scout_type": "on_demand_delegate",
+                    "skip_quality_gates": True,
+                    "phase": delegate_phase,
+                    "chat_parent": task_root,
+                    "required_capabilities": delegate_caps,
+                    "delegated_by": "team_lead",
+                    "delegate_intent": delegate_request.intent,
+                    "delegate_wait_policy": delegate_wait_policy,
+                    "delegate_budget_rounds": delegate_round_budget,
+                    "delegate_source_phase": source_phase,
+                    "delegate_report_contract_version": "operator_report_v1",
+                    "delegate_original_specialist": str(
+                        assignment.get("rewired_from_specialist", "") or ""
+                    ).strip(),
+                    "skill_targets": delegate_skill_targets,
+                    "lsp_targets": delegate_lsp_targets,
+                    "tool_rewiring_active": bool(assignment.get("tool_rewiring_active", False)),
+                    "tool_rewiring_candidates": list(
+                        assignment.get("tool_rewiring_candidates", []) or []
+                    ),
+                    "tool_rewiring_replacement_for": list(
+                        assignment.get("tool_rewiring_replacement_for", []) or []
+                    ),
+                    "tool_rewiring_preferred_specialist": str(
+                        assignment.get("tool_rewiring_preferred_specialist", "") or ""
+                    ).strip(),
+                    "tool_rewiring_reason": str(
+                        assignment.get("tool_rewiring_reason", "") or ""
+                    ).strip(),
+                    **build_tool_specialist_metadata(
+                        specialist=delegate_specialist,
+                        required_capabilities=delegate_caps,
+                        reason=(
+                            f"delegacion del Team Lead via {delegate_request.intent}; "
+                            f"source_phase={source_phase}; wait_policy={delegate_wait_policy}"
+                        ),
+                        skill_targets=delegate_skill_targets,
+                        lsp_targets=delegate_lsp_targets,
+                    ),
+                },
+            )
+        )
+
+    orch.run_until_idle(max_rounds=delegate_round_budget)
+
+    delegate_ws = orch._get_workflow_state(task_root)
+    for entry in delegate_entries:
+        task_id = str(entry.get("task_id", "") or "")
+        phase = str(entry.get("phase", "") or "")
+        delegate_task = orch.taskboard.get_task(task_id)
+        result = str(delegate_task.metadata.get("result", "") if delegate_task else "")
+        state = str(delegate_task.state.value if delegate_task else "missing")
+        if not result:
+            result = delegate_ws.get("phase_outputs", {}).get(phase, "")
+        if not result:
+            result = "Sin datos disponibles para esta consulta."
+        entry["result"] = result
+        entry["state"] = state
+        entry["result_len"] = len(result)
+
+    aggregated_delegate_result, delegate_quorum_met = _aggregate_delegate_results(
+        delegate_entries,
+        wait_policy=delegate_wait_policy,
+    )
+    batch_economics = _estimate_delegate_batch_economics(delegate_entries)
+    source_task = orch.taskboard.get_task(source_task_id)
+    if source_task is not None:
+        inject_block = (
+            f"\n\n[Resultado de tu delegación"
+            f" (ciclo {delegate_cycle}, source_phase='{source_phase}', "
+            f"intent='{delegate_request.intent}', wait_policy='{delegate_wait_policy}', "
+            f"quorum_met='{delegate_quorum_met}', query: '{delegate_query[:80]}'):\n"
+            f"{aggregated_delegate_result[:900]}\n]"
+        )
+        source_task.description = source_task.description + inject_block
+        orch.taskboard.retry_task(
+            source_task_id,
+            reason=f"delegate_result_injected ({source_phase}, cycle {delegate_cycle})",
+        )
+        orch.run_until_idle(max_rounds=rerun_budget)
+
+    batch_payload = {
+        "source_phase": source_phase,
+        "source_task_id": source_task_id,
+        "intent": delegate_request.intent,
+        "query": delegate_query[:200],
+        "wait_policy": delegate_wait_policy,
+        "delegate_budget_rounds": delegate_round_budget,
+        "delegate_cycle": delegate_cycle,
+        "quorum_met": delegate_quorum_met,
+        "specialists": [str(entry.get("specialist", "") or "") for entry in delegate_entries],
+        "task_ids": [str(entry.get("task_id", "") or "") for entry in delegate_entries],
+        "states": [str(entry.get("state", "") or "") for entry in delegate_entries],
+        "result_lengths": [int(entry.get("result_len", 0) or 0) for entry in delegate_entries],
+        "economics": batch_economics,
+    }
+    delegate_ws.setdefault("delegate_batches", []).append(batch_payload)
+    delegate_ws["delegate_economics_summary"] = _summarize_delegate_economics(
+        _coerce_delegate_batches(delegate_ws.get("delegate_batches", []))
+    )
+    orch._save_workflow_state()
+    orch.event_logger.emit(
+        "lcp_directive_applied",
+        {
+            "task_id": task_root,
+            "directive": "delegate",
+            "source_phase": source_phase,
+            "intent": delegate_request.intent,
+            "query": delegate_query[:120],
+            "cycle": delegate_cycle,
+            "wait_policy": delegate_wait_policy,
+            "delegate_budget_rounds": delegate_round_budget,
+            "specialists": batch_payload["specialists"],
+            "quorum_met": delegate_quorum_met,
+            "delegate_result_len": len(aggregated_delegate_result),
+        },
+    )
+    orch.event_logger.emit(
+        "delegate_economics_estimated",
+        {
+            "task_id": task_root,
+            "source_phase": source_phase,
+            "intent": delegate_request.intent,
+            "wait_policy": delegate_wait_policy,
+            "quorum_met": delegate_quorum_met,
+            **batch_economics,
+        },
+    )
+    return {
+        "aggregated_result": aggregated_delegate_result,
+        "quorum_met": delegate_quorum_met,
+        "entries": delegate_entries,
+        "delegate_budget_rounds": delegate_round_budget,
+        "wait_policy": delegate_wait_policy,
+        "economics": batch_economics,
+    }
+
+
+def _structured_evidence_specs_for_phase(
+    phase_id: str,
+    phase_evidence_plan: dict[str, dict[str, object]],
+    *,
+    workspace: Path | None = None,
+) -> list[dict[str, object]]:
+    entry = dict(phase_evidence_plan.get(phase_id) or {})
+    intents = [
+        str(item).strip().lower()
+        for item in list(entry.get("delegate_intents", []) or [])
+        if str(item).strip()
+    ]
+    wait_policy = str(entry.get("wait_policy", "all") or "all").strip().lower()
+    delegate_budget = max(1, _safe_int_value(entry.get("delegate_budget", 3), 3))
+    specs: list[dict[str, object]] = []
+    for intent in intents:
+        delegate_request = _build_delegate_request(
+            intent,
+            query=f"Genera evidencia especializada para la fase '{phase_id}'.",
+            wait_policy=wait_policy,
+            delegate_budget=delegate_budget,
+        )
+        assignments = _resolve_delegate_assignments(
+            delegate_request,
+            workspace=Path(workspace or PROJECT_ROOT),
+        )
+        for assign_index, assignment in enumerate(assignments):
+            specialist = str(assignment.get("specialist", "repo_scout"))
+            evidence_phase_id = f"delegate_{phase_id}_{specialist}_{assign_index}"
+            skill_targets = [
+                str(item).strip()
+                for item in list(assignment.get("skill_targets", []) or [])
+                if str(item).strip()
+            ]
+            lsp_targets = [
+                str(item).strip()
+                for item in list(assignment.get("lsp_targets", []) or [])
+                if str(item).strip()
+            ]
+            if not skill_targets and not lsp_targets:
+                skill_targets, lsp_targets = _delegate_specialist_targets(
+                    intent=intent,
+                    specialist=specialist,
+                )
+            specs.append(
+                {
+                    "phase_id": evidence_phase_id,
+                    "intent": intent,
+                    "specialist": specialist,
+                    "role": assignment.get("role", Role.SCOUT),
+                    "required_capabilities": list(
+                        assignment.get("required_capabilities", []) or []
+                    ),
+                    "instruction": str(
+                        assignment.get("instruction", "Recoge evidencia especializada.")
+                    ),
+                    "skill_targets": skill_targets,
+                    "lsp_targets": lsp_targets,
+                    "report_contract": _delegate_report_contract(
+                        intent=intent,
+                        specialist=specialist,
+                    ),
+                    "wait_policy": wait_policy,
+                    "delegate_budget": delegate_budget,
+                    "source_phase": phase_id,
+                }
+            )
+    return specs
+
+
+def _coerce_phase_evidence_plan(
+    payload: object,
+) -> dict[str, dict[str, object]]:
+    plan: dict[str, dict[str, object]] = {}
+    if not isinstance(payload, dict):
+        return plan
+    for raw_phase_id, raw_entry in payload.items():
+        phase_id = str(raw_phase_id or "").strip()
+        if not phase_id or not isinstance(raw_entry, dict):
+            continue
+        entry: dict[str, object] = {}
+        intents = [
+            str(item).strip().lower()
+            for item in list(raw_entry.get("delegate_intents", []) or [])
+            if str(item).strip()
+        ]
+        if intents:
+            entry["delegate_intents"] = list(dict.fromkeys(intents))
+        wait_policy = str(raw_entry.get("wait_policy", "") or "").strip().lower()
+        if wait_policy in {"all", "best_effort", "quorum"}:
+            entry["wait_policy"] = wait_policy
+        if "delegate_budget" in raw_entry:
+            entry["delegate_budget"] = max(
+                1,
+                _safe_int_value(raw_entry.get("delegate_budget", 3), 3),
+            )
+        if entry:
+            plan[phase_id] = entry
+    return plan
+
+
+def _coerce_delegate_batches(payload: object) -> list[dict[str, object]]:
+    if not isinstance(payload, list):
+        return []
+    batches: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        batch = {str(key): value for key, value in item.items() if str(key).strip()}
+        if batch:
+            batches.append(batch)
+    return batches
+
+
+def _delegate_specialist_economics_profile(specialist: str) -> dict[str, int]:
+    specialist_key = str(specialist or "").strip().lower()
+    profiles: dict[str, dict[str, int]] = {
+        "repo_scout": {
+            "avoided_tokens": 600,
+            "operator_tokens": 180,
+            "cost_units_saved": 5,
+        },
+        "lsp_navigator": {
+            "avoided_tokens": 700,
+            "operator_tokens": 220,
+            "cost_units_saved": 6,
+        },
+        "test_runner": {
+            "avoided_tokens": 800,
+            "operator_tokens": 260,
+            "cost_units_saved": 7,
+        },
+        "browser_operator": {
+            "avoided_tokens": 1400,
+            "operator_tokens": 420,
+            "cost_units_saved": 10,
+        },
+        "mcp_operator": {
+            "avoided_tokens": 900,
+            "operator_tokens": 300,
+            "cost_units_saved": 7,
+        },
+        "skill_worker": {
+            "avoided_tokens": 750,
+            "operator_tokens": 240,
+            "cost_units_saved": 6,
+        },
+    }
+    return profiles.get(
+        specialist_key,
+        {
+            "avoided_tokens": 650,
+            "operator_tokens": 220,
+            "cost_units_saved": 5,
+        },
+    )
+
+
+def _delegate_state_multiplier(state: str) -> tuple[float, float]:
+    normalized = str(state or "").strip().lower()
+    if normalized == "completed":
+        return 1.0, 1.0
+    if normalized == "failed":
+        return 0.5, 0.7
+    if normalized in {"claimed", "ready", "pending", "blocked"}:
+        return 0.4, 0.5
+    return 0.3, 0.4
+
+
+def _estimate_delegate_batch_economics(
+    delegate_entries: list[dict[str, object]],
+) -> dict[str, object]:
+    specialist_breakdown: dict[str, dict[str, int]] = {}
+    estimated_lead_tokens_avoided = 0
+    estimated_operator_tokens_used = 0
+    estimated_cost_units_saved = 0
+
+    for entry in delegate_entries:
+        specialist = str(entry.get("specialist", "") or "").strip().lower() or "unknown"
+        state = str(entry.get("state", "") or "").strip().lower()
+        avoided_factor, operator_factor = _delegate_state_multiplier(state)
+        profile = _delegate_specialist_economics_profile(specialist)
+        avoided_tokens = int(round(profile["avoided_tokens"] * avoided_factor))
+        operator_tokens = int(round(profile["operator_tokens"] * operator_factor))
+        cost_units_saved = max(
+            0,
+            int(round(profile["cost_units_saved"] * avoided_factor)),
+        )
+        estimated_lead_tokens_avoided += avoided_tokens
+        estimated_operator_tokens_used += operator_tokens
+        estimated_cost_units_saved += cost_units_saved
+        specialist_row = specialist_breakdown.setdefault(
+            specialist,
+            {
+                "count": 0,
+                "completed": 0,
+                "failed": 0,
+                "estimated_lead_tokens_avoided": 0,
+                "estimated_operator_tokens_used": 0,
+                "estimated_net_tokens_saved": 0,
+                "estimated_cost_units_saved": 0,
+            },
+        )
+        specialist_row["count"] += 1
+        if state == "completed":
+            specialist_row["completed"] += 1
+        elif state == "failed":
+            specialist_row["failed"] += 1
+        specialist_row["estimated_lead_tokens_avoided"] += avoided_tokens
+        specialist_row["estimated_operator_tokens_used"] += operator_tokens
+        specialist_row["estimated_net_tokens_saved"] += max(
+            0, avoided_tokens - operator_tokens
+        )
+        specialist_row["estimated_cost_units_saved"] += cost_units_saved
+
+    return {
+        "economics_version": "delegate_economics_v1",
+        "estimated": True,
+        "specialist_tasks": len(delegate_entries),
+        "estimated_lead_tokens_avoided": estimated_lead_tokens_avoided,
+        "estimated_operator_tokens_used": estimated_operator_tokens_used,
+        "estimated_net_tokens_saved": max(
+            0, estimated_lead_tokens_avoided - estimated_operator_tokens_used
+        ),
+        "estimated_cost_units_saved": estimated_cost_units_saved,
+        "specialist_breakdown": specialist_breakdown,
+    }
+
+
+def _summarize_delegate_economics(
+    delegate_batches: list[dict[str, object]],
+) -> dict[str, object]:
+    summary = {
+        "economics_version": "delegate_economics_v1",
+        "estimated": True,
+        "batch_count": 0,
+        "specialist_task_count": 0,
+        "estimated_lead_tokens_avoided": 0,
+        "estimated_operator_tokens_used": 0,
+        "estimated_net_tokens_saved": 0,
+        "estimated_cost_units_saved": 0,
+        "quorum_met_count": 0,
+        "quorum_met_ratio": 0.0,
+        "wait_policy_counts": {},
+        "intent_counts": {},
+        "specialist_breakdown": {},
+    }
+    if not delegate_batches:
+        return summary
+
+    wait_policy_counts: dict[str, int] = {}
+    intent_counts: dict[str, int] = {}
+    specialist_breakdown: dict[str, dict[str, int]] = {}
+
+    for batch in delegate_batches:
+        if not isinstance(batch, dict):
+            continue
+        summary["batch_count"] += 1
+        economics = dict(batch.get("economics", {}) or {})
+        summary["specialist_task_count"] += _safe_int_value(
+            economics.get("specialist_tasks", 0), 0
+        )
+        summary["estimated_lead_tokens_avoided"] += _safe_int_value(
+            economics.get("estimated_lead_tokens_avoided", 0), 0
+        )
+        summary["estimated_operator_tokens_used"] += _safe_int_value(
+            economics.get("estimated_operator_tokens_used", 0), 0
+        )
+        summary["estimated_cost_units_saved"] += _safe_int_value(
+            economics.get("estimated_cost_units_saved", 0), 0
+        )
+        if bool(batch.get("quorum_met", False)):
+            summary["quorum_met_count"] += 1
+
+        wait_policy = str(batch.get("wait_policy", "") or "").strip().lower()
+        if wait_policy:
+            wait_policy_counts[wait_policy] = wait_policy_counts.get(wait_policy, 0) + 1
+        intent = str(batch.get("intent", "") or "").strip().lower()
+        if intent:
+            intent_counts[intent] = intent_counts.get(intent, 0) + 1
+
+        for specialist, values in dict(economics.get("specialist_breakdown", {}) or {}).items():
+            if not isinstance(values, dict):
+                continue
+            row = specialist_breakdown.setdefault(
+                str(specialist),
+                {
+                    "count": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "estimated_lead_tokens_avoided": 0,
+                    "estimated_operator_tokens_used": 0,
+                    "estimated_net_tokens_saved": 0,
+                    "estimated_cost_units_saved": 0,
+                },
+            )
+            row["count"] += _safe_int_value(values.get("count", 0), 0)
+            row["completed"] += _safe_int_value(values.get("completed", 0), 0)
+            row["failed"] += _safe_int_value(values.get("failed", 0), 0)
+            row["estimated_lead_tokens_avoided"] += _safe_int_value(
+                values.get("estimated_lead_tokens_avoided", 0), 0
+            )
+            row["estimated_operator_tokens_used"] += _safe_int_value(
+                values.get("estimated_operator_tokens_used", 0), 0
+            )
+            row["estimated_net_tokens_saved"] += _safe_int_value(
+                values.get("estimated_net_tokens_saved", 0), 0
+            )
+            row["estimated_cost_units_saved"] += _safe_int_value(
+                values.get("estimated_cost_units_saved", 0), 0
+            )
+
+    summary["estimated_net_tokens_saved"] = max(
+        0,
+        int(summary["estimated_lead_tokens_avoided"])
+        - int(summary["estimated_operator_tokens_used"]),
+    )
+    if int(summary["batch_count"]) > 0:
+        summary["quorum_met_ratio"] = round(
+            int(summary["quorum_met_count"]) / int(summary["batch_count"]),
+            4,
+        )
+    summary["wait_policy_counts"] = wait_policy_counts
+    summary["intent_counts"] = intent_counts
+    summary["specialist_breakdown"] = specialist_breakdown
+    return summary
+
+
+def _message_suggests_browser_surface(message: str) -> bool:
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return False
+    browser_terms = (
+        "frontend",
+        "ui",
+        "ux",
+        "browser",
+        "playwright",
+        "dom",
+        "selector",
+        "screenshot",
+        "scrape",
+        "scraping",
+        "mcp",
+        "page",
+        "screen",
+        "form",
+        "react",
+        "vite",
+        "css",
+        "html",
+        "component",
+        "web",
+    )
+    return any(term in normalized for term in browser_terms)
+
+
+def _message_suggests_security_surface(message: str) -> bool:
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return False
+    security_terms = (
+        "security",
+        "seguridad",
+        "secure",
+        "vulnerability",
+        "vulnerabilidad",
+        "semgrep",
+        "sast",
+        "audit",
+        "auditoria",
+        "compliance",
+        "hardening",
+        "auth",
+        "authentication",
+        "authorization",
+        "secret",
+        "credential",
+        "token",
+        "xss",
+        "csrf",
+        "sql injection",
+        "owasp",
+    )
+    return any(term in normalized for term in security_terms)
+
+
+def _message_suggests_research_surface(message: str) -> bool:
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return False
+    research_terms = (
+        "research",
+        "investiga",
+        "investigar",
+        "documentacion",
+        "documentation",
+        "docs",
+        "api reference",
+        "best practices",
+        "ground truth",
+        "context7",
+        "perplexity",
+        "look up",
+        "lookup",
+        "manual",
+        "spec",
+        "specification",
+        "integration guide",
+    )
+    return any(term in normalized for term in research_terms)
+
+
+def _detect_preplan_surface_hints(message: str) -> dict[str, object]:
+    surfaces: list[str] = []
+    recommended_delegate_intents: list[str] = []
+    recommended_specialists: list[str] = []
+
+    if _message_suggests_browser_surface(message):
+        surfaces.append("browser")
+        recommended_delegate_intents.append("delegate_browser_repro")
+        recommended_specialists.extend(["browser_operator", "skill_worker"])
+    if _message_suggests_security_surface(message):
+        surfaces.append("security")
+        recommended_delegate_intents.append("delegate_mcp_probe")
+        recommended_specialists.extend(["skill_worker", "repo_scout"])
+    if _message_suggests_research_surface(message):
+        surfaces.append("research")
+        recommended_delegate_intents.append("delegate_mcp_probe")
+        recommended_specialists.extend(["skill_worker", "repo_scout", "lsp_navigator"])
+
+    if not surfaces:
+        surfaces.append("general")
+        recommended_delegate_intents.append("delegate_repo_scan")
+        recommended_specialists.append("repo_scout")
+
+    return {
+        "surfaces": list(dict.fromkeys(surfaces)),
+        "recommended_delegate_intents": list(dict.fromkeys(recommended_delegate_intents)),
+        "recommended_specialists": list(dict.fromkeys(recommended_specialists)),
+    }
+
+
+def _estimate_preplan_context_pressure(
+    *,
+    runtime_dir: Path,
+    continuation_requested: bool,
+    continuation_of: str,
+    continuation_snapshot: str,
+) -> dict[str, object]:
+    previous_delegate_batches = 0
+    previous_phase_summaries = 0
+    previous_specialist_reports = 0
+    previous_invalidations = 0
+    previous_open_questions = 0
+    previous_phase_outputs: dict[str, object] = {}
+    previous_phase_context_summaries: dict[str, object] = {}
+    previous_project_context_summary = ""
+    previous_chat_context_summary = ""
+
+    if continuation_of:
+        workflow_payload = _read_json_payload(
+            runtime_dir / "workflow_state.json",
+            fallback={},
+        )
+        if isinstance(workflow_payload, dict):
+            previous_entry = workflow_payload.get(continuation_of, {})
+            if isinstance(previous_entry, dict):
+                previous_delegate_batches = len(
+                    _coerce_delegate_batches(previous_entry.get("delegate_batches", []))
+                )
+                previous_phase_context_summaries = dict(
+                    previous_entry.get("phase_context_summaries", {}) or {}
+                )
+                previous_phase_summaries = len(previous_phase_context_summaries)
+                previous_phase_outputs = dict(previous_entry.get("phase_outputs", {}) or {})
+                previous_project_context_summary = str(
+                    previous_entry.get("project_context_summary", "") or ""
+                )
+                previous_chat_context_summary = str(
+                    previous_entry.get("chat_context_summary", "") or ""
+                )
+        previous_specialist_reports = len(
+            list(
+                _load_chat_specialist_insights(runtime_dir, continuation_of).get(
+                    "specialist_reports",
+                    [],
+                )
+                or []
+            )
+        )
+        curator_store = ContextCuratorStore(runtime_dir)
+        chat_context = curator_store.load_chat_context(
+            continuation_of,
+            project_key=str(runtime_dir.parent.resolve()),
+        )
+        previous_invalidations = len(list(chat_context.get("invalidations", []) or []))
+        previous_open_questions = len(list(chat_context.get("open_questions", []) or []))
+
+    pressure = estimate_context_pressure(
+        continuation_requested=continuation_requested,
+        continuation_snapshot=continuation_snapshot,
+        phase_summary_count=previous_phase_summaries,
+        delegate_batch_count=previous_delegate_batches,
+        specialist_report_count=previous_specialist_reports,
+        invalidation_count=previous_invalidations,
+        open_question_count=previous_open_questions,
+    )
+    compaction_value = estimate_context_compaction_value(
+        phase_outputs=previous_phase_outputs,
+        project_context_summary=previous_project_context_summary,
+        chat_context_summary=previous_chat_context_summary,
+        phase_context_summaries=previous_phase_context_summaries,
+    )
+    merged_signals = list(pressure.get("signals", []) or [])
+    value_level = str(compaction_value.get("level", "") or "").strip().lower()
+    if value_level in {"medium", "high"}:
+        signal_name = f"context_compaction_value_{value_level}"
+        if signal_name not in merged_signals:
+            merged_signals.append(signal_name)
+    merged = dict(pressure)
+    merged["signals"] = merged_signals
+    merged["recommend_context_curator"] = bool(
+        pressure.get("recommend_context_curator", False)
+        or compaction_value.get("priority_boost", False)
+    )
+    merged["context_compaction"] = dict(compaction_value)
+    return merged
+
+
+def _build_preplan_signal_block(surface_hints: dict[str, object]) -> str:
+    surfaces = [
+        str(item).strip().lower()
+        for item in list(surface_hints.get("surfaces", []) or [])
+        if str(item).strip()
+    ]
+    intents = [
+        str(item).strip().lower()
+        for item in list(surface_hints.get("recommended_delegate_intents", []) or [])
+        if str(item).strip()
+    ]
+    specialists = [
+        str(item).strip().lower()
+        for item in list(surface_hints.get("recommended_specialists", []) or [])
+        if str(item).strip()
+    ]
+    if not surfaces:
+        return ""
+    return (
+        "\n\n[PREPLAN_SIGNALS]\n"
+        f"surfaces={', '.join(surfaces)}\n"
+        f"recommended_delegate_intents={', '.join(intents)}\n"
+        f"recommended_specialists={', '.join(specialists)}\n"
+        "Usa estas señales como pista previa al plan: si te ayudan, delega barato y "
+        "evita cargar el contexto pesado en el Lead. No son obligatorias.\n"
+        "[/PREPLAN_SIGNALS]"
+    )
+
+
+def _build_context_curator_prompt(
+    *,
+    message: str,
+    surface_hints: dict[str, object],
+    project_state_raw: str,
+    session_history_raw: str,
+) -> str:
+    surfaces = ", ".join(
+        [
+            str(item).strip().lower()
+            for item in list(surface_hints.get("surfaces", []) or [])
+            if str(item).strip()
+        ]
+    ) or "general"
+    return (
+        "Compacta el contexto del proyecto para el Team Lead en maximo 8 lineas utiles.\n"
+        f"Solicitud del usuario: {message[:180]}\n"
+        f"Superficies detectadas: {surfaces}\n\n"
+        "Prioriza solo lo relevante para decidir el plan inicial: hechos, archivos/areas "
+        "probables, riesgos y senales utiles. Sin teoria y sin transcripts crudos.\n\n"
+        "[PROJECT_STATE]\n"
+        f"{project_state_raw}\n"
+        "[/PROJECT_STATE]\n\n"
+        "[SESSION_HISTORY]\n"
+        f"{session_history_raw}\n"
+        "[/SESSION_HISTORY]"
+    )
+
+
+def _context_project_key(workspace: Path) -> str:
+    return str(workspace.resolve())
+
+
+def _persist_preplan_context(
+    *,
+    runtime_dir: Path,
+    workspace: Path,
+    task_root: str,
+    user_message: str,
+    surface_hints: dict[str, object],
+    curator_summary: str,
+    lead_summary: str,
+    source_task_ids: list[str],
+) -> tuple[dict[str, object], dict[str, object]]:
+    store = ContextCuratorStore(runtime_dir)
+    return store.remember_preplan(
+        project_key=_context_project_key(workspace),
+        chat_root=task_root,
+        user_message=user_message,
+        surface_hints=surface_hints,
+        curator_summary=curator_summary,
+        lead_summary=lead_summary,
+        source_task_ids=source_task_ids,
+    )
+
+
+def _build_curated_context_block(
+    *,
+    runtime_dir: Path,
+    workspace: Path,
+    continuation_of: str = "",
+) -> str:
+    store = ContextCuratorStore(runtime_dir)
+    parts: list[str] = []
+    project_summary = store.build_summary(store.load_project_context(_context_project_key(workspace)))
+    if project_summary:
+        parts.append("Contexto curado del proyecto:")
+        parts.extend(f"- {line}" for line in project_summary.splitlines())
+    continuation_root = str(continuation_of or "").strip()
+    if continuation_root:
+        chat_summary = store.build_summary(
+            store.load_chat_context(continuation_root, project_key=_context_project_key(workspace))
+        )
+        if chat_summary:
+            parts.append(f"Contexto curado de {continuation_root}:")
+            parts.extend(f"- {line}" for line in chat_summary.splitlines())
+    return ("\n" + "\n".join(parts)) if parts else ""
+
+
+def _record_context_invalidation(
+    *,
+    runtime_dir: Path,
+    workspace: Path,
+    task_root: str,
+    reason: str,
+    affected_phases: list[str],
+    source_task_ids: list[str],
+) -> tuple[str, str]:
+    store = ContextCuratorStore(runtime_dir)
+    project_ctx, chat_ctx = store.remember_invalidation(
+        project_key=_context_project_key(workspace),
+        chat_root=task_root,
+        reason=reason,
+        affected_phases=affected_phases,
+        source_task_ids=source_task_ids,
+    )
+    return store.build_summary(project_ctx), store.build_summary(chat_ctx)
+
+
+def _synthesize_default_phase_evidence_plan(
+    phases: list[PhaseSpec],
+    *,
+    message: str,
+    run_mode: str,
+) -> dict[str, dict[str, object]]:
+    """Fallback conservador cuando el Lead no define EVIDENCE_PLAN.
+
+    Prioriza evidencia barata y operativa para builds estandar sin cargar tokens
+    del Team Lead con transcripts extensos de tools.
+    """
+
+    if run_mode != "standard":
+        return {}
+
+    browser_surface = _message_suggests_browser_surface(message)
+    security_surface = _message_suggests_security_surface(message)
+    research_surface = _message_suggests_research_surface(message)
+    plan: dict[str, dict[str, object]] = {}
+    for spec in phases:
+        phase_id = str(spec.phase_id or "").strip()
+        if not phase_id:
+            continue
+        intents: list[str] = []
+        wait_policy = "best_effort"
+        delegate_budget = 2
+
+        if spec.role == "RESEARCHER" or phase_id in {"discovery", "research", "analysis", "investigate"}:
+            intents.append("delegate_repo_scan")
+            if research_surface:
+                intents.append("delegate_mcp_probe")
+        elif spec.role == "ENGINEER" or phase_id == "build":
+            intents.append("delegate_test_run")
+            wait_policy = "quorum"
+            delegate_budget = 4
+            if browser_surface:
+                intents.append("delegate_browser_repro")
+            if security_surface:
+                intents.append("delegate_mcp_probe")
+        elif spec.role == "REVIEWER" or phase_id == "review":
+            intents.append("delegate_repo_scan")
+            if security_surface or research_surface:
+                intents.append("delegate_mcp_probe")
+        elif spec.role == "QA" or phase_id == "qa":
+            intents.append("delegate_test_run")
+            wait_policy = "quorum"
+            delegate_budget = 3
+            if browser_surface:
+                intents.append("delegate_browser_repro")
+            if security_surface:
+                intents.append("delegate_mcp_probe")
+
+        if intents:
+            plan[phase_id] = {
+                "delegate_intents": list(dict.fromkeys(intents)),
+                "wait_policy": wait_policy,
+                "delegate_budget": delegate_budget,
+            }
+    return plan
+
+
+def _resolve_phase_evidence_plan(
+    *,
+    lead_output: str,
+    phases: list[PhaseSpec],
+    message: str,
+    run_mode: str,
+) -> tuple[dict[str, dict[str, object]], str]:
+    explicit_plan = _coerce_phase_evidence_plan(_extract_evidence_plan(lead_output))
+    if explicit_plan:
+        return explicit_plan, "lead"
+    return _synthesize_default_phase_evidence_plan(
+        phases,
+        message=message,
+        run_mode=run_mode,
+    ), "default"
+
+
+def _sync_chat_runtime_state(
+    orch,
+    *,
+    task_root: str,
+    chat_run_state: ChatRunState,
+    lead_run_mode: str,
+    delegated_task_ids: list[str] | None = None,
+    evidence_plan_source: str = "",
+) -> None:
+    ws = orch._get_workflow_state(task_root)
+    ws["phase_evidence_plan"] = _coerce_phase_evidence_plan(
+        chat_run_state.phase_evidence_plan
+    )
+    ws["lead_run_mode"] = str(lead_run_mode or "standard").strip() or "standard"
+    ws["phase_task_ids"] = chat_run_state.phase_task_ids
+    ws["workflow_phase_keys"] = chat_run_state.workflow_phase_keys
+    if delegated_task_ids is not None:
+        ws["delegated_task_ids"] = list(delegated_task_ids)
+    ws.setdefault("delegate_batches", [])
+    ws["delegate_economics_summary"] = _summarize_delegate_economics(
+        _coerce_delegate_batches(ws.get("delegate_batches", []))
+    )
+    if evidence_plan_source:
+        ws["evidence_plan_source"] = evidence_plan_source
+    orch._save_workflow_state()
+
+
+def _is_context_only_query(message: str) -> bool:
+    """Detecta si el mensaje es una consulta de orientacion/contexto sin solicitud de desarrollo.
+
+    Estos mensajes no deben penalizarse por falta de artefactos o ejecucion, ya que su
+    objetivo es recuperar y sintetizar informacion, no producir codigo.
+    """
+    normalized = re.sub(r"\s+", " ", str(message or "")).strip().lower()
+    if not normalized or len(normalized) > 300:
+        return False
+    # Patrones de orientacion: preguntas sobre estado/contexto del proyecto
+    orientation_patterns = [
+        r"\bde qu[eé]\s+(va|iba|trata|trataba)\b",
+        r"\bqu[eé]\s+(es|era|hay|hemos|tenemos|tiene)\b",
+        r"\b(resumen|resume|resumir|sintetiza|sintetizar)\b",
+        r"\b(estado|status)\s+(del|de)\s+(proyecto|trabajo|tarea)\b",
+        r"\b(qu[eé]|como)\s+(llevamos|vamos|estamos)\b",
+        r"\b(recuerda[sm]?|recuerdo|recordar)\b",
+        r"\b(contexto|context)\s+(del|de)\b",
+        r"\bqu[eé]\s+(hicimos|hemos\s+hecho|habiamos\s+hecho)\b",
+        r"\b(orientaci[oó]n|orientame|orient[aá]me)\b",
+        r"\bponte\s+al\s+(d[ií]a|corriente)\b",
+        r"\b(cuales?|qu[eé])\s+(son|eran)\s+(los|las)\s+(siguiente[s]?\s+paso[s]?|pendiente[s]?)\b",
+    ]
+    import re as _re
+    for pattern in orientation_patterns:
+        if _re.search(pattern, normalized):
+            return True
+    # Consultas muy cortas que preguntan sobre el proyecto (heuristica de longitud)
+    # Excluir mensajes que empiecen con verbos de accion imperativa
+    _action_verbs = (
+        "implementa", "añade", "agrega", "crea", "haz ", "modifica", "arregla",
+        "reorganiza", "refactoriza", "migra", "actualiza", "genera", "construye",
+        "diseña", "elimina", "borra", "configura", "despliega", "ejecuta", "fix",
+        "add ", "create", "build", "run ", "deploy", "update", "remove", "delete",
+    )
+    if len(normalized) < 80 and any(
+        kw in normalized
+        for kw in ["proyecto", "project", "sabes", "sabe", "recuerdas", "recuerda"]
+    ) and not any(normalized.startswith(v) for v in _action_verbs):
+        return True
+    return False
+
+
+
+def _detect_run_type(
+    message: str,
+    phase_task_ids: dict[str, str],
+    artifact_created: int,
+    artifact_modified: int,
+) -> str:
+    """Clasifica el tipo de run para aplicar el threshold de scoring correcto.
+
+    Returns:
+        "context_recovery" — consulta de orientacion sin desarrollo
+        "planning"         — solo fases de investigacion/diseno, sin engineer
+        "build"            — tiene fase engineer y/o produce artefactos
+        "mixed"            — combinacion de tipos
+    """
+    phase_names = set(phase_task_ids.keys()) - {"lead_intake", "lead_close"}
+    has_build = any(
+        k in phase_names for k in ("build", "implement", "develop", "code", "fix", "refactor")
+    ) or any(
+        # Detectar por presencia de fases de engineer aunque tengan otro nombre
+        k.startswith("engineer") or k.startswith("eng_") for k in phase_names
+    )
+    has_artifacts = (artifact_created + artifact_modified) > 0
+
+    if _is_context_only_query(message) and not has_build and not has_artifacts:
+        return "context_recovery"
+
+    if has_build or has_artifacts:
+        return "build"
+
+    # Solo fases de researcher/reviewer/qa sin engineer
+    researcher_phases = {"discovery", "research", "plan_research", "analysis", "investigate"}
+    review_phases = {"review", "plan_risks", "audit", "security"}
+    qa_phases = {"qa", "test", "verify", "acceptance"}
+    non_build = researcher_phases | review_phases | qa_phases
+    if phase_names and phase_names.issubset(non_build):
+        return "planning"
+
+    return "mixed"
 
 
 def _workspace_artifact_snapshot(workspace: Path) -> dict[str, tuple[int, int]]:
@@ -891,6 +2439,31 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
     evidence_gate_failures: list[str] = []
     live_mode_required = False
     live_mode_rejected = False
+    phase_evidence_plan: dict[str, dict[str, object]] = {}
+    delegate_batches: list[dict[str, object]] = []
+    delegate_economics: dict[str, object] = {}
+
+    workflow_state_payload = _read_json_payload(
+        runtime_dir / "workflow_state.json",
+        fallback={},
+    )
+    if isinstance(workflow_state_payload, dict):
+        workflow_entry = workflow_state_payload.get(normalized_root, {})
+        if isinstance(workflow_entry, dict):
+            phase_evidence_plan = _coerce_phase_evidence_plan(
+                workflow_entry.get("phase_evidence_plan", {})
+            )
+            delegate_batches = _coerce_delegate_batches(
+                workflow_entry.get("delegate_batches", [])
+            )
+            delegate_economics = dict(
+                workflow_entry.get("delegate_economics_summary", {}) or {}
+            )
+    specialist_insights = _load_chat_specialist_insights(runtime_dir, normalized_root)
+    specialist_reports = list(specialist_insights.get("specialist_reports", []) or [])
+    specialist_report_summary = dict(
+        specialist_insights.get("specialist_report_summary", {}) or {}
+    )
 
     tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
     if isinstance(tasks_payload, list):
@@ -935,6 +2508,10 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
             round_budget = max(
                 round_budget, _safe_int_value(payload.get("round_budget", 0), 0)
             )
+            if not phase_evidence_plan:
+                phase_evidence_plan = _coerce_phase_evidence_plan(
+                    payload.get("phase_evidence_plan", {})
+                )
         if (
             event_type == "chat_auto_rounds_extended"
             and event_task_id_upper == normalized_root
@@ -1009,12 +2586,28 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
 
     exists = exists or root_event_seen
     completed_tasks = sum(1 for state in phase_states.values() if state == "completed")
+    _active_states = {"pending", "ready", "claimed", "blocked", "waiting_user"}
     pending_tasks = sum(
-        1
-        for state in phase_states.values()
-        if state in {"pending", "ready", "claimed", "blocked"}
+        1 for state in phase_states.values() if state in _active_states
     )
     lead_state = phase_states.get("lead_close", "")
+
+    # E7-D4: Detectar si el run está pausado esperando respuesta del usuario
+    _waiting_user_progress = False
+    _waiting_question_progress = ""
+    _pending_clarify = runtime_dir / f"pending_clarification_{normalized_root}.json"
+    if _pending_clarify.exists():
+        try:
+            _pcs = json.loads(_pending_clarify.read_text(encoding="utf-8"))
+            if _pcs.get("type") in ("mid_run", "lead_intake"):
+                _waiting_user_progress = True
+                _waiting_question_progress = str(_pcs.get("question", ""))
+        except Exception:
+            pass
+    if not _waiting_user_progress:
+        _waiting_user_progress = any(
+            s == "waiting_user" for s in phase_states.values()
+        )
 
     if not exists:
         return TeamChatProgressResponse(
@@ -1040,12 +2633,19 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
             evidence_gate_failures=evidence_gate_failures,
             last_event=last_event,
             last_event_ts=last_event_ts,
+            phase_evidence_plan=phase_evidence_plan,
+            delegate_batches=delegate_batches,
+            delegate_economics=delegate_economics,
+            specialist_reports=specialist_reports,
+            specialist_report_summary=specialist_report_summary,
         )
 
     if evidence_gate_rejected:
         progress_state = "rejected"
     elif failed_tasks > 0 or lead_state == "failed":
         progress_state = "failed"
+    elif _waiting_user_progress:
+        progress_state = "waiting_user"
     elif lead_state == "completed" and pending_tasks == 0:
         progress_state = "completed"
     elif exhausted:
@@ -1091,6 +2691,13 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
         last_event_ts=last_event_ts,
         dynamic_phases_ready=_dynamic_phases_ready,
         phase_task_ids=_progress_phase_task_ids,
+        phase_evidence_plan=phase_evidence_plan,
+        delegate_batches=delegate_batches,
+        delegate_economics=delegate_economics,
+        specialist_reports=specialist_reports,
+        specialist_report_summary=specialist_report_summary,
+        waiting_user=_waiting_user_progress,
+        clarification_question=_waiting_question_progress,
     )
 
 
@@ -1548,7 +3155,15 @@ def _compose_user_facing_run_summary(
         meta_parts.append(f"modo={execution_label}")
     meta_parts.append(f"calidad={productivity_score}/100 | {elapsed_ms}ms | {task_root}")
 
-    lines: list[str] = [decision_text, "", "---", " | ".join(meta_parts)]
+    lines: list[str] = [
+        "Resumen del Team Lead para ti:",
+        decision_text,
+        "",
+        f"Continuity: {continuation_line}",
+        "",
+        "---",
+        " | ".join(meta_parts),
+    ]
     return "\n".join(lines)
 
 
@@ -1577,7 +3192,12 @@ def _compact_delegated_result(value: str, *, state: str) -> str:
     if not text:
         return "sin resultado"
     if _is_placeholder_output_text(text):
-        return "[placeholder]" if state == "completed" else f"[placeholder/{state}]"
+        lower = text.lower()
+        if lower.startswith("[demo]"):
+            return "demo"
+        if re.match(r"^\[simulado\s*\|", lower):
+            return "placeholder/simulado"
+        return "placeholder" if state == "completed" else f"placeholder/{state}"
     return _compact_text_line(_presentable_decision_text(text) or text, 220)
 
 
@@ -1611,10 +3231,6 @@ def _limit_chat_response(text: str, *, limit: int = 12000) -> str:
             return content
 
     return _trim_at_boundary(content, limit - 20) + "\n[... truncado]"
-
-
-def _apply_chat_demo_env(*, strict_mode: bool, environment: str):
-    return lambda: None
 
 
 def _stream_display_chunk(task_id: str, chunk: str) -> str:
@@ -1709,6 +3325,307 @@ def _resolve_chat_decision_text(
     )
 
 
+def _replan_window_is_open(phase_states: dict[str, str], workflow_phase_keys: list[str]) -> bool:
+    """MVP E9-O6: solo permitir REPLAN si ninguna fase dinamica ha empezado."""
+
+    dynamic_phases = [
+        phase
+        for phase in workflow_phase_keys
+        if phase not in {"lead_intake", "lead_close"} and not phase.startswith("lead_")
+    ]
+    if not dynamic_phases:
+        return False
+    allowed_states = {"pending", "ready", "blocked"}
+    return all(str(phase_states.get(phase, "") or "").strip().lower() in allowed_states for phase in dynamic_phases)
+
+
+def _extract_replan_phases_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, list[PhaseSpec]] | None:
+    """Busca un REPLAN emitido por algun checkpoint del Lead con WORKFLOW_PLAN valido."""
+
+    for phase_name, output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=True,
+        reverse=True,
+    ):
+        if not directives.get("replan"):
+            continue
+        parsed = parse_workflow_plan(output)
+        if parsed:
+            return phase_name, parsed
+    return None
+
+
+def _replan_skip_reason(source_phase: str) -> str:
+    normalized = str(source_phase or "").strip()
+    if normalized == "lead_close":
+        return "lead_close_completed_plan"
+    return ""
+
+
+def _extract_force_gate_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, str] | None:
+    """Busca un FORCE_GATE emitido por algun checkpoint del Lead."""
+
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=True,
+        reverse=True,
+    ):
+        target = str(directives.get("force_gate", "") or "").strip()
+        if target:
+            return phase_name, target
+    return None
+
+
+def _extract_abort_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, str] | None:
+    """Busca un ABORT_PHASES emitido por un checkpoint mid-run del Lead."""
+
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=True,
+    ):
+        reason = str(directives.get("abort_phases", "") or "").strip()
+        if reason:
+            return phase_name, reason
+    return None
+
+
+def _extract_skip_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, list[str]] | None:
+    """Busca un SKIP emitido por un checkpoint mid-run del Lead."""
+
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=True,
+    ):
+        targets = [
+            str(item).strip()
+            for item in list(directives.get("skip") or [])
+            if str(item).strip()
+        ]
+        if targets:
+            return phase_name, targets
+    return None
+
+
+def _extract_retry_route_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, str] | None:
+    """Busca un RETRY_ROUTE emitido por un checkpoint mid-run del Lead."""
+
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=True,
+    ):
+        target = str(directives.get("retry_route", "") or "").strip()
+        if target:
+            return phase_name, target
+    return None
+
+
+def _extract_advisory_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, str] | None:
+    """Busca un ADVISORY_MODE emitido por un checkpoint mid-run del Lead."""
+
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=True,
+    ):
+        reason = str(directives.get("advisory_mode", "") or "").strip()
+        if reason:
+            return phase_name, reason
+    return None
+
+
+def _extract_budget_adjustments_from_outputs(
+    phase_outputs: dict[str, str],
+) -> list[tuple[str, dict[str, object]]]:
+    """Recoge ajustes de budget emitidos por checkpoints del Lead en orden temporal."""
+
+    adjustments: list[tuple[str, dict[str, object]]] = []
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=False,
+    ):
+        payload: dict[str, object] = {}
+        if directives.get("escalate"):
+            payload["escalate"] = directives["escalate"]
+        if directives.get("extend_budget"):
+            payload["extend_budget"] = directives["extend_budget"]
+        if directives.get("set_budget"):
+            payload["set_budget"] = directives["set_budget"]
+        if payload:
+            adjustments.append((phase_name, payload))
+    return adjustments
+
+
+def _extract_delegate_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, object] | None:
+    """Busca una delegacion especializada emitida por un checkpoint mid-run del Lead."""
+
+    for phase_name, output, _directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=True,
+    ):
+        request = _extract_delegate_request(output)
+        if request is not None:
+            return phase_name, request
+    return None
+
+
+def _phase_started_for_replan(task: WorkTask | None) -> bool:
+    """Determina si una fase ya empezo y no debe ser reemplazada por REPLAN parcial."""
+
+    if task is None:
+        return False
+    state = str(task.state.value if hasattr(task.state, "value") else task.state).strip().lower()
+    if state in {"claimed", "completed", "failed", "waiting_user"}:
+        return True
+    if _safe_int_value(task.metadata.get("execution_round", 0), 0) > 0:
+        return True
+    if state == "blocked":
+        if (
+            task.metadata.get("result")
+            or task.metadata.get("error")
+            or task.metadata.get("waiting_since")
+            or task.metadata.get("gate_opened_at")
+            or task.metadata.get("quality_gate_tasks")
+        ):
+            return True
+    return False
+
+
+def _merge_replanned_phases(
+    current_phases: list[PhaseSpec],
+    tasks_by_phase: dict[str, WorkTask | None],
+    replan_phases: list[PhaseSpec],
+) -> tuple[list[PhaseSpec], list[str], list[str]]:
+    """Fusiona un REPLAN con el estado actual preservando fases ya iniciadas."""
+
+    preserved_specs: list[PhaseSpec] = []
+    preserved_phase_ids: list[str] = []
+    preserved_task_ids: list[str] = []
+    for spec in current_phases:
+        current_task = tasks_by_phase.get(spec.phase_id)
+        if not _phase_started_for_replan(current_task):
+            continue
+        preserved_specs.append(spec)
+        preserved_phase_ids.append(spec.phase_id)
+        if current_task is not None:
+            preserved_task_ids.append(current_task.task_id)
+
+    preserved_set = set(preserved_phase_ids)
+    merged = preserved_specs + [
+        spec for spec in replan_phases if spec.phase_id not in preserved_set
+    ]
+    return merged, preserved_phase_ids, preserved_task_ids
+
+
+def _prune_phases_for_mid_run_lead_action(
+    current_phases: list[PhaseSpec],
+    tasks_by_phase: dict[str, WorkTask | None],
+    target_phase_ids: list[str] | None = None,
+    abort_all_pending: bool = False,
+) -> tuple[list[PhaseSpec], list[str], list[str], list[str]]:
+    """Elimina fases no iniciadas por instruccion mid-run del Lead.
+
+    Devuelve: `new_phases, removed_phase_ids, preserved_started_phase_ids, skipped_started_targets`.
+    """
+
+    started_phase_ids = {
+        spec.phase_id
+        for spec in current_phases
+        if _phase_started_for_replan(tasks_by_phase.get(spec.phase_id))
+    }
+
+    raw_targets = {
+        str(item).strip()
+        for item in list(target_phase_ids or [])
+        if str(item).strip()
+    }
+    skipped_started_targets = sorted(raw_targets & started_phase_ids)
+
+    if abort_all_pending:
+        removed_phase_ids = {
+            spec.phase_id
+            for spec in current_phases
+            if spec.phase_id not in started_phase_ids
+        }
+    else:
+        removed_phase_ids = {
+            phase_id
+            for phase_id in raw_targets
+            if phase_id in {spec.phase_id for spec in current_phases}
+            and phase_id not in started_phase_ids
+        }
+
+    changed = True
+    while changed:
+        changed = False
+        for spec in current_phases:
+            if spec.phase_id in removed_phase_ids or spec.phase_id in started_phase_ids:
+                continue
+            if any(dep in removed_phase_ids for dep in spec.depends_on):
+                removed_phase_ids.add(spec.phase_id)
+                changed = True
+
+    new_phases = [
+        spec for spec in current_phases if spec.phase_id not in removed_phase_ids
+    ]
+    preserved_started_phase_ids = [
+        spec.phase_id for spec in current_phases if spec.phase_id in started_phase_ids
+    ]
+    return (
+        new_phases,
+        sorted(removed_phase_ids),
+        preserved_started_phase_ids,
+        skipped_started_targets,
+    )
+
+
+def _retry_route_removal_phase_ids(
+    current_phases: list[PhaseSpec],
+    target_phase_id: str,
+) -> list[str]:
+    """Calcula la fase objetivo y todo su downstream transitivo para reintento."""
+
+    existing_ids = {spec.phase_id for spec in current_phases}
+    if target_phase_id not in existing_ids:
+        return []
+
+    removed = {target_phase_id}
+    changed = True
+    while changed:
+        changed = False
+        for spec in current_phases:
+            if spec.phase_id in removed:
+                continue
+            if any(dep in removed for dep in spec.depends_on):
+                removed.add(spec.phase_id)
+                changed = True
+    return [spec.phase_id for spec in current_phases if spec.phase_id in removed]
+
+
+def _strip_selected_directives(text: str, directives: list[str]) -> str:
+    """Elimina solo un subconjunto de directivas LCP del texto."""
+
+    return _lead_control_strip_selected_lcp_directives(text, directives)
+
+
 class NotebookLMSyncRequest(BaseModel):
     title: str = "AI Team Sync"
     source: str = "api"
@@ -1723,6 +3640,7 @@ from api.utils import (
     _truncate_text,
     _read_json_payload,
     _read_jsonl_records,
+    _load_chat_specialist_insights,
     _event_summary,
     _auth_expected_key,
     _extract_auth_token,
@@ -1735,6 +3653,8 @@ from api.utils import (
     _extract_user_message_from_task_description,
     _group_chat_roots,
     _build_project_continuity_context,
+    _build_scout_project_state_context,
+    _build_scout_session_history_context,
     _chat_round_budget,
     _sanitize_project_name,
     _allocate_project_path,
@@ -1827,10 +3747,6 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
     _token_queue: _queue_mod.Queue = _queue_mod.Queue()
 
     def _run_chat() -> TeamChatResponse:
-        restore_demo_env = _apply_chat_demo_env(
-            strict_mode=bool(payload.strict_mode),
-            environment="dev",
-        )
         orch = build_default_orchestrator(
             runtime_dir=runtime_dir,
             browser_mode="basic",
@@ -1863,6 +3779,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         continuation_of = ""
         continuation_snapshot = ""
         continuation_source: dict[str, object] = {}
+        preplan_surface_hints = _detect_preplan_surface_hints(payload.message)
+        preplan_signal_block = _build_preplan_signal_block(preplan_surface_hints)
         if continuation_requested:
             if continuation_target and continuation_target in previous_by_root:
                 continuation_source = previous_by_root.get(continuation_target, {})
@@ -1893,6 +3811,12 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             complexity=complexity,
             criticality=criticality,
         )
+        preplan_context_pressure = _estimate_preplan_context_pressure(
+            runtime_dir=runtime_dir,
+            continuation_requested=continuation_requested,
+            continuation_of=continuation_of,
+            continuation_snapshot=continuation_snapshot,
+        )
         require_build_execution_plan = not bool(continuation_requested)
 
         # ── Constantes de capabilities por rol ─────────────────────────────
@@ -1920,6 +3844,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         lead_task_id = f"{task_root}::lead_intake"
         continuity_context = _build_project_continuity_context(runtime_dir)
         continuity_block = f"\n\n{continuity_context}\n" if continuity_context else ""
+        curated_context_block = _build_curated_context_block(
+            runtime_dir=runtime_dir,
+            workspace=workspace,
+            continuation_of=continuation_of,
+        )
 
         orch.mailbox.send(
             sender="user",
@@ -1955,6 +3884,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "Eres Team Lead senior. Escucha al usuario, define alcance y estrategia de ejecucion.\n"
                 f"Solicitud original:\n{payload.message}\n"
                 "Entrega: objetivos, supuestos, riesgos y orden de trabajo del equipo."
+                f"{preplan_signal_block}"
+                f"{curated_context_block}"
                 f"{_WORKFLOW_PLAN_INSTRUCTION}"
                 f"{continuity_block}"
             )
@@ -1964,9 +3895,105 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 f"Solicitud original:\n{payload.message}\n"
                 "Entrega en <=12 lineas: objetivo, backlog priorizado (P0/P1), riesgos y"
                 " que se intentara completar en esta corrida."
+                f"{preplan_signal_block}"
+                f"{curated_context_block}"
                 f"{_WORKFLOW_PLAN_INSTRUCTION}"
                 f"{continuity_block}"
             )
+
+        # ── PASO 0: Pre-flight scouts (modelos baratos en paralelo) ─────────
+        # Los scouts pre-fetchen datos del proyecto sin LLM, luego los resumen
+        # con un modelo barato. El lead_intake recibe briefings compactos, no raw context.
+        scout_state_id = f"{task_root}::scout_project_state"
+        scout_history_id = f"{task_root}::scout_session_history"
+        scout_curator_id = f"{task_root}::scout_context_curator"
+
+        _scout_state_raw = _build_scout_project_state_context(workspace)
+        _scout_history_raw = _build_scout_session_history_context(runtime_dir)
+
+        _scout_state_task = WorkTask(
+            task_id=scout_state_id,
+            title="Scout: estado del proyecto",
+            description=(
+                "Resume el siguiente contexto en maximo 6 lineas de hechos concretos "
+                f"relevantes para la solicitud: '{payload.message[:120]}'\n\n"
+                f"{_scout_state_raw}\n\n"
+                "Formato: hechos breves. Sin teoria, sin recomendaciones."
+            ),
+            role=Role.SCOUT,
+            complexity=Complexity.LOW,
+            criticality=Criticality.LOW,
+            metadata={
+                **build_tool_specialist_metadata(
+                    specialist="repo_scout",
+                    required_capabilities=["repo_read"],
+                    reason="briefing barato del estado del proyecto para el Team Lead",
+                ),
+                "is_scout": True,
+                "scout_type": "project_state",
+                "skip_quality_gates": True,
+                "phase": "scout_project_state",
+                "chat_parent": task_root,
+            },
+        )
+        _scout_history_task = WorkTask(
+            task_id=scout_history_id,
+            title="Scout: historial de sesiones",
+            description=(
+                "Extrae los 3 hechos mas relevantes del historial para la "
+                f"solicitud: '{payload.message[:120]}'\n\n"
+                f"{_scout_history_raw}\n\n"
+                "Formato: 3 hechos concretos en maximo 6 lineas. "
+                "Incluye nombre del proyecto, decisiones tecnicas clave, estado de fases."
+            ),
+            role=Role.SCOUT,
+            complexity=Complexity.LOW,
+            criticality=Criticality.LOW,
+            metadata={
+                **build_tool_specialist_metadata(
+                    specialist="repo_scout",
+                    required_capabilities=["repo_read"],
+                    reason="briefing barato del historial reciente para el Team Lead",
+                ),
+                "is_scout": True,
+                "scout_type": "session_history",
+                "skip_quality_gates": True,
+                "phase": "scout_session_history",
+                "chat_parent": task_root,
+            },
+        )
+        _scout_curator_task = WorkTask(
+            task_id=scout_curator_id,
+            title="Scout: context curator",
+            description=_build_context_curator_prompt(
+                message=payload.message,
+                surface_hints=preplan_surface_hints,
+                project_state_raw=_scout_state_raw,
+                session_history_raw=_scout_history_raw,
+            ),
+            role=Role.SCOUT,
+            complexity=Complexity.LOW,
+            criticality=Criticality.LOW,
+            metadata={
+                **build_tool_specialist_metadata(
+                    specialist="context_curator",
+                    required_capabilities=["repo_read"],
+                    reason="compactacion barata del contexto antes de lead_intake",
+                ),
+                "is_scout": True,
+                "scout_type": "context_curator",
+                "skip_quality_gates": True,
+                "phase": "scout_context_curator",
+                "chat_parent": task_root,
+                "preplan_surface_hints": dict(preplan_surface_hints),
+                "context_pressure_score": int(preplan_context_pressure.get("score", 0) or 0),
+                "context_pressure_level": str(preplan_context_pressure.get("level", "") or "").strip(),
+                "context_pressure_signals": list(preplan_context_pressure.get("signals", []) or []),
+                "context_curator_recommended": bool(
+                    preplan_context_pressure.get("recommend_context_curator", False)
+                ),
+            },
+        )
 
         lead_intake_task = WorkTask(
             task_id=lead_task_id,
@@ -1975,16 +4002,49 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             role=Role.TEAM_LEAD,
             complexity=complexity,
             criticality=criticality,
+            dependencies=[scout_state_id, scout_history_id, scout_curator_id],
             metadata={
+                **build_chat_task_policy_metadata(),
                 "required_capabilities": ["reasoning"],
-                "interactive_chat": True,
-                "skip_quality_gates": True,
                 "require_peer_consultation": True,
                 "phase": "lead_intake",
                 "chat_preferred_role": preferred_role.value,
+                "preplan_surface_hints": dict(preplan_surface_hints),
+                "preplan_signal_block": preplan_signal_block,
+                "preplan_context_curator_task_id": scout_curator_id,
                 "continuation_requested": continuation_requested,
                 "continuation_of": continuation_of,
                 "continuation_snapshot": continuation_snapshot,
+                "context_pressure_score": int(preplan_context_pressure.get("score", 0) or 0),
+                "context_pressure_level": str(preplan_context_pressure.get("level", "") or "").strip(),
+                "context_pressure_signals": list(preplan_context_pressure.get("signals", []) or []),
+                "context_curator_recommended": bool(
+                    preplan_context_pressure.get("recommend_context_curator", False)
+                ),
+            },
+        )
+
+        _preplan_ws = orch._get_workflow_state(task_root)
+        _preplan_ws["preplan_surface_hints"] = dict(preplan_surface_hints)
+        _preplan_ws["preplan_signal_block"] = preplan_signal_block
+        _preplan_ws["continuation_requested"] = continuation_requested
+        _preplan_ws["continuation_of"] = continuation_of
+        _preplan_ws["continuation_snapshot"] = continuation_snapshot
+        _preplan_ws["context_pressure"] = dict(preplan_context_pressure)
+        _preplan_ws["context_curator_recommended"] = bool(
+            preplan_context_pressure.get("recommend_context_curator", False)
+        )
+        orch._save_workflow_state()
+        orch.event_logger.emit(
+            "lead_preplan_surface_hints",
+            {
+                "task_id": task_root,
+                "surfaces": list(preplan_surface_hints.get("surfaces", []) or []),
+                "recommended_delegate_intents": list(
+                    preplan_surface_hints.get("recommended_delegate_intents", []) or []
+                ),
+                "context_pressure_score": int(preplan_context_pressure.get("score", 0) or 0),
+                "context_pressure_level": str(preplan_context_pressure.get("level", "") or "").strip(),
             },
         )
 
@@ -2010,97 +4070,337 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
 
         started = time.perf_counter()
 
-        # ── PASO 1: ejecutar solo lead_intake ───────────────────────────────
+        # ── PASO 1: scouts en paralelo → lead_intake ─────────────────────────
+        # Los scouts (SCOUT role) corren en paralelo con modelos baratos.
+        # lead_intake arranca solo cuando ambos scouts completan.
+        orch.submit_task(_scout_state_task)
+        orch.submit_task(_scout_history_task)
+        orch.submit_task(_scout_curator_task)
         orch.submit_task(lead_intake_task)
         orch.run_until_idle(max_rounds=_LEAD_INTAKE_MAX_ROUNDS)
+
+        # ── E7-C: Delegación bajo demanda [DELEGATE: "query"] ─────────────────
+        # El Lead puede solicitar que un scout busque info adicional antes de
+        # planificar. El scout responde con el contexto disponible y el Lead
+        # replanifica con esa info. Máximo _MAX_DELEGATE_CYCLES ciclos.
+        _MAX_DELEGATE_CYCLES = 2
+        for _delegate_cycle in range(_MAX_DELEGATE_CYCLES):
+            _tmp_ws = orch._get_workflow_state(task_root)
+            _tmp_lead_out = _tmp_ws.get("phase_outputs", {}).get("lead_intake", "")
+            _delegate_request = _extract_delegate_request(_tmp_lead_out)
+            if _delegate_request is None:
+                break
+            _lead_delegate_result = _execute_delegate_request(
+                orch=orch,
+                task_root=task_root,
+                workspace=workspace,
+                runtime_dir=runtime_dir,
+                delegate_request=_delegate_request,
+                source_task_id=lead_task_id,
+                source_phase="lead_intake",
+                delegate_cycle=_delegate_cycle,
+                rerun_budget=_LEAD_INTAKE_MAX_ROUNDS,
+            )
+            if not _lead_delegate_result:
+                break
 
         # ── PASO 2: parsear WORKFLOW_PLAN del lead → fases dinamicas ────────
         _ws = orch._get_workflow_state(task_root)
         _lead_output = _ws.get("phase_outputs", {}).get("lead_intake", "")
-        phases: list[PhaseSpec] = parse_workflow_plan(_lead_output) or default_phases(
-            chat_mode
+
+        # ── Pausa conversacional: [CLARIFY] ──────────────────────────────────
+        _clarify_question = _extract_clarify_directive(_lead_output)
+        if _clarify_question:
+            _pending_file = runtime_dir / f"pending_clarification_{task_root}.json"
+            _pending_state = {
+                "task_root": task_root,
+                "question": _clarify_question,
+                "original_message": payload.message,
+                "original_payload": payload.model_dump(),
+                "lead_output": _lead_output[:800],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _pending_file.write_text(json.dumps(_pending_state, ensure_ascii=False, indent=2))
+            orch.event_logger.emit(
+                "chat_waiting_user",
+                {"task_id": task_root, "question": _clarify_question},
+            )
+            return TeamChatResponse(
+                task_id=task_root,
+                role=preferred_role.value,
+                state="waiting_user",
+                response=_clarify_question,
+                decision_justification="Lead necesita aclaración antes de planificar.",
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+                lead_task_id=lead_task_id,
+                delegated_task_ids=[],
+                phase_task_ids={"lead_intake": lead_task_id},
+                chat_mode=chat_mode,
+                phase_evidence_plan={},
+                delegate_batches=[],
+                delegate_economics={},
+                specialist_reports=[],
+                specialist_report_summary={},
+                waiting_user=True,
+                clarification_question=_clarify_question,
+            )
+        # ── LCP: Lead Control Protocol ───────────────────────────────────────
+        # Parsear directivas del Lead e intervenir antes de crear fases.
+        # Prioridad: REJECT > ABORT/DIRECT > ESCALATE > SKIP > EXTEND_BUDGET
+        _lcp_resolution = _lead_control_resolve_lead_intake(
+            lead_output=_lead_output,
+            chat_mode=chat_mode,
+            complexity=complexity,
+            criticality=criticality,
+            round_budget=round_budget,
+        )
+        _lcp = _lcp_resolution.directives
+        _lead_output_clean = _lcp_resolution.cleaned_output
+        _lead_run_mode = str(_lcp.get("run_mode", "") or "").strip() or "standard"
+        _curator_output = str(_ws.get("phase_outputs", {}).get("scout_context_curator", "") or "")
+        _project_context_payload, _chat_context_payload = _persist_preplan_context(
+            runtime_dir=runtime_dir,
+            workspace=workspace,
+            task_root=task_root,
+            user_message=payload.message,
+            surface_hints=preplan_surface_hints,
+            curator_summary=_curator_output,
+            lead_summary=_lead_output_clean,
+            source_task_ids=[scout_curator_id, lead_task_id],
+        )
+        _ws["project_context_summary"] = ContextCuratorStore(runtime_dir).build_summary(
+            _project_context_payload
+        )
+        _ws["chat_context_summary"] = ContextCuratorStore(runtime_dir).build_summary(
+            _chat_context_payload
+        )
+        orch._save_workflow_state()
+        orch.event_logger.emit(
+            "context_curator_persisted",
+            {
+                "task_id": task_root,
+                "project_key": _context_project_key(workspace),
+                "chat_root": task_root,
+                "surfaces": list(preplan_surface_hints.get("surfaces", []) or []),
+            },
         )
 
-        # Construir estructuras de fases desde el plan dinamico
-        phase_task_ids: dict[str, str] = {"lead_intake": lead_task_id}
-        for _spec in phases:
-            phase_task_ids[_spec.phase_id] = f"{task_root}::{_spec.phase_id}"
-        phase_task_ids["lead_close"] = f"{task_root}::lead_close"
+        def _lcp_base_response(**kwargs) -> "TeamChatResponse":
+            """Response de retorno temprano compartida por REJECT/ABORT/DIRECT."""
+            return TeamChatResponse(
+                task_id=task_root,
+                role=preferred_role.value,
+                response=_lead_output_clean,
+                decision_justification=kwargs.get("justification", ""),
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+                lead_task_id=lead_task_id,
+                delegated_task_ids=[],
+                phase_task_ids={"lead_intake": lead_task_id},
+                chat_mode=chat_mode,
+                round_budget=round_budget,
+                state=kwargs.get("state", "completed"),
+                phase_evidence_plan={},
+                delegate_batches=[],
+                delegate_economics={},
+                specialist_reports=[],
+                specialist_report_summary={},
+            )
 
-        workflow_phase_keys: list[str] = (
-            ["lead_intake"] + [s.phase_id for s in phases] + ["lead_close"]
+        for _event in _lcp_resolution.events:
+            orch.event_logger.emit(
+                "lcp_directive_applied",
+                {"task_id": task_root, **_event.to_event_payload()},
+            )
+
+        if _lcp_resolution.early_exit is not None:
+            return _lcp_base_response(
+                state=_lcp_resolution.early_exit.state,
+                justification=_lcp_resolution.early_exit.justification,
+            )
+
+        _phase_evidence_plan, _evidence_plan_source = _resolve_phase_evidence_plan(
+            lead_output=_lead_output,
+            phases=_lcp_resolution.phases,
+            message=payload.message,
+            run_mode=_lead_run_mode,
         )
-        delegated_task_ids: list[str] = [phase_task_ids[s.phase_id] for s in phases]
+        _chat_run_state = ChatRunState(
+            chat_root=task_root,
+            lead_task_id=lead_task_id,
+            preferred_role=preferred_role,
+            chat_mode=chat_mode,
+            complexity=_lcp_resolution.complexity,
+            criticality=_lcp_resolution.criticality,
+            round_budget=_lcp_resolution.round_budget,
+            phases=_lcp_resolution.phases,
+            phase_evidence_plan=_phase_evidence_plan,
+        )
+        _sync_chat_runtime_state(
+            orch,
+            task_root=task_root,
+            chat_run_state=_chat_run_state,
+            lead_run_mode=_lead_run_mode,
+            evidence_plan_source=_evidence_plan_source,
+        )
+        _resolved_complexity = _chat_run_state.complexity
+        _resolved_criticality = _chat_run_state.criticality
+        round_budget = _chat_run_state.round_budget
+        _chat_round_budget_cap = 80
+        lead_advisory_mode = False
+        lead_advisory_reason = ""
+        policy_signals: list[str] = []
+        phases: list[PhaseSpec] = _chat_run_state.phases
+        def _submit_chat_plan(
+            _state: ChatRunState,
+        ) -> tuple[dict[str, str], list[str], list[str]]:
+            local_phase_task_ids = _state.phase_task_ids
+            local_workflow_phase_keys = _state.workflow_phase_keys
+            local_delegated_task_ids = _state.delegated_task_ids
+            local_require_execution_plan = (
+                require_build_execution_plan and _lead_run_mode == "standard"
+            )
 
-        # Crear WorkTasks para cada fase dinamica
-        for _spec in phases:
-            _role_enum = Role[_spec.role]  # e.g. Role.ENGINEER
-            _caps = _ROLE_CAPABILITIES.get(_spec.role, ["analysis"])
-            _is_engineer = _spec.role == "ENGINEER"
-            # Dependencias: lead_intake + las que especifica el plan
-            _deps = [lead_task_id] + [
-                phase_task_ids[d]
-                for d in _spec.depends_on
-                if d in phase_task_ids and phase_task_ids[d] != lead_task_id
-            ]
-            if not _deps:
-                _deps = [lead_task_id]
-            orch.submit_task(
-                WorkTask(
-                    task_id=phase_task_ids[_spec.phase_id],
-                    title=_spec.phase_id.replace("_", " ").title(),
-                    description=(
-                        f"{_spec.objective}\n"
-                        f"Solicitud original: {payload.message}\n"
-                        f"Entrega: resultado accionable con evidencia para la siguiente fase."
-                        f"{continuity_block}"
-                    ),
-                    role=_role_enum,
-                    complexity=complexity,
-                    criticality=criticality,
-                    dependencies=_deps,
-                    metadata={
-                        "required_capabilities": _caps,
-                        "interactive_chat": True,
-                        "skip_quality_gates": True,
-                        "require_peer_consultation": True,
-                        "require_execution_plan": require_build_execution_plan
-                        if _is_engineer
-                        else False,
-                        "phase": _spec.phase_id,
-                        "chat_parent": task_root,
-                        "delegated_by": "team_lead",
-                        "delegation_brief": _spec.objective,
-                        "delegation_from_role": "team_lead",
-                    },
+            for _spec in _state.phases:
+                _phase_task_exists = (
+                    orch.taskboard.get_task(local_phase_task_ids[_spec.phase_id]) is not None
                 )
-            )
+                _role_enum = Role[_spec.role]
+                _caps = _ROLE_CAPABILITIES.get(_spec.role, ["analysis"])
+                _is_engineer = _spec.role == "ENGINEER"
+                _deps = _state.dependency_ids_for(_spec)
+                if not _phase_task_exists:
+                    orch.submit_task(
+                        WorkTask(
+                            task_id=local_phase_task_ids[_spec.phase_id],
+                            title=_spec.phase_id.replace("_", " ").title(),
+                            description=(
+                                f"{_spec.objective}\n"
+                                f"Solicitud original: {payload.message}\n"
+                                f"Entrega: resultado accionable con evidencia para la siguiente fase."
+                                f"{continuity_block}"
+                            ),
+                            role=_role_enum,
+                            complexity=_resolved_complexity,
+                            criticality=_resolved_criticality,
+                            dependencies=_deps,
+                            metadata={
+                                **build_chat_task_policy_metadata(
+                                    require_execution_plan=(
+                                        local_require_execution_plan if _is_engineer else False
+                                    )
+                                ),
+                                "required_capabilities": _caps,
+                                "require_peer_consultation": True,
+                                "phase": _spec.phase_id,
+                                "chat_parent": task_root,
+                                "lead_run_mode": _lead_run_mode,
+                                "delegated_by": "team_lead",
+                                "delegation_brief": _spec.objective,
+                                "delegation_from_role": "team_lead",
+                            },
+                        )
+                    )
+                _evidence_specs = _structured_evidence_specs_for_phase(
+                    _spec.phase_id,
+                    _state.phase_evidence_plan,
+                )
+                for _evidence_spec in _evidence_specs:
+                    _evidence_task_id = f"{task_root}::{_evidence_spec['phase_id']}"
+                    if orch.taskboard.get_task(_evidence_task_id) is not None:
+                        local_delegated_task_ids.append(_evidence_task_id)
+                        continue
+                    orch.submit_task(
+                        WorkTask(
+                            task_id=_evidence_task_id,
+                            title=f"Evidencia {str(_evidence_spec['source_phase']).replace('_', ' ')}",
+                            description=(
+                                f"{_evidence_spec['instruction']}\n\n"
+                                f"Fase origen: {_spec.phase_id}\n"
+                                f"Objetivo de la fase: {_spec.objective}\n"
+                                f"Solicitud original: {payload.message}\n"
+                                f"{_evidence_spec['report_contract']}"
+                                f"{continuity_block}"
+                            ),
+                            role=_evidence_spec["role"],
+                            complexity=Complexity.LOW,
+                            criticality=_resolved_criticality,
+                            dependencies=[local_phase_task_ids[_spec.phase_id]],
+                            metadata={
+                                **build_chat_task_policy_metadata(),
+                                "required_capabilities": _evidence_spec["required_capabilities"],
+                                "skip_quality_gates": True,
+                                "skip_evidence_gate": True,
+                                "phase": _evidence_spec["phase_id"],
+                                "chat_parent": task_root,
+                                "lead_run_mode": _lead_run_mode,
+                                "delegated_by": "team_lead",
+                                "delegation_brief": (
+                                    f"Evidencia estructurada para {_spec.phase_id}: "
+                                    f"{_evidence_spec['intent']}"
+                                ),
+                                "delegation_from_role": "team_lead",
+                                "delegate_intent": _evidence_spec["intent"],
+                                "delegate_wait_policy": _evidence_spec["wait_policy"],
+                                "delegate_budget_rounds": _evidence_spec["delegate_budget"],
+                                "evidence_source_phase": _spec.phase_id,
+                                "structured_evidence_task": True,
+                                "delegate_report_contract_version": "operator_report_v1",
+                                "skill_targets": _evidence_spec["skill_targets"],
+                                "lsp_targets": _evidence_spec["lsp_targets"],
+                                **build_tool_specialist_metadata(
+                                    specialist=str(_evidence_spec["specialist"]),
+                                    required_capabilities=_evidence_spec["required_capabilities"],
+                                    reason=(
+                                        f"evidence_plan para la fase {_spec.phase_id}; "
+                                        f"intent={_evidence_spec['intent']}"
+                                    ),
+                                    skill_targets=_evidence_spec["skill_targets"],
+                                    lsp_targets=_evidence_spec["lsp_targets"],
+                                ),
+                            },
+                        )
+                    )
+                    local_delegated_task_ids.append(_evidence_task_id)
+            local_delegated_task_ids = list(dict.fromkeys(local_delegated_task_ids))
 
-        # lead_close depende de todas las fases delegadas
-        _close_deps = delegated_task_ids if delegated_task_ids else [lead_task_id]
-        orch.submit_task(
-            WorkTask(
-                task_id=phase_task_ids["lead_close"],
-                title="Lead synthesis and response",
-                description=(
-                    "Como Team Lead senior, sintetiza el trabajo del equipo y responde al usuario.\n"
-                    f"Solicitud original: {payload.message}\n"
-                    "Entrega: resumen ejecutivo, decisiones tomadas y proximos pasos."
-                    f"{continuity_block}"
-                ),
-                role=Role.TEAM_LEAD,
-                complexity=complexity,
-                criticality=criticality,
-                dependencies=_close_deps,
-                metadata={
-                    "required_capabilities": ["reasoning"],
-                    "interactive_chat": True,
-                    "skip_quality_gates": True,
-                    "require_peer_consultation": True,
-                    "phase": "lead_close",
-                    "chat_parent": task_root,
-                },
-            )
+            _close_deps = local_delegated_task_ids if local_delegated_task_ids else [lead_task_id]
+            if orch.taskboard.get_task(_state.lead_close_task_id) is None:
+                orch.submit_task(
+                    WorkTask(
+                        task_id=_state.lead_close_task_id,
+                        title="Lead synthesis and response",
+                        description=(
+                            "Como Team Lead senior, sintetiza el trabajo del equipo y responde al usuario.\n"
+                            f"Solicitud original: {payload.message}\n"
+                            "Entrega: resumen ejecutivo, decisiones tomadas y proximos pasos."
+                            f"{continuity_block}"
+                        ),
+                        role=Role.TEAM_LEAD,
+                        complexity=_resolved_complexity,
+                        criticality=_resolved_criticality,
+                        dependencies=_close_deps,
+                        metadata={
+                            **build_chat_task_policy_metadata(),
+                            "required_capabilities": ["reasoning"],
+                            "require_peer_consultation": True,
+                            "phase": "lead_close",
+                            "chat_parent": task_root,
+                            "lead_run_mode": _lead_run_mode,
+                        },
+                    )
+                )
+            return local_phase_task_ids, local_workflow_phase_keys, local_delegated_task_ids
+
+        phase_task_ids, workflow_phase_keys, delegated_task_ids = _submit_chat_plan(
+            _chat_run_state
+        )
+        _sync_chat_runtime_state(
+            orch,
+            task_root=task_root,
+            chat_run_state=_chat_run_state,
+            lead_run_mode=_lead_run_mode,
+            delegated_task_ids=delegated_task_ids,
+            evidence_plan_source=_evidence_plan_source,
         )
 
         workflow_label = " -> ".join(workflow_phase_keys)
@@ -2113,6 +4413,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "phase_count": len(workflow_phase_keys),
                 "delegated_count": len(delegated_task_ids),
                 "dynamic_phases": [s.phase_id for s in phases],
+                "lead_run_mode": _lead_run_mode,
+                "phase_evidence_plan": _chat_run_state.phase_evidence_plan,
+                "evidence_plan_source": _evidence_plan_source,
                 "continuation_requested": continuation_requested,
                 "continuation_of": continuation_of,
                 "continuation_snapshot": continuation_snapshot,
@@ -2133,6 +4436,930 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         # ── PASO 3: ejecutar fases dinamicas + lead_close ───────────────────
         orch.run_until_idle(max_rounds=round_budget)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+        _phase_states_for_replan: dict[str, str] = {}
+        for _phase_name, _phase_id in phase_task_ids.items():
+            _task_row = orch.taskboard.get_task(_phase_id)
+            _phase_states_for_replan[_phase_name] = (
+                _task_row.state.value if _task_row is not None else "missing"
+            )
+
+        _budget_adjustments = _extract_budget_adjustments_from_outputs(
+            _ws.get("phase_outputs", {})
+        )
+        _budget_changed = False
+        for _budget_source_phase, _budget_payload in _budget_adjustments:
+            _source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_budget_source_phase, "") or ""
+            )
+            _strip_budget_directives: list[str] = []
+            _new_round_budget = round_budget
+            _escalate = _budget_payload.get("escalate")
+            if isinstance(_escalate, dict):
+                _valid_complexity = {"low", "medium", "high"}
+                _valid_criticality = {"low", "medium", "high"}
+                _complexity_value = str(_escalate.get("complexity", "") or "").strip()
+                _criticality_value = str(_escalate.get("criticality", "") or "").strip()
+                if _complexity_value in _valid_complexity:
+                    _resolved_complexity = Complexity(_complexity_value)
+                if _criticality_value in _valid_criticality:
+                    _resolved_criticality = Criticality(_criticality_value)
+                _boost = {"high": 1.5}.get(_resolved_complexity.value, 1.0)
+                if _boost > 1.0:
+                    _new_round_budget = min(
+                        _chat_round_budget_cap,
+                        max(round_budget, int(round_budget * _boost)),
+                    )
+                _strip_budget_directives.append("ESCALATE")
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "escalate_mid_run",
+                        "source_phase": _budget_source_phase,
+                        "payload": _escalate,
+                        "new_round_budget": _new_round_budget,
+                    },
+                )
+            if _budget_payload.get("extend_budget"):
+                _extension = int(_budget_payload.get("extend_budget", 0))
+                _new_round_budget = min(_chat_round_budget_cap, round_budget + _extension)
+                _strip_budget_directives.append("EXTEND_BUDGET")
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "extend_budget_mid_run",
+                        "source_phase": _budget_source_phase,
+                        "extension": _extension,
+                        "new_round_budget": _new_round_budget,
+                    },
+                )
+            if _budget_payload.get("set_budget"):
+                _requested_budget = int(_budget_payload.get("set_budget", round_budget))
+                _new_round_budget = max(1, min(_requested_budget, _chat_round_budget_cap))
+                _strip_budget_directives.append("SET_BUDGET")
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "set_budget_mid_run",
+                        "source_phase": _budget_source_phase,
+                        "new_round_budget": _new_round_budget,
+                    },
+                )
+            if _strip_budget_directives:
+                round_budget = _new_round_budget
+                _budget_changed = True
+                _ws.setdefault("phase_outputs", {})[_budget_source_phase] = (
+                    _strip_selected_directives(_source_output, _strip_budget_directives)
+                )
+                orch._save_workflow_state()
+
+        if _budget_changed:
+            _chat_run_state = ChatRunState(
+                chat_root=task_root,
+                lead_task_id=lead_task_id,
+                preferred_role=preferred_role,
+                chat_mode=chat_mode,
+                complexity=_resolved_complexity,
+                criticality=_resolved_criticality,
+                round_budget=round_budget,
+                phases=phases,
+                phase_evidence_plan=_chat_run_state.phase_evidence_plan,
+            )
+            _sync_chat_runtime_state(
+                orch,
+                task_root=task_root,
+                chat_run_state=_chat_run_state,
+                lead_run_mode=_lead_run_mode,
+                delegated_task_ids=delegated_task_ids,
+                evidence_plan_source=_evidence_plan_source,
+            )
+
+        _MAX_MIDRUN_DELEGATE_CYCLES = 2
+        for _mid_delegate_cycle in range(_MAX_MIDRUN_DELEGATE_CYCLES):
+            _mid_delegate_request = _extract_delegate_request_from_outputs(
+                _ws.get("phase_outputs", {})
+            )
+            if _mid_delegate_request is None:
+                break
+            _delegate_source_phase, _delegate_request = _mid_delegate_request
+            _delegate_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_delegate_source_phase, "") or ""
+            )
+            _ws.setdefault("phase_outputs", {})[_delegate_source_phase] = _strip_selected_directives(
+                _delegate_source_output,
+                [
+                    "DELEGATE",
+                    "DELEGATE_REPO_SCAN",
+                    "DELEGATE_BROWSER_REPRO",
+                    "DELEGATE_LSP_IMPACT",
+                    "DELEGATE_TEST_RUN",
+                    "DELEGATE_MCP_PROBE",
+                    "WAIT_POLICY",
+                    "DELEGATE_BUDGET",
+                ],
+            )
+            orch._save_workflow_state()
+            _mid_source_task_id = f"{task_root}::{_delegate_source_phase}"
+            _delegate_result = _execute_delegate_request(
+                orch=orch,
+                task_root=task_root,
+                workspace=workspace,
+                runtime_dir=runtime_dir,
+                delegate_request=_delegate_request,
+                source_task_id=_mid_source_task_id,
+                source_phase=_delegate_source_phase,
+                delegate_cycle=_mid_delegate_cycle,
+                rerun_budget=round_budget,
+            )
+            if not _delegate_result:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "delegate",
+                        "source_phase": _delegate_source_phase,
+                        "reason": "missing_source_task",
+                    },
+                )
+                break
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+        _advisory_request = _extract_advisory_request_from_outputs(
+            _ws.get("phase_outputs", {})
+        )
+        if _advisory_request is not None:
+            _advisory_source_phase, _advisory_reason = _advisory_request
+            _advisory_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_advisory_source_phase, "") or ""
+            )
+            _ws.setdefault("phase_outputs", {})[_advisory_source_phase] = _strip_selected_directives(
+                _advisory_source_output,
+                ["ADVISORY_MODE"],
+            )
+            orch._save_workflow_state()
+            _lead_close_task = orch.taskboard.get_task(phase_task_ids.get("lead_close", ""))
+            if not _phase_started_for_replan(_lead_close_task):
+                _current_tasks_by_phase = {
+                    _phase_name: orch.taskboard.get_task(_phase_id)
+                    for _phase_name, _phase_id in phase_task_ids.items()
+                    if _phase_name not in {"lead_intake", "lead_close"}
+                }
+                _pruned_phases, _removed_phase_ids, _preserved_started_phase_ids, _ = (
+                    _prune_phases_for_mid_run_lead_action(
+                        phases,
+                        _current_tasks_by_phase,
+                        abort_all_pending=True,
+                    )
+                )
+                _preserved_task_ids = [
+                    _task.task_id
+                    for _phase_name, _task in _current_tasks_by_phase.items()
+                    if _phase_name in set(_preserved_started_phase_ids)
+                    and _task is not None
+                ]
+                _remove_ids = [
+                    _task.task_id
+                    for _task in orch.taskboard.list_tasks()
+                    if str(_task.task_id).startswith(f"{task_root}::")
+                    and _task.task_id != lead_task_id
+                    and _task.task_id not in set(_preserved_task_ids)
+                ]
+                orch.taskboard.remove_tasks(_remove_ids)
+                _keep_outputs: dict[str, str] = {}
+                for _phase_key, _output in _ws.get("phase_outputs", {}).items():
+                    if _is_supporting_control_phase(_phase_key):
+                        _keep_outputs[_phase_key] = _output
+                    elif _phase_key in set(_preserved_started_phase_ids):
+                        _keep_outputs[_phase_key] = _output
+                _ws["phase_outputs"] = _keep_outputs
+                orch._save_workflow_state()
+                lead_advisory_mode = True
+                lead_advisory_reason = _advisory_reason
+                _chat_run_state = ChatRunState(
+                    chat_root=task_root,
+                    lead_task_id=lead_task_id,
+                    preferred_role=preferred_role,
+                    chat_mode=chat_mode,
+                    complexity=_resolved_complexity,
+                    criticality=_resolved_criticality,
+                    round_budget=round_budget,
+                    phases=_pruned_phases,
+                    phase_evidence_plan=_chat_run_state.phase_evidence_plan,
+                )
+                phases = _chat_run_state.phases
+                phase_task_ids, workflow_phase_keys, delegated_task_ids = _submit_chat_plan(
+                    _chat_run_state
+                )
+                _sync_chat_runtime_state(
+                    orch,
+                    task_root=task_root,
+                    chat_run_state=_chat_run_state,
+                    lead_run_mode=_lead_run_mode,
+                    delegated_task_ids=delegated_task_ids,
+                    evidence_plan_source=_evidence_plan_source,
+                )
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "advisory_mode",
+                        "source_phase": _advisory_source_phase,
+                        "reason": lead_advisory_reason,
+                        "removed_phases": _removed_phase_ids,
+                    },
+                )
+                orch.run_until_idle(max_rounds=round_budget)
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+            else:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "advisory_mode",
+                        "source_phase": _advisory_source_phase,
+                        "reason": "lead_close_started",
+                    },
+                )
+
+        _replan_request = _extract_replan_phases_from_outputs(
+            _ws.get("phase_outputs", {})
+        )
+        if _replan_request is not None:
+            _replan_source_phase, _replan_phases = _replan_request
+            _replan_skip = _replan_skip_reason(_replan_source_phase)
+            if _replan_skip:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "replan",
+                        "source_phase": _replan_source_phase,
+                        "reason": _replan_skip,
+                    },
+                )
+                _replan_request = None
+        if _replan_request is not None:
+            _replan_source_phase, _replan_phases = _replan_request
+            _replan_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_replan_source_phase, "") or ""
+            )
+            _replan_evidence_plan = (
+                _extract_evidence_plan(_replan_source_output)
+                or _chat_run_state.phase_evidence_plan
+            )
+            if _replan_window_is_open(_phase_states_for_replan, workflow_phase_keys):
+                _remove_ids = [
+                    _task.task_id
+                    for _task in orch.taskboard.list_tasks()
+                    if str(_task.task_id).startswith(f"{task_root}::")
+                    and _task.task_id != lead_task_id
+                ]
+                orch.taskboard.remove_tasks(_remove_ids)
+                _keep_outputs: dict[str, str] = {}
+                for _phase_key, _output in _ws.get("phase_outputs", {}).items():
+                    if _is_supporting_control_phase(_phase_key):
+                        _keep_outputs[_phase_key] = _output
+                _ws["phase_outputs"] = _keep_outputs
+                _phase_context_summaries = dict(_ws.get("phase_context_summaries", {}) or {})
+                for _phase_name in [spec.phase_id for spec in phases]:
+                    _phase_context_summaries.pop(_phase_name, None)
+                _ws["phase_context_summaries"] = _phase_context_summaries
+                _project_summary, _chat_summary = _record_context_invalidation(
+                    runtime_dir=runtime_dir,
+                    workspace=workspace,
+                    task_root=task_root,
+                    reason="replan_full",
+                    affected_phases=[spec.phase_id for spec in phases],
+                    source_task_ids=[lead_task_id, f"{task_root}::{_replan_source_phase}"],
+                )
+                _ws["project_context_summary"] = _project_summary
+                _ws["chat_context_summary"] = _chat_summary
+                orch._save_workflow_state()
+
+                _chat_run_state = ChatRunState(
+                    chat_root=task_root,
+                    lead_task_id=lead_task_id,
+                    preferred_role=preferred_role,
+                    chat_mode=chat_mode,
+                    complexity=_resolved_complexity,
+                    criticality=_resolved_criticality,
+                    round_budget=round_budget,
+                    phases=_replan_phases,
+                    phase_evidence_plan=_replan_evidence_plan,
+                )
+                phases = _chat_run_state.phases
+                phase_task_ids, workflow_phase_keys, delegated_task_ids = _submit_chat_plan(
+                    _chat_run_state
+                )
+                _sync_chat_runtime_state(
+                    orch,
+                    task_root=task_root,
+                    chat_run_state=_chat_run_state,
+                    lead_run_mode=_lead_run_mode,
+                    delegated_task_ids=delegated_task_ids,
+                    evidence_plan_source="replan",
+                )
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "replan",
+                        "source_phase": _replan_source_phase,
+                        "phase_count": len(_replan_phases),
+                    },
+                )
+                orch.run_until_idle(max_rounds=round_budget)
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+            else:
+                _current_tasks_by_phase = {
+                    _phase_name: orch.taskboard.get_task(_phase_id)
+                    for _phase_name, _phase_id in phase_task_ids.items()
+                    if _phase_name not in {"lead_intake", "lead_close"}
+                }
+                _merged_phases, _preserved_phase_ids, _preserved_task_ids = _merge_replanned_phases(
+                    phases,
+                    _current_tasks_by_phase,
+                    _replan_phases,
+                )
+                if _preserved_phase_ids and len(_merged_phases) >= len(_preserved_phase_ids):
+                    _remove_ids = [
+                        _task.task_id
+                        for _task in orch.taskboard.list_tasks()
+                        if str(_task.task_id).startswith(f"{task_root}::")
+                        and _task.task_id != lead_task_id
+                        and _task.task_id not in set(_preserved_task_ids)
+                    ]
+                    orch.taskboard.remove_tasks(_remove_ids)
+
+                    _keep_outputs: dict[str, str] = {}
+                    for _phase_key, _output in _ws.get("phase_outputs", {}).items():
+                        if _is_supporting_control_phase(_phase_key):
+                            _keep_outputs[_phase_key] = _output
+                        elif _phase_key in set(_preserved_phase_ids):
+                            _keep_outputs[_phase_key] = _output
+                    _ws["phase_outputs"] = _keep_outputs
+                    _phase_context_summaries = dict(_ws.get("phase_context_summaries", {}) or {})
+                    for _phase_name in _removed_phase_ids:
+                        _phase_context_summaries.pop(_phase_name, None)
+                    _ws["phase_context_summaries"] = _phase_context_summaries
+                    _project_summary, _chat_summary = _record_context_invalidation(
+                        runtime_dir=runtime_dir,
+                        workspace=workspace,
+                        task_root=task_root,
+                        reason="replan_partial",
+                        affected_phases=_removed_phase_ids,
+                        source_task_ids=[lead_task_id, f"{task_root}::{_replan_source_phase}"],
+                    )
+                    _ws["project_context_summary"] = _project_summary
+                    _ws["chat_context_summary"] = _chat_summary
+                    orch._save_workflow_state()
+
+                    _chat_run_state = ChatRunState(
+                        chat_root=task_root,
+                        lead_task_id=lead_task_id,
+                        preferred_role=preferred_role,
+                        chat_mode=chat_mode,
+                        complexity=_resolved_complexity,
+                        criticality=_resolved_criticality,
+                        round_budget=round_budget,
+                        phases=_merged_phases,
+                        phase_evidence_plan=_replan_evidence_plan,
+                    )
+                    phases = _chat_run_state.phases
+                    phase_task_ids, workflow_phase_keys, delegated_task_ids = _submit_chat_plan(
+                        _chat_run_state
+                    )
+                    _sync_chat_runtime_state(
+                        orch,
+                        task_root=task_root,
+                        chat_run_state=_chat_run_state,
+                        lead_run_mode=_lead_run_mode,
+                        delegated_task_ids=delegated_task_ids,
+                        evidence_plan_source="replan",
+                    )
+                    orch.event_logger.emit(
+                        "lcp_directive_applied",
+                        {
+                            "task_id": task_root,
+                            "directive": "replan_partial",
+                            "source_phase": _replan_source_phase,
+                            "phase_count": len(_merged_phases),
+                            "preserved_phases": _preserved_phase_ids,
+                        },
+                    )
+                    orch.run_until_idle(max_rounds=round_budget)
+                    elapsed_ms = int((time.perf_counter() - started) * 1000)
+                else:
+                    orch.event_logger.emit(
+                        "lcp_directive_skipped",
+                        {
+                            "task_id": task_root,
+                            "directive": "replan",
+                            "source_phase": _replan_source_phase,
+                            "reason": "dynamic_phase_already_started",
+                        },
+                    )
+
+        _abort_request = _extract_abort_request_from_outputs(_ws.get("phase_outputs", {}))
+        if _abort_request is not None:
+            _abort_source_phase, _abort_reason = _abort_request
+            _abort_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_abort_source_phase, "") or ""
+            )
+            _ws.setdefault("phase_outputs", {})[_abort_source_phase] = _strip_lcp_directives(
+                _abort_source_output
+            )
+            orch._save_workflow_state()
+            _lead_close_task = orch.taskboard.get_task(phase_task_ids.get("lead_close", ""))
+            if not _phase_started_for_replan(_lead_close_task):
+                _current_tasks_by_phase = {
+                    _phase_name: orch.taskboard.get_task(_phase_id)
+                    for _phase_name, _phase_id in phase_task_ids.items()
+                    if _phase_name not in {"lead_intake", "lead_close"}
+                }
+                _pruned_phases, _removed_phase_ids, _preserved_started_phase_ids, _ = (
+                    _prune_phases_for_mid_run_lead_action(
+                        phases,
+                        _current_tasks_by_phase,
+                        abort_all_pending=True,
+                    )
+                )
+                if _removed_phase_ids:
+                    _preserved_task_ids = [
+                        _task.task_id
+                        for _phase_name, _task in _current_tasks_by_phase.items()
+                        if _phase_name in set(_preserved_started_phase_ids)
+                        and _task is not None
+                    ]
+                    _remove_ids = [
+                        _task.task_id
+                        for _task in orch.taskboard.list_tasks()
+                        if str(_task.task_id).startswith(f"{task_root}::")
+                        and _task.task_id != lead_task_id
+                        and _task.task_id not in set(_preserved_task_ids)
+                    ]
+                    orch.taskboard.remove_tasks(_remove_ids)
+                    _keep_outputs: dict[str, str] = {}
+                    for _phase_key, _output in _ws.get("phase_outputs", {}).items():
+                        if _is_supporting_control_phase(_phase_key):
+                            _keep_outputs[_phase_key] = _output
+                        elif _phase_key in set(_preserved_started_phase_ids):
+                            _keep_outputs[_phase_key] = _output
+                    _ws["phase_outputs"] = _keep_outputs
+                    orch._save_workflow_state()
+                    _chat_run_state = ChatRunState(
+                        chat_root=task_root,
+                        lead_task_id=lead_task_id,
+                        preferred_role=preferred_role,
+                        chat_mode=chat_mode,
+                        complexity=_resolved_complexity,
+                        criticality=_resolved_criticality,
+                        round_budget=round_budget,
+                        phases=_pruned_phases,
+                        phase_evidence_plan=_chat_run_state.phase_evidence_plan,
+                    )
+                    phases = _chat_run_state.phases
+                    phase_task_ids, workflow_phase_keys, delegated_task_ids = _submit_chat_plan(
+                        _chat_run_state
+                    )
+                    _sync_chat_runtime_state(
+                        orch,
+                        task_root=task_root,
+                        chat_run_state=_chat_run_state,
+                        lead_run_mode=_lead_run_mode,
+                        delegated_task_ids=delegated_task_ids,
+                        evidence_plan_source=_evidence_plan_source,
+                    )
+                    orch.event_logger.emit(
+                        "lcp_directive_applied",
+                        {
+                            "task_id": task_root,
+                            "directive": "abort_phases",
+                            "source_phase": _abort_source_phase,
+                            "removed_phases": _removed_phase_ids,
+                            "reason": _abort_reason,
+                        },
+                    )
+                    orch.run_until_idle(max_rounds=round_budget)
+                    elapsed_ms = int((time.perf_counter() - started) * 1000)
+                else:
+                    orch.event_logger.emit(
+                        "lcp_directive_skipped",
+                        {
+                            "task_id": task_root,
+                            "directive": "abort_phases",
+                            "source_phase": _abort_source_phase,
+                            "reason": "no_pending_phases_to_abort",
+                        },
+                    )
+            else:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "abort_phases",
+                        "source_phase": _abort_source_phase,
+                        "reason": "lead_close_started",
+                    },
+                )
+
+        _skip_request = _extract_skip_request_from_outputs(_ws.get("phase_outputs", {}))
+        if _skip_request is not None:
+            _skip_source_phase, _skip_targets = _skip_request
+            _skip_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_skip_source_phase, "") or ""
+            )
+            _ws.setdefault("phase_outputs", {})[_skip_source_phase] = _strip_lcp_directives(
+                _skip_source_output
+            )
+            orch._save_workflow_state()
+            _lead_close_task = orch.taskboard.get_task(phase_task_ids.get("lead_close", ""))
+            if not _phase_started_for_replan(_lead_close_task):
+                _current_tasks_by_phase = {
+                    _phase_name: orch.taskboard.get_task(_phase_id)
+                    for _phase_name, _phase_id in phase_task_ids.items()
+                    if _phase_name not in {"lead_intake", "lead_close"}
+                }
+                (
+                    _pruned_phases,
+                    _removed_phase_ids,
+                    _preserved_started_phase_ids,
+                    _skipped_started_targets,
+                ) = _prune_phases_for_mid_run_lead_action(
+                    phases,
+                    _current_tasks_by_phase,
+                    target_phase_ids=_skip_targets,
+                )
+                if _removed_phase_ids:
+                    _preserved_task_ids = [
+                        _task.task_id
+                        for _phase_name, _task in _current_tasks_by_phase.items()
+                        if _phase_name in set(_preserved_started_phase_ids)
+                        and _task is not None
+                    ]
+                    _remove_ids = [
+                        _task.task_id
+                        for _task in orch.taskboard.list_tasks()
+                        if str(_task.task_id).startswith(f"{task_root}::")
+                        and _task.task_id != lead_task_id
+                        and _task.task_id not in set(_preserved_task_ids)
+                    ]
+                    orch.taskboard.remove_tasks(_remove_ids)
+                    _keep_outputs: dict[str, str] = {}
+                    for _phase_key, _output in _ws.get("phase_outputs", {}).items():
+                        if _is_supporting_control_phase(_phase_key):
+                            _keep_outputs[_phase_key] = _output
+                        elif _phase_key in set(_preserved_started_phase_ids):
+                            _keep_outputs[_phase_key] = _output
+                    _ws["phase_outputs"] = _keep_outputs
+                    orch._save_workflow_state()
+                    _chat_run_state = ChatRunState(
+                        chat_root=task_root,
+                        lead_task_id=lead_task_id,
+                        preferred_role=preferred_role,
+                        chat_mode=chat_mode,
+                        complexity=_resolved_complexity,
+                        criticality=_resolved_criticality,
+                        round_budget=round_budget,
+                        phases=_pruned_phases,
+                        phase_evidence_plan=_chat_run_state.phase_evidence_plan,
+                    )
+                    phases = _chat_run_state.phases
+                    phase_task_ids, workflow_phase_keys, delegated_task_ids = _submit_chat_plan(
+                        _chat_run_state
+                    )
+                    _sync_chat_runtime_state(
+                        orch,
+                        task_root=task_root,
+                        chat_run_state=_chat_run_state,
+                        lead_run_mode=_lead_run_mode,
+                        delegated_task_ids=delegated_task_ids,
+                        evidence_plan_source=_evidence_plan_source,
+                    )
+                    orch.event_logger.emit(
+                        "lcp_directive_applied",
+                        {
+                            "task_id": task_root,
+                            "directive": "skip_mid_run",
+                            "source_phase": _skip_source_phase,
+                            "removed_phases": _removed_phase_ids,
+                            "requested_phases": _skip_targets,
+                            "skipped_started_targets": _skipped_started_targets,
+                        },
+                    )
+                    orch.run_until_idle(max_rounds=round_budget)
+                    elapsed_ms = int((time.perf_counter() - started) * 1000)
+                else:
+                    orch.event_logger.emit(
+                        "lcp_directive_skipped",
+                        {
+                            "task_id": task_root,
+                            "directive": "skip_mid_run",
+                            "source_phase": _skip_source_phase,
+                            "requested_phases": _skip_targets,
+                            "reason": "no_pending_target_phases",
+                            "skipped_started_targets": _skipped_started_targets,
+                        },
+                    )
+            else:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "skip_mid_run",
+                        "source_phase": _skip_source_phase,
+                        "requested_phases": _skip_targets,
+                        "reason": "lead_close_started",
+                    },
+                )
+
+        _retry_route_request = _extract_retry_route_request_from_outputs(
+            _ws.get("phase_outputs", {})
+        )
+        if _retry_route_request is not None:
+            _retry_source_phase, _retry_target_phase = _retry_route_request
+            _retry_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_retry_source_phase, "") or ""
+            )
+            _ws.setdefault("phase_outputs", {})[_retry_source_phase] = _strip_selected_directives(
+                _retry_source_output,
+                ["RETRY_ROUTE"],
+            )
+            orch._save_workflow_state()
+            _lead_close_task = orch.taskboard.get_task(phase_task_ids.get("lead_close", ""))
+            _target_task_id = phase_task_ids.get(_retry_target_phase, "")
+            _target_task = orch.taskboard.get_task(_target_task_id) if _target_task_id else None
+            _tasks_by_phase = {
+                _phase_name: orch.taskboard.get_task(_phase_id)
+                for _phase_name, _phase_id in phase_task_ids.items()
+                if _phase_name not in {"lead_intake", "lead_close"}
+            }
+            _retry_removed_phase_ids = _retry_route_removal_phase_ids(
+                phases,
+                _retry_target_phase,
+            )
+            _downstream_started = any(
+                _phase_name != _retry_target_phase
+                and _phase_started_for_replan(_tasks_by_phase.get(_phase_name))
+                for _phase_name in _retry_removed_phase_ids
+            )
+            if (
+                _target_task is not None
+                and _phase_started_for_replan(_target_task)
+                and not _phase_started_for_replan(_lead_close_task)
+                and _retry_removed_phase_ids
+                and not _downstream_started
+            ):
+                _preserved_started_phase_ids = [
+                    _phase_name
+                    for _phase_name, _task in _tasks_by_phase.items()
+                    if _phase_name not in set(_retry_removed_phase_ids)
+                    and _phase_started_for_replan(_task)
+                ]
+                _preserved_task_ids = [
+                    _task.task_id
+                    for _phase_name, _task in _tasks_by_phase.items()
+                    if _phase_name in set(_preserved_started_phase_ids)
+                    and _task is not None
+                ]
+                _remove_ids = [
+                    _task.task_id
+                    for _task in orch.taskboard.list_tasks()
+                    if str(_task.task_id).startswith(f"{task_root}::")
+                    and _task.task_id != lead_task_id
+                    and _task.task_id not in set(_preserved_task_ids)
+                ]
+                orch.taskboard.remove_tasks(_remove_ids)
+                _keep_outputs: dict[str, str] = {}
+                for _phase_key, _output in _ws.get("phase_outputs", {}).items():
+                    if _is_supporting_control_phase(_phase_key):
+                        _keep_outputs[_phase_key] = _output
+                    elif _phase_key in set(_preserved_started_phase_ids):
+                        _keep_outputs[_phase_key] = _output
+                _ws["phase_outputs"] = _keep_outputs
+                orch._save_workflow_state()
+                _chat_run_state = ChatRunState(
+                    chat_root=task_root,
+                    lead_task_id=lead_task_id,
+                    preferred_role=preferred_role,
+                    chat_mode=chat_mode,
+                    complexity=_resolved_complexity,
+                    criticality=_resolved_criticality,
+                    round_budget=round_budget,
+                    phases=phases,
+                    phase_evidence_plan=_chat_run_state.phase_evidence_plan,
+                )
+                phase_task_ids, workflow_phase_keys, delegated_task_ids = _submit_chat_plan(
+                    _chat_run_state
+                )
+                _sync_chat_runtime_state(
+                    orch,
+                    task_root=task_root,
+                    chat_run_state=_chat_run_state,
+                    lead_run_mode=_lead_run_mode,
+                    delegated_task_ids=delegated_task_ids,
+                    evidence_plan_source=_evidence_plan_source,
+                )
+                _new_target_task_id = phase_task_ids.get(_retry_target_phase, "")
+                _excluded_adapters = [
+                    str(item).strip()
+                    for item in list((_target_task.metadata.get("excluded_adapters", []) or []))
+                    if str(item).strip()
+                ]
+                _last_adapter_name = str(_target_task.metadata.get("last_adapter_name", "") or "").strip()
+                if _last_adapter_name and _last_adapter_name not in _excluded_adapters:
+                    _excluded_adapters.append(_last_adapter_name)
+                if _new_target_task_id:
+                    orch.taskboard.update_metadata(
+                        _new_target_task_id,
+                        {
+                            "excluded_adapters": _excluded_adapters,
+                            "retry_route_requested": True,
+                            "retry_route_requested_by": _retry_source_phase,
+                            "retry_route_count": int(_target_task.metadata.get("retry_route_count", 0)) + 1,
+                        },
+                    )
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "retry_route",
+                        "source_phase": _retry_source_phase,
+                        "target_phase": _retry_target_phase,
+                        "excluded_adapters": _excluded_adapters,
+                    },
+                )
+                orch.run_until_idle(max_rounds=round_budget)
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+            else:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "retry_route",
+                        "source_phase": _retry_source_phase,
+                        "target_phase": _retry_target_phase,
+                        "reason": (
+                            "lead_close_started"
+                            if _phase_started_for_replan(_lead_close_task)
+                            else "target_not_started_or_downstream_already_started"
+                        ),
+                    },
+                )
+
+        _force_gate_request = _extract_force_gate_request_from_outputs(
+            _ws.get("phase_outputs", {})
+        )
+        if _force_gate_request is not None:
+            _force_gate_source_phase, _force_gate_target = _force_gate_request
+            _force_gate_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_force_gate_source_phase, "") or ""
+            )
+            _clean_force_gate_output = _strip_lcp_directives(_force_gate_source_output)
+            _ws.setdefault("phase_outputs", {})[_force_gate_source_phase] = (
+                _clean_force_gate_output
+            )
+            _phase_context_summaries = dict(_ws.get("phase_context_summaries", {}) or {})
+            _phase_context_summaries.pop(_force_gate_target, None)
+            _ws["phase_context_summaries"] = _phase_context_summaries
+            _project_summary, _chat_summary = _record_context_invalidation(
+                runtime_dir=runtime_dir,
+                workspace=workspace,
+                task_root=task_root,
+                reason="force_gate",
+                affected_phases=[_force_gate_target],
+                source_task_ids=[lead_task_id, f"{task_root}::{_force_gate_source_phase}"],
+            )
+            _ws["project_context_summary"] = _project_summary
+            _ws["chat_context_summary"] = _chat_summary
+            orch._save_workflow_state()
+            _target_task_id = phase_task_ids.get(_force_gate_target, "")
+            _target_task = orch.taskboard.get_task(_target_task_id) if _target_task_id else None
+            _lead_close_task = orch.taskboard.get_task(phase_task_ids.get("lead_close", ""))
+            _lead_close_started = _phase_started_for_replan(_lead_close_task)
+            if (
+                _target_task is not None
+                and _target_task.state == TaskState.COMPLETED
+                and not _target_task.metadata.get("quality_gate_spawned")
+                and not _lead_close_started
+            ):
+                orch.taskboard.mark_blocked(
+                    _target_task.task_id,
+                    reason="waiting_quality_gates",
+                )
+                orch.taskboard.update_metadata(
+                    _target_task.task_id,
+                    {
+                        "force_gate_requested_by": _force_gate_source_phase,
+                        "force_gate_target_phase": _force_gate_target,
+                        "force_gate_requested": True,
+                    },
+                )
+                orch._spawn_quality_gates(_target_task)
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "force_gate",
+                        "source_phase": _force_gate_source_phase,
+                        "target_phase": _force_gate_target,
+                    },
+                )
+                orch.run_until_idle(max_rounds=round_budget)
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+            else:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "force_gate",
+                        "source_phase": _force_gate_source_phase,
+                        "target_phase": _force_gate_target,
+                        "reason": (
+                            "lead_close_started"
+                            if _lead_close_started
+                            else "target_phase_not_completed_or_gate_already_open"
+                        ),
+                    },
+                )
+                if not _lead_close_started:
+                    orch.run_until_idle(max_rounds=round_budget)
+                    elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+        # ── E7-D4: Pausa mid-run — algún agente emitió [CLARIFY] ─────────────
+        _mid_waiting = [
+            t for t in orch.taskboard.list_tasks()
+            if t.state == TaskState.WAITING_USER
+        ]
+        if _mid_waiting:
+            _mwt = _mid_waiting[0]
+            _mwq = _mwt.metadata.get("clarify_question", "")
+            _mwphase = str(_mwt.task_id or "").split("::")[-1]
+            _mid_pending_file = runtime_dir / f"pending_clarification_{task_root}.json"
+            _mid_state = {
+                "type": "mid_run",
+                "task_root": task_root,
+                "chat_run_state": _chat_run_state.to_dict(),
+                "waiting_task_id": _mwt.task_id,
+                "waiting_phase": _mwphase,
+                "question": _mwq,
+                "original_message": payload.message,
+                "original_payload": payload.model_dump(),
+                "phase_task_ids": phase_task_ids,
+                "workflow_phase_keys": workflow_phase_keys,
+                "chat_mode": chat_mode,
+                "remaining_budget": round_budget,
+                "preferred_role": preferred_role.value,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _mid_pending_file.write_text(
+                json.dumps(_mid_state, ensure_ascii=False, indent=2, default=str)
+            )
+            orch.event_logger.emit(
+                "chat_waiting_user",
+                {"task_id": task_root, "phase": _mwphase, "question": _mwq},
+            )
+            return TeamChatResponse(
+                task_id=task_root,
+                role=preferred_role.value,
+                state="waiting_user",
+                response=_mwq,
+                decision_justification=(
+                    f"El agente '{_mwphase}' necesita aclaración antes de continuar."
+                ),
+                elapsed_ms=elapsed_ms,
+                lead_task_id=lead_task_id,
+                delegated_task_ids=delegated_task_ids,
+                phase_task_ids=phase_task_ids,
+                chat_mode=chat_mode,
+                phase_evidence_plan=_coerce_phase_evidence_plan(
+                    _ws.get("phase_evidence_plan", _chat_run_state.phase_evidence_plan)
+                ),
+                delegate_batches=_coerce_delegate_batches(
+                    _ws.get("delegate_batches", [])
+                ),
+                delegate_economics=dict(
+                    _ws.get("delegate_economics_summary", {}) or {}
+                ),
+                specialist_reports=list(
+                    _load_chat_specialist_insights(runtime_dir, task_root).get(
+                        "specialist_reports", []
+                    )
+                    or []
+                ),
+                specialist_report_summary=dict(
+                    _load_chat_specialist_insights(runtime_dir, task_root).get(
+                        "specialist_report_summary", {}
+                    )
+                    or {}
+                ),
+                waiting_user=True,
+                clarification_question=_mwq,
+            )
+
         artifact_after = _workspace_artifact_snapshot(workspace)
         created_artifacts, modified_artifacts = _workspace_artifact_diff(
             artifact_before, artifact_after
@@ -2185,7 +5412,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             local_pending = sum(
                 1
                 for state in local_phase_states.values()
-                if state in {"pending", "ready", "claimed", "blocked"}
+                if state in {"pending", "ready", "claimed", "blocked", "waiting_user"}
             )
             return (
                 local_lead,
@@ -2317,7 +5544,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         pending_phases = [
             phase
             for phase in workflow_phase_keys
-            if phase_states.get(phase) in {"pending", "ready", "claimed", "blocked"}
+            if phase_states.get(phase) in {"pending", "ready", "claimed", "blocked", "waiting_user"}
         ]
         failed_phases = [
             phase
@@ -2423,23 +5650,10 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         demo_fast_chat_active = _env_bool("AITEAM_CHAT_DEMO_FAST", default=False)
         decision_display = _presentable_decision_text(decision_compact) or decision_compact or "—"
 
-        live_mode_required = _env_bool("AITEAM_LIVE_MODE_REQUIRED", default=False)
-        live_mode_rejected = False
-        if live_mode_required and execution_mode != "live":
-            live_mode_rejected = True
-            if final_state != "failed":
-                final_state = "rejected"
-            productivity_status = "weak"
-            next_action_hint = "Este entorno requiere modo live; la corrida detectada no fue live. Configura adapters live y reintenta."
-            orch.event_logger.emit(
-                "chat_live_mode_required_rejected",
-                {
-                    "task_id": task_root,
-                    "execution_mode": execution_mode,
-                    "required": True,
-                },
-            )
-
+        live_mode_required = _env_bool(
+            "AITEAM_LIVE_MODE_REQUIRED",
+            default=False,
+        ) or _env_bool("AITEAM_REQUIRE_LIVE_MODE", default=False)
         evidence_gate_failures = _evaluate_phase_evidence_gate(
             task_rows_by_phase=task_rows_by_phase,
             execution_steps=execution_steps,
@@ -2465,21 +5679,6 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         evidence_gate_applied = False
         if evidence_gate_failures:
             evidence_gate_applied = True
-            if final_state != "failed":
-                final_state = "rejected"
-            productivity_status = "weak"
-            next_action_hint = "Evidence gate bloquea cierre sin evidencia valida en build/review/qa; corrige y reintenta."
-            orch.event_logger.emit(
-                "chat_evidence_gate_rejected",
-                {
-                    "task_id": task_root,
-                    "failures": evidence_gate_failures,
-                    "execution_mode": execution_mode,
-                    "execution_steps": execution_steps,
-                    "artifact_created": artifact_created,
-                    "artifact_modified": artifact_modified,
-                },
-            )
             # Emitir compliance_violation por cada fallo del evidence gate
             _FAILURE_REASON_MAP = {
                 "missing_execution_plan": "missing_execution_plan_required",
@@ -2575,69 +5774,74 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         else:
             continuity_line = "new run (no previous chat roots)"
 
-        strict_mode_applied = False
-        if bool(payload.strict_mode) and not continuation_requested:
-            has_minimum_evidence = (
-                artifact_created + artifact_modified
-            ) > 0 or execution_steps > 0
-            mode_is_reliable = execution_mode in {"live", "hybrid"}
-            if final_state == "completed" and (
-                not has_minimum_evidence or not mode_is_reliable
-            ):
-                strict_mode_applied = True
-                final_state = "in_progress"
-                productivity_status = "weak"
-                if not mode_is_reliable:
-                    next_action_hint = "Strict mode bloquea cierre en modo simulado; activa adapters live o agrega ejecucion verificable."
-                else:
-                    next_action_hint = "Strict mode bloquea cierre sin evidencia minima; agrega pasos ejecutados o artefactos."
-                orch.event_logger.emit(
-                    "chat_strict_mode_blocked_close",
-                    {
-                        "task_id": task_root,
-                        "reason": "simulated_mode_or_missing_evidence",
-                        "execution_steps": execution_steps,
-                        "artifact_created": artifact_created,
-                        "artifact_modified": artifact_modified,
-                        "execution_mode": execution_mode,
-                    },
-                )
-
-        productivity_threshold = 35
-        low_productivity_override = (
-            bool(payload.allow_low_productivity_override)
-            or bool(continuation_requested)
-            or demo_fast_chat_active
+        run_type = _detect_run_type(
+            message=payload.message,
+            phase_task_ids=phase_task_ids,
+            artifact_created=artifact_created,
+            artifact_modified=artifact_modified,
         )
-        low_productivity_rejected = False
-        if (
-            productivity_score < productivity_threshold
-            and not low_productivity_override
-            and final_state != "failed"
-        ):
-            low_productivity_rejected = True
-            final_state = "rejected"
-            productivity_status = "weak"
-            next_action_hint = f"Corrida rechazada por productividad<{productivity_threshold}; genera evidencia ejecutable y reintenta."
+        orch.event_logger.emit(
+            "chat_run_type_detected",
+            {
+                "task_id": task_root,
+                "run_type": run_type,
+                "productivity_score": productivity_score,
+                "reasoning_score": reasoning_score,
+                "phases": list(phase_task_ids.keys()),
+            },
+        )
+
+        run_type_policy = resolve_run_type_policy(run_type, reasoning_score)
+        productivity_threshold = run_type_policy.productivity_threshold
+        _passes_by_reasoning = run_type_policy.passes_by_reasoning
+        is_context_query = run_type_policy.is_context_query
+        if is_context_query:
             orch.event_logger.emit(
-                "chat_low_productivity_rejected",
+                "chat_context_only_query",
                 {
                     "task_id": task_root,
+                    "run_type": run_type,
+                    "message_preview": payload.message[:120],
                     "productivity_score": productivity_score,
-                    "threshold": productivity_threshold,
-                    "override": False,
+                    "reasoning_score": reasoning_score,
+                    "passes_by_reasoning": _passes_by_reasoning,
                 },
             )
-        elif productivity_score < productivity_threshold and low_productivity_override:
-            orch.event_logger.emit(
-                "chat_low_productivity_override",
-                {
-                    "task_id": task_root,
-                    "productivity_score": productivity_score,
-                    "threshold": productivity_threshold,
-                    "override": True,
-                },
-            )
+        _policy_outcome = evaluate_chat_policy(
+            ChatPolicyInput(
+                task_id=task_root,
+                run_type=run_type,
+                final_state=final_state,
+                productivity_status=productivity_status,
+                next_action_hint=next_action_hint,
+                strict_mode=bool(payload.strict_mode),
+                continuation_requested=bool(continuation_requested),
+                allow_low_productivity_override=bool(payload.allow_low_productivity_override),
+                demo_fast_chat_active=demo_fast_chat_active,
+                lead_advisory_mode=lead_advisory_mode,
+                live_mode_required=live_mode_required,
+                execution_mode=execution_mode,
+                execution_steps=execution_steps,
+                artifact_created=artifact_created,
+                artifact_modified=artifact_modified,
+                productivity_score=productivity_score,
+                reasoning_score=reasoning_score,
+                evidence_gate_failures=evidence_gate_failures,
+            ),
+            run_type_policy,
+        )
+        final_state = _policy_outcome.final_state
+        productivity_status = _policy_outcome.productivity_status
+        next_action_hint = _policy_outcome.next_action_hint
+        live_mode_rejected = _policy_outcome.live_mode_rejected
+        evidence_gate_applied = _policy_outcome.evidence_gate_applied
+        strict_mode_applied = _policy_outcome.strict_mode_applied
+        low_productivity_rejected = _policy_outcome.low_productivity_rejected
+        low_productivity_override = _policy_outcome.low_productivity_override
+        policy_review_required = _policy_outcome.policy_review_required
+        policy_signals.extend(_policy_outcome.policy_signals)
+        for _policy_event in _policy_outcome.events:
+            orch.event_logger.emit(_policy_event.event_type, _policy_event.payload)
 
         if not lead_completed:
             orch.event_logger.emit(
@@ -2731,10 +5935,68 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             compact_status += f"\nFallido: {failed_line}"
         if next_action_hint and final_state != "completed":
             compact_status += f"\nSiguiente: {next_action_hint}"
+        elif next_action_hint and policy_review_required:
+            compact_status += f"\nPolicy review: {next_action_hint}"
 
         response_lines = [
+            "Lead summary:",
             user_facing_summary,
+            "",
+            "Workflow phases:",
+            workflow_lines or "- none",
         ]
+        if lead_advisory_mode:
+            response_lines.extend(
+                [
+                    "",
+                    f"Advisory mode: {lead_advisory_reason or 'El Lead decidió cerrar en modo advisory.'}",
+                ]
+            )
+        if (
+            bool(payload.strict_mode)
+            or live_mode_required
+            or evidence_gate_applied
+            or low_productivity_rejected
+            or policy_review_required
+            or policy_signals
+        ):
+            _strict_mode_label = (
+                "blocked_close"
+                if strict_mode_applied
+                else (
+                    "signaled"
+                    if "strict_mode_requires_more_evidence" in policy_signals
+                    else ("on" if payload.strict_mode else "off")
+                )
+            )
+            _live_mode_label = (
+                "rejected"
+                if live_mode_rejected
+                else (
+                    "required_signal"
+                    if "live_mode_required_non_live" in policy_signals
+                    else ("required" if live_mode_required else "off")
+                )
+            )
+            _evidence_gate_label = (
+                "failed_signal"
+                if evidence_gate_applied and "evidence_gate_failed" in policy_signals
+                else ("rejected" if evidence_gate_applied else "pass")
+            )
+            response_lines.extend(
+                [
+                    "",
+                    f"Strict mode: {_strict_mode_label}",
+                    f"Live mode gate: {_live_mode_label}",
+                    f"Evidence gate: {_evidence_gate_label}",
+                ]
+            )
+            if policy_review_required:
+                response_lines.append("Policy review required: yes")
+            if policy_signals:
+                response_lines.append(
+                    f"Policy signals: {', '.join(policy_signals)}"
+                )
         if artifact_files:
             response_lines.extend(
                 [
@@ -2758,6 +6020,43 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         # Estado técnico compacto al final
         response_lines.extend(["", "---", compact_status])
 
+        _strict_mode_label = (
+            "blocked_close"
+            if strict_mode_applied
+            else (
+                "signaled"
+                if "strict_mode_requires_more_evidence" in policy_signals
+                else ("on" if payload.strict_mode else "off")
+            )
+        )
+        _live_mode_label = (
+            "rejected"
+            if live_mode_rejected
+            else (
+                "required_signal"
+                if "live_mode_required_non_live" in policy_signals
+                else ("required" if live_mode_required else "off")
+            )
+        )
+        _evidence_gate_label = (
+            "failed_signal"
+            if evidence_gate_applied and "evidence_gate_failed" in policy_signals
+            else ("rejected" if evidence_gate_applied else "pass")
+        )
+        _low_productivity_label = (
+            "rejected"
+            if low_productivity_rejected
+            else (
+                "signaled"
+                if "low_productivity_below_threshold" in policy_signals
+                else (
+                    "override"
+                    if low_productivity_override and productivity_score < productivity_threshold
+                    else "active"
+                )
+            )
+        )
+
         # Bloque verbose completo solo cuando se pide explícitamente
         if verbose_lead:
             response_lines.extend([
@@ -2776,14 +6075,17 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 f"Route attempts: {len(route_records)} (success={successful_routes})",
                 f"Execution steps: {execution_steps} (success={execution_steps_success})",
                 f"Execution mode: {execution_mode_label} ({output_count_label}={placeholder_outputs}/{max(1, output_result_count)})",
-                f"Live mode gate: {'rejected' if live_mode_rejected else ('required' if live_mode_required else 'off')}",
+                f"Live mode gate: {_live_mode_label}",
                 f"Checks passed: {', '.join(successful_checks) if successful_checks else 'none'}",
-                f"Evidence gate: {'rejected' if evidence_gate_applied else 'pass'} ({', '.join(evidence_gate_failures) if evidence_gate_failures else 'ok'})",
+                f"Evidence gate: {_evidence_gate_label} ({', '.join(evidence_gate_failures) if evidence_gate_failures else 'ok'})",
                 f"Artifacts: created={artifact_created} modified={artifact_modified}",
                 f"Quality: productivity={productivity_score}/100 ({productivity_status}) reasoning={reasoning_score}/100",
                 f"Action hint: {next_action_hint}",
-                f"Strict mode: {'blocked_close' if strict_mode_applied else ('on' if payload.strict_mode else 'off')}",
-                f"Low productivity gate: {'rejected' if low_productivity_rejected else ('override' if low_productivity_override and productivity_score < productivity_threshold else 'active')}",
+                f"Strict mode: {_strict_mode_label}",
+                f"Low productivity gate: {_low_productivity_label}",
+                f"Advisory mode: {'on' if lead_advisory_mode else 'off'} ({lead_advisory_reason or '-'})",
+                f"Policy review required: {'yes' if policy_review_required else 'no'}",
+                f"Policy signals: {', '.join(policy_signals) if policy_signals else 'none'}",
                 f"Auto-extended rounds: +{auto_extended_rounds}",
                 "",
                 "Workflow phases:",
@@ -2791,6 +6093,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             ])
 
         merged_response = _limit_chat_response("\n".join(response_lines))
+        _specialist_insights = _load_chat_specialist_insights(runtime_dir, task_root)
 
         _token_queue.put(("done", None))
         result = TeamChatResponse(
@@ -2824,6 +6127,26 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             successful_check_count=len(successful_checks),
             live_mode_required=live_mode_required,
             live_mode_rejected=live_mode_rejected,
+            advisory_mode=lead_advisory_mode,
+            advisory_reason=lead_advisory_reason,
+            policy_review_required=policy_review_required,
+            validation_owner=CHAT_VALIDATION_OWNER,
+            policy_signals=policy_signals,
+            phase_evidence_plan=_coerce_phase_evidence_plan(
+                _ws.get("phase_evidence_plan", _chat_run_state.phase_evidence_plan)
+            ),
+            delegate_batches=_coerce_delegate_batches(
+                _ws.get("delegate_batches", [])
+            ),
+            delegate_economics=dict(
+                _ws.get("delegate_economics_summary", {}) or {}
+            ),
+            specialist_reports=list(
+                _specialist_insights.get("specialist_reports", []) or []
+            ),
+            specialist_report_summary=dict(
+                _specialist_insights.get("specialist_report_summary", {}) or {}
+            ),
             next_action_hint=next_action_hint,
             strict_mode=bool(payload.strict_mode),
             strict_mode_applied=strict_mode_applied,
@@ -2837,7 +6160,6 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             evidence_gate_applied=evidence_gate_applied,
             evidence_gate_failures=evidence_gate_failures,
         )
-        restore_demo_env()
         return result
 
     async def _event_stream():
@@ -2867,6 +6189,15 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         result_dict = (
                             result.model_dump() if hasattr(result, "model_dump") else {}
                         )
+                        # M5: truncar el campo "response" en el evento result para evitar
+                        # truncacion SSE en respuestas largas. El frontend ya usa el stream
+                        # acumulado (token_chunk) para el contenido principal; "response"
+                        # solo se usa como fallback cuando accumulated < 80 chars.
+                        _resp_full = result_dict.get("response", "")
+                        if len(_resp_full) > 2000:
+                            result_dict = dict(result_dict)
+                            result_dict["response"] = _resp_full[:2000]
+                            result_dict["response_truncated"] = True
                         yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
                     except Exception as exc:
                         yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
@@ -2879,6 +6210,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         result_dict = (
                             result.model_dump() if hasattr(result, "model_dump") else {}
                         )
+                        _resp_full = result_dict.get("response", "")
+                        if len(_resp_full) > 2000:
+                            result_dict = dict(result_dict)
+                            result_dict["response"] = _resp_full[:2000]
+                            result_dict["response_truncated"] = True
                         yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
                     except Exception as exc:
                         yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
@@ -2886,6 +6222,299 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 yield "event: keepalive\ndata: {}\n\n"
 
     return StreamingResponse(_event_stream(), media_type="text/event-stream")
+
+
+def _build_resume_stream(
+    pending_state: dict,
+    clarification: str,
+    runtime_dir: Path,
+) -> "StreamingResponse":
+    """E7-D4: Reanuda un run pausado mid-run (type == 'mid_run') con la respuesta del usuario.
+
+    Carga el orquestador desde disco (tiene el taskboard persistido con la tarea
+    en WAITING_USER), inyecta la respuesta, y ejecuta las fases restantes con
+    SSE streaming idéntico al flujo principal.
+    """
+    import queue as _qmod_resume
+
+    _resume_queue: _qmod_resume.Queue = _qmod_resume.Queue()
+
+    task_root = pending_state["task_root"]
+    waiting_task_id = pending_state["waiting_task_id"]
+    waiting_phase = pending_state.get("waiting_phase", "")
+    question = pending_state.get("question", "")
+    _chat_run_state_payload = pending_state.get("chat_run_state")
+    _chat_run_state = None
+    if isinstance(_chat_run_state_payload, dict):
+        try:
+            _chat_run_state = ChatRunState.from_dict(_chat_run_state_payload)
+        except Exception:
+            _chat_run_state = None
+
+    phase_task_ids: dict[str, str] = (
+        _chat_run_state.phase_task_ids
+        if _chat_run_state is not None
+        else pending_state.get("phase_task_ids", {})
+    )
+    remaining_budget = max(
+        1,
+        int(
+            pending_state.get(
+                "remaining_budget",
+                _chat_run_state.round_budget if _chat_run_state is not None else 5,
+            )
+        ),
+    )
+    preferred_role_str = (
+        _chat_run_state.preferred_role.value
+        if _chat_run_state is not None
+        else pending_state.get("preferred_role", "engineer")
+    )
+    original_message = pending_state.get("original_message", "")
+
+    def _run_resume() -> "TeamChatResponse":
+        orch_resume = build_default_orchestrator(
+            runtime_dir=runtime_dir,
+            browser_mode="basic",
+            environment="dev",
+        )
+
+        def _on_chunk_r(task_id: str, chunk: str) -> None:
+            disp = _stream_display_chunk(task_id, chunk)
+            if disp:
+                _resume_queue.put(
+                    ("token_chunk", {"task_id": task_id, "chunk": disp})
+                )
+
+        orch_resume.token_chunk_callback = _on_chunk_r
+
+        def _on_agent_event_r(event: dict) -> None:
+            _resume_queue.put(("agent_event", event))
+
+        orch_resume.agent_event_callback = _on_agent_event_r
+
+        waiting_task = orch_resume.taskboard.get_task(waiting_task_id)
+        if waiting_task is None or waiting_task.state != TaskState.WAITING_USER:
+            # Estado inconsistente — devolver respuesta de error
+            return TeamChatResponse(
+                task_id=task_root,
+                role=preferred_role_str,
+                state="failed",
+                response=(
+                    f"No se encontró la tarea pausada '{waiting_task_id}'. "
+                    "Es posible que el estado haya sido reiniciado."
+                ),
+                decision_justification="mid_run_resume_task_not_found",
+                elapsed_ms=0,
+                lead_task_id=phase_task_ids.get("lead_intake", ""),
+                delegated_task_ids=[],
+                phase_task_ids=phase_task_ids,
+                phase_evidence_plan=(
+                    _chat_run_state.phase_evidence_plan if _chat_run_state is not None else {}
+                ),
+                delegate_batches=[],
+                delegate_economics={},
+                specialist_reports=[],
+                specialist_report_summary={},
+            )
+
+        # Inyectar respuesta del usuario en la descripción de la tarea pausada
+        _inject = (
+            f"\n\n[Respuesta del usuario a tu pregunta previa '{question}': "
+            f"{clarification}]"
+        )
+        waiting_task.description = waiting_task.description + _inject
+        orch_resume.taskboard.retry_task(
+            waiting_task_id,
+            reason=f"mid_run_clarification_injected (phase={waiting_phase})",
+        )
+        orch_resume.event_logger.emit(
+            "lcp_directive_applied",
+            {
+                "task_id": task_root,
+                "directive": "mid_run_resume",
+                "phase": waiting_phase,
+                "question_len": len(question),
+                "answer_len": len(clarification),
+            },
+        )
+
+        started_r = time.perf_counter()
+        orch_resume.run_until_idle(max_rounds=remaining_budget)
+        elapsed_r = int((time.perf_counter() - started_r) * 1000)
+
+        # Recoger resultado: lead_close si completó, o el output de la fase que pausó
+        _ws_r = orch_resume._get_workflow_state(task_root)
+        _phase_outputs_r = _ws_r.get("phase_outputs", {})
+        lead_close_output = _phase_outputs_r.get("lead_close", "")
+        waiting_phase_output = _phase_outputs_r.get(waiting_phase, "")
+        final_response = lead_close_output or waiting_phase_output or (
+            f"Run reanudado desde fase '{waiting_phase}'. "
+            f"Respuesta original: {original_message[:200]}"
+        )
+        final_response = _strip_lcp_directives(final_response)
+
+        # Estado de fases para la respuesta
+        _phase_states: dict[str, str] = {}
+        for pname, pid in phase_task_ids.items():
+            t = orch_resume.taskboard.get_task(pid)
+            _phase_states[pname] = t.state.value if t else "missing"
+        _resume_specialist_insights = _load_chat_specialist_insights(runtime_dir, task_root)
+
+        return TeamChatResponse(
+            task_id=task_root,
+            role=preferred_role_str,
+            state="completed",
+            response=final_response,
+            decision_justification=(
+                f"Run reanudado tras aclaración de fase '{waiting_phase}'."
+            ),
+            elapsed_ms=elapsed_r,
+            lead_task_id=(
+                _chat_run_state.lead_task_id
+                if _chat_run_state is not None
+                else phase_task_ids.get("lead_intake", "")
+            ),
+            delegated_task_ids=(
+                _chat_run_state.delegated_task_ids
+                if _chat_run_state is not None
+                else [
+                    pid for pname, pid in phase_task_ids.items()
+                    if pname not in ("lead_intake", "lead_close")
+                ]
+            ),
+            phase_task_ids=phase_task_ids,
+            phase_states=_phase_states,
+            phase_evidence_plan=_coerce_phase_evidence_plan(
+                _ws_r.get(
+                    "phase_evidence_plan",
+                    _chat_run_state.phase_evidence_plan if _chat_run_state is not None else {},
+                )
+            ),
+            delegate_batches=_coerce_delegate_batches(
+                _ws_r.get("delegate_batches", [])
+            ),
+            delegate_economics=dict(
+                _ws_r.get("delegate_economics_summary", {}) or {}
+            ),
+            specialist_reports=list(
+                _resume_specialist_insights.get("specialist_reports", []) or []
+            ),
+            specialist_report_summary=dict(
+                _resume_specialist_insights.get("specialist_report_summary", {}) or {}
+            ),
+        )
+
+    async def _resume_event_stream():
+        import asyncio as _aio_r
+
+        _fut_r = _aio_r.get_event_loop().run_in_executor(None, _run_resume)
+        while True:
+            try:
+                item = await _aio_r.to_thread(
+                    lambda: _resume_queue.get(timeout=2.0)
+                )
+                etype, data = item
+                if etype == "token_chunk":
+                    yield f"event: token_chunk\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                elif etype == "agent_event":
+                    ename = (
+                        data.get("type", "agent_event") if isinstance(data, dict)
+                        else "agent_event"
+                    )
+                    yield f"event: {ename}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+            except Exception:
+                if _fut_r.done():
+                    try:
+                        result_r = _fut_r.result()
+                        result_dict_r = (
+                            result_r.model_dump()
+                            if hasattr(result_r, "model_dump") else {}
+                        )
+                        _resp_r = result_dict_r.get("response", "")
+                        if len(_resp_r) > 2000:
+                            result_dict_r = dict(result_dict_r)
+                            result_dict_r["response"] = _resp_r[:2000]
+                            result_dict_r["response_truncated"] = True
+                        yield f"event: result\ndata: {json.dumps(result_dict_r, ensure_ascii=False, default=str)}\n\n"
+                    except Exception as exc:
+                        yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+                    break
+                yield "event: keepalive\ndata: {}\n\n"
+
+    return StreamingResponse(_resume_event_stream(), media_type="text/event-stream")
+
+
+class ClarifyRequest(BaseModel):
+    chat_id: str
+    clarification: str
+
+
+@app.post("/api/aiteam/chat/clarify")
+async def post_aiteam_chat_clarify(payload: ClarifyRequest, request: Request):
+    """Reanuda un run pausado con [CLARIFY] inyectando la respuesta del usuario.
+
+    Carga el estado pendiente, construye un nuevo TeamChatRequest con la
+    clarificación añadida al mensaje original, y ejecuta el chat normalmente.
+    """
+    _require_api_auth_request(request)
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    runtime_dir = workspace / "runtime"
+
+    task_root = _normalize_task_root(payload.chat_id)
+    pending_file = runtime_dir / f"pending_clarification_{task_root}.json"
+
+    if not pending_file.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay clarificación pendiente para el chat {payload.chat_id}",
+        )
+
+    try:
+        pending_state = json.loads(pending_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error leyendo estado pendiente: {exc}")
+
+    # ── E7-D4: Distinguir pausa de lead_intake vs pausa mid-run ──────────────
+    pending_type = pending_state.get("type", "lead_intake")
+
+    # Eliminar estado pendiente antes de reanudar (en ambos paths)
+    pending_file.unlink(missing_ok=True)
+
+    if pending_type == "mid_run":
+        # Reanudar el run desde la tarea pausada sin reiniciar el workflow completo
+        return _build_resume_stream(pending_state, payload.clarification, runtime_dir)
+
+    # ── Path original: pausa de lead_intake ─────────────────────────────────
+    original_payload_data = pending_state.get("original_payload", {})
+    original_message = pending_state.get("original_message", original_payload_data.get("message", ""))
+    question = pending_state.get("question", "")
+
+    # Inyectar la respuesta del usuario en el mensaje original
+    augmented_message = (
+        f"{original_message}\n\n"
+        f"[Respuesta del usuario a tu pregunta previa '{question}': "
+        f"{payload.clarification}]"
+    )
+
+    # Construir nuevo request reutilizando los parámetros originales
+    new_payload = TeamChatRequest(
+        message=augmented_message,
+        role=original_payload_data.get("role", "engineer"),
+        complexity=original_payload_data.get("complexity", "medium"),
+        criticality=original_payload_data.get("criticality", "medium"),
+        mode=original_payload_data.get("mode", "sprint5"),
+        max_rounds=original_payload_data.get("max_rounds"),
+        client_task_id=original_payload_data.get("client_task_id", ""),
+        strict_mode=original_payload_data.get("strict_mode", False),
+        auto_extend_weak_runs=original_payload_data.get("auto_extend_weak_runs", True),
+        allow_low_productivity_override=original_payload_data.get(
+            "allow_low_productivity_override", False
+        ),
+    )
+
+    # Reutilizar el endpoint principal (en hilo separado para no bloquear)
+    return await post_aiteam_chat(new_payload, request)
 
 
 @app.get("/api/aiteam/chat/progress/{task_id}", response_model=TeamChatProgressResponse)

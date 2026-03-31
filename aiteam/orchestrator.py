@@ -25,13 +25,33 @@ from aiteam.execution import (
     LocalCommandExecutor,
     PlaywrightBrowserController,
 )
+from aiteam.chat_policy import uses_chat_policy
+from aiteam.context_curator import (
+    ContextCuratorStore,
+    estimate_context_compaction_value,
+    estimate_context_pressure,
+)
 from aiteam.mailbox import Mailbox
+from aiteam.lead_control import extract_lcp_directives
 from aiteam.memory import AgentMemoryStore
 from aiteam.observability import EventLogger
 from aiteam.profiles import build_prompt, build_system_prompt, role_charter_for
 from aiteam.router import HybridRouter
 from aiteam.runtime import SandboxManager
 from aiteam.taskboard import TaskBoard
+from aiteam.tool_specialists import (
+    build_tool_specialist_metadata,
+    infer_tool_specialist,
+    parse_specialist_report,
+    select_specialists_for_task,
+    specialist_profile,
+)
+from aiteam.tool_inventory import (
+    derive_target_capabilities,
+    normalize_lsp_targets,
+    normalize_skill_targets,
+    normalize_tool_capabilities,
+)
 from aiteam.types import Role, RoutingDecision, RoutingRequest, TaskState, WorkTask
 
 
@@ -59,6 +79,7 @@ class AITeamOrchestrator:
         self.sandboxes = SandboxManager(runtime_dir / "sandboxes")
         self.event_logger = EventLogger(runtime_dir)
         self.project_root = (project_root or runtime_dir.parent).resolve()
+        self.context_curator = ContextCuratorStore(runtime_dir)
         self.additional_workspace_roots = [
             path.resolve() for path in (additional_workspace_roots or [])
         ]
@@ -117,6 +138,381 @@ class AITeamOrchestrator:
         self.agent_event_callback: "Callable[[dict], None] | None" = None
         self._init_tool_dispatcher()
 
+    def _ensure_tool_specialist_metadata(self, task: WorkTask) -> None:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        self._apply_tool_rewiring_hints(task)
+        explicit_name = str(metadata.get("tool_specialist", "") or "").strip().lower()
+        required_caps = metadata.get("required_capabilities", [])
+        specialist_name = infer_tool_specialist(
+            role=task.role,
+            required_capabilities=required_caps,
+            metadata=metadata,
+        )
+        if not specialist_name:
+            return
+        profile = specialist_profile(specialist_name)
+        if profile is None:
+            return
+        metadata.setdefault("tool_specialist", profile.name)
+        metadata.setdefault("tool_specialist_label", profile.label)
+        metadata.setdefault("tool_specialist_contract_version", "tool_specialist_v1")
+        metadata.setdefault("tool_specialist_tool_families", list(profile.tool_families))
+        metadata.setdefault(
+            "tool_specialist_preferred_capabilities",
+            sorted(
+                {
+                    *normalize_tool_capabilities(required_caps or profile.preferred_capabilities),
+                    *derive_target_capabilities(
+                        skill_targets=metadata.get("skill_targets", []),
+                        lsp_targets=metadata.get("lsp_targets", []),
+                    ),
+                }
+            ),
+        )
+        metadata.setdefault("tool_specialist_default_tier", profile.default_tier)
+        metadata.setdefault("tool_specialist_decision_scope", "operate_tools_and_report_only")
+        metadata.setdefault("tool_specialist_economic_routing", True)
+        metadata.setdefault(
+            "tool_specialist_skill_targets",
+            normalize_skill_targets(metadata.get("skill_targets", [])),
+        )
+        metadata.setdefault(
+            "tool_specialist_lsp_targets",
+            normalize_lsp_targets(metadata.get("lsp_targets", [])),
+        )
+        if "tool_specialist_reason" not in metadata:
+            metadata["tool_specialist_reason"] = (
+                "especializacion inferida por capacidades de tools requeridas"
+            )
+        if "tool_specialist_inferred" not in metadata:
+            metadata["tool_specialist_inferred"] = not bool(explicit_name)
+
+    def _apply_tool_rewiring_hints(self, task: WorkTask) -> None:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        if self._to_bool(metadata.get("_tool_rewiring_evaluated", False)):
+            return
+        metadata["_tool_rewiring_evaluated"] = True
+        required_caps = {
+            str(item or "").strip().lower()
+            for item in list(metadata.get("required_capabilities", []) or [])
+            if str(item or "").strip()
+        }
+        if not required_caps:
+            return
+        try:
+            suggestions = self.tool_integrator.suggest_requirements(required_caps, limit=3)
+        except Exception:
+            return
+        if not suggestions:
+            return
+        rewired = [item for item in suggestions if str(item.get("replacement_for", "") or "").strip()]
+        if not rewired:
+            return
+        candidate_names = [
+            str(item.get("name", "") or "").strip().lower()
+            for item in rewired
+            if str(item.get("name", "") or "").strip()
+        ]
+        replaced_names = [
+            str(item.get("replacement_for", "") or "").strip().lower()
+            for item in rewired
+            if str(item.get("replacement_for", "") or "").strip()
+        ]
+        if not candidate_names:
+            return
+        metadata["tool_rewiring_candidates"] = candidate_names
+        metadata["tool_rewiring_replacement_for"] = replaced_names
+        metadata["tool_rewiring_active"] = True
+        metadata["tool_rewiring_suppress_mcp_operator"] = True
+        metadata["tool_rewiring_preferred_specialist"] = self._preferred_specialist_for_replacements(candidate_names)
+        metadata["tool_rewiring_reason"] = (
+            "catalog_replacement_candidates_preferred_over_replaceable_mcp"
+        )
+        self.event_logger.emit(
+            "tool_rewiring_applied",
+            {
+                "task_id": task.task_id,
+                "role": task.role.value,
+                "replacement_for": replaced_names,
+                "candidates": candidate_names,
+                "preferred_specialist": str(
+                    metadata.get("tool_rewiring_preferred_specialist", "") or ""
+                ).strip(),
+                "reason": str(metadata.get("tool_rewiring_reason", "") or "").strip(),
+            },
+        )
+
+    @staticmethod
+    def _preferred_specialist_for_replacements(candidates: list[str]) -> str:
+        normalized = [str(item or "").strip().lower() for item in candidates if str(item or "").strip()]
+        if any(name.endswith("_skill") for name in normalized):
+            return "skill_worker"
+        if any(any(token in name for token in ("playwright", "browser", "puppeteer")) for name in normalized):
+            return "browser_operator"
+        if any(any(token in name for token in ("test", "pytest", "jest", "vitest")) for name in normalized):
+            return "test_runner"
+        if any(any(token in name for token in ("lsp", "symbol", "reference")) for name in normalized):
+            return "lsp_navigator"
+        if any(any(token in name for token in ("repo", "git")) for name in normalized):
+            return "repo_scout"
+        return ""
+
+    def _collect_specialist_prefetch_context(self, task: WorkTask) -> str:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        if self._to_bool(metadata.get("skip_specialist_prefetch", False)):
+            return ""
+        if self._to_bool(metadata.get("_specialist_prefetch_done", False)):
+            stored = metadata.get("specialist_prefetch_context", "")
+            return str(stored or "")
+        task_specialist_name = str(metadata.get("tool_specialist", "") or "").strip().lower()
+        if task_specialist_name:
+            task_specialist_profile = specialist_profile(task_specialist_name)
+            if task_specialist_profile is not None and task_specialist_profile.owner_role == task.role:
+                metadata["_specialist_prefetch_done"] = True
+                return ""
+
+        required_caps = normalize_tool_capabilities(metadata.get("required_capabilities", []))
+        skill_targets = normalize_skill_targets(metadata.get("skill_targets", []))
+        lsp_targets = normalize_lsp_targets(metadata.get("lsp_targets", []))
+        task_root = self._task_root(task.task_id)
+        pressure = self._refresh_context_pressure(task_root, metadata=metadata)
+        wants_context_curator = (
+            self._to_bool(metadata.get("context_curator_requested", False))
+            or self._to_bool(metadata.get("context_curator_recommended", False))
+            or self._to_bool(metadata.get("context_pressure_high", False))
+            or (
+                self._to_bool(metadata.get("continuation_requested", False))
+                and task.role == Role.TEAM_LEAD
+            )
+        )
+        if not required_caps and not skill_targets and not lsp_targets and not wants_context_curator:
+            metadata["_specialist_prefetch_done"] = True
+            self._record_specialist_quorum_result(
+                task=task,
+                specialists=[],
+                quorum_required=0,
+                quorum_mode="any",
+                reports=[],
+            )
+            return ""
+
+        available_mcp = None
+        if self.mcp_manager is not None:
+            try:
+                available_mcp = self.mcp_manager.list_healthy(retry_unhealthy=False)
+            except Exception:
+                available_mcp = None
+
+        roster = select_specialists_for_task(
+            role=task.role,
+            required_capabilities=required_caps,
+            complexity=task.complexity,
+            criticality=task.criticality,
+            skill_targets=skill_targets,
+            lsp_targets=lsp_targets,
+            available_mcp_servers=available_mcp,
+            metadata=metadata,
+        )
+        metadata["context_pressure"] = pressure
+        if roster.is_empty():
+            metadata["_specialist_prefetch_done"] = True
+            self._record_specialist_quorum_result(
+                task=task,
+                specialists=[],
+                quorum_required=0,
+                quorum_mode="any",
+                reports=[],
+            )
+            return ""
+
+        metadata["specialist_roster_applied"] = roster.to_metadata()
+        reports: list[dict[str, Any]] = []
+        briefing_lines = [
+            "Informes compactos de especialistas delegados antes de ejecutar la tarea principal:",
+        ]
+
+        for specialist_name in roster.specialists:
+            profile = specialist_profile(specialist_name)
+            if profile is None:
+                continue
+            specialist_metadata = build_tool_specialist_metadata(
+                specialist=specialist_name,
+                required_capabilities=required_caps,
+                reason=f"prefetch para {task.task_id}",
+                skill_targets=skill_targets,
+                lsp_targets=lsp_targets,
+            )
+            specialist_request = RoutingRequest(
+                role=profile.owner_role,
+                complexity=task.complexity,
+                criticality=task.criticality,
+                required_capabilities=set(required_caps),
+                tool_specialist=specialist_name,
+                tool_rewiring_preferred_specialist=str(
+                    metadata.get("tool_rewiring_preferred_specialist", "") or ""
+                ).strip(),
+                prefer_economic_routing=True,
+                preferred_tool_tier=profile.default_tier,
+                skill_targets=set(skill_targets),
+                lsp_targets=set(lsp_targets),
+                approved_adapters=self.compliance.approved_adapters(metadata),
+                excluded_adapters=set(),
+                sensitive_approval=self.compliance.evaluate_sensitive_approval(task.metadata)[0],
+                environment=self.environment,
+            )
+            specialist_prompt = build_prompt(
+                profile.owner_role,
+                f"Specialist precheck: {task.title}",
+                (
+                    f"Tarea principal: {task.title}\n"
+                    f"Descripcion: {task.description}\n"
+                    "Devuelve un informe operativo compacto para ayudar a otra tarea principal."
+                ),
+            )
+            specialist_messages = [
+                {
+                    "role": "system",
+                    "content": build_system_prompt(
+                        profile.owner_role,
+                        task_metadata=specialist_metadata,
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Analiza la tarea principal '{task.title}'.\n"
+                        f"Descripcion:\n{task.description}\n\n"
+                        "Entrega un informe compacto con summary, evidence, artifacts, risks y recommendation."
+                    ),
+                },
+            ]
+            decision = self.router.route_and_invoke(
+                request=specialist_request,
+                prompt=specialist_prompt,
+                task_id=f"{task.task_id}::prefetch::{specialist_name}",
+                messages=specialist_messages,
+                tools=None,
+            )
+            if not decision.success:
+                self.event_logger.emit(
+                    "specialist_prefetch_failed",
+                    {
+                        "task_id": task.task_id,
+                        "specialist": specialist_name,
+                        "provider": decision.provider,
+                        "model": decision.model,
+                        "reason": decision.reason,
+                    },
+                )
+                briefing_lines.append(
+                    f"- {specialist_name}: fallo al recopilar informe ({decision.reason or 'unknown'})."
+                )
+                continue
+
+            parsed = parse_specialist_report(
+                decision.response.content,
+                specialist=specialist_name,
+                provider=decision.provider,
+                model=decision.model,
+                toolset_used=list(specialist_metadata.get("tool_specialist_tool_families", []) or []),
+                tokens_used=decision.response.input_tokens + decision.response.output_tokens,
+            )
+            report_meta = parsed.to_metadata()
+            report_meta["source"] = "prefetch"
+            reports.append(report_meta)
+            briefing_lines.append(
+                (
+                    f"- {specialist_name} ({decision.provider}/{decision.model}): "
+                    f"{self._compact_text(parsed.summary, 220)}"
+                )
+            )
+            if parsed.recommendation:
+                briefing_lines.append(
+                    f"  recomendacion: {self._compact_text(parsed.recommendation, 180)}"
+                )
+            self.event_logger.emit(
+                "specialist_prefetch_completed",
+                {
+                    "task_id": task.task_id,
+                    "specialist": specialist_name,
+                    "provider": decision.provider,
+                    "model": decision.model,
+                    "summary": self._compact_text(parsed.summary, 180),
+                },
+            )
+
+        metadata["_specialist_prefetch_done"] = True
+        metadata["specialist_prefetch_reports"] = reports
+        existing_reports = list(metadata.get("specialist_reports", []) or [])
+        metadata["specialist_reports"] = existing_reports + reports
+        self._record_specialist_quorum_result(
+            task=task,
+            specialists=list(roster.specialists),
+            quorum_required=int(roster.quorum_required),
+            quorum_mode=str(roster.quorum_mode or "any"),
+            reports=reports,
+        )
+        context = "\n".join(briefing_lines) if len(briefing_lines) > 1 else ""
+        metadata["specialist_prefetch_context"] = context
+        return context
+
+    def _record_specialist_quorum_result(
+        self,
+        task: WorkTask,
+        *,
+        specialists: list[str],
+        quorum_required: int,
+        quorum_mode: str,
+        reports: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        normalized_specialists = [
+            str(item).strip().lower() for item in specialists if str(item).strip()
+        ]
+        received_set = {
+            str(item.get("specialist", "") or "").strip().lower()
+            for item in list(reports or [])
+            if isinstance(item, dict) and str(item.get("specialist", "") or "").strip()
+        }
+        received_specialists = [
+            specialist for specialist in normalized_specialists if specialist in received_set
+        ]
+        missing_specialists = [
+            specialist for specialist in normalized_specialists if specialist not in received_set
+        ]
+        responses_required = max(0, int(quorum_required))
+        responses_received = len(received_specialists)
+        quorum_met = responses_received >= responses_required
+        result = {
+            "specialists": normalized_specialists,
+            "quorum_mode": str(quorum_mode or "any").strip().lower() or "any",
+            "responses_required": responses_required,
+            "responses_received": responses_received,
+            "received_specialists": received_specialists,
+            "missing_specialists": missing_specialists,
+            "quorum_met": quorum_met,
+        }
+        metadata["specialist_quorum_result"] = result
+        if missing_specialists and quorum_met:
+            metadata["specialist_quorum_warning"] = (
+                "quorum_met_with_partial_specialist_coverage"
+            )
+        else:
+            metadata.pop("specialist_quorum_warning", None)
+        self.event_logger.emit(
+            "specialist_quorum_result",
+            {
+                "task_id": task.task_id,
+                "quorum_mode": result["quorum_mode"],
+                "quorum_met": quorum_met,
+                "responses_received": responses_received,
+                "responses_required": responses_required,
+                "received_specialists": received_specialists,
+                "missing_specialists": missing_specialists,
+            },
+        )
+        return result
+
     def _init_tool_dispatcher(self) -> None:
         catalog_path = self.project_root / "config" / "tool_sources.catalog.json"
         try:
@@ -142,6 +538,12 @@ class AITeamOrchestrator:
             synced = self.mcp_manager.sync_from_catalog()
             if synced > 0:
                 self.event_logger.emit("mcp_catalog_synced", {"new_servers": synced})
+            bootstrapped = self.mcp_manager.bootstrap_from_opencode()
+            if bootstrapped > 0:
+                self.event_logger.emit(
+                    "mcp_opencode_bootstrapped",
+                    {"new_servers": bootstrapped},
+                )
         except Exception:
             self.mcp_manager = None
 
@@ -206,11 +608,561 @@ class AITeamOrchestrator:
         if facts:
             ws["facts"].extend(facts[-5:])
             ws["facts"] = ws["facts"][-20:]
+        self._update_context_curator_for_phase(
+            task_root=task_root,
+            phase=phase,
+            output=output,
+        )
         self._save_workflow_state()
         self.event_logger.emit(
             "workflow_state_updated",
             {"task_root": task_root, "phase": phase, "facts_count": len(ws["facts"])},
         )
+
+    def _update_context_curator_for_phase(
+        self,
+        *,
+        task_root: str,
+        phase: str,
+        output: str,
+    ) -> None:
+        normalized_phase = str(phase or "").strip()
+        text = str(output or "").strip()
+        if not task_root.startswith("CHAT-") or not normalized_phase or not text:
+            return
+        ws = self._get_workflow_state(task_root)
+        project_ctx, chat_ctx, summary = self.context_curator.remember_phase_summary(
+            project_key=self._project_thread_key(),
+            chat_root=task_root,
+            phase=normalized_phase,
+            output=text,
+            source_task_ids=[f"{task_root}::{normalized_phase}"],
+        )
+        phase_summaries = dict(ws.get("phase_context_summaries", {}) or {})
+        phase_summaries[normalized_phase] = summary
+        ws["phase_context_summaries"] = phase_summaries
+        ws["project_context_summary"] = self.context_curator.build_summary(project_ctx)
+        ws["chat_context_summary"] = self.context_curator.build_summary(chat_ctx)
+        self._refresh_context_pressure(task_root)
+        self.event_logger.emit(
+            "context_curator_phase_updated",
+            {
+                "task_root": task_root,
+                "phase": normalized_phase,
+                "summary_len": len(summary),
+            },
+        )
+
+    def _compute_context_pressure(
+        self,
+        task_root: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        ws = self._get_workflow_state(task_root)
+        meta = metadata or {}
+        continuation_requested = self._to_bool(
+            meta.get("continuation_requested", ws.get("continuation_requested", False))
+        )
+        continuation_snapshot = str(
+            meta.get("continuation_snapshot", ws.get("continuation_snapshot", "")) or ""
+        ).strip()
+        phase_summary_count = len(dict(ws.get("phase_context_summaries", {}) or {}))
+        delegate_batch_count = len(list(ws.get("delegate_batches", []) or []))
+
+        specialist_report_count = 0
+        for entry in self.event_logger.recent_events(hours=24):
+            event_type = str(entry.get("event_type", "") or "").strip().lower()
+            if event_type not in {"specialist_report_parsed", "specialist_prefetch_completed"}:
+                continue
+            payload = entry.get("payload", {}) or {}
+            event_task_id = str(payload.get("task_id", "") or "").strip()
+            if event_task_id.startswith(task_root):
+                specialist_report_count += 1
+
+        chat_ctx = self.context_curator.load_chat_context(
+            task_root,
+            project_key=self._project_thread_key(),
+        )
+        invalidation_count = len(list(chat_ctx.get("invalidations", []) or []))
+        open_question_count = len(list(chat_ctx.get("open_questions", []) or []))
+
+        pressure = estimate_context_pressure(
+            continuation_requested=continuation_requested,
+            continuation_snapshot=continuation_snapshot,
+            phase_summary_count=phase_summary_count,
+            delegate_batch_count=delegate_batch_count,
+            specialist_report_count=specialist_report_count,
+            invalidation_count=invalidation_count,
+            open_question_count=open_question_count,
+        )
+        compaction_value = estimate_context_compaction_value(
+            phase_outputs=dict(ws.get("phase_outputs", {}) or {}),
+            project_context_summary=str(ws.get("project_context_summary", "") or ""),
+            chat_context_summary=str(ws.get("chat_context_summary", "") or ""),
+            phase_context_summaries=dict(ws.get("phase_context_summaries", {}) or {}),
+        )
+        merged_signals = list(pressure.get("signals", []) or [])
+        value_level = str(compaction_value.get("level", "") or "").strip().lower()
+        if value_level in {"medium", "high"}:
+            signal_name = f"context_compaction_value_{value_level}"
+            if signal_name not in merged_signals:
+                merged_signals.append(signal_name)
+        merged = dict(pressure)
+        merged["signals"] = merged_signals
+        merged["recommend_context_curator"] = bool(
+            pressure.get("recommend_context_curator", False)
+            or compaction_value.get("priority_boost", False)
+        )
+        merged["context_compaction"] = dict(compaction_value)
+        return merged
+
+    def _refresh_context_pressure(
+        self,
+        task_root: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        ws = self._get_workflow_state(task_root)
+        pressure = self._compute_context_pressure(task_root, metadata=metadata)
+        previous = dict(ws.get("context_pressure", {}) or {})
+        ws["context_pressure"] = dict(pressure)
+        ws["context_curator_recommended"] = bool(
+            pressure.get("recommend_context_curator", False)
+        )
+        compaction_value = dict(pressure.get("context_compaction", {}) or {})
+        if metadata is not None:
+            metadata["context_pressure_score"] = int(pressure.get("score", 0) or 0)
+            metadata["context_pressure_level"] = str(
+                pressure.get("level", "") or ""
+            ).strip()
+            metadata["context_pressure_signals"] = list(
+                pressure.get("signals", []) or []
+            )
+            metadata["context_pressure_high"] = (
+                str(pressure.get("level", "") or "").strip().lower() == "high"
+            )
+            metadata["context_compaction_value_level"] = str(
+                compaction_value.get("level", "") or ""
+            ).strip()
+            metadata["context_compaction_signals"] = list(
+                compaction_value.get("signals", []) or []
+            )
+            metadata["estimated_context_chars_saved"] = int(
+                compaction_value.get("estimated_context_chars_saved", 0) or 0
+            )
+            metadata["estimated_context_tokens_saved"] = int(
+                compaction_value.get("estimated_context_tokens_saved", 0) or 0
+            )
+            metadata["context_compaction_priority_boost"] = bool(
+                compaction_value.get("priority_boost", False)
+            )
+            if bool(pressure.get("recommend_context_curator", False)):
+                metadata["context_curator_recommended"] = True
+        if previous != pressure:
+            self.event_logger.emit(
+                "context_pressure_updated",
+                {
+                    "task_root": task_root,
+                    "score": int(pressure.get("score", 0) or 0),
+                    "level": str(pressure.get("level", "") or "").strip(),
+                    "signals": list(pressure.get("signals", []) or []),
+                    "estimated_context_tokens_saved": int(
+                        compaction_value.get("estimated_context_tokens_saved", 0) or 0
+                    ),
+                    "context_compaction_level": str(
+                        compaction_value.get("level", "") or ""
+                    ).strip(),
+                },
+            )
+        return pressure
+
+    def _maybe_spawn_lead_failure_checkpoint(
+        self,
+        task: WorkTask,
+        reason: str,
+    ) -> str | None:
+        """Crea un checkpoint explicito del Lead tras un fallo de fase de chat.
+
+        MVP de E9-O5: no replantea el grafo todavia, pero materializa una tarea del
+        Team Lead que puede decidir, pedir aclaracion o preparar la futura
+        replanificacion sobre la corrida viva.
+        """
+        chat_parent = str(task.metadata.get("chat_parent", "") or "").strip()
+        if not chat_parent or task.role == Role.TEAM_LEAD:
+            return None
+
+        phase_name = str(task.metadata.get("phase", "") or "").strip()
+        if not phase_name:
+            phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else task.role.value
+        if phase_name in {"lead_intake", "lead_close"}:
+            return None
+
+        checkpoint_id = f"{chat_parent}::lead_failure_{phase_name}"
+        if self.taskboard.get_task(checkpoint_id) is not None:
+            task.metadata["lead_failure_checkpoint_id"] = checkpoint_id
+            return checkpoint_id
+
+        checkpoint_task = WorkTask(
+            task_id=checkpoint_id,
+            title=f"[Checkpoint] Revisar fallo en {phase_name}",
+            description=(
+                "Como Team Lead, interviene tras un fallo de fase durante una corrida de chat.\n"
+                f"Fase fallida: {phase_name}\n"
+                f"Tarea fallida: {task.task_id}\n"
+                f"Motivo: {reason[:500]}\n"
+                f"Contexto previo: {task.description[:1200]}\n"
+                "Objetivo: decidir el siguiente paso inmediato. Puedes pedir aclaracion "
+                "al usuario si falta contexto o preparar la futura replanificacion."
+            ),
+            role=Role.TEAM_LEAD,
+            complexity=task.complexity,
+            criticality=task.criticality,
+            metadata={
+                "required_capabilities": ["reasoning"],
+                "interactive_chat": True,
+                "skip_quality_gates": True,
+                "skip_evidence_gate": True,
+                "skip_peer_consultation": True,
+                "phase": f"lead_failure_{phase_name}",
+                "chat_parent": chat_parent,
+                "failure_checkpoint_for": task.task_id,
+                "failure_phase": phase_name,
+                "failure_reason": reason[:500],
+                "checkpoint_kind": "post_failure",
+            },
+        )
+        try:
+            self.taskboard.add_task(checkpoint_task)
+        except ValueError:
+            pass
+
+        task.metadata["lead_failure_checkpoint_id"] = checkpoint_id
+        self.mailbox.send(
+            sender="system",
+            recipient="team_lead",
+            subject=f"Lead checkpoint requested: {task.task_id}",
+            body=(
+                f"Se abrio un checkpoint del Lead tras el fallo de {task.task_id}. "
+                f"reason={reason[:240]}"
+            ),
+            task_id=task.task_id,
+        )
+        self.event_logger.emit(
+            "lead_failure_checkpoint_spawned",
+            {
+                "task_id": task.task_id,
+                "chat_parent": chat_parent,
+                "checkpoint_task_id": checkpoint_id,
+                "phase": phase_name,
+            },
+        )
+        return checkpoint_id
+
+    def _maybe_spawn_lead_report_checkpoint(
+        self,
+        task: WorkTask,
+        output: str,
+    ) -> str | None:
+        """Crea un checkpoint del Lead tras recibir un informe delegado.
+
+        MVP deliberativo: solo aplica a corridas `planning_only` y `team_decision`.
+        La tarea del Lead puede pedir aclaracion al usuario y, si el `lead_close`
+        aun no ha empezado, se encadena como dependencia adicional para que el
+        cierre espere a este punto de control.
+        """
+        chat_parent = str(task.metadata.get("chat_parent", "") or "").strip()
+        if not chat_parent or task.role == Role.TEAM_LEAD:
+            return None
+
+        lead_run_mode = str(task.metadata.get("lead_run_mode", "") or "").strip().lower()
+        if lead_run_mode not in {"planning_only", "team_decision"}:
+            return None
+
+        phase_name = str(task.metadata.get("phase", "") or "").strip()
+        if not phase_name:
+            phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else task.role.value
+        if phase_name.startswith("lead_") or phase_name in {"lead_intake", "lead_close"}:
+            return None
+
+        checkpoint_id = f"{chat_parent}::lead_report_{phase_name}"
+        if self.taskboard.get_task(checkpoint_id) is not None:
+            task.metadata["lead_report_checkpoint_id"] = checkpoint_id
+            return checkpoint_id
+
+        checkpoint_task = WorkTask(
+            task_id=checkpoint_id,
+            title=f"[Checkpoint] Revisar informe de {phase_name}",
+            description=(
+                "Como Team Lead, revisa este informe delegado antes del cierre.\n"
+                f"Modo de corrida: {lead_run_mode}\n"
+                f"Fase origen: {phase_name}\n"
+                f"Tarea origen: {task.task_id}\n"
+                f"Resumen del informe: {output[:1200]}\n"
+                "Objetivo: sintetizar implicaciones, decidir si basta para continuar "
+                "o pedir aclaracion al usuario si la decision sigue ambigua."
+            ),
+            role=Role.TEAM_LEAD,
+            complexity=task.complexity,
+            criticality=task.criticality,
+            metadata={
+                "required_capabilities": ["reasoning"],
+                "interactive_chat": True,
+                "skip_quality_gates": True,
+                "skip_evidence_gate": True,
+                "skip_peer_consultation": True,
+                "phase": f"lead_report_{phase_name}",
+                "chat_parent": chat_parent,
+                "lead_run_mode": lead_run_mode,
+                "report_checkpoint_for": task.task_id,
+                "report_phase": phase_name,
+                "checkpoint_kind": "post_delegate_report",
+            },
+        )
+        try:
+            self.taskboard.add_task(checkpoint_task)
+        except ValueError:
+            pass
+
+        lead_close_id = f"{chat_parent}::lead_close"
+        lead_close_task = self.taskboard.get_task(lead_close_id)
+        if (
+            lead_close_task is not None
+            and lead_close_task.state not in (TaskState.CLAIMED, TaskState.COMPLETED)
+            and checkpoint_id not in lead_close_task.dependencies
+        ):
+            lead_close_task.dependencies.append(checkpoint_id)
+            lead_close_task.metadata["lead_report_checkpoint_dependencies"] = sorted(
+                set(
+                    list(lead_close_task.metadata.get("lead_report_checkpoint_dependencies", []))
+                    + [checkpoint_id]
+                )
+            )
+            self.taskboard.checkpoint()
+
+        for downstream_task in self.taskboard.list_tasks():
+            if downstream_task.task_id == task.task_id:
+                continue
+            if str(downstream_task.metadata.get("chat_parent", "") or "").strip() != chat_parent:
+                continue
+            if downstream_task.state in (TaskState.CLAIMED, TaskState.COMPLETED, TaskState.FAILED):
+                continue
+            if task.task_id not in list(downstream_task.dependencies or []):
+                continue
+            if checkpoint_id in downstream_task.dependencies:
+                continue
+            downstream_task.dependencies.append(checkpoint_id)
+            downstream_task.metadata["lead_report_gate_dependencies"] = sorted(
+                set(
+                    list(downstream_task.metadata.get("lead_report_gate_dependencies", []))
+                    + [checkpoint_id]
+                )
+            )
+            self.taskboard.checkpoint()
+
+        task.metadata["lead_report_checkpoint_id"] = checkpoint_id
+        self.mailbox.send(
+            sender=task.role.value,
+            recipient="team_lead",
+            subject=f"Lead report checkpoint: {task.task_id}",
+            body=(
+                f"Se abrio un checkpoint del Lead tras el informe de {task.task_id}. "
+                f"run_mode={lead_run_mode}"
+            ),
+            task_id=task.task_id,
+        )
+        self.event_logger.emit(
+            "lead_report_checkpoint_spawned",
+            {
+                "task_id": task.task_id,
+                "chat_parent": chat_parent,
+                "checkpoint_task_id": checkpoint_id,
+                "phase": phase_name,
+                "lead_run_mode": lead_run_mode,
+            },
+        )
+        return checkpoint_id
+
+    def _sensitive_reasons_for_preflight(self, task: WorkTask) -> list[str]:
+        reasons: list[str] = []
+        if bool(task.metadata.get("require_execution_plan")):
+            reasons.append("require_execution_plan")
+        execution_plan = task.metadata.get("execution_plan", [])
+        if isinstance(execution_plan, list) and execution_plan:
+            reasons.append("execution_plan_present")
+        if bool(task.metadata.get("require_security_gate")):
+            reasons.append("require_security_gate")
+        if self._should_open_security_gate(task):
+            reasons.append("security_gate_candidate")
+        return sorted(set(reasons))
+
+    def _maybe_spawn_lead_preflight_checkpoint(
+        self,
+        task: WorkTask,
+    ) -> str | None:
+        """Crea un checkpoint previo del Lead antes de una fase sensible.
+
+        Se usa para tareas de chat que aun no han empezado y que implican
+        ejecucion sensible o gates de seguridad. El checkpoint puede pausar la
+        corrida via `[CLARIFY]` antes de entrar en la fase delicada.
+        """
+        chat_parent = str(task.metadata.get("chat_parent", "") or "").strip()
+        if not chat_parent or task.role in (Role.TEAM_LEAD, Role.SCOUT):
+            return None
+        if task.metadata.get("lead_preflight_approved"):
+            return None
+
+        phase_name = str(task.metadata.get("phase", "") or "").strip()
+        if not phase_name:
+            phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else task.role.value
+        if phase_name.startswith("lead_") or phase_name in {"lead_intake", "lead_close"}:
+            return None
+
+        sensitive_reasons = self._sensitive_reasons_for_preflight(task)
+        if not sensitive_reasons:
+            return None
+
+        checkpoint_id = f"{chat_parent}::lead_preflight_{phase_name}"
+        existing = self.taskboard.get_task(checkpoint_id)
+        if existing is not None:
+            task.metadata["lead_preflight_checkpoint_id"] = checkpoint_id
+            if checkpoint_id not in task.dependencies:
+                task.dependencies.append(checkpoint_id)
+                self.taskboard.checkpoint()
+            if existing.state == TaskState.COMPLETED:
+                checkpoint_output = str(
+                    existing.metadata.get("result")
+                    or existing.metadata.get("_last_agent_output")
+                    or ""
+                ).strip()
+                checkpoint_directives = (
+                    extract_lcp_directives(checkpoint_output)
+                    if checkpoint_output
+                    else {}
+                )
+                if checkpoint_directives.get("replan"):
+                    task.metadata["lead_preflight_replan_requested"] = True
+                    return checkpoint_id
+                task.metadata["lead_preflight_approved"] = True
+                return None
+            return checkpoint_id
+
+        checkpoint_task = WorkTask(
+            task_id=checkpoint_id,
+            title=f"[Checkpoint] Autorizar fase sensible {phase_name}",
+            description=(
+                "Como Team Lead, valida si esta fase sensible debe ejecutarse ahora.\n"
+                f"Fase candidata: {phase_name}\n"
+                f"Tarea candidata: {task.task_id}\n"
+                f"Motivos de sensibilidad: {', '.join(sensitive_reasons)}\n"
+                f"Contexto de la tarea: {task.description[:1200]}\n"
+                "Objetivo: decidir si se puede continuar, si conviene pedir aclaracion "
+                "al usuario o si hay que replantear el enfoque antes de ejecutar."
+            ),
+            role=Role.TEAM_LEAD,
+            complexity=task.complexity,
+            criticality=task.criticality,
+            metadata={
+                "required_capabilities": ["reasoning"],
+                "interactive_chat": True,
+                "skip_quality_gates": True,
+                "skip_evidence_gate": True,
+                "skip_peer_consultation": True,
+                "phase": f"lead_preflight_{phase_name}",
+                "chat_parent": chat_parent,
+                "lead_run_mode": str(task.metadata.get("lead_run_mode", "") or "").strip() or "standard",
+                "preflight_for": task.task_id,
+                "preflight_phase": phase_name,
+                "preflight_sensitive_reasons": sensitive_reasons,
+                "checkpoint_kind": "pre_sensitive_phase",
+            },
+        )
+        try:
+            self.taskboard.add_task(checkpoint_task)
+        except ValueError:
+            pass
+
+        if checkpoint_id not in task.dependencies:
+            task.dependencies.append(checkpoint_id)
+        task.metadata["lead_preflight_checkpoint_id"] = checkpoint_id
+        task.metadata["lead_preflight_sensitive_reasons"] = sensitive_reasons
+        self.taskboard.checkpoint()
+        self.mailbox.send(
+            sender="system",
+            recipient="team_lead",
+            subject=f"Lead preflight checkpoint: {task.task_id}",
+            body=(
+                f"Se abrio un checkpoint previo para {task.task_id}. "
+                f"sensitive_reasons={sensitive_reasons}"
+            ),
+            task_id=task.task_id,
+        )
+        self.event_logger.emit(
+            "lead_preflight_checkpoint_spawned",
+            {
+                "task_id": task.task_id,
+                "chat_parent": chat_parent,
+                "checkpoint_task_id": checkpoint_id,
+                "phase": phase_name,
+                "sensitive_reasons": sensitive_reasons,
+            },
+        )
+        return checkpoint_id
+
+    def _has_pending_chat_directive_checkpoint(self, task: WorkTask) -> bool:
+        """Evita avanzar mientras exista una directiva del Lead pendiente de consumo.
+
+        Hoy `REPLAN` y `FORCE_GATE` se aplican en `api/main.py` despues de
+        `run_until_idle()`. Este helper evita que la corrida siga hasta
+        `lead_close` o la fase sensible si un checkpoint del Lead ya emitio una
+        de esas directivas y aun no fue consumida por la capa de chat.
+        """
+        chat_parent = str(task.metadata.get("chat_parent", "") or "").strip()
+        if not chat_parent:
+            return False
+
+        phase_outputs = self._get_workflow_state(chat_parent).get("phase_outputs", {})
+        if not isinstance(phase_outputs, dict):
+            return False
+
+        dependency_phases: list[str] = []
+        prefix = f"{chat_parent}::"
+        for dependency in list(task.dependencies or []):
+            dep_id = str(dependency or "").strip()
+            if not dep_id.startswith(prefix):
+                continue
+            phase_name = dep_id[len(prefix):]
+            if phase_name.startswith(("lead_preflight_", "lead_report_")):
+                dependency_phases.append(phase_name)
+
+        if not dependency_phases:
+            phase_name = str(task.metadata.get("phase", "") or "").strip()
+            if phase_name == "lead_close":
+                dependency_phases = [
+                    name
+                    for name in phase_outputs.keys()
+                    if isinstance(name, str) and name.startswith("lead_report_")
+                ]
+            else:
+                dependency_phases = [
+                    name
+                    for name in phase_outputs.keys()
+                    if isinstance(name, str) and name.startswith("lead_preflight_")
+                ]
+
+        for checkpoint_phase in dependency_phases:
+            output = phase_outputs.get(checkpoint_phase, "")
+            if checkpoint_phase not in phase_outputs:
+                continue
+            directives = extract_lcp_directives(str(output or ""))
+            if (
+                directives.get("replan")
+                or directives.get("force_gate")
+                or directives.get("abort_phases")
+                or directives.get("advisory_mode")
+                or directives.get("skip")
+                or directives.get("retry_route")
+            ):
+                return True
+        return False
 
     # ── Team Ledger ─────────────────────────────────────────────────
 
@@ -249,23 +1201,49 @@ class AITeamOrchestrator:
     def _build_dependency_output_context(self, task: WorkTask) -> str:
         if not task.dependencies:
             return ""
+        # lead_close necesita mas contexto para no fabricar informacion:
+        # Researcher (900) y QA (800) deben llegar completos al Team Lead.
+        _phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else ""
+        _is_lead_close = _phase_name == "lead_close"
         lines: list[str] = []
         for dep_id in task.dependencies:
             dep_task = self.taskboard.get_task(dep_id)
             if dep_task is None or dep_task.state != TaskState.COMPLETED:
                 continue
+            task_root = self._task_root(task.task_id)
+            ws = self.workflow_state.get(task_root, {})
+            phase_summaries = ws.get("phase_context_summaries", {})
+            dep_phase = str(dep_task.metadata.get("phase", "") or "").strip()
+            compact_summary = ""
+            if isinstance(phase_summaries, dict) and dep_phase:
+                compact_summary = str(phase_summaries.get(dep_phase, "") or "").strip()
             result = dep_task.metadata.get("result", "")
-            if not result:
+            if not result and not compact_summary:
                 continue
             phase_label = dep_task.role.value.replace("_", " ").title()
-            compacted = self._compact_text(result, 400)
+            role = dep_task.role.value
+            if _is_lead_close and role in ("researcher", "qa"):
+                limit = 900 if role == "researcher" else 800
+            else:
+                limit = 400
+            compacted = compact_summary or self._compact_text(str(result or ""), limit)
             lines.append(f"[{phase_label}] {compacted}")
         if not lines:
             task_root = self._task_root(task.task_id)
             ws = self.workflow_state.get(task_root, {})
             phase_outputs = ws.get("phase_outputs", {})
+            phase_summaries = ws.get("phase_context_summaries", {})
+            chat_context_summary = str(ws.get("chat_context_summary", "") or "").strip()
+            if chat_context_summary:
+                lines.append(f"[Context Curator] {self._compact_text(chat_context_summary, 500)}")
+            fallback_limit = 600 if _is_lead_close else 300
             for phase, output in phase_outputs.items():
-                lines.append(f"[{phase}] {self._compact_text(output, 300)}")
+                compacted = ""
+                if isinstance(phase_summaries, dict):
+                    compacted = str(phase_summaries.get(phase, "") or "").strip()
+                lines.append(
+                    f"[{phase}] {compacted or self._compact_text(output, fallback_limit)}"
+                )
         return "\n".join(lines[:8])
 
     # ── Gate feedback collection ────────────────────────────────────
@@ -335,6 +1313,10 @@ class AITeamOrchestrator:
         """Reclama todas las tareas READY disponibles."""
         claimed_tasks: list[WorkTask] = []
         for task in self.taskboard.ready_tasks():
+            if self._maybe_spawn_lead_preflight_checkpoint(task):
+                continue
+            if self._has_pending_chat_directive_checkpoint(task):
+                continue
             assignee = task.assignee or self._assignee_for_role(task.role)
             if not self.taskboard.claim_task(task.task_id, assignee=assignee):
                 current = self.taskboard.get_task(task.task_id)
@@ -790,7 +1772,46 @@ class AITeamOrchestrator:
                 tags=["execution", "environment"],
             )
 
+        self._ensure_tool_specialist_metadata(task)
         context = self._build_collaboration_context(task=task, assignee=assignee)
+        skill_mcp_context = self._build_skill_mcp_context(task=task, assignee=assignee)
+        specialist_prefetch_context = self._collect_specialist_prefetch_context(task)
+        if specialist_prefetch_context:
+            skill_mcp_context = (
+                f"{skill_mcp_context}\n\n{specialist_prefetch_context}"
+                if skill_mcp_context
+                else specialist_prefetch_context
+            )
+        specialist_quorum = dict(task.metadata.get("specialist_quorum_result", {}) or {})
+        if specialist_quorum and not self._to_bool(
+            specialist_quorum.get("quorum_met", True)
+        ):
+            self.taskboard.mark_blocked(task.task_id, reason="specialist_quorum_not_met")
+            self.taskboard.update_metadata(
+                task.task_id,
+                {
+                    "specialist_quorum_missing": list(
+                        specialist_quorum.get("missing_specialists", []) or []
+                    ),
+                    "specialist_quorum_received": list(
+                        specialist_quorum.get("received_specialists", []) or []
+                    ),
+                },
+            )
+            self._emit_agent_event(
+                {
+                    "type": "agent_blocked",
+                    "task_id": task.task_id,
+                    "agent_id": assignee,
+                    "role": task.role.value,
+                    "phase": _phase,
+                    "reason": "specialist_quorum_not_met",
+                }
+            )
+            self.session_store.close_session(
+                session, summary="specialist_quorum_not_met", status="blocked"
+            )
+            return
         peer_report = self._run_peer_consultation(task=task, assignee=assignee)
         peer_context = peer_report.text
         decision_governance = self._build_decision_governance_context(
@@ -825,9 +1846,7 @@ class AITeamOrchestrator:
                     "required_rank": 5,
                     "criticality": task.criticality.value,
                 },
-            )
-        skill_mcp_context = self._build_skill_mcp_context(task=task, assignee=assignee)
-
+        )
         context = self.compliance.sanitize_context(context) if context else ""
         peer_context = (
             self.compliance.sanitize_context(peer_context) if peer_context else ""
@@ -956,7 +1975,32 @@ class AITeamOrchestrator:
             complexity=task.complexity,
             criticality=task.criticality,
             required_capabilities=set(task.metadata.get("required_capabilities", [])),
+            tool_specialist=str(task.metadata.get("tool_specialist", "") or "").strip(),
+            tool_rewiring_preferred_specialist=str(
+                task.metadata.get("tool_rewiring_preferred_specialist", "") or ""
+            ).strip(),
+            prefer_economic_routing=self._to_bool(
+                task.metadata.get("tool_specialist_economic_routing", False)
+            ),
+            preferred_tool_tier=str(
+                task.metadata.get("tool_specialist_default_tier", "") or ""
+            ).strip(),
+            skill_targets={
+                str(item).strip().lower()
+                for item in list(task.metadata.get("skill_targets", []) or [])
+                if str(item).strip()
+            },
+            lsp_targets={
+                str(item).strip().lower()
+                for item in list(task.metadata.get("lsp_targets", []) or [])
+                if str(item).strip()
+            },
             approved_adapters=self.compliance.approved_adapters(task.metadata),
+            excluded_adapters={
+                str(name).strip()
+                for name in list(task.metadata.get("excluded_adapters", []) or [])
+                if str(name).strip()
+            },
             sensitive_approval=sensitive_approval,
             environment=self.environment,
         )
@@ -1070,6 +2114,10 @@ class AITeamOrchestrator:
                     complexity=request.complexity,
                     criticality=request.criticality,
                     required_capabilities=set(),  # relax capabilities
+                    tool_specialist=request.tool_specialist,
+                    tool_rewiring_preferred_specialist=request.tool_rewiring_preferred_specialist,
+                    prefer_economic_routing=request.prefer_economic_routing,
+                    preferred_tool_tier=request.preferred_tool_tier,
                     approved_adapters=request.approved_adapters,
                     sensitive_approval=request.sensitive_approval,
                     environment=request.environment,
@@ -1133,6 +2181,12 @@ class AITeamOrchestrator:
         task.metadata["total_latency_ms"] = current_total + int(
             decision.response.latency_ms
         )
+        _selected_adapter_name = self._selected_adapter_name(decision)
+        if _selected_adapter_name:
+            task.metadata["last_adapter_name"] = _selected_adapter_name
+        task.metadata["last_provider"] = decision.provider
+        task.metadata["last_model"] = decision.model
+        task.metadata["last_channel"] = decision.channel.value
 
         role_key = f"latency_{task.role.value}_ms"
         current_role_time = task.metadata.get(role_key, 0)
@@ -1208,6 +2262,7 @@ class AITeamOrchestrator:
             if found_placeholders and not task.metadata.get("skip_placeholder_check"):
                 reason = f"Placeholder detected: {', '.join(found_placeholders)}"
                 self.taskboard.mark_failed(task.task_id, error=reason)
+                self._maybe_spawn_lead_failure_checkpoint(task, reason)
                 self._maybe_run_event_meeting(
                     trigger="task_failed",
                     task_id=task.task_id,
@@ -1229,6 +2284,31 @@ class AITeamOrchestrator:
                 output=safe_content,
                 peer_report=peer_report,
             )
+            specialist_name = str(task.metadata.get("tool_specialist", "") or "").strip().lower()
+            if specialist_name:
+                parsed_report = parse_specialist_report(
+                    safe_content,
+                    specialist=specialist_name,
+                    provider=decision.provider,
+                    model=decision.model,
+                    toolset_used=list(task.metadata.get("tool_specialist_tool_families", []) or []),
+                    tokens_used=decision.response.input_tokens + decision.response.output_tokens,
+                )
+                reports = list(task.metadata.get("specialist_reports", []) or [])
+                reports.append(parsed_report.to_metadata())
+                task.metadata["specialist_reports"] = reports
+                self.event_logger.emit(
+                    "specialist_report_parsed",
+                    {
+                        "task_id": task.task_id,
+                        "specialist": specialist_name,
+                        "provider": decision.provider,
+                        "model": decision.model,
+                        "validation_status": parsed_report.validation_status,
+                        "validation_errors": list(parsed_report.validation_errors),
+                        "report_version": parsed_report.report_version,
+                    },
+                )
             thread.append_turn(
                 role="assistant",
                 content=safe_content,
@@ -1250,9 +2330,47 @@ class AITeamOrchestrator:
                 task_id=task.task_id,
                 tags=["result", decision.channel.value],
             )
-            # Evidence gate: solo para fases de build/ejecucion, no para plan_*
+            # ── E7-D4: Pausa mid-run — DEBE ir ANTES del evidence gate ─────────
+            # Si el agente emitió [CLARIFY], pausar la tarea antes de evaluar
+            # evidencia. Una tarea que pide aclaración no produce artefactos y
+            # debe ser tratada como pausada, no como fallida.
+            # Excluir lead_intake (manejado por api/main.py) y scouts.
+            # lead_close SI puede pausar: es el primer checkpoint real del Lead
+            # durante la run antes del cierre final.
             _phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else ""
-            _is_planning_phase = _phase_name.startswith("plan_") or _phase_name in (
+            _is_scout_task = task.metadata.get("is_scout", False) or task.role.value == "scout"
+            _can_pause_early = (
+                not _is_scout_task
+                and task.role.value != "scout"
+                and _phase_name != "lead_intake"
+            )
+            if _can_pause_early:
+                import re as _re_mid
+                _mid_clarify = _re_mid.search(
+                    r'\[CLARIFY:\s*"(.+?)"\]', safe_content,
+                    _re_mid.DOTALL | _re_mid.IGNORECASE,
+                )
+                if _mid_clarify:
+                    _mid_cq = _mid_clarify.group(1).strip()
+                    _wstate_root = self._task_root(task.task_id)
+                    _wstate_phase = _phase_name or task.role.value
+                    self._update_workflow_state(_wstate_root, _wstate_phase, safe_content)
+                    self.taskboard.mark_waiting_user(task.task_id, question=_mid_cq)
+                    self.event_logger.emit(
+                        "chat_waiting_user",
+                        {
+                            "task_id": task.task_id,
+                            "phase": _phase_name,
+                            "question": _mid_cq,
+                        },
+                    )
+                    self.session_store.close_session(
+                        session, summary="mid_run_waiting_user", status="paused"
+                    )
+                    return
+
+            # Evidence gate: solo para fases de build/ejecucion, no para plan_* ni scouts
+            _is_planning_phase = _is_scout_task or _phase_name.startswith("plan_") or _phase_name in (
                 "lead_intake",
                 "lead_close",
                 "discovery",
@@ -1272,6 +2390,7 @@ class AITeamOrchestrator:
                 if not has_evidence:
                     evidence_error = f"EvidenceGate Blocked: {reason}"
                     self.taskboard.mark_failed(task.task_id, error=evidence_error)
+                    self._maybe_spawn_lead_failure_checkpoint(task, evidence_error)
                     self._maybe_run_event_meeting(
                         trigger="task_failed",
                         task_id=task.task_id,
@@ -1384,6 +2503,7 @@ class AITeamOrchestrator:
                 task_id=task.task_id,
             )
             self._notify_dependents(task.task_id, summary=safe_content)
+            self._maybe_spawn_lead_report_checkpoint(task, safe_content)
 
             # ── Cerrar sesion exitosa ──
             self.session_store.close_session(
@@ -1394,6 +2514,21 @@ class AITeamOrchestrator:
         failure_text = self.compliance.redact_text(
             decision.response.error or decision.reason
         )
+
+        # Scouts que fallan se completan con output vacio para no bloquear lead_intake
+        if task.metadata.get("is_scout") or task.role.value == "scout":
+            task.metadata["scout_failed"] = True
+            task.metadata["scout_error"] = failure_text[:200]
+            self.taskboard.mark_completed(task.task_id, details="Sin datos disponibles.")
+            self.event_logger.emit(
+                "scout_graceful_failure",
+                {"task_id": task.task_id, "reason": failure_text[:200]},
+            )
+            self.session_store.close_session(
+                session, summary="scout_graceful_failure", status="completed"
+            )
+            return
+
         if self._maybe_handoff_and_retry(
             task=task, failed_assignee=assignee, decision=decision
         ):
@@ -1411,6 +2546,7 @@ class AITeamOrchestrator:
             tags=["failure"],
         )
         self.taskboard.mark_failed(task.task_id, error=failure_text)
+        self._maybe_spawn_lead_failure_checkpoint(task, failure_text)
         self._emit_agent_event(
             {
                 "type": "agent_failed",
@@ -1974,6 +3110,17 @@ class AITeamOrchestrator:
         ]
         return any(marker in blob for marker in markers)
 
+    @staticmethod
+    def _selected_adapter_name(decision: RoutingDecision) -> str:
+        for attempt in reversed(list(decision.attempts or [])):
+            raw = str(attempt or "").strip()
+            if ":ok" not in raw:
+                continue
+            parts = raw.split(":")
+            if parts:
+                return parts[0].strip()
+        return ""
+
     def _build_handoff_context(
         self, task: WorkTask, source_agent: str, decision: RoutingDecision | None = None
     ) -> str:
@@ -2063,31 +3210,11 @@ class AITeamOrchestrator:
         _agent_output = str(task.metadata.get("_last_agent_output", ""))
         _phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else ""
 
-        # Si no hay modo live real, no aceptar nunca salida textual como evidencia.
-        live_api_enabled = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        if not live_api_enabled and _agent_output.strip():
-            return False, "live_mode_required_no_simulated_evidence"
-
-        # ── Modo live sin git diff: validar calidad minima del output por rol ──
-        # Un LLM puede devolver "Tarea completada." y no hacer nada. Se exige
-        # contenido tecnico minimo apropiado al rol antes de aceptar como evidencia.
-        if live_api_enabled and _agent_output.strip():
-            quality_ok, quality_reason = self._assess_output_quality(
-                _agent_output, task.role, _phase_name
-            )
-            if quality_ok:
-                return True, f"live_output_quality:{quality_reason}"
-
-        # ── Fallback: tarea conversacional / teorica ────────────────────────
-        # Si la tarea fue marcada como conversacional, aceptar:
-        #   (a) documentacion generada (.md/.txt) en el workspace o runtime/
-        #   (b) output LLM sustancial (>400 chars) → se persiste como artefacto
-        if task.metadata.get("conversational"):
+        # ── Tarea conversacional / teórica — evaluar ANTES del bloqueo live_api ──
+        # Las tareas conversacionales (chat interactivo, análisis, consultoría) producen
+        # output textual como evidencia legítima. No requieren artefactos de git ni
+        # modo live para ser válidas: su output ES el entregable.
+        if task.metadata.get("conversational") or task.metadata.get("interactive_chat"):
             # (a) buscar archivos de documentacion recien creados
             doc_exts = {".md", ".txt", ".rst", ".adoc"}
             for search_root in [workspace, self.runtime_dir]:
@@ -2114,9 +3241,31 @@ class AITeamOrchestrator:
                     return True, f"conversational_output_persisted:{doc_path.name}"
                 except Exception:
                     pass
-            # (c) si tiene output pero no alcanza umbral → pasa igualmente (es una respuesta valida)
+            # (c) cualquier output → respuesta válida para tareas conversacionales
             if _agent_output.strip():
                 return True, "conversational_response_accepted"
+
+        # Si no hay modo live real, no aceptar salida textual como evidencia de artefactos.
+        live_api_enabled = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if "[SIMULADO |" in _agent_output:
+            return False, "simulated_placeholder_blocked:placeholder_output"
+        if not live_api_enabled and _agent_output.strip():
+            return True, "simulated_mode_accepted"
+
+        # ── Modo live sin git diff: validar calidad minima del output por rol ──
+        # Un LLM puede devolver "Tarea completada." y no hacer nada. Se exige
+        # contenido tecnico minimo apropiado al rol antes de aceptar como evidencia.
+        if live_api_enabled and _agent_output.strip():
+            quality_ok, quality_reason = self._assess_output_quality(
+                _agent_output, task.role, _phase_name
+            )
+            if quality_ok:
+                return True, f"live_output_quality:{quality_reason}"
 
         return (
             False,
@@ -2361,7 +3510,7 @@ class AITeamOrchestrator:
             return False
         if task.metadata.get("quality_gate_spawned"):
             return False
-        if task.metadata.get("skip_quality_gates"):
+        if task.metadata.get("skip_quality_gates") or uses_chat_policy(task.metadata):
             return False
         return True
 
@@ -2373,16 +3522,35 @@ class AITeamOrchestrator:
         parent_sessions = self.session_store.sessions_for_task(task.task_id)
         if parent_sessions:
             last_session = parent_sessions[-1]
+            raw_actions = (
+                last_session.get("actions", [])
+                if isinstance(last_session, dict)
+                else getattr(last_session, "actions", [])
+            )
             exec_actions = [
                 a
-                for a in (last_session.actions or [])
-                if a.action_type in ("command_exec", "llm_call")
+                for a in (raw_actions or [])
+                if (
+                    getattr(a, "action_type", None) in ("command_exec", "llm_call")
+                    or (
+                        isinstance(a, dict)
+                        and str(a.get("action_type", "")).strip()
+                        in ("command_exec", "llm_call")
+                    )
+                )
             ]
             if exec_actions:
                 lines.append("Acciones del engineer:")
                 for a in exec_actions[-6:]:
-                    status = "OK" if a.success else "FAIL"
-                    lines.append(f"  [{status}] {a.action_type}: {a.detail[:120]}")
+                    if isinstance(a, dict):
+                        status = "OK" if bool(a.get("success", False)) else "FAIL"
+                        action_type = str(a.get("action_type", "") or "")
+                        detail = str(a.get("detail", "") or "")
+                    else:
+                        status = "OK" if getattr(a, "success", False) else "FAIL"
+                        action_type = str(getattr(a, "action_type", "") or "")
+                        detail = str(getattr(a, "detail", "") or "")
+                    lines.append(f"  [{status}] {action_type}: {detail[:120]}")
 
         # 2. Parsed git diff summary
         raw_diff = task.metadata.get("git_diff_evidence", "")
@@ -2450,7 +3618,9 @@ class AITeamOrchestrator:
         return "\n".join(summary_lines)
 
     def _spawn_quality_gates(self, task: WorkTask) -> None:
-        skip_evidence = task.metadata.get("skip_evidence_gate", False)
+        skip_evidence = task.metadata.get("skip_evidence_gate", False) or uses_chat_policy(
+            task.metadata
+        )
         skip_placeholder = task.metadata.get("skip_placeholder_check", False)
 
         # Build rich evidence context for gates
@@ -2687,6 +3857,7 @@ class AITeamOrchestrator:
                 # Conflict already resolved and still failing → final failure
                 reason = f"quality_gates_failed:{','.join(failed_gates)}"
                 self.taskboard.mark_failed(task.task_id, error=reason)
+                self._maybe_spawn_lead_failure_checkpoint(task, reason)
                 self.mailbox.send(
                     sender="system",
                     recipient="team_lead",
@@ -2798,7 +3969,7 @@ class AITeamOrchestrator:
         ):
             output_summary = "placeholder/adapter"
         else:
-            output_summary = self._compact_text(output_text, 1500)
+            output_summary = self._compact_text(output_text, 3000)
         justification = (
             f"decision_rank=R{charter.decision_rank}/5 assignee={assignee} role={task.role.value}; "
             f"consulted={consulted}; unavailable={unavailable}; "
@@ -2837,6 +4008,98 @@ class AITeamOrchestrator:
             },
         )
 
+    def _peer_diversity_required(self, task: WorkTask) -> bool:
+        override = task.metadata.get("peer_consultation_diversity_required")
+        if isinstance(override, bool):
+            return override
+        if isinstance(override, str):
+            normalized = override.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        return bool(
+            getattr(self.router.policy, "peer_consultation_diversity_required", True)
+        )
+
+    def _route_peer_with_diversity(
+        self,
+        task: WorkTask,
+        peer_role: Role,
+        assignee: str,
+        round_label: str,
+        prompt: str,
+        messages: list[dict[str, str]],
+        used_providers: set[str],
+    ) -> RoutingDecision:
+        base_request = RoutingRequest(
+            role=peer_role,
+            complexity=task.complexity,
+            criticality=task.criticality,
+            required_capabilities=self._peer_capabilities(peer_role),
+            tool_rewiring_preferred_specialist=str(
+                task.metadata.get("tool_rewiring_preferred_specialist", "") or ""
+            ).strip(),
+            environment=self.environment,
+        )
+        diversity_required = self._peer_diversity_required(task)
+        normalized_used = {item.strip().lower() for item in used_providers if str(item).strip()}
+        if not diversity_required or not normalized_used:
+            return self.router.route_and_invoke(
+                request=base_request,
+                prompt=prompt,
+                task_id=task.task_id,
+                messages=messages,
+            )
+
+        diverse_request = RoutingRequest(
+            role=peer_role,
+            complexity=task.complexity,
+            criticality=task.criticality,
+            required_capabilities=self._peer_capabilities(peer_role),
+            tool_rewiring_preferred_specialist=base_request.tool_rewiring_preferred_specialist,
+            environment=self.environment,
+            excluded_providers=set(normalized_used),
+        )
+        diverse_eligible = self.router.eligible_adapters(diverse_request)
+        diverse_decision = None
+        fallback_reason = ""
+        if diverse_eligible:
+            diverse_decision = self.router.route_and_invoke(
+                request=diverse_request,
+                prompt=prompt,
+                task_id=task.task_id,
+                messages=messages,
+            )
+            if diverse_decision.success:
+                return diverse_decision
+            fallback_reason = "diverse_candidates_failed"
+        else:
+            fallback_reason = "no_diverse_provider_available"
+
+        fallback_decision = self.router.route_and_invoke(
+            request=base_request,
+            prompt=prompt,
+            task_id=task.task_id,
+            messages=messages,
+        )
+        self.event_logger.emit(
+            "peer_diversity_fallback",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "peer_role": peer_role.value,
+                "round": round_label,
+                "used_providers": sorted(normalized_used),
+                "fallback_reason": fallback_reason,
+                "fallback_provider": fallback_decision.provider,
+                "fallback_success": fallback_decision.success,
+            },
+        )
+        if fallback_decision.success or diverse_decision is None:
+            return fallback_decision
+        return diverse_decision
+
     def _run_peer_consultation(
         self, task: WorkTask, assignee: str
     ) -> PeerConsultationReport:
@@ -2854,15 +4117,9 @@ class AITeamOrchestrator:
         summaries: list[str] = []
         consulted_roles: list[str] = []
         unavailable_roles: list[str] = []
+        round1_used_providers: set[str] = set()
         for peer_role in peer_roles:
             peer_agent = self._assignee_for_role(peer_role)
-            request = RoutingRequest(
-                role=peer_role,
-                complexity=task.complexity,
-                criticality=task.criticality,
-                required_capabilities=self._peer_capabilities(peer_role),
-                environment=self.environment,
-            )
             peer_prompt = self._peer_prompt_for_task(task, peer_role)
             peer_messages = self._build_peer_messages(
                 task=task,
@@ -2870,11 +4127,14 @@ class AITeamOrchestrator:
                 assignee=assignee,
                 round_label="round1",
             )
-            decision = self.router.route_and_invoke(
-                request=request,
+            decision = self._route_peer_with_diversity(
+                task=task,
+                peer_role=peer_role,
+                assignee=assignee,
+                round_label="round1",
                 prompt=peer_prompt,
-                task_id=task.task_id,
                 messages=peer_messages,
+                used_providers=round1_used_providers,
             )
             if decision.success:
                 content = self.compliance.redact_text(decision.response.content)
@@ -2903,6 +4163,7 @@ class AITeamOrchestrator:
                 )
                 consulted_roles.append(peer_role.value)
                 summaries.append(f"{peer_role.value}: {content[:220]}")
+                round1_used_providers.add(str(decision.provider or "").strip().lower())
             else:
                 unavailable_roles.append(peer_role.value)
                 summaries.append(
@@ -2915,6 +4176,7 @@ class AITeamOrchestrator:
                 f"- {s}" for s in summaries if "no disponible" not in s
             )
             round2_summaries: list[str] = []
+            round2_used_providers: set[str] = set()
             for peer_role in peer_roles:
                 if peer_role.value not in consulted_roles:
                     continue
@@ -2926,13 +4188,6 @@ class AITeamOrchestrator:
                     "Revisa las opiniones y da tu posicion final en 2-3 oraciones: "
                     "acuerdo, desacuerdo, o matiz importante."
                 )
-                r2_request = RoutingRequest(
-                    role=peer_role,
-                    complexity=task.complexity,
-                    criticality=task.criticality,
-                    required_capabilities=self._peer_capabilities(peer_role),
-                    environment=self.environment,
-                )
                 r2_messages = self._build_peer_messages(
                     task=task,
                     peer_role=peer_role,
@@ -2940,11 +4195,14 @@ class AITeamOrchestrator:
                     round_label="round2",
                     prior_inputs=all_inputs,
                 )
-                r2_decision = self.router.route_and_invoke(
-                    request=r2_request,
+                r2_decision = self._route_peer_with_diversity(
+                    task=task,
+                    peer_role=peer_role,
+                    assignee=assignee,
+                    round_label="round2",
                     prompt=r2_prompt,
-                    task_id=task.task_id,
                     messages=r2_messages,
+                    used_providers=round2_used_providers,
                 )
                 if r2_decision.success:
                     r2_content = self.compliance.redact_text(
@@ -2967,6 +4225,9 @@ class AITeamOrchestrator:
                     )
                     round2_summaries.append(
                         f"{peer_role.value} (R2): {r2_content[:220]}"
+                    )
+                    round2_used_providers.add(
+                        str(r2_decision.provider or "").strip().lower()
                     )
 
             if round2_summaries:
@@ -3092,6 +4353,26 @@ class AITeamOrchestrator:
         role_messages = self._context_messages(recipient=task.role.value)
 
         lines: list[str] = []
+
+        # ── Output propio del intento anterior (gate retry) ──────────────────
+        # retry_task() no borra metadata["result"], así que el output previo sigue
+        # disponible cuando gate_iteration > 0. Lo inyectamos para que el agente
+        # sepa qué produjo antes y pueda corregirlo con precisión.
+        gate_iter = int(task.metadata.get("gate_iteration", 0))
+        if gate_iter > 0:
+            own_prev = str(task.metadata.get("result") or "")
+            if not own_prev:
+                # Fallback: phase_outputs del workflow state
+                task_root = self._task_root(task.task_id)
+                _phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else ""
+                own_prev = self.workflow_state.get(task_root, {}).get(
+                    "phase_outputs", {}
+                ).get(_phase_name, "")
+            if own_prev:
+                lines.append(
+                    f"Tu output anterior (iteracion {gate_iter - 1}, revisa y mejora):\n"
+                    f"{self._compact_text(own_prev, 600)}"
+                )
 
         # ── Resultados de fases anteriores (propagacion de contexto) ──
         dep_context = self._build_dependency_output_context(task)
@@ -3239,21 +4520,39 @@ class AITeamOrchestrator:
         return self._compact_context(lines, max_lines=30, max_chars=3800)
 
     def _build_skill_mcp_context(self, task: WorkTask, assignee: str) -> str:
+        skill_targets = normalize_skill_targets(task.metadata.get("skill_targets", []))
+        lsp_targets = normalize_lsp_targets(task.metadata.get("lsp_targets", []))
         required = {
             item.strip().lower()
             for item in task.metadata.get("required_capabilities", [])
             if str(item).strip()
         }
+        required.update(
+            derive_target_capabilities(
+                skill_targets=skill_targets,
+                lsp_targets=lsp_targets,
+            )
+        )
+        guidance_mode = (
+            "coordinator"
+            if task.role == Role.TEAM_LEAD and (skill_targets or lsp_targets)
+            else "operator"
+        )
         guidance = self.tool_integrator.guidance_for_task(
             role=task.role.value,
             description=f"{task.title}\n{task.description}",
             required_capabilities=required,
+            preferred_skills=skill_targets,
+            lsp_targets=lsp_targets,
+            guidance_mode=guidance_mode,
         )
         text = str(guidance.get("text", "")).strip()
         if not text:
             return ""
         compacted = self._compact_context(
-            text.splitlines(), max_lines=14, max_chars=1200
+            text.splitlines(),
+            max_lines=8 if guidance_mode == "coordinator" else 14,
+            max_chars=700 if guidance_mode == "coordinator" else 1200,
         )
         self._remember_memory(
             agent_id=assignee,
@@ -3268,6 +4567,9 @@ class AITeamOrchestrator:
             {
                 "task_id": task.task_id,
                 "role": task.role.value,
+                "guidance_mode": guidance.get("guidance_mode", guidance_mode),
+                "preferred_skills": guidance.get("preferred_skills", []),
+                "lsp_targets": guidance.get("lsp_targets", []),
                 "skills": guidance.get("skills", []),
                 "recommended_mcp": guidance.get("recommended_mcp", []),
                 "active_mcp": guidance.get("active_mcp", []),
@@ -3545,7 +4847,11 @@ class AITeamOrchestrator:
         gate_iteration: int,
         prev_summary: str,
     ) -> list[dict[str, str]]:
-        system_message = build_system_prompt(task.role, ab_version=ab_version)
+        system_message = build_system_prompt(
+            task.role,
+            ab_version=ab_version,
+            task_metadata=task.metadata,
+        )
         current_user_turn = self._build_current_task_message(
             task,
             context=context,

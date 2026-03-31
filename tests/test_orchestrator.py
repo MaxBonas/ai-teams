@@ -2,17 +2,23 @@ import tempfile
 import unittest
 import json
 import shutil
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from aiteam.adapters import ApiAdapter, SubscriptionAdapter
+from aiteam.adapters import (
+    ApiAdapter as RealApiAdapter,
+    FakeSuccessAdapter,
+    SubscriptionAdapter as RealSubscriptionAdapter,
+)
 from aiteam.adapters.base import ModelAdapter
 from aiteam.config import build_default_router_policy
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.router import HybridRouter
 from aiteam.types import (
     AdapterResponse,
+    ChannelType,
     Complexity,
     Criticality,
     Role,
@@ -21,7 +27,1294 @@ from aiteam.types import (
 )
 
 
+class SubscriptionAdapter(FakeSuccessAdapter):
+    def __init__(self, *args, **kwargs) -> None:
+        kwargs.setdefault("channel", ChannelType.SUBSCRIPTION)
+        super().__init__(*args, **kwargs)
+
+
+class ApiAdapter(FakeSuccessAdapter):
+    def __init__(self, *args, **kwargs) -> None:
+        kwargs.setdefault("channel", ChannelType.API)
+        super().__init__(*args, **kwargs)
+
+
+class FailureThenLeadClarifyAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(str(item.get("content", "")) for item in messages if isinstance(item, dict))
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, interviene tras un fallo de fase" in joined:
+            return AdapterResponse(
+                success=True,
+                content='[CLARIFY: "¿Quieres que reoriente la corrida o solo documente el fallo?"]',
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        if "FORCE FAIL CHECKPOINT" in joined:
+            return AdapterResponse(
+                success=False,
+                content="",
+                error="forced_checkpoint_failure",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=0,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Respuesta de prueba",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class DeliberativeReportCheckpointAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, revisa este informe delegado antes del cierre." in joined:
+            return AdapterResponse(
+                success=True,
+                content='[CLARIFY: "¿Prefieres una recomendación conservadora o agresiva?"]',
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Cierre del Team Lead.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Informe delegado con opciones y tradeoffs.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class SensitivePreflightCheckpointAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, valida si esta fase sensible debe ejecutarse ahora." in joined:
+            return AdapterResponse(
+                success=True,
+                content='[CLARIFY: "¿Autorizas ejecutar esta fase sensible ahora mismo?"]',
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Implementacion o revision completada.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class SpecialistJsonAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_api",
+            provider="openai",
+            model="gpt-cheap",
+            channel=ChannelType.API,
+            capabilities={"analysis", "reasoning", "browser_test"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        return AdapterResponse(
+            success=True,
+            content=json.dumps(
+                {
+                    "summary": "UI reproducida con error de selector",
+                    "evidence": ["selector .cta no existe"],
+                    "artifacts": ["runtime/screenshots/home.png"],
+                    "risks": ["flaky test"],
+                    "recommendation": "usar data-testid",
+                    "confidence": 0.77,
+                }
+            ),
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class SpecialistPrefetchAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_api",
+            provider="openai",
+            model="gpt-cheap",
+            channel=ChannelType.API,
+            capabilities={"analysis", "reasoning", "coding", "test_execute"},
+        )
+        self.calls: list[dict[str, object]] = []
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        prompt_text = str(prompt or "")
+        joined_messages = "\n".join(
+            str(item.get("content", "")) for item in (messages or []) if isinstance(item, dict)
+        )
+        self.calls.append(
+            {
+                "prompt": prompt_text,
+                "messages": joined_messages,
+            }
+        )
+        if "Specialist precheck:" in prompt_text:
+            return AdapterResponse(
+                success=True,
+                content=json.dumps(
+                    {
+                        "summary": "Los tests relevantes apuntan a un caso borde de validacion.",
+                        "evidence": ["tests/test_router.py::test_x"],
+                        "artifacts": [],
+                        "risks": ["posible regresion de budget"],
+                        "recommendation": "mantener cobertura y ejecutar smoke",
+                        "confidence": 0.71,
+                    }
+                ),
+                latency_ms=1,
+                input_tokens=8,
+                output_tokens=12,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Respuesta principal con contexto de especialista.",
+            latency_ms=1,
+            input_tokens=11,
+            output_tokens=21,
+        )
+
+
+class PeerDiversityCaptureAdapter(ModelAdapter):
+    def __init__(
+        self,
+        *,
+        name: str,
+        provider: str,
+        model: str,
+        capabilities: set[str],
+        record: list[dict[str, str]],
+    ) -> None:
+        super().__init__(
+            name=name,
+            provider=provider,
+            model=model,
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities=capabilities,
+        )
+        self.record = record
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Consulta para" in joined:
+            round_label = "round2" if "Modo: round2" in joined else "round1"
+            self.record.append(
+                {
+                    "provider": self.provider,
+                    "round": round_label,
+                }
+            )
+            content = f"{self.provider} peer input"
+        else:
+            content = f"{self.provider} main response"
+        return AdapterResponse(
+            success=True,
+            content=content,
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class SpecialistQuorumAdapter(ModelAdapter):
+    def __init__(self, failing_specialists: set[str] | None = None) -> None:
+        super().__init__(
+            name="openai_api",
+            provider="openai",
+            model="gpt-cheap",
+            channel=ChannelType.API,
+            capabilities={
+                "analysis",
+                "reasoning",
+                "coding",
+                "test_execute",
+                "browser_test",
+                "repo_read",
+            },
+        )
+        self.failing_specialists = {
+            str(item).strip().lower() for item in (failing_specialists or set()) if str(item).strip()
+        }
+        self.main_calls = 0
+
+    def available(self) -> bool:
+        return True
+
+    @staticmethod
+    def _extract_specialist_name(messages) -> str:
+        joined_messages = "\n".join(
+            str(item.get("content", "")) for item in (messages or []) if isinstance(item, dict)
+        )
+        marker = "Especializacion activa:"
+        if marker not in joined_messages:
+            return ""
+        suffix = joined_messages.split(marker, 1)[1]
+        if "(" not in suffix or ")" not in suffix:
+            return ""
+        return suffix.split("(", 1)[1].split(")", 1)[0].strip().lower()
+
+    def invoke(self, prompt, messages=None, tools=None):
+        prompt_text = str(prompt or "")
+        if "Specialist precheck:" in prompt_text:
+            specialist_name = self._extract_specialist_name(messages)
+            if specialist_name in self.failing_specialists:
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    latency_ms=1,
+                    input_tokens=8,
+                    output_tokens=0,
+                    error=f"{specialist_name}_failed",
+                )
+            return AdapterResponse(
+                success=True,
+                content=json.dumps(
+                    {
+                        "summary": f"Informe de {specialist_name or 'specialist'}",
+                        "evidence": [f"evidence:{specialist_name or 'unknown'}"],
+                        "artifacts": [],
+                        "risks": [],
+                        "recommendation": "continuar",
+                        "confidence": 0.72,
+                    }
+                ),
+                latency_ms=1,
+                input_tokens=8,
+                output_tokens=12,
+            )
+        self.main_calls += 1
+        return AdapterResponse(
+            success=True,
+            content="Respuesta principal tras quorum de especialistas.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=18,
+        )
+
+
 class OrchestratorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._previous_tempdir = tempfile.tempdir
+        self._previous_temporary_directory = tempfile.TemporaryDirectory
+        self._local_temp_root = Path.cwd() / ".tmp_test_orchestrator"
+        self._local_temp_root.mkdir(parents=True, exist_ok=True)
+        tempfile.tempdir = str(self._local_temp_root)
+
+        class _WorkspaceTemporaryDirectory:
+            def __init__(
+                inner_self,
+                suffix: str | None = None,
+                prefix: str | None = None,
+                dir: str | Path | None = None,
+                ignore_cleanup_errors: bool = False,
+            ) -> None:
+                inner_self._ignore_cleanup_errors = ignore_cleanup_errors
+                inner_self._root = Path(dir) if dir else self._local_temp_root
+                inner_self._prefix = prefix or "tmp"
+                inner_self._suffix = suffix or ""
+                inner_self.name = ""
+
+            def __enter__(inner_self) -> str:
+                candidate = (
+                    inner_self._root
+                    / f"{inner_self._prefix}{uuid4().hex}{inner_self._suffix}"
+                )
+                candidate.mkdir(parents=True, exist_ok=False)
+                inner_self.name = str(candidate)
+                return inner_self.name
+
+            def __exit__(inner_self, exc_type, exc, tb) -> bool:
+                shutil.rmtree(inner_self.name, ignore_errors=True)
+                return False
+
+            def cleanup(inner_self) -> None:
+                shutil.rmtree(inner_self.name, ignore_errors=True)
+
+        tempfile.TemporaryDirectory = _WorkspaceTemporaryDirectory
+
+    def tearDown(self) -> None:
+        tempfile.tempdir = self._previous_tempdir
+        tempfile.TemporaryDirectory = self._previous_temporary_directory
+
+    def test_infers_tool_specialist_metadata_for_tool_heavy_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    ApiAdapter(
+                        name="openai_api",
+                        provider="openai",
+                        model="gpt-cheap",
+                        capabilities={"browser_test", "reasoning"},
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="chat_root::qa",
+                title="Reproducir bug de UI",
+                description="Usa browser y resume pasos.",
+                role=Role.QA,
+                metadata={"required_capabilities": ["browser_testing"]},
+            )
+
+            orchestrator._ensure_tool_specialist_metadata(task)
+
+            self.assertEqual(task.metadata["tool_specialist"], "browser_operator")
+            self.assertEqual(
+                task.metadata["tool_specialist_decision_scope"],
+                "operate_tools_and_report_only",
+            )
+            self.assertTrue(task.metadata["tool_specialist_economic_routing"])
+            self.assertTrue(task.metadata["tool_specialist_inferred"])
+
+    def test_applies_tool_rewiring_hints_from_catalog_replacements(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    ApiAdapter(
+                        name="openai_api",
+                        provider="openai",
+                        model="gpt-cheap",
+                        capabilities={"reasoning", "analysis"},
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="chat_root::review",
+                title="Analizar seguridad",
+                description="Necesita herramienta de seguridad pero con fallback.",
+                role=Role.REVIEWER,
+                metadata={"required_capabilities": ["security_scan", "external_mcp"]},
+            )
+
+            with patch.object(
+                orchestrator.tool_integrator,
+                "suggest_requirements",
+                return_value=[
+                    {
+                        "name": "semgrep_security_skill",
+                        "category": "skill",
+                        "replacement_for": "semgrep_mcp",
+                    }
+                ],
+            ):
+                orchestrator._ensure_tool_specialist_metadata(task)
+
+            self.assertTrue(task.metadata["tool_rewiring_active"])
+            self.assertEqual(task.metadata["tool_rewiring_preferred_specialist"], "skill_worker")
+            self.assertEqual(task.metadata["tool_specialist"], "skill_worker")
+            self.assertTrue(task.metadata["tool_rewiring_suppress_mcp_operator"])
+            self.assertIn("semgrep_security_skill", list(task.metadata.get("tool_rewiring_candidates", []) or []))
+
+    def test_persists_structured_specialist_report_in_task_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[SpecialistJsonAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="chat_root::qa",
+                title="Reproducir bug de UI",
+                description="Usa browser y resume pasos.",
+                role=Role.QA,
+                metadata={
+                    "required_capabilities": ["browser_testing"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            stored = orchestrator.taskboard.get_task("chat_root::qa")
+            assert stored is not None
+            reports = list(stored.metadata.get("specialist_reports", []) or [])
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(reports[0].get("specialist"), "browser_operator")
+            self.assertEqual(reports[0].get("provider"), "openai")
+            self.assertEqual(reports[0].get("model"), "gpt-cheap")
+            self.assertEqual(reports[0].get("recommendation"), "usar data-testid")
+            self.assertEqual(int(reports[0].get("tokens_used", 0)), 30)
+            self.assertEqual(reports[0].get("report_version"), "specialist_report_v1")
+            self.assertEqual(reports[0].get("validation_status"), "valid")
+            self.assertEqual(reports[0].get("validation_errors"), [])
+
+            events_file = runtime_dir / "events.jsonl"
+            self.assertTrue(events_file.exists())
+            events_text = events_file.read_text(encoding="utf-8")
+            self.assertIn('"event_type": "specialist_report_parsed"', events_text)
+            self.assertIn('"validation_status": "valid"', events_text)
+
+    def test_select_specialists_prefetches_reports_before_main_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapter = SpecialistPrefetchAdapter()
+            router = HybridRouter(
+                adapters=[adapter],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="root::build",
+                title="Endurecer validacion",
+                description="Implementa ajuste y valida con tests.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["test_execute"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            stored = orchestrator.taskboard.get_task("root::build")
+            assert stored is not None
+            self.assertGreaterEqual(len(adapter.calls), 2)
+            precheck_indices = [
+                idx
+                for idx, call in enumerate(adapter.calls)
+                if "Specialist precheck:" in str(call.get("prompt", ""))
+            ]
+            self.assertTrue(precheck_indices)
+            self.assertLess(precheck_indices[0], len(adapter.calls) - 1)
+            self.assertIn(
+                "Informes compactos de especialistas delegados",
+                str(adapter.calls[-1].get("messages", "")),
+            )
+            applied = dict(stored.metadata.get("specialist_roster_applied", {}) or {})
+            self.assertTrue(applied)
+            self.assertIn("test_runner", list(applied.get("specialist_roster", []) or []))
+            prefetch_reports = list(stored.metadata.get("specialist_prefetch_reports", []) or [])
+            self.assertEqual(len(prefetch_reports), 1)
+            self.assertEqual(prefetch_reports[0].get("specialist"), "test_runner")
+
+    def test_specialist_quorum_all_blocks_main_task_when_missing_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapter = SpecialistQuorumAdapter(failing_specialists={"test_runner"})
+            router = HybridRouter(
+                adapters=[adapter],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="root::critical_build",
+                title="Ejecutar validacion critica",
+                description="Necesita doble evidencia antes de avanzar.",
+                role=Role.ENGINEER,
+                criticality=Criticality.HIGH,
+                metadata={
+                    "required_capabilities": ["test_execute"],
+                    "specialist_roster": ["test_runner", "repo_scout"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            stored = orchestrator.taskboard.get_task("root::critical_build")
+            assert stored is not None
+            self.assertEqual(stored.state, TaskState.BLOCKED)
+            self.assertEqual(stored.metadata.get("blocked_reason"), "specialist_quorum_not_met")
+            quorum_result = dict(stored.metadata.get("specialist_quorum_result", {}) or {})
+            self.assertFalse(quorum_result.get("quorum_met"))
+            self.assertEqual(int(quorum_result.get("responses_received", 0)), 1)
+            self.assertEqual(int(quorum_result.get("responses_required", 0)), 2)
+            self.assertIn("test_runner", list(quorum_result.get("missing_specialists", []) or []))
+            self.assertEqual(adapter.main_calls, 0)
+            events = orchestrator.event_logger.recent_events(hours=1)
+            quorum_events = [
+                item for item in events if item.get("event_type") == "specialist_quorum_result"
+            ]
+            self.assertTrue(quorum_events)
+            payload = quorum_events[-1].get("payload", {}) or {}
+            self.assertFalse(payload.get("quorum_met"))
+            self.assertEqual(int(payload.get("responses_received", 0)), 1)
+            self.assertEqual(int(payload.get("responses_required", 0)), 2)
+
+    def test_specialist_quorum_majority_allows_main_task_with_partial_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapter = SpecialistQuorumAdapter(failing_specialists={"browser_operator"})
+            router = HybridRouter(
+                adapters=[adapter],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="root::build_with_majority",
+                title="Endurecer pipeline",
+                description="Cruza repo, tests y superficie browser.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["repo_read", "test_execute", "browser_testing"],
+                    "specialist_roster": ["repo_scout", "test_runner", "browser_operator"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            stored = orchestrator.taskboard.get_task("root::build_with_majority")
+            assert stored is not None
+            self.assertEqual(stored.state, TaskState.COMPLETED)
+            quorum_result = dict(stored.metadata.get("specialist_quorum_result", {}) or {})
+            self.assertTrue(quorum_result.get("quorum_met"))
+            self.assertEqual(quorum_result.get("quorum_mode"), "majority")
+            self.assertEqual(int(quorum_result.get("responses_received", 0)), 2)
+            self.assertEqual(int(quorum_result.get("responses_required", 0)), 2)
+            self.assertIn("browser_operator", list(quorum_result.get("missing_specialists", []) or []))
+            self.assertEqual(
+                stored.metadata.get("specialist_quorum_warning"),
+                "quorum_met_with_partial_specialist_coverage",
+            )
+            self.assertGreaterEqual(adapter.main_calls, 1)
+
+    def test_specialist_quorum_zero_does_not_block_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapter = SpecialistQuorumAdapter()
+            router = HybridRouter(
+                adapters=[adapter],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="root::light_task",
+                title="Responder con recomendacion",
+                description="No requiere herramientas especializadas.",
+                role=Role.RESEARCHER,
+                metadata={
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            stored = orchestrator.taskboard.get_task("root::light_task")
+            assert stored is not None
+            self.assertEqual(stored.state, TaskState.COMPLETED)
+            quorum_result = dict(stored.metadata.get("specialist_quorum_result", {}) or {})
+            self.assertTrue(quorum_result.get("quorum_met"))
+            self.assertEqual(int(quorum_result.get("responses_required", 0)), 0)
+            self.assertEqual(int(quorum_result.get("responses_received", 0)), 0)
+            self.assertEqual(
+                list(stored.metadata.get("specialist_prefetch_reports", []) or []),
+                [],
+            )
+
+    def test_sensitive_chat_phase_spawns_lead_preflight_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[SensitivePreflightCheckpointAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            sensitive_task = WorkTask(
+                task_id="CHAT-SENSITIVE::build",
+                title="Sensitive build",
+                description="Implementa un cambio con comandos sensibles.",
+                role=Role.ENGINEER,
+                complexity=Complexity.HIGH,
+                criticality=Criticality.HIGH,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "build",
+                    "chat_parent": "CHAT-SENSITIVE",
+                    "lead_run_mode": "standard",
+                    "require_execution_plan": True,
+                },
+            )
+
+            orchestrator.submit_task(sensitive_task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            checkpoint = orchestrator.taskboard.get_task(
+                "CHAT-SENSITIVE::lead_preflight_build"
+            )
+            build_task = orchestrator.taskboard.get_task("CHAT-SENSITIVE::build")
+            assert checkpoint is not None
+            assert build_task is not None
+            self.assertEqual(checkpoint.role, Role.TEAM_LEAD)
+            self.assertEqual(checkpoint.state, TaskState.WAITING_USER)
+            self.assertEqual(
+                checkpoint.metadata.get("clarify_question"),
+                "¿Autorizas ejecutar esta fase sensible ahora mismo?",
+            )
+            self.assertIn(checkpoint.task_id, build_task.dependencies)
+            self.assertEqual(build_task.state, TaskState.PENDING)
+            self.assertEqual(
+                build_task.metadata.get("lead_preflight_checkpoint_id"),
+                checkpoint.task_id,
+            )
+            self.assertIn(
+                "require_execution_plan",
+                build_task.metadata.get("lead_preflight_sensitive_reasons", []),
+            )
+
+    def test_non_sensitive_chat_phase_does_not_spawn_lead_preflight_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[SensitivePreflightCheckpointAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            normal_task = WorkTask(
+                task_id="CHAT-NONSENSITIVE::review",
+                title="Normal review",
+                description="Revision ligera.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["review"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "review",
+                    "chat_parent": "CHAT-NONSENSITIVE",
+                    "lead_run_mode": "standard",
+                },
+            )
+
+            orchestrator.submit_task(normal_task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            self.assertIsNone(
+                orchestrator.taskboard.get_task("CHAT-NONSENSITIVE::lead_preflight_review")
+            )
+
+    def test_deliberative_run_spawns_lead_report_checkpoint_and_blocks_close(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[DeliberativeReportCheckpointAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            delegated = WorkTask(
+                task_id="CHAT-TEAM-DECISION::review_options",
+                title="Review options",
+                description="Evaluar opciones del equipo.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["review"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "review_options",
+                    "chat_parent": "CHAT-TEAM-DECISION",
+                    "lead_run_mode": "team_decision",
+                },
+            )
+            lead_close = WorkTask(
+                task_id="CHAT-TEAM-DECISION::lead_close",
+                title="Lead synthesis and response",
+                description="Lead synthesis and response",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-TEAM-DECISION::review_options"],
+                metadata={
+                    "required_capabilities": ["reasoning"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "phase": "lead_close",
+                    "chat_parent": "CHAT-TEAM-DECISION",
+                    "lead_run_mode": "team_decision",
+                },
+            )
+
+            orchestrator.submit_task(delegated)
+            orchestrator.submit_task(lead_close)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            checkpoint = orchestrator.taskboard.get_task(
+                "CHAT-TEAM-DECISION::lead_report_review_options"
+            )
+            close_task = orchestrator.taskboard.get_task("CHAT-TEAM-DECISION::lead_close")
+            assert checkpoint is not None
+            assert close_task is not None
+            self.assertEqual(checkpoint.role, Role.TEAM_LEAD)
+            self.assertEqual(checkpoint.state, TaskState.WAITING_USER)
+            self.assertEqual(
+                checkpoint.metadata.get("clarify_question"),
+                "¿Prefieres una recomendación conservadora o agresiva?",
+            )
+            self.assertIn(checkpoint.task_id, close_task.dependencies)
+            self.assertIn(
+                checkpoint.task_id,
+                close_task.metadata.get("lead_report_checkpoint_dependencies", []),
+            )
+            self.assertEqual(close_task.state, TaskState.PENDING)
+
+    def test_standard_run_does_not_spawn_lead_report_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[DeliberativeReportCheckpointAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            delegated = WorkTask(
+                task_id="CHAT-STANDARD::review",
+                title="Review",
+                description="Revision normal.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["review"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "review",
+                    "chat_parent": "CHAT-STANDARD",
+                    "lead_run_mode": "standard",
+                },
+            )
+
+            orchestrator.submit_task(delegated)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            self.assertIsNone(
+                orchestrator.taskboard.get_task("CHAT-STANDARD::lead_report_review")
+            )
+
+    def test_chat_phase_failure_spawns_lead_checkpoint_that_can_pause(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[FailureThenLeadClarifyAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            failed_task = WorkTask(
+                task_id="CHAT-FAIL-CHECKPOINT::build",
+                title="Build checkpoint test",
+                description="FORCE FAIL CHECKPOINT",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "build",
+                    "chat_parent": "CHAT-FAIL-CHECKPOINT",
+                },
+            )
+
+            orchestrator.submit_task(failed_task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            failed = orchestrator.taskboard.get_task("CHAT-FAIL-CHECKPOINT::build")
+            checkpoint = orchestrator.taskboard.get_task(
+                "CHAT-FAIL-CHECKPOINT::lead_failure_build"
+            )
+            assert failed is not None
+            assert checkpoint is not None
+            self.assertEqual(failed.state, TaskState.FAILED)
+            self.assertEqual(
+                failed.metadata.get("lead_failure_checkpoint_id"),
+                "CHAT-FAIL-CHECKPOINT::lead_failure_build",
+            )
+            self.assertEqual(checkpoint.role, Role.TEAM_LEAD)
+            self.assertEqual(checkpoint.state, TaskState.WAITING_USER)
+            self.assertEqual(
+                checkpoint.metadata.get("clarify_question"),
+                "¿Quieres que reoriente la corrida o solo documente el fallo?",
+            )
+
+    def test_non_chat_failure_does_not_spawn_lead_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[FailureThenLeadClarifyAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            failed_task = WorkTask(
+                task_id="NONCHAT-FAIL-1",
+                title="Non chat failing task",
+                description="FORCE FAIL CHECKPOINT",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            orchestrator.submit_task(failed_task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            failed = orchestrator.taskboard.get_task("NONCHAT-FAIL-1")
+            assert failed is not None
+            self.assertEqual(failed.state, TaskState.FAILED)
+            self.assertIsNone(
+                orchestrator.taskboard.get_task("NONCHAT-FAIL-1::lead_failure_engineer")
+            )
+
+    def test_workflow_state_updates_phase_context_summaries_for_chat_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            orchestrator._update_workflow_state(
+                "CHAT-CTX-1",
+                "build",
+                "Implementado login flow con cambios en auth.py y evidencia compacta para browser.",
+            )
+
+            ws = orchestrator._get_workflow_state("CHAT-CTX-1")
+            self.assertIn("build", ws.get("phase_context_summaries", {}))
+            self.assertTrue(bool(str(ws.get("chat_context_summary", "") or "").strip()))
+            self.assertTrue(
+                (runtime_dir / "context" / "chats" / "CHAT-CTX-1.json").exists()
+            )
+
+    def test_context_pressure_updates_from_delegate_batches_and_invalidations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            ws = orchestrator._get_workflow_state("CHAT-CTX-PRESSURE")
+            ws["continuation_requested"] = True
+            ws["continuation_snapshot"] = "build:failed, qa:pending"
+            ws["delegate_batches"] = [{"id": "b1"}, {"id": "b2"}, {"id": "b3"}]
+            ws["phase_context_summaries"] = {
+                "discovery": "resumen 1",
+                "build": "resumen 2",
+                "review": "resumen 3",
+                "qa": "resumen 4",
+            }
+            orchestrator.context_curator.remember_invalidation(
+                project_key=str(project_root.resolve()),
+                chat_root="CHAT-CTX-PRESSURE",
+                reason="replan_partial",
+                affected_phases=["build"],
+                source_task_ids=["CHAT-CTX-PRESSURE::lead_failure_build"],
+            )
+
+            metadata = {"required_capabilities": ["review"]}
+            pressure = orchestrator._refresh_context_pressure(
+                "CHAT-CTX-PRESSURE",
+                metadata=metadata,
+            )
+
+            self.assertEqual(pressure["level"], "high")
+            self.assertTrue(metadata.get("context_curator_recommended"))
+            self.assertTrue(bool(ws.get("context_pressure", {})))
+            self.assertEqual(ws.get("context_pressure", {}).get("level"), "high")
+
+    def test_context_compaction_priority_boost_promotes_curator_even_with_low_base_pressure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            ws = orchestrator._get_workflow_state("CHAT-CTX-ROI")
+            ws["phase_outputs"] = {
+                "discovery": "D" * 1100,
+                "build": "B" * 1500,
+            }
+            ws["project_context_summary"] = "Proyecto corto"
+            ws["chat_context_summary"] = "Chat corto"
+            ws["phase_context_summaries"] = {
+                "discovery": "Resumen discovery",
+                "build": "Resumen build",
+            }
+
+            metadata = {"required_capabilities": ["review"]}
+            pressure = orchestrator._refresh_context_pressure(
+                "CHAT-CTX-ROI",
+                metadata=metadata,
+            )
+
+            self.assertEqual(pressure.get("level"), "low")
+            self.assertTrue(metadata.get("context_curator_recommended"))
+            self.assertTrue(metadata.get("context_compaction_priority_boost"))
+            self.assertGreater(int(metadata.get("estimated_context_tokens_saved", 0)), 300)
+            self.assertEqual(
+                str((pressure.get("context_compaction", {}) or {}).get("level", "")),
+                "high",
+            )
+
+    def test_dependency_output_context_prefers_compacted_phase_summaries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-CTX-2::build",
+                title="Build",
+                description="Implementa login",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={"phase": "build", "result": "RAW OUTPUT MUY LARGO " * 80},
+            )
+            dep.state = TaskState.COMPLETED
+            orchestrator.taskboard.add_task(dep)
+            orchestrator._update_workflow_state(
+                "CHAT-CTX-2",
+                "build",
+                "Resumen build: auth.py actualizado, flujo login reparado, falta smoke browser.",
+            )
+
+            task = WorkTask(
+                task_id="CHAT-CTX-2::review",
+                title="Review",
+                description="Revisa",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-CTX-2::build"],
+                metadata={"phase": "review"},
+            )
+
+            context = orchestrator._build_dependency_output_context(task)
+
+            self.assertIn("Resumen build:", context)
+            self.assertNotIn("RAW OUTPUT MUY LARGO RAW OUTPUT MUY LARGO RAW OUTPUT MUY LARGO", context)
+
+    def test_lead_close_can_pause_run_with_clarify(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"reasoning", "analysis"},
+                        response_content='[CLARIFY: "¿Debo priorizar velocidad o calidad?"]',
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-LEAD-CLOSE::lead_close",
+                title="Lead synthesis and response",
+                description="Sintetiza y decide el siguiente paso.",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["reasoning"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "phase": "lead_close",
+                    "chat_parent": "CHAT-LEAD-CLOSE",
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            paused = orchestrator.taskboard.get_task("CHAT-LEAD-CLOSE::lead_close")
+            assert paused is not None
+            self.assertEqual(paused.state, TaskState.WAITING_USER)
+            self.assertEqual(
+                paused.metadata.get("clarify_question"),
+                "¿Debo priorizar velocidad o calidad?",
+            )
+
+    def test_lead_intake_still_does_not_pause_inside_orchestrator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"reasoning", "analysis"},
+                        response_content='[CLARIFY: "Necesito más contexto inicial."]',
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-LEAD-INTAKE::lead_intake",
+                title="Lead intake",
+                description="Analiza la petición y decide el flujo.",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["reasoning"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "phase": "lead_intake",
+                    "chat_parent": "CHAT-LEAD-INTAKE",
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            result = orchestrator.taskboard.get_task("CHAT-LEAD-INTAKE::lead_intake")
+            assert result is not None
+            self.assertNotEqual(result.state, TaskState.WAITING_USER)
+
     def test_workflow_build_phase_is_not_auto_conversational_from_question(self) -> None:
         task = WorkTask(
             task_id="CHAT-TEST::build",
@@ -55,6 +1348,7 @@ class OrchestratorTests(unittest.TestCase):
                     provider="openai",
                     model="gpt-pro",
                     capabilities={"coding", "reasoning", "analysis", "review"},
+                    response_content="[SIMULADO | openai:gpt-pro] Respuesta mock para build.",
                 )
             ]
             router = HybridRouter(
@@ -97,6 +1391,7 @@ class OrchestratorTests(unittest.TestCase):
                     provider="openai",
                     model="gpt-pro",
                     capabilities={"coding", "reasoning", "analysis", "review"},
+                    response_content="[SIMULADO | openai:gpt-pro] Respuesta mock para build.",
                 )
             ]
             router = HybridRouter(
@@ -184,6 +1479,7 @@ class OrchestratorTests(unittest.TestCase):
                     provider="openai",
                     model="gpt-pro",
                     capabilities={"coding", "reasoning", "analysis", "review"},
+                    response_content="[SIMULADO | openai:gpt-pro] Respuesta mock para build.",
                 )
             ]
             router = HybridRouter(
@@ -620,6 +1916,63 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(review.state.value, "completed")
             self.assertEqual(qa.state.value, "completed")
 
+    def test_completed_task_can_be_reopened_with_forced_quality_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "review", "analysis", "reasoning"},
+                    response_content="Gate passed with explicit review notes.",
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            task = WorkTask(
+                task_id="ENG-FORCE-1",
+                title="Completed build",
+                description="Implementacion ya completada.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            parent = orchestrator.taskboard.get_task("ENG-FORCE-1")
+            assert parent is not None
+            self.assertEqual(parent.state.value, "completed")
+
+            parent.metadata["skip_quality_gates"] = False
+            parent.metadata["force_gate_requested"] = True
+            orchestrator.taskboard.mark_blocked("ENG-FORCE-1", reason="waiting_quality_gates")
+            orchestrator._spawn_quality_gates(parent)
+            orchestrator.run_until_idle(max_rounds=6)
+
+            reopened = orchestrator.taskboard.get_task("ENG-FORCE-1")
+            review_gate = orchestrator.taskboard.get_task("ENG-FORCE-1::review")
+            qa_gate = orchestrator.taskboard.get_task("ENG-FORCE-1::qa")
+
+            assert reopened is not None
+            assert review_gate is not None
+            assert qa_gate is not None
+            self.assertEqual(reopened.state.value, "completed")
+            self.assertEqual(review_gate.state.value, "completed")
+            self.assertEqual(qa_gate.state.value, "completed")
+
     def test_parent_task_fails_when_quality_gate_fails(self) -> None:
         class ReviewFailAdapter(SubscriptionAdapter):
             def invoke(self, prompt: str) -> AdapterResponse:
@@ -825,7 +2178,7 @@ class OrchestratorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
             adapters: list[ModelAdapter] = [
-                SubscriptionAdapter(
+                RealSubscriptionAdapter(
                     name="openai_pro",
                     provider="openai",
                     model="gpt-pro",
@@ -1170,6 +2523,178 @@ class OrchestratorTests(unittest.TestCase):
             events = orchestrator.event_logger.recent_events(hours=1)
             self.assertTrue(
                 any(item.get("event_type") == "peer_messages_built" for item in events)
+            )
+
+    def test_peer_consultation_prefers_distinct_provider_families_when_available(self) -> None:
+        peer_records: list[dict[str, str]] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                PeerDiversityCaptureAdapter(
+                    name="openai_engineer",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                    record=peer_records,
+                ),
+                PeerDiversityCaptureAdapter(
+                    name="google_research",
+                    provider="google",
+                    model="gemini-pro",
+                    capabilities={"analysis"},
+                    record=peer_records,
+                ),
+                PeerDiversityCaptureAdapter(
+                    name="anthropic_review",
+                    provider="anthropic",
+                    model="claude-sonnet",
+                    capabilities={"review"},
+                    record=peer_records,
+                ),
+                PeerDiversityCaptureAdapter(
+                    name="groq_qa",
+                    provider="groq",
+                    model="llama-3.3",
+                    capabilities={"analysis"},
+                    record=peer_records,
+                ),
+            ]
+            router = HybridRouter(
+                adapters=adapters,
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            task = WorkTask(
+                task_id="PEER-DIVERSITY-1",
+                title="Implement feature",
+                description="Implementar autenticacion segura.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "require_peer_consultation": True,
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            round1_providers = [
+                item["provider"] for item in peer_records if item.get("round") == "round1"
+            ]
+            self.assertGreaterEqual(len(round1_providers), 3)
+            self.assertGreaterEqual(len(set(round1_providers)), 3)
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            self.assertFalse(
+                any(item.get("event_type") == "peer_diversity_fallback" for item in events)
+            )
+
+    def test_peer_consultation_emits_diversity_fallback_when_only_one_provider_is_available(
+        self,
+    ) -> None:
+        peer_records: list[dict[str, str]] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                PeerDiversityCaptureAdapter(
+                    name="openai_all",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "analysis", "review"},
+                    record=peer_records,
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters,
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            task = WorkTask(
+                task_id="PEER-DIVERSITY-2",
+                title="Implement feature",
+                description="Implementar autenticacion segura.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "require_peer_consultation": True,
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            round1_providers = [
+                item["provider"] for item in peer_records if item.get("round") == "round1"
+            ]
+            self.assertGreaterEqual(len(round1_providers), 2)
+            self.assertEqual(set(round1_providers), {"openai"})
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            self.assertTrue(
+                any(item.get("event_type") == "peer_diversity_fallback" for item in events)
+            )
+
+    def test_peer_consultation_diversity_policy_can_be_disabled(self) -> None:
+        peer_records: list[dict[str, str]] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            policy = build_default_router_policy()
+            policy.peer_consultation_diversity_required = False
+            adapters: list[ModelAdapter] = [
+                PeerDiversityCaptureAdapter(
+                    name="openai_all",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding", "analysis", "review"},
+                    record=peer_records,
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters,
+                policy=policy,
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            task = WorkTask(
+                task_id="PEER-DIVERSITY-3",
+                title="Implement feature",
+                description="Implementar autenticacion segura.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "require_peer_consultation": True,
+                },
+            )
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=4)
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            self.assertFalse(
+                any(item.get("event_type") == "peer_diversity_fallback" for item in events)
             )
 
     def test_conversational_e2e_flow_handles_team_lead_feedback_and_gate_retry(
@@ -1640,6 +3165,72 @@ class OrchestratorTests(unittest.TestCase):
             ]
             self.assertTrue(guidance_entries)
 
+    def test_team_lead_gets_compact_targeted_skill_mcp_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="lead_tool",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"analysis", "reasoning", "documentation"},
+                    role_targets={"team_lead"},
+                )
+            ]
+            router = HybridRouter(
+                adapters=adapters, policy=build_default_router_policy()
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path.cwd(),
+            )
+
+            task = WorkTask(
+                task_id="GUIDE-LEAD-1",
+                title="Coordinar inspeccion browser",
+                description="Delegar skill browser y usar LSP para estimar impacto",
+                role=Role.TEAM_LEAD,
+                metadata={
+                    "skill_targets": ["playwright_qa_skill"],
+                    "lsp_targets": ["impact"],
+                    "required_capabilities": [],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                },
+            )
+            assignee = orchestrator._assignee_for_role(Role.TEAM_LEAD)
+            context = orchestrator._build_skill_mcp_context(task, assignee)
+
+            self.assertIn("Coordina mediante especialistas", context)
+            self.assertIn("playwright_qa_skill", context)
+            self.assertIn("impact", context)
+            self.assertNotIn("Skills aplicables:", context)
+
+            entries = orchestrator.memory.recent(assignee, limit=10)
+            guidance_entries = [
+                item for item in entries if item.kind == "skill_mcp_guidance"
+            ]
+            self.assertTrue(guidance_entries)
+            self.assertIn("playwright_qa_skill", guidance_entries[0].content)
+
+            events_path = runtime_dir / "events.jsonl"
+            self.assertTrue(events_path.exists())
+            records = [
+                json.loads(line)
+                for line in events_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            matching = [
+                record
+                for record in records
+                if record.get("event_type") == "skill_mcp_guidance"
+            ]
+            self.assertTrue(matching)
+            payload = matching[-1]["payload"]
+            self.assertEqual(payload.get("guidance_mode"), "coordinator")
+            self.assertEqual(payload.get("preferred_skills"), ["playwright_qa_skill"])
+
     def test_records_decision_rank_and_justification_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
@@ -1684,7 +3275,7 @@ class OrchestratorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
             adapters: list[ModelAdapter] = [
-                SubscriptionAdapter(
+                RealSubscriptionAdapter(
                     name="openai_pro",
                     provider="openai",
                     model="gpt-5.3-codex",
@@ -1738,6 +3329,53 @@ class OrchestratorTests(unittest.TestCase):
             ]
             self.assertTrue(handoff_events)
             self.assertIn("summary", handoff_events[-1].get("payload", {}))
+
+
+    def test_gate_retry_injects_own_previous_output_into_context(self) -> None:
+        """M3.3: En gate retry (gate_iteration > 0), el agente ve su propio output anterior."""
+        import tempfile
+        from pathlib import Path
+        from aiteam.adapters.subscription import SubscriptionAdapter
+        from aiteam.router import HybridRouter
+        from aiteam.config import build_default_router_policy
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            adapters = [
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-4o",
+                    capabilities={"coding", "review", "reasoning"},
+                )
+            ]
+            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            orch = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=Path(tmp),
+            )
+
+            previous_output = "Implementé el endpoint POST /users con validación básica."
+            task = WorkTask(
+                task_id="M3-TEST::build",
+                title="Build endpoint",
+                description="Implementar endpoint POST /users.",
+                role=Role.ENGINEER,
+                metadata={
+                    "gate_iteration": 1,
+                    "result": previous_output,
+                    "phase": "build",
+                },
+            )
+            orch.taskboard.add_task(task)
+
+            context = orch._build_collaboration_context(task=task, assignee="engineer-1")
+
+            self.assertIn(previous_output[:40], context,
+                          "El output anterior del agente debe aparecer en el contexto del retry")
+            self.assertIn("iteracion 0", context.lower() if "iteracion" in context.lower() else context,
+                          "El contexto debe mencionar la iteracion anterior")
 
 
 if __name__ == "__main__":

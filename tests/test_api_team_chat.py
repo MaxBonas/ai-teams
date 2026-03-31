@@ -10,6 +10,13 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 import api.main as api_main
+from aiteam.config import build_default_router_policy
+from aiteam.orchestrator import AITeamOrchestrator
+from aiteam.router import HybridRouter
+from aiteam.adapters.base import ModelAdapter
+from aiteam.types import Complexity, Criticality, Role, TaskState, WorkTask
+from aiteam.types import AdapterResponse, ChannelType
+from aiteam.workflow_planner import PhaseSpec
 
 
 def _parse_sse_result(response) -> dict:
@@ -28,7 +35,1399 @@ def _parse_sse_result(response) -> dict:
         return {}
 
 
+class ReplanIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, valida si esta fase sensible debe ejecutarse ahora." in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[REPLAN]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: discovery\n"
+                    "role: RESEARCHER\n"
+                    "objective: recuperar contexto antes de implementar\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar con contexto validado\n"
+                    "depends_on: [discovery]\n"
+                    "phase_id: review\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar build replanificado\n"
+                    "depends_on: [build]\n"
+                    "phase_id: qa\n"
+                    "role: QA\n"
+                    "objective: validar build replanificado\n"
+                    "depends_on: [review]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Hace falta discovery antes del build."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=60,
+            )
+        if (
+            "Lead intake and planning" in joined
+            or "TRAS TU ANALISIS, incluye un bloque [WORKFLOW_PLAN]" in joined
+            or "Eres Team Lead senior. Convierte el input" in joined
+        ):
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar slice inicial\n"
+                    "phase_id: review\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar resultado\n"
+                    "depends_on: [build]\n"
+                    "phase_id: qa\n"
+                    "role: QA\n"
+                    "objective: validar salida\n"
+                    "depends_on: [review]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan inicial preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=40,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nWorkflow phases actualizadas tras replan.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado de fase con evidencia textual suficiente.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class ForceGateIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, valida si esta fase sensible debe ejecutarse ahora." in joined:
+            return AdapterResponse(
+                success=True,
+                content="Autorizado para continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if "Como Team Lead, revisa este informe delegado antes del cierre." in joined:
+            if "Fase origen: review" in joined:
+                return AdapterResponse(
+                    success=True,
+                    content='[FORCE_GATE: "build"]\nLa build debe regatearse de nuevo.',
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=20,
+                )
+            return AdapterResponse(
+                success=True,
+                content="Checkpoint revisado; continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if (
+            "Lead intake and planning" in joined
+            or "TRAS TU ANALISIS, incluye un bloque [WORKFLOW_PLAN]" in joined
+            or "Eres Team Lead senior. Convierte el input" in joined
+        ):
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: team_decision]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar slice bajo deliberacion\n"
+                    "phase_id: review\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar implementacion\n"
+                    "depends_on: [build]\n"
+                    "phase_id: qa\n"
+                    "role: QA\n"
+                    "objective: validar implementacion\n"
+                    "depends_on: [review]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan deliberativo preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=50,
+            )
+        if "Review Completed build" in joined or "QA Completed build" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Gate reabierta aprobada.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nSe forzo gate adicional sobre build.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado de fase con evidencia textual suficiente.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class DelegateSpecialistHelpersTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp_root = Path(".tmp_delegate_specialist_helpers")
+        self._tmp_root.mkdir(parents=True, exist_ok=True)
+        self._previous_temporary_directory = tempfile.TemporaryDirectory
+        self_outer = self
+
+        class _WorkspaceTemporaryDirectory:
+            def __init__(self, *args, **kwargs) -> None:
+                self.name = str(self_outer._tmp_root / f"tmp_{uuid4().hex}")
+                Path(self.name).mkdir(parents=True, exist_ok=True)
+
+            def __enter__(self):
+                return self.name
+
+            def __exit__(self, exc_type, exc, tb):
+                shutil.rmtree(self.name, ignore_errors=True)
+
+        tempfile.TemporaryDirectory = _WorkspaceTemporaryDirectory
+
+    def tearDown(self) -> None:
+        tempfile.TemporaryDirectory = self._previous_temporary_directory
+        shutil.rmtree(self._tmp_root, ignore_errors=True)
+
+    def test_extract_delegate_request_wrapper_supports_specialized_intents(self) -> None:
+        request = api_main._extract_delegate_request(
+            '[DELEGATE_BROWSER_REPRO: "reproduce el bug"]\n'
+            "[WAIT_POLICY: quorum]\n"
+            "[DELEGATE_BUDGET: +4]"
+        )
+
+        self.assertIsNotNone(request)
+        assert request is not None
+        self.assertEqual(request.intent, "delegate_browser_repro")
+        self.assertEqual(request.wait_policy, "quorum")
+        self.assertEqual(request.delegate_budget, 4)
+
+    def test_detect_preplan_surface_hints_combines_surfaces(self) -> None:
+        hints = api_main._detect_preplan_surface_hints(
+            "Research the API docs, run a semgrep security audit, and validate the browser flow"
+        )
+
+        self.assertIn("browser", list(hints.get("surfaces", []) or []))
+        self.assertIn("security", list(hints.get("surfaces", []) or []))
+        self.assertIn("research", list(hints.get("surfaces", []) or []))
+        self.assertIn("delegate_browser_repro", list(hints.get("recommended_delegate_intents", []) or []))
+        self.assertIn("delegate_mcp_probe", list(hints.get("recommended_delegate_intents", []) or []))
+        self.assertIn("skill_worker", list(hints.get("recommended_specialists", []) or []))
+
+    def test_build_preplan_signal_block_includes_detected_hints(self) -> None:
+        block = api_main._build_preplan_signal_block(
+            {
+                "surfaces": ["browser", "security"],
+                "recommended_delegate_intents": ["delegate_browser_repro", "delegate_mcp_probe"],
+                "recommended_specialists": ["browser_operator", "skill_worker"],
+            }
+        )
+
+        self.assertIn("[PREPLAN_SIGNALS]", block)
+        self.assertIn("surfaces=browser, security", block)
+        self.assertIn("delegate_browser_repro", block)
+        self.assertIn("skill_worker", block)
+
+    def test_build_context_curator_prompt_compacts_by_surface(self) -> None:
+        prompt = api_main._build_context_curator_prompt(
+            message="Audit security and inspect browser regressions",
+            surface_hints={"surfaces": ["security", "browser"]},
+            project_state_raw="FILES: app.py, auth.py",
+            session_history_raw="CHAT-1: se toco login flow",
+        )
+
+        self.assertIn("Superficies detectadas: security, browser", prompt)
+        self.assertIn("[PROJECT_STATE]", prompt)
+        self.assertIn("[SESSION_HISTORY]", prompt)
+        self.assertIn("Compacta el contexto del proyecto", prompt)
+
+    def test_estimate_preplan_context_pressure_reads_previous_chat_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            workflow_state = {
+                "CHAT-prev-ctx": {
+                    "delegate_batches": [{"id": "b1"}, {"id": "b2"}],
+                    "phase_outputs": {
+                        "discovery": "D" * 900,
+                        "build": "B" * 1300,
+                    },
+                    "project_context_summary": "Proyecto compacto",
+                    "chat_context_summary": "Chat compacto",
+                    "phase_context_summaries": {
+                        "discovery": "ctx 1",
+                        "build": "ctx 2",
+                        "review": "ctx 3",
+                        "qa": "ctx 4",
+                    },
+                }
+            }
+            (runtime_dir / "workflow_state.json").write_text(
+                json.dumps(workflow_state, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            chat_context_dir = runtime_dir / "context" / "chats"
+            chat_context_dir.mkdir(parents=True, exist_ok=True)
+            (chat_context_dir / "CHAT-prev-ctx.json").write_text(
+                json.dumps(
+                    {
+                        "version": "project_context_v1",
+                        "project_key": str(workspace.resolve()),
+                        "chat_root": "CHAT-prev-ctx",
+                        "working_set": [],
+                        "durable_facts": [],
+                        "decisions": [],
+                        "open_questions": [{"text": "revisar auth", "confidence": 0.6}],
+                        "invalidations": [{"text": "replan_partial", "confidence": 0.8}],
+                        "next_actions": [],
+                        "source_task_ids": [],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            pressure = api_main._estimate_preplan_context_pressure(
+                runtime_dir=runtime_dir,
+                continuation_requested=True,
+                continuation_of="CHAT-prev-ctx",
+                continuation_snapshot="build:failed, review:pending",
+            )
+
+            self.assertTrue(pressure["recommend_context_curator"])
+            self.assertIn(pressure["level"], {"medium", "high"})
+            self.assertIn("continuation_requested", pressure["signals"])
+            self.assertEqual(
+                str((pressure.get("context_compaction", {}) or {}).get("level", "")),
+                "medium",
+            )
+            self.assertTrue(
+                bool((pressure.get("context_compaction", {}) or {}).get("priority_boost", False))
+            )
+
+    def test_build_curated_context_block_reads_project_and_chat_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            api_main._persist_preplan_context(
+                runtime_dir=runtime_dir,
+                workspace=workspace,
+                task_root="CHAT-curated-1",
+                user_message="Research auth flow",
+                surface_hints={"surfaces": ["research"], "recommended_delegate_intents": ["delegate_mcp_probe"]},
+                curator_summary="- auth.py relevante",
+                lead_summary="P0 investigar auth",
+                source_task_ids=["CHAT-curated-1::lead_intake"],
+            )
+
+            block = api_main._build_curated_context_block(
+                runtime_dir=runtime_dir,
+                workspace=workspace,
+                continuation_of="CHAT-curated-1",
+            )
+
+            self.assertIn("Contexto curado del proyecto:", block)
+            self.assertIn("Contexto curado de CHAT-curated-1:", block)
+
+    def test_resolve_delegate_plan_maps_browser_intent_to_specialist(self) -> None:
+        request = api_main._extract_delegate_request(
+            '[DELEGATE_BROWSER_REPRO: "reproduce el bug"]'
+        )
+        assert request is not None
+
+        plan = api_main._resolve_delegate_plan(request)
+
+        self.assertEqual(plan["role"], Role.QA)
+        self.assertEqual(plan["specialist"], "browser_operator")
+        self.assertEqual(plan["phase_prefix"], "delegate_browser_repro")
+        self.assertIn("browser_test", plan["required_capabilities"])
+
+    def test_resolve_delegate_round_budget_applies_wait_policy_caps(self) -> None:
+        all_request = api_main._extract_delegate_request(
+            '[DELEGATE_REPO_SCAN: "mapea el repo"]\n[WAIT_POLICY: all]\n[DELEGATE_BUDGET: 9]'
+        )
+        best_effort_request = api_main._extract_delegate_request(
+            '[DELEGATE_REPO_SCAN: "mapea el repo"]\n[WAIT_POLICY: best_effort]\n[DELEGATE_BUDGET: 5]'
+        )
+        quorum_request = api_main._extract_delegate_request(
+            '[DELEGATE_REPO_SCAN: "mapea el repo"]\n[WAIT_POLICY: quorum]\n[DELEGATE_BUDGET: 5]'
+        )
+        assert all_request is not None
+        assert best_effort_request is not None
+        assert quorum_request is not None
+
+        self.assertEqual(api_main._resolve_delegate_round_budget(all_request), 6)
+        self.assertEqual(
+            api_main._resolve_delegate_round_budget(best_effort_request), 2
+        )
+        self.assertEqual(api_main._resolve_delegate_round_budget(quorum_request), 4)
+
+    def test_synthesize_default_phase_evidence_plan_for_standard_build(self) -> None:
+        plan = api_main._synthesize_default_phase_evidence_plan(
+            [
+                PhaseSpec("build", "ENGINEER", "Implementa formulario React", []),
+                PhaseSpec("review", "REVIEWER", "Revisa cambios", ["build"]),
+                PhaseSpec("qa", "QA", "Valida flujo final", ["review"]),
+            ],
+            message="Implement React login form with browser validation",
+            run_mode="standard",
+        )
+
+        self.assertIn("build", plan)
+        self.assertIn("delegate_test_run", plan["build"]["delegate_intents"])
+        self.assertIn("delegate_browser_repro", plan["build"]["delegate_intents"])
+        self.assertEqual(plan["build"]["wait_policy"], "quorum")
+        self.assertEqual(plan["review"]["delegate_intents"], ["delegate_repo_scan"])
+        self.assertIn("delegate_test_run", plan["qa"]["delegate_intents"])
+
+    def test_synthesize_default_phase_evidence_plan_adds_security_probe_for_sensitive_work(self) -> None:
+        plan = api_main._synthesize_default_phase_evidence_plan(
+            [
+                PhaseSpec("build", "ENGINEER", "Implementa auth segura", []),
+                PhaseSpec("review", "REVIEWER", "Audita seguridad", ["build"]),
+                PhaseSpec("qa", "QA", "Valida hardening", ["review"]),
+            ],
+            message="Implement secure authentication and run a semgrep security audit",
+            run_mode="standard",
+        )
+
+        self.assertIn("delegate_mcp_probe", plan["build"]["delegate_intents"])
+        self.assertIn("delegate_mcp_probe", plan["review"]["delegate_intents"])
+        self.assertIn("delegate_mcp_probe", plan["qa"]["delegate_intents"])
+
+    def test_synthesize_default_phase_evidence_plan_adds_research_probe_for_discovery(self) -> None:
+        plan = api_main._synthesize_default_phase_evidence_plan(
+            [
+                PhaseSpec("discovery", "RESEARCHER", "Investiga la integracion", []),
+                PhaseSpec("build", "ENGINEER", "Implementa la integracion", ["discovery"]),
+                PhaseSpec("review", "REVIEWER", "Revisa el cambio", ["build"]),
+            ],
+            message="Research the API documentation and best practices before implementing the integration",
+            run_mode="standard",
+        )
+
+        self.assertIn("delegate_repo_scan", plan["discovery"]["delegate_intents"])
+        self.assertIn("delegate_mcp_probe", plan["discovery"]["delegate_intents"])
+        self.assertIn("delegate_mcp_probe", plan["review"]["delegate_intents"])
+
+    def test_estimate_delegate_batch_economics_returns_positive_summary(self) -> None:
+        economics = api_main._estimate_delegate_batch_economics(
+            [
+                {"specialist": "browser_operator", "state": "completed"},
+                {"specialist": "repo_scout", "state": "completed"},
+                {"specialist": "test_runner", "state": "failed"},
+            ]
+        )
+
+        self.assertEqual(economics["economics_version"], "delegate_economics_v1")
+        self.assertTrue(bool(economics["estimated"]))
+        self.assertGreater(int(economics["estimated_lead_tokens_avoided"]), 0)
+        self.assertGreater(int(economics["estimated_operator_tokens_used"]), 0)
+        self.assertIn("browser_operator", economics["specialist_breakdown"])
+        self.assertIn(
+            "estimated_net_tokens_saved",
+            economics["specialist_breakdown"]["browser_operator"],
+        )
+
+    def test_resolve_delegate_assignments_rewires_replaceable_mcp_in_browser_quorum(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            config_dir = workspace / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "tool_sources.catalog.json").write_text(
+                json.dumps(
+                    {
+                        "tools": [
+                            {
+                                "name": "playwright_mcp",
+                                "category": "mcp",
+                                "capabilities": ["browser_testing", "e2e", "web_automation"],
+                                "fallback_strategy": "prefer_skill_or_cli",
+                                "replacement_candidates": ["playwright_qa_skill"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (config_dir / "skills.library.json").write_text(
+                json.dumps(
+                    {
+                        "skills": [
+                            {
+                                "name": "playwright_qa_skill",
+                                "description": "Playwright skill",
+                                "capabilities": ["browser_testing", "e2e", "web_automation"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            request = api_main._extract_delegate_request(
+                '[DELEGATE_BROWSER_REPRO: "reproduce el bug"]\n[WAIT_POLICY: quorum]'
+            )
+            assert request is not None
+
+            assignments = api_main._resolve_delegate_assignments(request, workspace=workspace)
+
+            self.assertGreaterEqual(len(assignments), 3)
+            self.assertEqual(assignments[0]["specialist"], "browser_operator")
+            self.assertIn("skill_worker", [row["specialist"] for row in assignments])
+            self.assertNotIn("mcp_operator", [row["specialist"] for row in assignments])
+            rewired = [row for row in assignments if row["specialist"] == "skill_worker"][0]
+            self.assertTrue(bool(rewired.get("tool_rewiring_active")))
+            self.assertEqual(str(rewired.get("tool_rewiring_preferred_specialist", "")), "skill_worker")
+            self.assertIn("playwright_qa_skill", list(rewired.get("skill_targets", []) or []))
+            self.assertIn("test_runner", [row["specialist"] for row in assignments])
+
+    def test_resolve_delegate_assignments_rewires_mcp_probe_to_skill_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            config_dir = workspace / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "tool_sources.catalog.json").write_text(
+                json.dumps(
+                    {
+                        "tools": [
+                            {
+                                "name": "semgrep_mcp",
+                                "category": "mcp",
+                                "capabilities": ["security_scan", "sast", "code_quality"],
+                                "fallback_strategy": "prefer_skill_or_cli",
+                                "replacement_candidates": ["semgrep_security_skill"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (config_dir / "skills.library.json").write_text(
+                json.dumps(
+                    {
+                        "skills": [
+                            {
+                                "name": "semgrep_security_skill",
+                                "description": "Semgrep skill",
+                                "capabilities": ["security_scan", "sast", "code_quality"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            request = api_main._extract_delegate_request(
+                '[DELEGATE_MCP_PROBE: "usa semgrep para inspeccionar seguridad"]\n[WAIT_POLICY: best_effort]'
+            )
+            assert request is not None
+
+            assignments = api_main._resolve_delegate_assignments(request, workspace=workspace)
+
+            self.assertEqual([row["specialist"] for row in assignments], ["skill_worker"])
+            self.assertIn("semgrep_security_skill", list(assignments[0].get("skill_targets", []) or []))
+
+    def test_aggregate_delegate_results_marks_quorum_met_with_majority(self) -> None:
+        summary, quorum_met = api_main._aggregate_delegate_results(
+            [
+                {
+                    "phase": "delegate_browser_repro_0_browser_operator",
+                    "specialist": "browser_operator",
+                    "state": "completed",
+                    "report_contract_version": "operator_report_v1",
+                    "result": "Pasos reproducidos correctamente.",
+                },
+                {
+                    "phase": "delegate_browser_repro_0_repo_scout",
+                    "specialist": "repo_scout",
+                    "state": "completed",
+                    "report_contract_version": "operator_report_v1",
+                    "result": "Archivos y rutas relevantes localizados.",
+                },
+                {
+                    "phase": "delegate_browser_repro_0_test_runner",
+                    "specialist": "test_runner",
+                    "state": "failed",
+                    "report_contract_version": "operator_report_v1",
+                    "result": "",
+                },
+            ],
+            wait_policy="quorum",
+        )
+
+        self.assertTrue(quorum_met)
+        self.assertIn("quorum_target=2", summary)
+        self.assertIn("quorum_met=yes", summary)
+        self.assertIn("contract=operator_report_v1", summary)
+
+    def test_delegate_specialist_targets_attach_playwright_and_lsp_hints(self) -> None:
+        browser_skill_targets, browser_lsp_targets = api_main._delegate_specialist_targets(
+            intent="delegate_browser_repro",
+            specialist="browser_operator",
+        )
+        lsp_skill_targets, lsp_lsp_targets = api_main._delegate_specialist_targets(
+            intent="delegate_lsp_impact",
+            specialist="lsp_navigator",
+        )
+
+        self.assertEqual(browser_skill_targets, ["playwright_qa_skill"])
+        self.assertEqual(browser_lsp_targets, [])
+        self.assertEqual(lsp_skill_targets, [])
+        self.assertEqual(lsp_lsp_targets, ["symbols", "references", "impact"])
+
+    def test_delegate_report_contract_for_browser_and_mcp_is_compact(self) -> None:
+        browser_contract = api_main._delegate_report_contract(
+            intent="delegate_browser_repro",
+            specialist="browser_operator",
+        )
+        mcp_contract = api_main._delegate_report_contract(
+            intent="delegate_mcp_probe",
+            specialist="mcp_operator",
+        )
+
+        self.assertIn("steps_reproduced", browser_contract)
+        self.assertIn("no pegues transcripts crudos", browser_contract)
+        self.assertIn("recommendation", mcp_contract)
+        self.assertIn("MCP", mcp_contract)
+
+    def test_extract_delegate_request_from_mid_run_outputs(self) -> None:
+        request = api_main._extract_delegate_request_from_outputs(
+            {
+                "lead_report_build": (
+                    '[DELEGATE_TEST_RUN: "ejecuta humo"]\n'
+                    "[WAIT_POLICY: best_effort]\n"
+                    "[DELEGATE_BUDGET: 2]"
+                )
+            }
+        )
+
+        self.assertIsNotNone(request)
+        assert request is not None
+        source_phase, delegate_request = request
+        self.assertEqual(source_phase, "lead_report_build")
+        self.assertEqual(delegate_request.intent, "delegate_test_run")
+        self.assertEqual(delegate_request.wait_policy, "best_effort")
+
+    def test_extract_delegate_request_from_failure_checkpoint_outputs(self) -> None:
+        request = api_main._extract_delegate_request_from_outputs(
+            {
+                "lead_failure_build": (
+                    '[DELEGATE_REPO_SCAN: "investiga el fallo"]\n'
+                    "[WAIT_POLICY: best_effort]\n"
+                    "[DELEGATE_BUDGET: 2]"
+                )
+            }
+        )
+
+        self.assertIsNotNone(request)
+        assert request is not None
+        source_phase, delegate_request = request
+        self.assertEqual(source_phase, "lead_failure_build")
+        self.assertEqual(delegate_request.intent, "delegate_repo_scan")
+        self.assertEqual(delegate_request.wait_policy, "best_effort")
+
+    def test_extract_delegate_request_from_lead_close_outputs(self) -> None:
+        request = api_main._extract_delegate_request_from_outputs(
+            {
+                "lead_close": (
+                    '[DELEGATE_BROWSER_REPRO: "valida el flujo final"]\n'
+                    "[WAIT_POLICY: quorum]\n"
+                    "[DELEGATE_BUDGET: 3]"
+                )
+            }
+        )
+
+        self.assertIsNotNone(request)
+        assert request is not None
+        source_phase, delegate_request = request
+        self.assertEqual(source_phase, "lead_close")
+        self.assertEqual(delegate_request.intent, "delegate_browser_repro")
+        self.assertEqual(delegate_request.wait_policy, "quorum")
+
+    def test_supporting_control_phase_accepts_delegate_prefixes(self) -> None:
+        self.assertTrue(api_main._is_supporting_control_phase("lead_intake"))
+        self.assertTrue(
+            api_main._is_supporting_control_phase(
+                "delegate_browser_repro_0_browser_operator"
+            )
+        )
+        self.assertFalse(api_main._is_supporting_control_phase("build"))
+
+    def test_strip_selected_directives_removes_delegate_controls_only(self) -> None:
+        cleaned = api_main._strip_selected_directives(
+            (
+                '[DELEGATE_BROWSER_REPRO: "reproduce"]\n'
+                "[WAIT_POLICY: quorum]\n"
+                "[DELEGATE_BUDGET: 4]\n"
+                '[REPLAN]\n[WORKFLOW_PLAN]\nphase_id: build\nrole: ENGINEER\nobjective: x\n[/WORKFLOW_PLAN]'
+            ),
+            [
+                "DELEGATE_BROWSER_REPRO",
+                "WAIT_POLICY",
+                "DELEGATE_BUDGET",
+            ],
+        )
+
+        self.assertNotIn("DELEGATE_BROWSER_REPRO", cleaned)
+        self.assertNotIn("WAIT_POLICY", cleaned)
+        self.assertNotIn("DELEGATE_BUDGET", cleaned)
+        self.assertIn("[REPLAN]", cleaned)
+
+    def test_extract_evidence_plan_wrapper_parses_structured_block(self) -> None:
+        plan = api_main._extract_evidence_plan(
+            "[EVIDENCE_PLAN]\n"
+            "phase_id: build\n"
+            "delegate: delegate_test_run\n"
+            "wait_policy: quorum\n"
+            "delegate_budget: 4\n"
+            "[/EVIDENCE_PLAN]"
+        )
+
+        self.assertEqual(plan["build"]["delegate_intents"], ["delegate_test_run"])
+        self.assertEqual(plan["build"]["wait_policy"], "quorum")
+        self.assertEqual(plan["build"]["delegate_budget"], 4)
+
+    def test_structured_evidence_specs_expand_to_specialist_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            config_dir = workspace / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "tool_sources.catalog.json").write_text(
+                json.dumps(
+                    {
+                        "tools": [
+                            {
+                                "name": "playwright_mcp",
+                                "category": "mcp",
+                                "capabilities": ["browser_testing", "e2e", "web_automation"],
+                                "fallback_strategy": "prefer_skill_or_cli",
+                                "replacement_candidates": ["playwright_qa_skill"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (config_dir / "skills.library.json").write_text(
+                json.dumps(
+                    {
+                        "skills": [
+                            {
+                                "name": "playwright_qa_skill",
+                                "description": "Playwright skill",
+                                "capabilities": ["browser_testing", "e2e", "web_automation"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            specs = api_main._structured_evidence_specs_for_phase(
+                "build",
+                {
+                    "build": {
+                        "delegate_intents": ["delegate_browser_repro"],
+                        "wait_policy": "quorum",
+                        "delegate_budget": 4,
+                    }
+                },
+                workspace=workspace,
+            )
+
+            self.assertGreaterEqual(len(specs), 3)
+            self.assertTrue(all(spec["source_phase"] == "build" for spec in specs))
+            self.assertIn("browser_operator", [spec["specialist"] for spec in specs])
+            self.assertIn("skill_worker", [spec["specialist"] for spec in specs])
+            browser_specs = [spec for spec in specs if spec["specialist"] == "browser_operator"]
+            self.assertTrue(browser_specs)
+            self.assertEqual(browser_specs[0]["skill_targets"], ["playwright_qa_skill"])
+            self.assertIn("steps_reproduced", str(browser_specs[0]["report_contract"]))
+            rewired_specs = [spec for spec in specs if spec["specialist"] == "skill_worker"]
+            self.assertTrue(rewired_specs)
+            self.assertIn("playwright_qa_skill", list(rewired_specs[0].get("skill_targets", []) or []))
+
+
+class AbortPhasesIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, revisa este informe delegado antes del cierre." in joined:
+            if "Fase origen: build" in joined:
+                return AdapterResponse(
+                    success=True,
+                    content='[ABORT_PHASES: "El build ya es suficiente; cerrar en advisory."]',
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=20,
+                )
+            return AdapterResponse(
+                success=True,
+                content="Checkpoint revisado; continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if "Lead intake and planning" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: team_decision]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar slice bajo deliberacion\n"
+                    "phase_id: review\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar implementacion\n"
+                    "depends_on: [build]\n"
+                    "phase_id: qa\n"
+                    "role: QA\n"
+                    "objective: validar implementacion\n"
+                    "depends_on: [review]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan deliberativo preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=50,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nCorrida convertida a advisory tras build.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado de fase con evidencia textual suficiente.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class SkipMidRunIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, revisa este informe delegado antes del cierre." in joined:
+            if "Fase origen: build" in joined:
+                return AdapterResponse(
+                    success=True,
+                    content='[SKIP: "review qa"]\nNo hace falta ejecutar review ni qa.',
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=20,
+                )
+            return AdapterResponse(
+                success=True,
+                content="Checkpoint revisado; continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if "Lead intake and planning" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: team_decision]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar slice bajo deliberacion\n"
+                    "phase_id: review\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar implementacion\n"
+                    "depends_on: [build]\n"
+                    "phase_id: qa\n"
+                    "role: QA\n"
+                    "objective: validar implementacion\n"
+                    "depends_on: [review]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan deliberativo preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=50,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nSe omitieron review y qa por decision del Lead.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado de fase con evidencia textual suficiente.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class RetryRouteIntegrationAdapter(ModelAdapter):
+    def __init__(self, name: str, shared_state: dict[str, object]) -> None:
+        model_name = "gpt-pro" if "primary" in name else "gpt-4o"
+        super().__init__(
+            name=name,
+            provider="openai",
+            model=model_name,
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+        self.shared_state = shared_state
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, revisa este informe delegado antes del cierre." in joined:
+            if (
+                "Fase origen: build" in joined
+                and not bool(self.shared_state.get("retry_emitted"))
+            ):
+                self.shared_state["retry_emitted"] = True
+                return AdapterResponse(
+                    success=True,
+                    content='[RETRY_ROUTE: "build"]\nPrueba otra ruta/modelo para build.',
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=20,
+                )
+            return AdapterResponse(
+                success=True,
+                content="Checkpoint revisado; continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if "Lead intake and planning" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: team_decision]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar slice bajo deliberacion\n"
+                    "phase_id: review\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar implementacion\n"
+                    "depends_on: [build]\n"
+                    "phase_id: qa\n"
+                    "role: QA\n"
+                    "objective: validar implementacion\n"
+                    "depends_on: [review]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan deliberativo preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=50,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nSe reintentó build con otra ruta.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        if "implementar slice bajo deliberacion" in joined:
+            label = "secondary" if "secondary" in self.name else "primary"
+            return AdapterResponse(
+                success=True,
+                content=f"Build completada via {label} route.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado de fase con evidencia textual suficiente.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class SetBudgetIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, revisa este informe delegado antes del cierre." in joined:
+            if "Fase origen: build" in joined:
+                return AdapterResponse(
+                    success=True,
+                    content="[SET_BUDGET: 3]\nRecorta budget tras validar el build.",
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=20,
+                )
+            return AdapterResponse(
+                success=True,
+                content="Checkpoint revisado; continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if "Lead intake and planning" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: team_decision]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar slice bajo deliberacion\n"
+                    "phase_id: review\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar implementacion\n"
+                    "depends_on: [build]\n"
+                    "phase_id: qa\n"
+                    "role: QA\n"
+                    "objective: validar implementacion\n"
+                    "depends_on: [review]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan deliberativo preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=50,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nBudget ajustado mid-run.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado de fase con evidencia textual suficiente.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class AdvisoryModeIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, revisa este informe delegado antes del cierre." in joined:
+            if "Fase origen: build" in joined:
+                return AdapterResponse(
+                    success=True,
+                    content='[ADVISORY_MODE: "No hay evidencia live suficiente; cerrar como advisory."]',
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=20,
+                )
+            return AdapterResponse(
+                success=True,
+                content="Checkpoint revisado; continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if "Lead intake and planning" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: team_decision]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar slice bajo deliberacion\n"
+                    "phase_id: review\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar implementacion\n"
+                    "depends_on: [build]\n"
+                    "phase_id: qa\n"
+                    "role: QA\n"
+                    "objective: validar implementacion\n"
+                    "depends_on: [review]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan deliberativo preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=50,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nCierre en advisory mode por decision del Lead.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado de fase con evidencia textual suficiente.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class LeadFailureDelegateIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review", "repo_read"},
+        )
+        self.failure_delegate_emitted = False
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, valida si esta fase sensible debe ejecutarse ahora." in joined:
+            return AdapterResponse(
+                success=True,
+                content="Autorizado para continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if (
+            "Eres Team Lead." in joined
+            and "Como Team Lead, interviene tras un fallo de fase" in joined
+        ):
+            if not self.failure_delegate_emitted:
+                self.failure_delegate_emitted = True
+                return AdapterResponse(
+                    success=True,
+                    content=(
+                        '[DELEGATE_REPO_SCAN: "inspecciona por que falla build y resume los hechos"]\n'
+                        "[WAIT_POLICY: best_effort]\n"
+                        "[DELEGATE_BUDGET: 2]"
+                    ),
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=30,
+                )
+            return AdapterResponse(
+                success=True,
+                content='[ABORT_PHASES: "Cerrar tras investigar el fallo inicial."]',
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        if (
+            "Lead intake and planning" in joined
+            or "TRAS TU ANALISIS, incluye un bloque [WORKFLOW_PLAN]" in joined
+            or "Eres Team Lead senior. Convierte el input" in joined
+        ):
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: forzar fallo inicial y luego investigar\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=30,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nSe delegó investigación tras el fallo y se cerró la corrida.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        if "forzar fallo inicial y luego investigar" in joined:
+            return AdapterResponse(
+                success=False,
+                content="",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=0,
+                error="forced_build_failure",
+            )
+        return AdapterResponse(
+            success=True,
+            content="Informe delegado con hechos compactos del repo.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class LeadCloseDelegateIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review", "browser_test"},
+        )
+        self.close_delegate_emitted = False
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, valida si esta fase sensible debe ejecutarse ahora." in joined:
+            return AdapterResponse(
+                success=True,
+                content="Autorizado para continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if (
+            "Lead intake and planning" in joined
+            or "TRAS TU ANALISIS, incluye un bloque [WORKFLOW_PLAN]" in joined
+            or "Eres Team Lead senior. Convierte el input" in joined
+        ):
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar slice con evidencia textual suficiente\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan corto preparado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=30,
+            )
+        if "Eres Team Lead." in joined and "Lead synthesis and response" in joined:
+            if not self.close_delegate_emitted:
+                self.close_delegate_emitted = True
+                return AdapterResponse(
+                    success=True,
+                    content=(
+                        '[DELEGATE_BROWSER_REPRO: "reproduce el flujo final y resume evidencia visual"]\n'
+                        "[WAIT_POLICY: best_effort]\n"
+                        "[DELEGATE_BUDGET: 2]"
+                    ),
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=30,
+                )
+            return AdapterResponse(
+                success=True,
+                content="Lead summary:\nSe cerró tras delegar verificación final desde lead_close.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado de fase con evidencia textual suficiente.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
 class APITeamChatTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._previous_tempdir = tempfile.tempdir
+        self._previous_temporary_directory = tempfile.TemporaryDirectory
+        self._local_temp_root = Path.cwd() / ".tmp_api_team_chat_tests"
+        self._local_temp_root.mkdir(parents=True, exist_ok=True)
+        tempfile.tempdir = str(self._local_temp_root)
+
+        class _WorkspaceTemporaryDirectory:
+            def __init__(
+                inner_self,
+                suffix: str | None = None,
+                prefix: str | None = None,
+                dir: str | os.PathLike[str] | None = None,
+                ignore_cleanup_errors: bool = False,
+            ) -> None:
+                inner_self._ignore_cleanup_errors = ignore_cleanup_errors
+                inner_self._root = Path(dir) if dir else self._local_temp_root
+                inner_self._prefix = prefix or "tmp"
+                inner_self._suffix = suffix or ""
+                inner_self.name = ""
+
+            def __enter__(inner_self) -> str:
+                candidate = (
+                    inner_self._root
+                    / f"{inner_self._prefix}{uuid4().hex}{inner_self._suffix}"
+                )
+                candidate.mkdir(parents=True, exist_ok=False)
+                inner_self.name = str(candidate)
+                return inner_self.name
+
+            def __exit__(inner_self, exc_type, exc, tb) -> bool:
+                shutil.rmtree(inner_self.name, ignore_errors=True)
+                return False
+
+            def cleanup(inner_self) -> None:
+                shutil.rmtree(inner_self.name, ignore_errors=True)
+
+        tempfile.TemporaryDirectory = _WorkspaceTemporaryDirectory
+
+    def tearDown(self) -> None:
+        tempfile.tempdir = self._previous_tempdir
+        tempfile.TemporaryDirectory = self._previous_temporary_directory
+
     def test_continuation_message_accepts_spanish_continuad(self) -> None:
         self.assertTrue(api_main._is_continuation_message("continuad"))
 
@@ -131,6 +1530,240 @@ class APITeamChatTests(unittest.TestCase):
         self.assertIn("pendiente=review, qa, lead_close", decision)
         self.assertNotIn("Objetivo inmediato", decision)
 
+    def test_replan_window_is_open_only_when_dynamic_phases_not_started(self) -> None:
+        self.assertTrue(
+            api_main._replan_window_is_open(
+                {
+                    "lead_intake": "completed",
+                    "build": "ready",
+                    "review": "pending",
+                    "lead_close": "pending",
+                },
+                ["lead_intake", "build", "review", "lead_close"],
+            )
+        )
+        self.assertFalse(
+            api_main._replan_window_is_open(
+                {
+                    "lead_intake": "completed",
+                    "build": "completed",
+                    "review": "pending",
+                    "lead_close": "pending",
+                },
+                ["lead_intake", "build", "review", "lead_close"],
+            )
+        )
+
+    def test_extract_replan_phases_from_outputs_requires_directive_and_plan(self) -> None:
+        replan = api_main._extract_replan_phases_from_outputs(
+            {
+                "lead_preflight_build": (
+                    "[REPLAN]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: discovery\n"
+                    "role: RESEARCHER\n"
+                    "objective: re-evaluar alcance\n"
+                    "[/WORKFLOW_PLAN]"
+                )
+            }
+        )
+        self.assertIsNotNone(replan)
+        assert replan is not None
+        phase_name, phases = replan
+        self.assertEqual(phase_name, "lead_preflight_build")
+        self.assertEqual([item.phase_id for item in phases], ["discovery"])
+
+    def test_extract_force_gate_request_from_outputs(self) -> None:
+        force_gate = api_main._extract_force_gate_request_from_outputs(
+            {
+                "lead_report_review": '[FORCE_GATE: "build"]',
+            }
+        )
+        self.assertEqual(force_gate, ("lead_report_review", "build"))
+
+    def test_extract_abort_request_from_outputs(self) -> None:
+        abort_request = api_main._extract_abort_request_from_outputs(
+            {
+                "lead_report_build": '[ABORT_PHASES: "Cerrar en advisory"]',
+            }
+        )
+        self.assertEqual(abort_request, ("lead_report_build", "Cerrar en advisory"))
+
+    def test_extract_skip_request_from_outputs(self) -> None:
+        skip_request = api_main._extract_skip_request_from_outputs(
+            {
+                "lead_report_build": '[SKIP: "review qa"]',
+            }
+        )
+        self.assertEqual(skip_request, ("lead_report_build", ["review", "qa"]))
+
+    def test_extract_retry_route_request_from_outputs(self) -> None:
+        retry_request = api_main._extract_retry_route_request_from_outputs(
+            {
+                "lead_report_build": '[RETRY_ROUTE: "build"]',
+            }
+        )
+        self.assertEqual(retry_request, ("lead_report_build", "build"))
+
+    def test_extract_budget_adjustments_from_outputs(self) -> None:
+        adjustments = api_main._extract_budget_adjustments_from_outputs(
+            {
+                "lead_report_build": "[SET_BUDGET: 3]\n[EXTEND_BUDGET: +2]",
+            }
+        )
+        self.assertEqual(len(adjustments), 1)
+        phase_name, payload = adjustments[0]
+        self.assertEqual(phase_name, "lead_report_build")
+        self.assertEqual(payload.get("set_budget"), 3)
+        self.assertEqual(payload.get("extend_budget"), 2)
+
+    def test_phase_started_for_replan_detects_claimed_and_blocked_with_execution(self) -> None:
+        claimed = WorkTask(
+            task_id="CHAT::build",
+            title="Build",
+            description="",
+            role=Role.ENGINEER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            state=TaskState.CLAIMED,
+        )
+        blocked_after_start = WorkTask(
+            task_id="CHAT::review",
+            title="Review",
+            description="",
+            role=Role.REVIEWER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            state=TaskState.BLOCKED,
+            metadata={"execution_round": 1},
+        )
+        pending = WorkTask(
+            task_id="CHAT::qa",
+            title="QA",
+            description="",
+            role=Role.QA,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            state=TaskState.PENDING,
+        )
+
+        self.assertTrue(api_main._phase_started_for_replan(claimed))
+        self.assertTrue(api_main._phase_started_for_replan(blocked_after_start))
+        self.assertFalse(api_main._phase_started_for_replan(pending))
+
+    def test_merge_replanned_phases_preserves_started_and_replaces_pending_tail(self) -> None:
+        current_phases = [
+            PhaseSpec("build", "ENGINEER", "Implementar", []),
+            PhaseSpec("review", "REVIEWER", "Revisar", ["build"]),
+            PhaseSpec("qa", "QA", "Validar", ["review"]),
+        ]
+        tasks_by_phase = {
+            "build": WorkTask(
+                task_id="CHAT::build",
+                title="Build",
+                description="",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                state=TaskState.COMPLETED,
+            ),
+            "review": WorkTask(
+                task_id="CHAT::review",
+                title="Review",
+                description="",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                state=TaskState.PENDING,
+            ),
+            "qa": WorkTask(
+                task_id="CHAT::qa",
+                title="QA",
+                description="",
+                role=Role.QA,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                state=TaskState.READY,
+            ),
+        }
+        replan_phases = [
+            PhaseSpec("build", "ENGINEER", "Mantener build existente", []),
+            PhaseSpec("review_options", "REVIEWER", "Replantear opciones", ["build"]),
+            PhaseSpec("qa", "QA", "Nueva validacion", ["review_options"]),
+        ]
+
+        merged, preserved_ids, preserved_task_ids = api_main._merge_replanned_phases(
+            current_phases,
+            tasks_by_phase,
+            replan_phases,
+        )
+
+        self.assertEqual(preserved_ids, ["build"])
+        self.assertEqual(preserved_task_ids, ["CHAT::build"])
+        self.assertEqual(
+            [item.phase_id for item in merged],
+            ["build", "review_options", "qa"],
+        )
+
+    def test_prune_phases_for_mid_run_lead_action_removes_pending_tail(self) -> None:
+        current_phases = [
+            PhaseSpec("build", "ENGINEER", "Implementar", []),
+            PhaseSpec("review", "REVIEWER", "Revisar", ["build"]),
+            PhaseSpec("qa", "QA", "Validar", ["review"]),
+        ]
+        tasks_by_phase = {
+            "build": WorkTask(
+                task_id="CHAT::build",
+                title="Build",
+                description="",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                state=TaskState.COMPLETED,
+            ),
+            "review": WorkTask(
+                task_id="CHAT::review",
+                title="Review",
+                description="",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                state=TaskState.PENDING,
+            ),
+            "qa": WorkTask(
+                task_id="CHAT::qa",
+                title="QA",
+                description="",
+                role=Role.QA,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                state=TaskState.PENDING,
+            ),
+        }
+
+        merged, removed_ids, preserved_started_ids, skipped_started = (
+            api_main._prune_phases_for_mid_run_lead_action(
+                current_phases,
+                tasks_by_phase,
+                target_phase_ids=["review"],
+            )
+        )
+
+        self.assertEqual([item.phase_id for item in merged], ["build"])
+        self.assertEqual(removed_ids, ["qa", "review"])
+        self.assertEqual(preserved_started_ids, ["build"])
+        self.assertEqual(skipped_started, [])
+
+    def test_retry_route_removal_phase_ids_includes_target_and_downstream(self) -> None:
+        current_phases = [
+            PhaseSpec("discovery", "RESEARCHER", "Descubrir", []),
+            PhaseSpec("build", "ENGINEER", "Implementar", ["discovery"]),
+            PhaseSpec("review", "REVIEWER", "Revisar", ["build"]),
+            PhaseSpec("qa", "QA", "Validar", ["review"]),
+        ]
+        removed = api_main._retry_route_removal_phase_ids(current_phases, "build")
+        self.assertEqual(removed, ["build", "review", "qa"])
+
     def test_chat_is_led_by_team_lead_and_returns_delegation(self) -> None:
         temp_root = Path.cwd() / ".tmp_api_team_chat_tests"
         workspace = temp_root / f"case_{uuid4().hex}"
@@ -178,6 +1811,478 @@ class APITeamChatTests(unittest.TestCase):
         finally:
             api_main.set_current_workspace(previous_workspace)
             shutil.rmtree(workspace, ignore_errors=True)
+
+    def test_chat_replan_integration_rebuilds_pending_plan(self) -> None:
+        temp_root = Path.cwd() / ".tmp_api_team_chat_tests"
+        workspace = temp_root / f"case_{uuid4().hex}"
+        previous_workspace = api_main.get_current_workspace()
+
+        def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+            return AITeamOrchestrator(
+                router=HybridRouter(
+                    adapters=[ReplanIntegrationAdapter()],
+                    policy=build_default_router_policy(),
+                ),
+                runtime_dir=runtime_dir,
+                project_root=workspace,
+                browser_mode=browser_mode,
+                environment=environment,
+            )
+
+        try:
+            workspace.mkdir(parents=True, exist_ok=True)
+            api_main.set_current_workspace(workspace)
+            client = TestClient(api_main.app)
+            with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Implement endpoint with context recovery before build",
+                            "mode": "sprint5",
+                            "max_rounds": 6,
+                            "allow_low_productivity_override": True,
+                            "auto_extend_weak_runs": False,
+                        },
+                    )
+            self.assertEqual(response.status_code, 200)
+            payload = _parse_sse_result(response)
+            phase_task_ids = payload.get("phase_task_ids", {})
+            self.assertIn("discovery", phase_task_ids)
+            self.assertIn("build", phase_task_ids)
+
+            events_file = workspace / "runtime" / "events.jsonl"
+            self.assertTrue(events_file.exists())
+            events_text = events_file.read_text(encoding="utf-8")
+            self.assertIn('"directive": "replan"', events_text)
+            self.assertIn('"source_phase": "lead_preflight_build"', events_text)
+        finally:
+            api_main.set_current_workspace(previous_workspace)
+            shutil.rmtree(workspace, ignore_errors=True)
+
+    def test_chat_force_gate_integration_reopens_completed_phase(self) -> None:
+        temp_root = Path.cwd() / ".tmp_api_team_chat_tests"
+        workspace = temp_root / f"case_{uuid4().hex}"
+        previous_workspace = api_main.get_current_workspace()
+
+        def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+            return AITeamOrchestrator(
+                router=HybridRouter(
+                    adapters=[ForceGateIntegrationAdapter()],
+                    policy=build_default_router_policy(),
+                ),
+                runtime_dir=runtime_dir,
+                project_root=workspace,
+                browser_mode=browser_mode,
+                environment=environment,
+            )
+
+        try:
+            workspace.mkdir(parents=True, exist_ok=True)
+            api_main.set_current_workspace(workspace)
+            client = TestClient(api_main.app)
+            with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Implement and then revalidate build under team decision mode",
+                            "mode": "sprint5",
+                            "max_rounds": 8,
+                            "allow_low_productivity_override": True,
+                            "auto_extend_weak_runs": False,
+                        },
+                    )
+            self.assertEqual(response.status_code, 200)
+            payload = _parse_sse_result(response)
+            self.assertIn("build", payload.get("phase_task_ids", {}))
+
+            tasks_file = workspace / "runtime" / "tasks.json"
+            self.assertTrue(tasks_file.exists())
+            tasks_text = tasks_file.read_text(encoding="utf-8")
+            self.assertIn("::build::review", tasks_text)
+            self.assertIn("::build::qa", tasks_text)
+
+            events_file = workspace / "runtime" / "events.jsonl"
+            events_text = events_file.read_text(encoding="utf-8")
+            self.assertIn('"directive": "force_gate"', events_text)
+            self.assertIn('"target_phase": "build"', events_text)
+            self.assertIn('"event_type": "quality_gates_opened"', events_text)
+        finally:
+            api_main.set_current_workspace(previous_workspace)
+            shutil.rmtree(workspace, ignore_errors=True)
+
+    def test_chat_abort_phases_integration_converts_run_to_advisory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[AbortPhasesIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                        response = client.post(
+                            "/api/aiteam/chat",
+                            json={
+                                "message": "Implement and decide if more validation is still needed",
+                                "mode": "sprint5",
+                                "max_rounds": 8,
+                                "allow_low_productivity_override": True,
+                                "auto_extend_weak_runs": False,
+                            },
+                        )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertIn("build", payload.get("phase_task_ids", {}))
+                self.assertNotIn("review", payload.get("phase_task_ids", {}))
+                self.assertNotIn("qa", payload.get("phase_task_ids", {}))
+
+                tasks_file = workspace / "runtime" / "tasks.json"
+                tasks_text = tasks_file.read_text(encoding="utf-8")
+                self.assertIn("::build", tasks_text)
+                self.assertNotIn("::review", tasks_text)
+                self.assertNotIn("::qa", tasks_text)
+
+                events_file = workspace / "runtime" / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"directive": "abort_phases"', events_text)
+                self.assertIn('"source_phase": "lead_report_build"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_skip_mid_run_integration_removes_pending_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[SkipMidRunIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                        response = client.post(
+                            "/api/aiteam/chat",
+                            json={
+                                "message": "Implement and skip downstream validation if the lead agrees",
+                                "mode": "sprint5",
+                                "max_rounds": 8,
+                                "allow_low_productivity_override": True,
+                                "auto_extend_weak_runs": False,
+                            },
+                        )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertIn("build", payload.get("phase_task_ids", {}))
+                self.assertNotIn("review", payload.get("phase_task_ids", {}))
+                self.assertNotIn("qa", payload.get("phase_task_ids", {}))
+
+                events_file = workspace / "runtime" / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"directive": "skip_mid_run"', events_text)
+                self.assertIn('"source_phase": "lead_report_build"', events_text)
+                self.assertIn('"removed_phases": ["qa", "review"]', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_retry_route_integration_retries_target_with_alternate_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            shared_state = {"retry_emitted": False}
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[
+                            RetryRouteIntegrationAdapter("primary_route", shared_state),
+                            RetryRouteIntegrationAdapter("secondary_route", shared_state),
+                        ],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                        response = client.post(
+                            "/api/aiteam/chat",
+                            json={
+                                "message": "Implement and retry build with another route if the lead requests it",
+                                "mode": "sprint5",
+                                "max_rounds": 8,
+                                "allow_low_productivity_override": True,
+                                "auto_extend_weak_runs": False,
+                            },
+                        )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertIn("build", payload.get("phase_task_ids", {}))
+
+                tasks_file = workspace / "runtime" / "tasks.json"
+                tasks_data = json.loads(tasks_file.read_text(encoding="utf-8"))
+                by_id = {
+                    item.get("task_id"): item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                }
+                build_task = by_id.get(payload.get("phase_task_ids", {}).get("build"))
+                self.assertIsNotNone(build_task)
+                metadata = dict(build_task.get("metadata", {}))
+                self.assertEqual(metadata.get("last_adapter_name"), "secondary_route")
+                self.assertIn("primary_route", list(metadata.get("excluded_adapters", [])))
+                self.assertTrue(bool(metadata.get("retry_route_requested")))
+
+                events_file = workspace / "runtime" / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"directive": "retry_route"', events_text)
+                self.assertIn('"target_phase": "build"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_set_budget_mid_run_updates_round_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[SetBudgetIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                        response = client.post(
+                            "/api/aiteam/chat",
+                            json={
+                                "message": "Implement and then let the lead reduce the remaining budget",
+                                "mode": "sprint5",
+                                "max_rounds": 8,
+                                "allow_low_productivity_override": True,
+                                "auto_extend_weak_runs": False,
+                            },
+                        )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertEqual(int(payload.get("round_budget", 0)), 3)
+
+                events_file = workspace / "runtime" / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"directive": "set_budget_mid_run"', events_text)
+                self.assertIn('"source_phase": "lead_report_build"', events_text)
+                self.assertIn('"new_round_budget": 3', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_delegate_from_lead_failure_checkpoint_integration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[LeadFailureDelegateIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                original_policy_metadata = api_main.build_chat_task_policy_metadata
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    with patch.object(
+                        api_main,
+                        "build_chat_task_policy_metadata",
+                        side_effect=lambda **kwargs: original_policy_metadata(
+                            require_execution_plan=False
+                        ),
+                    ):
+                        with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                            response = client.post(
+                                "/api/aiteam/chat",
+                                json={
+                                    "message": "Trigger a failing build and let the lead delegate investigation",
+                                    "mode": "sprint5",
+                                    "max_rounds": 8,
+                                    "allow_low_productivity_override": True,
+                                    "auto_extend_weak_runs": False,
+                                },
+                            )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertTrue(isinstance(payload.get("delegate_batches", []), list))
+                self.assertTrue(
+                    any(
+                        str(batch.get("source_phase", "")) == "lead_failure_build"
+                        for batch in list(payload.get("delegate_batches", []) or [])
+                    )
+                )
+
+                events_file = workspace / "runtime" / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"source_phase": "lead_failure_build"', events_text)
+                self.assertIn('"intent": "delegate_repo_scan"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_delegate_from_lead_close_integration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[LeadCloseDelegateIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                original_policy_metadata = api_main.build_chat_task_policy_metadata
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    with patch.object(
+                        api_main,
+                        "build_chat_task_policy_metadata",
+                        side_effect=lambda **kwargs: original_policy_metadata(
+                            require_execution_plan=False
+                        ),
+                    ):
+                        with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                            response = client.post(
+                                "/api/aiteam/chat",
+                                json={
+                                    "message": "Complete a short run and let the lead delegate one final browser verification",
+                                    "mode": "sprint5",
+                                    "max_rounds": 8,
+                                    "allow_low_productivity_override": True,
+                                    "auto_extend_weak_runs": False,
+                                },
+                            )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertIn("lead_close", payload.get("phase_task_ids", {}))
+                self.assertTrue(isinstance(payload.get("delegate_batches", []), list))
+                self.assertTrue(
+                    any(
+                        str(batch.get("source_phase", "")) == "lead_close"
+                        for batch in list(payload.get("delegate_batches", []) or [])
+                    )
+                )
+                self.assertIn("lead_close", str(payload.get("phase_task_ids", {})))
+
+                events_file = workspace / "runtime" / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"source_phase": "lead_close"', events_text)
+                self.assertIn('"intent": "delegate_browser_repro"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_advisory_mode_turns_policy_blocks_into_signals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[AdvisoryModeIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    with patch.object(api_main, "_evaluate_phase_evidence_gate", return_value=[]):
+                        response = client.post(
+                            "/api/aiteam/chat",
+                            json={
+                                "message": "Implement and let the lead close in advisory mode if evidence is weak",
+                                "mode": "sprint5",
+                                "max_rounds": 8,
+                                "strict_mode": True,
+                                "allow_low_productivity_override": False,
+                                "auto_extend_weak_runs": False,
+                            },
+                        )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertEqual(str(payload.get("state", "")), "completed")
+                self.assertTrue(bool(payload.get("advisory_mode")))
+                self.assertIn("advisory", str(payload.get("response", "")).lower())
+                self.assertIn(
+                    "strict_mode_requires_more_evidence",
+                    list(payload.get("policy_signals", [])),
+                )
+                self.assertIn(
+                    "low_productivity_below_threshold",
+                    list(payload.get("policy_signals", [])),
+                )
+
+                events_file = workspace / "runtime" / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"directive": "advisory_mode"', events_text)
+                self.assertIn('"event_type": "chat_policy_signal"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
 
     def test_chat_persists_lead_and_delegated_tasks_to_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -379,6 +2484,232 @@ class APITeamChatTests(unittest.TestCase):
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
+    def test_chat_tasks_expose_explicit_validation_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.post(
+                    "/api/aiteam/chat",
+                    json={
+                        "message": "Create a concise plan and execute the first step",
+                        "mode": "sprint5",
+                        "max_rounds": 4,
+                        "auto_extend_weak_runs": False,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertEqual(str(payload.get("validation_owner", "")), "chat_policy")
+
+                tasks_file = workspace / "runtime" / "tasks.json"
+                tasks_data = json.loads(tasks_file.read_text(encoding="utf-8"))
+                by_id = {
+                    item.get("task_id"): item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                }
+                build_task = by_id.get(payload.get("phase_task_ids", {}).get("build"))
+                lead_close = by_id.get(payload.get("phase_task_ids", {}).get("lead_close"))
+                self.assertIsNotNone(build_task)
+                self.assertIsNotNone(lead_close)
+                for task_row in [build_task, lead_close]:
+                    metadata = ((task_row or {}).get("metadata", {}) or {})
+                    self.assertEqual(str(metadata.get("validation_owner", "")), "chat_policy")
+                    self.assertEqual(
+                        str(metadata.get("final_validation_layer", "")),
+                        "chat_policy",
+                    )
+                    self.assertEqual(
+                        str(metadata.get("phase_quality_gate_mode", "")),
+                        "delegated_to_chat_policy",
+                    )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_response_progress_and_events_expose_phase_evidence_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.post(
+                    "/api/aiteam/chat",
+                    json={
+                        "message": "Implement React login form with browser validation and tests",
+                        "mode": "sprint5",
+                        "max_rounds": 4,
+                        "auto_extend_weak_runs": False,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                phase_evidence_plan = payload.get("phase_evidence_plan", {})
+                self.assertTrue(isinstance(phase_evidence_plan, dict))
+                self.assertIn("build", phase_evidence_plan)
+                self.assertIn(
+                    "delegate_test_run",
+                    list(phase_evidence_plan["build"].get("delegate_intents", [])),
+                )
+                self.assertTrue(isinstance(payload.get("delegate_batches", []), list))
+                self.assertTrue(isinstance(payload.get("delegate_economics", {}), dict))
+                self.assertTrue(isinstance(payload.get("specialist_reports", []), list))
+                self.assertTrue(isinstance(payload.get("specialist_report_summary", {}), dict))
+                self.assertIn(
+                    "estimated_net_tokens_saved",
+                    payload.get("delegate_economics", {}),
+                )
+
+                task_root = str(payload.get("task_id", "")).strip()
+                progress = client.get(f"/api/aiteam/chat/progress/{task_root}")
+                self.assertEqual(progress.status_code, 200)
+                progress_payload = progress.json()
+                self.assertIn("build", progress_payload.get("phase_evidence_plan", {}))
+                self.assertTrue(
+                    isinstance(progress_payload.get("delegate_batches", []), list)
+                )
+                self.assertTrue(
+                    isinstance(progress_payload.get("delegate_economics", {}), dict)
+                )
+                self.assertTrue(
+                    isinstance(progress_payload.get("specialist_reports", []), list)
+                )
+                self.assertTrue(
+                    isinstance(progress_payload.get("specialist_report_summary", {}), dict)
+                )
+
+                events_file = workspace / "runtime" / "events.jsonl"
+                event_rows = [
+                    json.loads(line)
+                    for line in events_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                plan_rows = [
+                    row for row in event_rows
+                    if str(row.get("event_type", "")) == "chat_plan_created"
+                ]
+                self.assertTrue(plan_rows)
+                plan_payload = dict((plan_rows[-1].get("payload", {}) or {}))
+                self.assertIn("build", plan_payload.get("phase_evidence_plan", {}))
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_browser_surface_delegates_to_browser_and_mcp_specialists_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.post(
+                    "/api/aiteam/chat",
+                    json={
+                        "message": "Debug React browser flow with DOM checks, screenshots and MCP UI validation",
+                        "mode": "sprint5",
+                        "max_rounds": 4,
+                        "auto_extend_weak_runs": False,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                phase_evidence_plan = payload.get("phase_evidence_plan", {})
+                self.assertIn("build", phase_evidence_plan)
+                self.assertIn(
+                    "delegate_browser_repro",
+                    list(phase_evidence_plan["build"].get("delegate_intents", [])),
+                )
+
+                task_root = str(payload.get("task_id", "")).strip()
+                tasks_file = workspace / "runtime" / "tasks.json"
+                tasks_data = json.loads(tasks_file.read_text(encoding="utf-8"))
+                build_delegate_rows = [
+                    item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                    and str(item.get("task_id", "")).startswith(f"{task_root}::delegate_build_")
+                ]
+                self.assertTrue(build_delegate_rows)
+
+                by_specialist = {
+                    str(((row.get("metadata", {}) or {}).get("tool_specialist", ""))): (row.get("metadata", {}) or {})
+                    for row in build_delegate_rows
+                }
+                self.assertIn("browser_operator", by_specialist)
+                self.assertIn("mcp_operator", by_specialist)
+                self.assertEqual(
+                    by_specialist["browser_operator"].get("skill_targets", []),
+                    ["playwright_qa_skill"],
+                )
+                self.assertEqual(
+                    by_specialist["browser_operator"].get("delegate_report_contract_version", ""),
+                    "operator_report_v1",
+                )
+                self.assertIn(
+                    "playwright_qa_skill",
+                    list(by_specialist["browser_operator"].get("tool_specialist_skill_targets", [])),
+                )
+
+                browser_rows = [
+                    row for row in build_delegate_rows
+                    if str(((row.get("metadata", {}) or {}).get("tool_specialist", "")) or "") == "browser_operator"
+                ]
+                self.assertTrue(browser_rows)
+                self.assertIn(
+                    "steps_reproduced",
+                    str(browser_rows[0].get("description", "")),
+                )
+                self.assertTrue(isinstance(payload.get("specialist_reports", []), list))
+                summary = dict(payload.get("specialist_report_summary", {}) or {})
+                self.assertIn("count", summary)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_scout_preflight_tasks_use_repo_scout_specialization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.post(
+                    "/api/aiteam/chat",
+                    json={
+                        "message": "Ponme al día del proyecto y prepara plan inicial",
+                        "mode": "sprint5",
+                        "max_rounds": 4,
+                        "auto_extend_weak_runs": False,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                task_root = str(payload.get("task_id", "")).strip()
+
+                tasks_file = workspace / "runtime" / "tasks.json"
+                tasks_data = json.loads(tasks_file.read_text(encoding="utf-8"))
+                by_id = {
+                    item.get("task_id"): item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                }
+                scout_rows = [
+                    by_id.get(f"{task_root}::scout_project_state"),
+                    by_id.get(f"{task_root}::scout_session_history"),
+                ]
+                scout_rows = [row for row in scout_rows if row is not None]
+                self.assertGreaterEqual(len(scout_rows), 2)
+                for row in scout_rows:
+                    metadata = ((row or {}).get("metadata", {}) or {})
+                    self.assertEqual(str(metadata.get("tool_specialist", "")), "repo_scout")
+                    self.assertEqual(
+                        str(metadata.get("tool_specialist_decision_scope", "")),
+                        "operate_tools_and_report_only",
+                    )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
     def test_chat_auto_extends_round_budget_when_run_is_weak(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -434,7 +2765,7 @@ class APITeamChatTests(unittest.TestCase):
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
-    def test_chat_low_productivity_gate_rejects_without_override(self) -> None:
+    def test_chat_low_productivity_gate_signals_without_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             previous_workspace = api_main.get_current_workspace()
@@ -458,10 +2789,12 @@ class APITeamChatTests(unittest.TestCase):
                     int(payload.get("productivity_score", 100)),
                     int(payload.get("productivity_threshold", 35)),
                 )
-                state_value = str(payload.get("state", ""))
-                self.assertIn(state_value, {"rejected", "failed"})
-                if state_value == "rejected":
-                    self.assertTrue(bool(payload.get("low_productivity_rejected")))
+                self.assertTrue(bool(payload.get("policy_review_required")))
+                self.assertFalse(bool(payload.get("low_productivity_rejected")))
+                self.assertIn(
+                    "low_productivity_below_threshold",
+                    list(payload.get("policy_signals", [])),
+                )
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -490,7 +2823,7 @@ class APITeamChatTests(unittest.TestCase):
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
-    def test_chat_evidence_gate_rejects_placeholder_build_outputs(self) -> None:
+    def test_chat_evidence_gate_signals_placeholder_build_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             previous_workspace = api_main.get_current_workspace()
@@ -511,7 +2844,11 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 payload = _parse_sse_result(response)
                 self.assertTrue(bool(payload.get("evidence_gate_applied")))
-                self.assertIn(str(payload.get("state", "")), {"rejected", "failed"})
+                self.assertTrue(bool(payload.get("policy_review_required")))
+                self.assertIn(
+                    "evidence_gate_failed",
+                    list(payload.get("policy_signals", [])),
+                )
                 failures = payload.get("evidence_gate_failures", [])
                 self.assertTrue(any("build" in str(item) for item in failures))
             finally:
@@ -538,6 +2875,11 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 payload = _parse_sse_result(response)
                 self.assertTrue(bool(payload.get("evidence_gate_applied")))
+                self.assertTrue(bool(payload.get("policy_review_required")))
+                self.assertIn(
+                    "evidence_gate_failed",
+                    list(payload.get("policy_signals", [])),
+                )
                 failures = [
                     str(item) for item in payload.get("evidence_gate_failures", [])
                 ]
@@ -564,7 +2906,7 @@ class APITeamChatTests(unittest.TestCase):
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
-    def test_chat_can_require_live_mode_via_env_gate(self) -> None:
+    def test_chat_can_signal_live_mode_via_env_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             previous_workspace = api_main.get_current_workspace()
@@ -589,8 +2931,12 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 payload = _parse_sse_result(response)
                 self.assertTrue(bool(payload.get("live_mode_required")))
-                self.assertTrue(bool(payload.get("live_mode_rejected")))
-                self.assertIn(str(payload.get("state", "")), {"rejected", "failed"})
+                self.assertFalse(bool(payload.get("live_mode_rejected")))
+                self.assertTrue(bool(payload.get("policy_review_required")))
+                self.assertIn(
+                    "live_mode_required_non_live",
+                    list(payload.get("policy_signals", [])),
+                )
             finally:
                 if previous_env is None:
                     os.environ.pop("AITEAM_REQUIRE_LIVE_MODE", None)
