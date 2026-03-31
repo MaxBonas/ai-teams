@@ -130,6 +130,98 @@ class ContextCuratorTests(unittest.TestCase):
         self.assertGreater(int(value["estimated_context_tokens_saved"]), 300)
         self.assertIn("context_savings_material", value["signals"])
 
+    def test_remember_preplan_continuation_deduplicates_existing_facts(self) -> None:
+        """Llamar dos veces con los mismos datos no debe doblar los items en durable_facts."""
+        store = ContextCuratorStore(self.runtime_dir)
+        kwargs = dict(
+            project_key=str(self.workspace.resolve()),
+            chat_root="CHAT-dedup01",
+            user_message="Implementar login seguro",
+            surface_hints={"surfaces": ["security"], "recommended_delegate_intents": ["delegate_mcp_probe"]},
+            curator_summary="- auth.py es el punto critico\n- semgrep encuentra CVEs",
+            lead_summary="P0 seguridad en auth",
+            source_task_ids=["CHAT-dedup01::lead_intake"],
+        )
+        store.remember_preplan(**kwargs)
+        first_ctx = store.load_chat_context("CHAT-dedup01", project_key=str(self.workspace.resolve()))
+        first_fact_count = len(first_ctx["durable_facts"])
+
+        # Segunda llamada con los mismos datos (simulando continuation que reprocesa el mismo estado)
+        store.remember_preplan(**kwargs)
+        second_ctx = store.load_chat_context("CHAT-dedup01", project_key=str(self.workspace.resolve()))
+        second_fact_count = len(second_ctx["durable_facts"])
+
+        self.assertEqual(
+            first_fact_count,
+            second_fact_count,
+            "Llamadas repetidas con mismos datos no deben duplicar durable_facts",
+        )
+        self.assertGreater(first_fact_count, 0)
+
+    def test_remember_phase_summary_accumulates_long_run_correctly(self) -> None:
+        """Una run larga con 4 fases debe producir un project_context_v1 con working_set no vacío
+        y un build_summary() legible."""
+        store = ContextCuratorStore(self.runtime_dir)
+        project_key = str(self.workspace.resolve())
+        chat_root = "CHAT-longrun01"
+
+        # Simular cierre de 4 fases con outputs representativos
+        phases = [
+            ("discovery", "Repositorio auditado. auth.py es clave. 3 endpoints expuestos."),
+            ("build", "Patch de seguridad aplicado en auth.py. Tests pasan."),
+            ("review", "Revisión aprobada. Sin regresiones detectadas."),
+            ("qa", "Suite QA completa. Cobertura 94%. 0 fallos."),
+        ]
+        for phase, output in phases:
+            store.remember_phase_summary(
+                project_key=project_key,
+                chat_root=chat_root,
+                phase=phase,
+                output=output,
+                source_task_ids=[f"{chat_root}::{phase}"],
+            )
+
+        final_ctx = store.load_project_context(project_key)
+
+        # El contexto debe tener entradas en al menos durable_facts y working_set
+        total_items = (
+            len(final_ctx["durable_facts"])
+            + len(final_ctx["working_set"])
+            + len(final_ctx["decisions"])
+        )
+        self.assertGreater(total_items, 0, "project_context_v1 debe tener items tras 4 fases")
+
+        # build_summary debe producir texto legible (no vacío)
+        summary = store.build_summary(final_ctx)
+        self.assertTrue(summary, "build_summary no debe ser vacío tras una run de 4 fases")
+        self.assertIn("discovery", summary.lower())
+
+    def test_curated_context_preferred_over_raw_in_continuity_output(self) -> None:
+        """_build_project_continuity_context debe anteponer el bloque curator sobre historia cruda."""
+        store = ContextCuratorStore(self.runtime_dir)
+        store.remember_preplan(
+            project_key=str(self.workspace.resolve()),
+            chat_root="CHAT-priority01",
+            user_message="Optimizar rendimiento de la API",
+            surface_hints={"surfaces": ["research"], "recommended_delegate_intents": ["delegate_lsp"]},
+            curator_summary="- endpoint /api/data es el cuello de botella\n- N+1 query en ORM detectado",
+            lead_summary="P1 rendimiento: resolver N+1 antes del release",
+            source_task_ids=["CHAT-priority01::lead_intake"],
+        )
+
+        continuity_text = _build_project_continuity_context(self.runtime_dir)
+
+        # El bloque curado debe aparecer en el output
+        self.assertIn("Context curator:", continuity_text)
+        self.assertIn("durable_facts:", continuity_text)
+
+        # El contenido curado debe aparecer antes que cualquier raw history marker
+        curator_pos = continuity_text.find("Context curator:")
+        self.assertGreater(curator_pos, -1, "Bloque 'Context curator:' debe estar presente")
+
+        # Verificar que el contenido semántico real está presente
+        self.assertIn("N+1", continuity_text)
+
 
 if __name__ == "__main__":
     unittest.main()

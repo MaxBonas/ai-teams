@@ -451,11 +451,15 @@ class SpecialistRoster:
     (findings, evidence, risks, recommendation) que el Lead lee antes de actuar.
     """
 
-    specialists: list[str]       # nombres ordenados (más crítico primero)
-    quorum_required: int         # mínimo de informes para proceder
-    quorum_mode: str             # "all" | "majority" | "any"
-    reasoning: str               # por qué se seleccionaron estos especialistas
-    economics: dict[str, str]    # specialist → tier estimado (budget_api, etc.)
+    specialists: list[str]        # nombres ordenados (más crítico primero)
+    quorum_required: int          # mínimo de informes para proceder
+    quorum_mode: str              # "all" | "majority" | "any"
+    reasoning: str                # por qué se seleccionaron estos especialistas
+    economics: dict[str, str]     # specialist → tier estimado (budget_api, etc.)
+    preferred_tool_tier: str = "budget_api"
+    # Tier sugerido para enrutar este roster. Calculado como el tier máximo
+    # entre todos los especialistas del roster (cheapest que satisface todos).
+    # "local" < "budget_api" < "advanced_api" < "senior_cloud"
 
     def is_empty(self) -> bool:
         return len(self.specialists) == 0
@@ -467,6 +471,10 @@ class SpecialistRoster:
             "specialist_roster_quorum_mode": self.quorum_mode,
             "specialist_roster_reasoning": self.reasoning,
             "specialist_roster_economics": self.economics,
+            "specialist_roster_preferred_tool_tier": self.preferred_tool_tier,
+            # Convenio de routing: cuando E10-W1 cablee el roster en orchestrator,
+            # usar preferred_tool_tier como preferred_tool_tier en RoutingRequest
+            # para que todos los especialistas vayan al tier correcto.
         }
 
 
@@ -644,13 +652,37 @@ def select_specialists_for_task(
     )
 
 
+_TIER_RANK: dict[str, int] = {
+    "local": 0,
+    "budget_api": 1,
+    "advanced_api": 2,
+    "senior_cloud": 3,
+}
+_TIER_BY_RANK: dict[int, str] = {v: k for k, v in _TIER_RANK.items()}
+
+
+def _roster_preferred_tier(economics: dict[str, str]) -> str:
+    """Calcula el tier mínimo que satisface a todos los especialistas del roster.
+
+    Regla: tier = max(tier de cada especialista). Si el roster contiene un
+    especialista de advanced_api, el tier del roster sube a advanced_api para
+    garantizar que ese especialista tenga el modelo que necesita.
+    En la práctica todos los especialistas son budget_api o local, así que
+    el resultado habitual es "budget_api".
+    """
+    if not economics:
+        return "budget_api"
+    max_rank = max(_TIER_RANK.get(str(tier).strip().lower(), 1) for tier in economics.values())
+    return _TIER_BY_RANK.get(max_rank, "budget_api")
+
+
 def _build_roster(
     *,
     specialists: list[str],
     criticality: Criticality,
     reasoning: str,
 ) -> SpecialistRoster:
-    """Construye el SpecialistRoster con quorum y economics."""
+    """Construye el SpecialistRoster con quorum, economics y routing tier."""
     n = len(specialists)
     is_high_criticality = criticality.value in ("high",)
 
@@ -661,6 +693,7 @@ def _build_roster(
             quorum_mode="any",
             reasoning=reasoning,
             economics={},
+            preferred_tool_tier="budget_api",
         )
 
     # Quorum: HIGH criticality → todos; 3 specialists → mayoría; resto → any
@@ -686,6 +719,7 @@ def _build_roster(
         quorum_mode=quorum_mode,
         reasoning=reasoning,
         economics=economics,
+        preferred_tool_tier=_roster_preferred_tier(economics),
     )
 
 
