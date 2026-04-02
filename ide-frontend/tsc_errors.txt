@@ -1,5 +1,0 @@
-src/components/OperatorTimeline.tsx(2,22): error TS6133: 'Filter' is declared but its value is never read.
-src/components/OperatorTimeline.tsx(240,19): error TS6133: 'isDelegation' is declared but its value is never read.
-src/components/OperatorTimeline.tsx(242,19): error TS6133: 'isTool' is declared but its value is never read.
-src/components/OperatorTimeline.tsx(244,19): error TS6133: 'isPeerR2' is declared but its value is never read.
-src/components/TeamConversationViewer.tsx(2,28): error TS6133: 'MailOpen' is declared but its value is never read.

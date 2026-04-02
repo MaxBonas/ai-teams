@@ -1,8 +1,0 @@
-{
-  "ts": "2026-02-21T01:21:47.449701+00:00",
-  "mode": "command",
-  "success": true,
-  "details": "Prepared markdown for NotebookLM upload: runtime\\notebooklm_ready\\notebooklm_ready_20260221T012147Z.md",
-  "ready_path": "runtime\\notebooklm_ready\\notebooklm_ready_20260221T012147Z.md",
-  "payload_path": "runtime\\notebooklm_outbox\\sync_20260221T012147Z.json"
-}

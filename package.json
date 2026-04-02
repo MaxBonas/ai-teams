@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node scripts/dev.mjs",
     "build": "cd ide-frontend && npm run build",
-    "test":  "python -m pytest tests/ -q",
+    "test": ".\\scripts\\pytest_local.bat",
     "lint":  "cd ide-frontend && npm run lint"
   },
   "engines": {

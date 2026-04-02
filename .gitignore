@@ -30,23 +30,25 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+pytest_out.txt
+.tmp_*/
+.ruff_cache/
 
 # Node / frontend
 ide-frontend/node_modules/
 ide-frontend/dist/
 ide-frontend/.vite/
+ide-frontend/build_errors.txt
+ide-frontend/tsc_errors.txt
 
-# Runtime state (generado, no versionable)
-runtime/ide_logs/
-runtime/sandboxes/
-runtime/sessions/
-runtime/memory/
-runtime/mailbox.jsonl
-runtime/events.jsonl
-runtime/cost_ledger.jsonl
-runtime/tasks.json
-runtime/dashboard.html
-runtime/notebooklm_sync_status.json
+# Local snapshots / tooling artifacts
+.aiteam_snapshots/
+
+# Runtime state (local por maquina; no versionable)
+runtime/*
+!runtime/ollama/
+runtime/ollama/*
+!runtime/ollama/Modelfile.aiteam-qwen-coder
 
 # Logs
 *.log

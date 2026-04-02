@@ -1,123 +1,165 @@
-# AI Team Hybrid Orchestrator
+# AI Team Hybrid Orchestrator — Claude Context
 
 Sistema de orquestacion multi-agente para desarrollo y entrega de software.
-Nombre del paquete: `aiteam-hybrid` (v0.1.0). Estado: operativo para orquestacion, observabilidad y continuidad por proyecto.
+
+Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `763 passed`.
+
+Fuentes de verdad operativas:
+
+- `task.md`
+- `walkthrough.md`
+- `docs/ARCHITECTURE_PLAN.md`
+- `docs/TASKS_2026_03_28.md`
+- `docs/INDEX.md`
+
+## Regla principal
+
+La prioridad del proyecto es poder seguir desarrollando rapido en `MAX-GAMINGPC` y `ORCH-01` sin que un `git pull` rompa el entorno local.
+
+Modelo de trabajo correcto:
+
+- Git comparte codigo y plantillas
+- Cada maquina mantiene su propio `venv/`
+- Cada maquina mantiene su propio `runtime/`
+- Cada maquina mantiene su propio `node_modules/`
+
+No intentar compartir `runtime/` vivo ni `venv/` entre maquinas.
 
 ## Stack
 
-- **Backend**: Python 3.10+ con FastAPI (puerto 8000)
-- **Frontend**: React 19 + TypeScript 5.9 + Vite (puerto 9483)
-- **Persistencia**: archivos JSONL en `runtime/`
-- **Tests**: pytest (30+ archivos en `tests/`)
+- Backend: FastAPI + Python 3.12
+- Frontend: React 19 + TypeScript 5.9 + Vite
+- Persistencia:
+  - SQLite en `runtime/aiteam.db` para `tasks` y `workflow_state`
+  - JSONL para ledger, eventos y registros append-only
+- compatibilidad JSON residual solo para fixtures/tests y constructores legacy
+- Tests: `pytest`
 
-## Estructura del proyecto
+## Flujo rapido entre maquinas
 
+Cuando cambies de maquina:
+
+1. En la maquina origen: `git commit` + `git push`
+2. En la maquina destino: `git pull`
+3. Ejecutar `.\scripts\prepare_dev_env.bat`
+4. Seguir trabajando
+
+## Como commitear sin romper la otra maquina
+
+Si el cambio es grande, separarlo por capas:
+
+1. portabilidad del entorno
+2. limpieza de estado local trackeado
+3. funcionalidad/tests/docu
+
+No mezclar en un solo commit:
+
+- scripts de bootstrap
+- borrado de `runtime/` trackeado
+- cambios de producto
+
+Referencia operativa:
+
+- `docs/COMMIT_STRATEGY_2026_04_02.md`
+
+Comandos recomendados:
+
+- Preparar entorno: `.\scripts\prepare_dev_env.bat`
+- Python local: `.\scripts\python_local.bat`
+- Pytest local: `.\scripts\pytest_local.bat`
+- Arranque IDE: `.\start_ide.bat`
+
+## Que viaja por Git y que no
+
+Si un cambio debe compartirse entre maquinas, debe vivir en codigo o en plantillas versionadas.
+
+Comparte por Git:
+
+- `aiteam/`
+- `api/`
+- `ide-frontend/`
+- `tests/`
+- `scripts/`
+- `docs/`
+- `config/*.example.json`
+- `pyproject.toml`
+
+No compartir por Git:
+
+- `venv/`
+- `runtime/` salvo `runtime/ollama/Modelfile.aiteam-qwen-coder`
+- `ide-frontend/node_modules/`
+- logs, caches y artefactos generados
+
+Regla practica:
+
+- Si cambias configuracion compartida, editar `config/*.example.json`
+- No usar `runtime/*.json` como fuente de verdad compartida
+
+## Bootstrap local
+
+Scripts importantes:
+
+- `scripts/ensure_local_venv.ps1`
+  - valida o recrea `venv/`
+  - instala dependencias desde `pyproject.toml`
+- `scripts/ensure_local_runtime.ps1`
+  - rehidrata `runtime/` local desde plantillas en `config/`
+- `scripts/prepare_dev_env.bat`
+  - ejecuta ambos pasos y deja el repo listo para seguir programando
+
+`start_ide.bat` ya intenta preparar `venv/` y `runtime/` antes de arrancar.
+
+## Pruebas
+
+Smoke rapido:
+
+```powershell
+.\scripts\pytest_local.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x
 ```
-aiteam/           Nucleo del orquestador (33 modulos Python)
-api/              Backend FastAPI
-ide-frontend/     Frontend React + TypeScript
-tests/            Suite de pruebas pytest
-config/           Templates de configuracion y catalogos
-docs/             28 archivos de documentacion
-scripts/          Scripts utilitarios (benchmark, ingestion)
-runtime/          Estado de runtime: memoria, eventos, mailbox
+
+Suite completa:
+
+```powershell
+.\scripts\pytest_local.bat tests -q --tb=line
 ```
 
-## Comandos de desarrollo
-
-```bash
-# Arranque rapido (Windows)
-start_ide.bat                    # levanta backend + frontend con health checks
-stop_ide.bat                     # detiene procesos del IDE
-
-# Manual
-uvicorn api.main:app --reload --port 8000          # backend
-cd ide-frontend && npm run dev -- --port 9483      # frontend
-
-# Tests
-pytest tests/
-
-# CLI
-python -m aiteam.cli <comando>
-# Comandos principales: init, plan, run, status, dashboard, system-check
-```
-
-## Arquitectura
-
-Workflow por fases: `lead_intake -> discovery -> build -> review -> qa -> lead_close`
-
-5 roles: Team Lead (R5), Researcher (R3), Engineer (R4), Reviewer (R4), QA (R4).
-
-- **Router**: Pro-first (suscripciones OpenAI/Anthropic/Google) con fallback a API.
-- **Quality gates**: Review + QA obligatorios antes de cerrar tareas de Engineer.
-- **Compliance**: guardrails para operaciones sensibles, redaccion de secretos, doble aprobacion en `prod`.
-- **FinOps**: presupuesto diario/mensual, señal de presion, ledger de costos.
-
-## Archivos clave
-
-| Archivo | Funcion |
-|---------|---------|
-| `aiteam/orchestrator.py` | Motor principal de orquestacion |
-| `aiteam/router.py` | Logica de ruteo hibrido Pro-first + API |
-| `aiteam/taskboard.py` | Gestion de tareas y dependencias |
-| `aiteam/compliance.py` | Guardrails de seguridad y compliance |
-| `aiteam/finops.py` | Presupuesto y control de costos |
-| `aiteam/memory.py` | Memoria persistente por agente |
-| `aiteam/execution.py` | Ejecucion de comandos con sandbox |
-| `api/main.py` | Entrada de la app FastAPI |
-| `ide-frontend/src/` | Interfaz web React |
-
-## Convenciones
-
-- Documentacion del proyecto en **espanol**.
-- Variables de entorno en `.env` (copiar de `.env.example`). Nunca commitear `.env` ni API keys.
-- Templates de configuracion usan sufijo `.example` (ej. `adapters.example.json`).
-- Estado de runtime va en directorios `runtime/` o `runtime_<entorno>/`.
-- Entorno de desarrollo: Windows 11, shell bash, venv en `venv/` (Python 3.12).
-- Raiz base de proyectos: `C:\Users\<usuario>\Documents\Antigravity Projects\` (varia por maquina).
-- Activar venv: `source venv/Scripts/activate` (bash). Tests: `venv/Scripts/python.exe -m pytest tests/ -q --tb=short`.
-- Tests actuales: **271 passing** (2026-03-26). Antes de cualquier cambio, verificar que pasan.
-- Smoke test rapido (2s): `venv/Scripts/python.exe -m pytest tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x`
-
-## Infraestructura — dos maquinas
-
-Este proyecto se desarrolla en un setup de dos maquinas en red local.
+## Dos maquinas
 
 | Maquina | Rol | Notas |
 |---------|-----|-------|
-| **max-gamingpc** | Principal (desarrollo activo) | Windows 11, usuario activo: `she__` |
-| **ORCH-01** (DESKTOP-SR6CQA1) | Secundaria (orquestacion) | Online en LAN, acceso via RustDesk |
+| `MAX-GAMINGPC` | Principal de desarrollo | Windows 11, usuario `she__` |
+| `ORCH-01` | Secundaria | Windows 11, acceso por RustDesk |
 
-**Syncthing** sincroniza la carpeta `Antigravity Projects` entre ambas maquinas.
-- **NUNCA sincronizar**: `venv/`, `node_modules/`, `__pycache__/`, `.git/`, `runtime/`
-- Si un venv fue sincronizado desde otra maquina, los paths internos en `pyvenv.cfg` estan rotos.
-  Recrear siempre con: `py -3.12 -m venv venv --clear && venv/Scripts/pip install -r requirements.txt`
-- **GitHub** (`github.com/MaxBonas/ai-teams`, privado) es la fuente de verdad para codigo.
+GitHub es la fuente de verdad del codigo.
 
-**Red**: NordVPN en max-gamingpc puede interferir con conexiones LAN directas (RustDesk usa UDP).
+Syncthing no debe sincronizar:
 
-## Diagnostico antes de cualquier fix
+- `venv/`
+- `node_modules/`
+- `runtime/`
+- `.git/`
+- `__pycache__/`
 
-**Regla: listar 3 causas probables ANTES de tocar nada. Arreglar de una en una y verificar.**
+## Diagnostico antes de tocar nada
 
-### MCP servers que no arrancan — orden obligatorio
+Regla: listar 3 causas probables antes de tocar nada. Arreglar de una en una y verificar.
 
-1. **Env vars** — Claude Desktop en Windows no hereda el PATH del shell. Verificar primero.
-2. **Venv integridad** — ¿existe local? ¿`pyvenv.cfg` apunta a esta maquina?
-3. **Paths con espacios** — `Antigravity Projects` tiene un espacio; usar comillas siempre.
-4. **Puerto/protocolo** — verificar puerto correcto y TCP vs UDP antes de tocar firewall.
-5. Solo si 1-4 estan OK: investigar DLL / pywin32. Usar skill `/fix-mcp`.
+Orden sugerido para fallos tipicos en Windows:
 
-### Problemas de red / conectividad — orden obligatorio
+1. Entorno local roto (`venv`, PATH, launcher, deps)
+2. Path con espacios o ruta de otra maquina
+3. Estado runtime local ausente o contaminado
 
-1. Verificar si **NordVPN esta activo** — puede bloquear trafico LAN directo.
-2. Verificar **protocolo correcto** (RustDesk = UDP, no TCP).
-3. Verificar **puerto correcto** antes de modificar reglas de firewall.
-4. Solo entonces: revisar reglas de firewall.
+## Notas operativas
 
-### Python / venv en Windows
+- `api/main.py` sigue siendo un archivo grande y acoplado
+- `runtime/` es local por maquina aunque la persistencia principal ya use SQLite
+- Los warnings `UnicodeDecodeError cp1252` en subprocesos externos son ruido del SO salvo que rompan comportamiento real
 
-- Multiples versiones instaladas. Usar siempre `py -3.12` o el venv del proyecto.
-- En bash (Git Bash): paths con `/c/Users/...` no con `C:\Users\...`.
-- Comillas obligatorias en paths con espacios: `"/c/Users/she__/Documents/Antigravity Projects/..."`.
-- `UnicodeDecodeError cp1252` en subprocesos externos: ignorar, es un warning del SO, no del codigo.
+## Documentos de referencia
+
+- `AGENTS.md`: contexto operativo general del repo
+- `README.md`: arranque y flujo recomendado
+- `walkthrough.md`: estabilizacion tecnica reciente
+- `task.md`: backlog y siguientes pasos

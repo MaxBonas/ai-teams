@@ -19,6 +19,7 @@ if errorlevel 1 (
 
 call :resolve_python || goto :fail
 call :resolve_npm    || goto :fail
+call :ensure_runtime || goto :fail
 call :ensure_frontend_deps || goto :fail
 call :ensure_log_dir || goto :fail
 
@@ -63,17 +64,18 @@ start "" "http://localhost:%FRONTEND_PORT%"
 goto :success
 
 :ensure_frontend_deps
-if not exist "%ROOT_DIR%ide-frontend\node_modules" (
-    echo [AI Team IDE] node_modules no encontrado, ejecutando npm install...
-    pushd "%ROOT_DIR%ide-frontend" >nul
-    npm install --prefer-offline --no-fund --no-audit
-    if errorlevel 1 (
-        popd >nul
-        echo [AI Team IDE] ERROR: npm install fallido.
-        exit /b 1
-    )
-    popd >nul
-    echo [AI Team IDE] Dependencias instaladas.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%scripts\ensure_frontend_deps.ps1" -Quiet >nul 2>nul
+if errorlevel 1 (
+    echo [AI Team IDE] ERROR: No se pudieron preparar las dependencias frontend.
+    exit /b 1
+)
+exit /b 0
+
+:ensure_runtime
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%scripts\ensure_local_runtime.ps1" -Quiet >nul 2>nul
+if errorlevel 1 (
+    echo [AI Team IDE] ERROR: No se pudo preparar el runtime local.
+    exit /b 1
 )
 exit /b 0
 
@@ -86,15 +88,15 @@ if errorlevel 1 (
 exit /b 0
 
 :resolve_python
-if exist "%ROOT_DIR%venv\Scripts\python.exe" (
-    call :python_has_uvicorn "%ROOT_DIR%venv\Scripts\python.exe"
-    if not errorlevel 1 (
-        set "PYTHON_EXE=%ROOT_DIR%venv\Scripts\python.exe"
-        echo [AI Team IDE] Usando venv Python.
-        exit /b 0
-    )
-    echo [AI Team IDE] WARNING: venv Python encontrado pero uvicorn no instalado.
+set "PYTHON_EXE="
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%scripts\ensure_local_venv.ps1" -PrintPython -Quiet 2^>nul`) do (
+    if not defined PYTHON_EXE set "PYTHON_EXE=%%i"
 )
+if defined PYTHON_EXE (
+    echo [AI Team IDE] Usando Python local del proyecto.
+    exit /b 0
+)
+echo [AI Team IDE] WARNING: no se pudo validar o reparar el venv local; probando fallback.
 where python >nul 2>nul
 if errorlevel 1 (
     echo [AI Team IDE] ERROR: Python no encontrado. Instala Python o crea venv en .\venv

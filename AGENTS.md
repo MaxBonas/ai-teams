@@ -2,13 +2,14 @@
 
 Sistema de orquestacion multi-agente para desarrollo y entrega de software.
 Nombre del paquete: `aiteam-hybrid` (v0.1.0). Estado: operativo para orquestacion, observabilidad y continuidad por proyecto.
+Validacion mas reciente: `2026-04-02`, `MAX-GAMINGPC`, `763 passed`.
 
 ## Stack
 
-- **Backend**: Python 3.10+ con FastAPI (puerto 8000)
-- **Frontend**: React 19 + TypeScript 5.9 + Vite (puerto 9483)
-- **Persistencia**: archivos JSONL en `runtime/`
-- **Tests**: pytest (30+ archivos en `tests/`)
+- **Backend**: Python 3.10+ con FastAPI (launcher por defecto en puerto 8010)
+- **Frontend**: React 19 + TypeScript 5.9 + Vite (launcher por defecto en puerto 9490)
+- **Persistencia**: SQLite para `tasks` y `workflow_state`, JSONL para ledger/eventos y compatibilidad JSON residual solo en tests/constructores legacy
+- **Tests**: pytest (`763 passed` en `MAX-GAMINGPC`, 2026-04-02)
 
 ## Estructura del proyecto
 
@@ -31,24 +32,25 @@ start_ide.bat                    # levanta backend + frontend con health checks
 stop_ide.bat                     # detiene procesos del IDE
 
 # Manual
-uvicorn api.main:app --reload --port 8000          # backend
-cd ide-frontend && npm run dev -- --port 9483      # frontend
+scripts\python_local.bat -m uvicorn api.main:app --reload --port 8010   # backend
+cd ide-frontend && npm run dev -- --port 9490                           # frontend
 
 # Tests
-pytest tests/
+scripts\pytest_local.bat tests -q --tb=line
 
 # CLI
-python -m aiteam.cli <comando>
+scripts\python_local.bat -m aiteam.cli <comando>
 # Comandos principales: init, plan, run, status, dashboard, system-check
 ```
 
 ## Arquitectura
 
-Workflow por fases: `lead_intake -> discovery -> build -> review -> qa -> lead_close`
+Workflow base por fases: `lead_intake -> dynamic phases -> lead_close`
 
-5 roles: Team Lead (R5), Researcher (R3), Engineer (R4), Reviewer (R4), QA (R4).
+6 roles: Team Lead (R5), Scout (R2/R3), Researcher (R3), Engineer (R4), Reviewer (R4), QA (R4).
 
 - **Router**: Pro-first (suscripciones OpenAI/Anthropic/Google) con fallback a API.
+- **Observabilidad de routing**: pestaña `Routing` en `StatusPanel` y endpoint `/api/aiteam/routing/catalog` para ver primario/fallbacks efectivos por rol.
 - **Quality gates**: Review + QA obligatorios antes de cerrar tareas de Engineer.
 - **Compliance**: guardrails para operaciones sensibles, redaccion de secretos, doble aprobacion en `prod`.
 - **FinOps**: presupuesto diario/mensual, señal de presion, ledger de costos.
@@ -73,11 +75,15 @@ Workflow por fases: `lead_intake -> discovery -> build -> review -> qa -> lead_c
 - Variables de entorno en `.env` (copiar de `.env.example`). Nunca commitear `.env` ni API keys.
 - Templates de configuracion usan sufijo `.example` (ej. `adapters.example.json`).
 - Estado de runtime va en directorios `runtime/` o `runtime_<entorno>/`.
-- Entorno de desarrollo: Windows 11, shell bash, venv en `venv/` (Python 3.12).
+- Entorno de desarrollo: Windows 11, shell PowerShell o bash, venv en `venv/` (Python 3.12).
 - Raiz base de proyectos: `C:\Users\<usuario>\Documents\Antigravity Projects\` (varia por maquina).
-- Activar venv: `source venv/Scripts/activate` (bash). Tests: `venv/Scripts/python.exe -m pytest tests/ -q --tb=short`.
-- Tests actuales: **271 passing** (2026-03-26). Antes de cualquier cambio, verificar que pasan.
-- Smoke test rapido (2s): `venv/Scripts/python.exe -m pytest tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x`
+- Activar venv: `source venv/Scripts/activate` (bash). Bootstrap recomendado: `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ensure_local_venv.ps1`
+- Wrappers locales:
+  - Python: `.\scripts\python_local.bat`
+  - Pytest: `.\scripts\pytest_local.bat`
+  - Reanudacion tras pull: `.\scripts\prepare_dev_env.bat`
+- Tests actuales: **763 passed** (2026-04-02, `MAX-GAMINGPC`). Antes de cualquier cambio, verificar que pasan.
+- Smoke test rapido (2s): `.\scripts\pytest_local.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x`
 
 ## Infraestructura — dos maquinas
 
@@ -85,16 +91,72 @@ Este proyecto se desarrolla en un setup de dos maquinas en red local.
 
 | Maquina | Rol | Notas |
 |---------|-----|-------|
-| **max-gamingpc** | Principal (desarrollo activo) | Windows 11, usuario activo: `she__` |
+| **MAX-GAMINGPC** | Principal (desarrollo activo) | Windows 11, usuario activo: `she__` |
 | **ORCH-01** (DESKTOP-SR6CQA1) | Secundaria (orquestacion) | Online en LAN, acceso via RustDesk |
 
 **Syncthing** sincroniza la carpeta `Antigravity Projects` entre ambas maquinas.
 - **NUNCA sincronizar**: `venv/`, `node_modules/`, `__pycache__/`, `.git/`, `runtime/`
 - Si un venv fue sincronizado desde otra maquina, los paths internos en `pyvenv.cfg` estan rotos.
-  Recrear siempre con: `py -3.12 -m venv venv --clear && venv/Scripts/pip install -r requirements.txt`
+  Recrear siempre con: `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ensure_local_venv.ps1 -ForceRecreate`
+- Si el launcher de `venv/Scripts/python.exe` falla en una maquina sincronizada, tratar el venv como no confiable y recrearlo localmente antes de depurar codigo.
+- `start_ide.bat` ya intenta validar o reparar `venv/` antes de arrancar backend/frontend.
+- `runtime/` debe tratarse como estado local por maquina. Si falta config runtime tras un pull, rehidratar con `.\scripts\prepare_dev_env.bat`.
 - **GitHub** (`github.com/MaxBonas/ai-teams`, privado) es la fuente de verdad para codigo.
 
 **Red**: NordVPN en max-gamingpc puede interferir con conexiones LAN directas (RustDesk usa UDP).
+
+## Protocolo De Desarrollo Entre Maquinas
+
+Objetivo principal: poder avanzar en una maquina, cambiar a la otra y seguir programando rapido sin reparaciones manuales largas.
+
+Regla de oro:
+
+- Git comparte codigo y plantillas
+- Cada maquina mantiene su propio `venv/`
+- Cada maquina mantiene su propio `runtime/`
+- Cada maquina mantiene su propio `node_modules/`
+
+Flujo obligatorio al cambiar de maquina:
+
+1. `git commit` + `git push` en la maquina origen
+2. `git pull` en la maquina destino
+3. `.\scripts\prepare_dev_env.bat`
+4. continuar con `.\scripts\python_local.bat` y `.\scripts\pytest_local.bat`
+
+## Estrategia de commit entre maquinas
+
+Cuando haya una tanda grande de cambios, no hacer un commit monolítico si mezcla:
+
+- portabilidad del entorno
+- limpieza de artefactos locales
+- funcionalidad de backend/frontend
+- documentación
+
+Estrategia recomendada:
+
+1. `chore/dev-env-portability`
+2. `chore/stop-tracking-local-state`
+3. `feat/...` con funcionalidad, tests y docu
+
+Regla práctica:
+
+- el commit 1 debe dejar `pull -> .\scripts\prepare_dev_env.bat` funcionando
+- el commit 2 debe sacar del repo `runtime/`, snapshots y artefactos locales históricamente trackeados
+- el commit 3 debe llevar el producto
+
+Documento de referencia para este corte:
+
+- `docs/COMMIT_STRATEGY_2026_04_02.md`
+
+Configuracion compartida:
+
+- editar `config/*.example.json`
+- no usar `runtime/*.json` como fuente de verdad compartida
+- `prepare_dev_env` solo refresca desde plantilla si el archivo local seguia sincronizado; si detecta override local, lo conserva
+
+Excepcion permitida en `runtime/`:
+
+- `runtime/ollama/Modelfile.aiteam-qwen-coder`
 
 ## Diagnostico antes de cualquier fix
 

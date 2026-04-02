@@ -52,9 +52,30 @@ async function waitForHttp(url, timeoutMs = 30_000) {
 // ── Process helpers ──────────────────────────────────────────────────────────
 
 function resolvePython() {
+  if (IS_WIN) {
+    const wrapper = join(ROOT, 'scripts', 'python_local.bat');
+    if (existsSync(wrapper)) return wrapper;
+  }
   const venvPy = join(ROOT, 'venv', 'Scripts', 'python.exe');
   if (existsSync(venvPy)) return venvPy;
   return IS_WIN ? 'python' : 'python3';
+}
+
+function runSetup() {
+  if (!IS_WIN) return Promise.resolve();
+  const setupScript = join(ROOT, 'scripts', 'prepare_dev_env.bat');
+  if (!existsSync(setupScript)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const proc = spawn('cmd.exe', ['/c', setupScript], {
+      cwd: ROOT,
+      stdio: 'inherit',
+    });
+    proc.on('error', reject);
+    proc.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`prepare_dev_env failed with code ${code}`));
+    });
+  });
 }
 
 function spawnProc(cmd, args, opts = {}) {
@@ -74,6 +95,7 @@ function spawnProc(cmd, args, opts = {}) {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  await runSetup();
   // Find two free ports (prefer familiar ones, fall back to any)
   const [backendPort, frontendPort] = await Promise.all([
     freePort(8010),

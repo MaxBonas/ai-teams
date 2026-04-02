@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "aiteam-hybrid"
 version = "0.1.0"
@@ -15,8 +19,18 @@ dependencies = [
     "pywinpty; sys_platform == 'win32'",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "httpx",
+    "pytest",
+]
+
 [project.scripts]
 aiteam = "aiteam.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["aiteam*"]
+exclude = ["tests*", "runtime*", "docs*", "ide-frontend*", "config*", "default*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,139 +1,129 @@
-# AI Teams — Handoff para Claude Móvil
-> Pega este archivo completo en Claude (móvil o web) para retomar el proyecto con contexto completo.
+# AI Team Hybrid Orchestrator — Handoff Actual
 
----
+Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `763 passed`.
 
-## ¿Qué es este proyecto?
+Este archivo sustituye el handoff historico de fin de marzo como punto de entrada rapido para retomar el proyecto.
 
-**AI Teams Hybrid Orchestrator** (`github.com/MaxBonas/ai-teams`, privado) — sistema de orquestación multi-agente para desarrollo de software. 5 roles: Team Lead (R5), Researcher (R3), Engineer (R4), Reviewer (R4), QA (R4). Workflow por fases: `lead_intake → discovery → build → review → qa → lead_close`.
+Fuentes de verdad operativas:
 
-**Stack:**
-- Backend: Python 3.10+ / FastAPI (puerto 8000)
-- Frontend: React 19 + TypeScript + Vite (puerto 9483)
-- Arranque: `start_ide.bat` en Windows 11
-- Repositorio: `C:\Users\Max\Antigravity Projects\Ai_Teams\`
-- Venv: `venv/Scripts/activate` (bash), Python 3.12
+- `task.md`
+- `walkthrough.md`
+- `docs/ARCHITECTURE_PLAN.md`
+- `docs/TASKS_2026_03_28.md`
+- `docs/INDEX.md`
 
----
+## Objetivo operativo
 
-## Estado actual (2026-03-29/30)
+La prioridad no es compartir el runtime vivo entre `MAX-GAMINGPC` y `ORCH-01`.
+La prioridad es poder seguir programando rapido en ambas maquinas y que un `git pull` no rompa el entorno local.
 
-### Lo que funciona bien ✅
-- Orquestador ejecuta workflows reales con LLMs (Anthropic claude-sonnet-4-6 via suscripción)
-- Streaming SSE del Team Lead al frontend en tiempo real
-- Frontend IDE con 2 paneles (chat + workspace), file explorer, terminal
-- Chat history: carga chats anteriores desde StatusPanel
-- Historial de runs limitado al workspace activo (fix reciente)
-- Botón × para borrar proyectos de la lista "Recent Projects"
-- Input de Rounds como texto libre (se puede borrar y reescribir sin que revierta)
-- Inspector Decision Trace: card visual con modal expandible sin truncar
+## Regla de oro
 
-### Bugs conocidos sin fix ❌
+Git comparte:
 
-**BUG #1 — CRÍTICO: `require_execution_plan` auto-bloquea `plan_engineering`**
-- Archivo: `aiteam/orchestrator.py`
-- El validador pre-ejecución exige un `execution_plan` para correr... la fase que crea ese plan
-- Resultado: `plan_engineering` falla en 168ms con 0 llamadas LLM, `status: failed`, bloquea build/review/qa
-- Ha ocurrido en 3 sesiones distintas: CHAT-B5D99644, CHAT-D08CC854, CHAT-C32F147C
-- Fix: excluir la fase `plan_engineering` de la validación `require_execution_plan`, o aplicar esa validación solo a fases ≥ `build`
+- codigo
+- tests
+- scripts
+- documentacion
+- plantillas de configuracion
 
-**BUG #2 — ALTO: Review/QA se ejecutan aunque build esté bloqueado**
-- Archivo: `aiteam/orchestrator.py` (scheduler de fases)
-- Si `build:blocked` por `dependency_failed`, Review y QA ejecutan igualmente, gastan ~1.7k tokens para rechazar "nada"
-- Fix: si fase dependiente está `blocked`, marcar downstream como `skipped` automáticamente
+Cada maquina mantiene local:
 
-**BUG #3 — MEDIO: `filesystem_mcp` apunta a usuario incorrecto**
-- Archivo: `runtime/mcp_servers.json` y configuración Claude Desktop
-- Path erróneo: `C:\Users\she__\Documents\Antigravity Projects\`
-- Path correcto: `C:\Users\Max\Antigravity Projects\`
-- Consecuencia: agentes no pueden leer/escribir archivos reales del workspace
+- `venv/`
+- `runtime/`
+- `node_modules/`
 
-**BUG #4 — MEDIO: `build_synthesis_draft` marca `completed` sin entregar nada**
-- Un agente puede terminar con `status: completed` pero output `"BLOCKED – no proceder"`
-- Las métricas de éxito quedan infladas (tasa real ≠ tasa reportada)
-- Fix: añadir campo `deliverable_produced: bool` en `session_index.jsonl`
+## Protocolo al cambiar de maquina
 
-**PROBLEMA #5 — DISEÑO: "Continue" crea sesión nueva en vez de retomar fase fallida**
-- Al pulsar Continue, el orquestador lanza un nuevo `lead_intake` replanificando desde cero (~1.1k tokens desperdiciados)
-- Debería poder reanudar directamente en la fase fallida con contexto ya cargado
+1. En la maquina donde avanzaste: `git commit` + `git push`
+2. En la otra maquina: `git pull`
+3. Ejecutar:
 
-### MCPs: estado
-- `context7_mcp`: ✅ healthy
-- `github_mcp`: ✅ healthy (pero disabled)
-- `semgrep_mcp`, `perplexity_mcp`, `playwright_mcp`: ❌ unhealthy (404 NPM)
-- `filesystem_mcp`: ❌ unhealthy (ruta incorrecta — BUG #3)
-- `git_mcp`: ❌ unhealthy (dependencia `cryptography` rota en uvx)
-
----
-
-## Proyecto "Prueba AITeams" — Chromashift
-
-Workspace de prueba en `C:\Users\Max\Antigravity Projects\Prueba AITeams\`.
-
-**Lo que el equipo de agentes acordó:**
-- Juego: "Chromashift" — puzzle-plataformas con manipulación de colores RGB
-- Stack: JavaScript/Canvas API, browser-native, zero setup
-- Scope MVP: <500 LOC, abrir HTML y funciona
-- GDD y spec técnica mínima: guardados en `runtime/workflow_state.json`
-
-**Lo que NO se implementó** (porque build quedó bloqueado por BUG #1):
-- El código del juego real con mecánicas RGB
-- `game.js` actual es un prototipo anterior (collector básico, no Chromashift)
-
-**Para continuar Chromashift:** pedir explícitamente "implementa el core loop de Chromashift con Canvas API, mecánica de cambio de color RGB" — no "continue" genérico.
-
----
-
-## Archivos clave
-
-| Archivo | Función |
-|---------|---------|
-| `aiteam/orchestrator.py` | Motor principal — aquí están BUG #1 y #2 |
-| `api/main.py` | API FastAPI — streaming SSE, endpoints de chat/history |
-| `aiteam/adapters/api.py` | Router de modelos LLM |
-| `ide-frontend/src/components/TeamChat.tsx` | Chat principal con streaming |
-| `ide-frontend/src/components/StatusPanel.tsx` | Panel lateral con historial |
-| `ide-frontend/src/components/WorkspaceSelector.tsx` | Selector de proyecto |
-| `ide-frontend/src/services/workspaceService.ts` | localStorage de workspaces |
-| `runtime/` | Estado de runtime (no commitear) |
-
----
-
-## Cómo arrancar
-
-```bash
-# Windows — doble clic o desde terminal:
-start_ide.bat
-
-# Manual:
-source venv/Scripts/activate
-uvicorn api.main:app --reload --port 8000   # backend
-cd ide-frontend && npm run dev -- --port 9483  # frontend
-
-# Tests (smoke, 2s):
-venv/Scripts/python.exe -m pytest tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py -q --tb=line -x
+```powershell
+.\scripts\prepare_dev_env.bat
 ```
 
----
+4. Seguir trabajando con:
 
-## Próximas tareas priorizadas
+```powershell
+.\scripts\python_local.bat
+.\scripts\pytest_local.bat
+```
 
-1. **P0** — Fix BUG #1: `require_execution_plan` en `orchestrator.py` no debe aplicarse a `plan_engineering`
-2. **P0** — Fix BUG #3: corregir path de `filesystem_mcp` (usuario `she__` → `Max`)
-3. **P1** — Fix BUG #2: cortocircuitar Review/QA cuando `build:blocked`
-4. **P1** — Implementar Chromashift real (core loop + color switching)
-5. **P2** — Fix BUG #4: añadir `deliverable_produced` a sesiones
-6. **P2** — Fix PROBLEMA #5: Continue debe retomar fase fallida, no crear sesión nueva
+## Estrategia de commit recomendada
 
----
+Para esta fase del repo, la regla es:
 
-## Contexto de dos máquinas
+- no mezclar portabilidad, limpieza de estado local y funcionalidad en un único commit grande
 
-| Máquina | Rol |
+Orden recomendado:
+
+1. commit de portabilidad del entorno
+2. commit que deja de trackear `runtime/` y otros artefactos locales
+3. commit de funcionalidad/tests/docu
+
+Referencia detallada:
+
+- `docs/COMMIT_STRATEGY_2026_04_02.md`
+
+## Estado tecnico actual
+
+- `TaskBoard` y `workflow_state` persisten en SQLite
+- La API/UI leen SQLite como fuente normal; JSON legacy queda solo como compatibilidad residual de tests/constructores
+- El evidence gate ya no acepta `git diff` ajeno antes de rechazar output simulado
+- La persistencia ya no pisa snapshots completos entre procesos
+- El repo ya trata `runtime/` como estado local por maquina
+- `E10-W9` ya queda cerrado: 8 tests E2E multiagente activos y sin `skip`
+
+## Scripts clave
+
+- `scripts/ensure_local_venv.ps1`
+- `scripts/ensure_local_runtime.ps1`
+- `scripts/prepare_dev_env.bat`
+- `scripts/python_local.bat`
+- `scripts/pytest_local.bat`
+- `start_ide.bat`
+
+## Reglas de configuracion
+
+Si un cambio debe viajar por Git, editar plantillas en `config/`:
+
+- `config/adapters.example.json`
+- `config/mcp_servers.example.json`
+- `config/model_catalog.example.json`
+
+No usar estos archivos como fuente de verdad compartida:
+
+- `runtime/adapters.json`
+- `runtime/mcp_servers.json`
+- `runtime/model_catalog.json`
+- `runtime/provider_*.json`
+- `runtime/system_check.json`
+
+## Smoke recomendado
+
+```powershell
+.\scripts\pytest_local.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_api_aiteam_state.py -q --tb=line -x
+```
+
+## Suite completa
+
+```powershell
+.\scripts\pytest_local.bat tests -q --tb=line
+```
+
+## Maquinas
+
+| Maquina | Rol |
 |---------|-----|
-| `max-gamingpc` | Principal (desarrollo activo), Windows 11 |
-| `ORCH-01` (DESKTOP-SR6CQA1) | Secundaria, online en LAN, acceso RustDesk |
+| `MAX-GAMINGPC` | principal de desarrollo |
+| `ORCH-01` | secundaria |
 
-Syncthing sincroniza `Antigravity Projects/` entre ambas. **Nunca sincronizar** `venv/`, `node_modules/`, `runtime/`.
+GitHub es la fuente de verdad del codigo.
 
-Repo en GitHub: `github.com/MaxBonas/ai-teams` (privado) — fuente de verdad para código.
+## Siguiente deuda tecnica relevante
+
+- Robustizar la vista `Routing` antes de abrir la fase editable
+- Abrir la fase editable de asignacion de providers/modelos por rol con override local seguro
+- Mantener limpieza, unificacion y criba de documentacion interna como prioridad activa
+- Vigilar unos dias el flujo `pull -> prepare_dev_env -> seguir programando`
