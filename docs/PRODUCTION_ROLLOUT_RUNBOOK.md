@@ -50,7 +50,7 @@ Salida de fase:
 ## Respuesta a incidentes
 
 1. Pausar nuevas tareas (`run` detenido).
-2. Revisar `events.jsonl`, `mailbox.jsonl`, `tasks.json`.
+2. Revisar `events.jsonl`, `mailbox.jsonl`, `aiteam.db` y, solo si hace falta compatibilidad legacy, `tasks.json`.
 3. Identificar tipo:
    - compliance
    - calidad

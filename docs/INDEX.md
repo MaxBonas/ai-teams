@@ -1,8 +1,18 @@
-# AI Team — Índice de Documentación
+# AI Team — Indice de Documentacion
 
-**Actualizado**: 2026-03-31
-**Tests**: 386 passing | 28 fallos pre-existentes (infraestructura, ver T-F en TASKS)
-**Visión del proyecto**: IDE multimodelo con equipo de agentes (Team Lead, Researcher, Engineer, Reviewer, QA, Scout) que delega a modelos baratos, celebra reuniones multimodelo donde cada modelo aporta su perspectiva, y el Lead tiene la última palabra pero debe justificar los desacuerdos.
+**Actualizado**: 2026-04-02
+**Maquina validada**: `MAX-GAMINGPC`
+**Tests**: `763 passed`
+**Persistencia**: SQLite en `runtime/aiteam.db` para `tasks` y `workflow_state`, con compatibilidad JSON residual solo para tests/constructores legacy
+**Vision del proyecto**: IDE multimodelo con equipo de agentes (Team Lead, Scout, Researcher, Engineer, Reviewer, QA) que delega por tiers, mantiene continuidad por proyecto y aplica quality gates antes de cerrar trabajo de build.
+
+---
+
+## Taxonomia documental
+
+- **Fuente de verdad operativa**: backlog vivo, estado validado, orden de prioridades y decisiones de refactor
+- **Referencia vigente**: diseño, arquitectura o políticas útiles, pero no backlog operativo
+- **Historico**: contexto útil para auditoría o trazabilidad; no usar para decidir el siguiente trabajo
 
 ---
 
@@ -10,11 +20,15 @@
 
 | Documento | Qué contiene |
 |---|---|
+| `../walkthrough.md` | Walkthrough tecnico de la estabilizacion reciente en `MAX-GAMINGPC` |
+| `../task.md` | Estado actual, backlog inmediato y siguientes pasos |
 | `TASKS_2026_03_28.md` | **Backlog principal** — epics completados, tareas pendientes, definición de done |
 | `DESIGN_2026_03_31.md` | Diseño de scoring, scout layer, WAITING_USER, LCP directives (implementado) |
 | `DESIGN_2026_03_28.md` | Diseño de Agent Lanes y Dynamic Phases (implementado) |
 | `ARCHITECTURE.md` | Arquitectura del sistema: módulos, roles, flujo de fases, calidad gates |
+| `ARCHITECTURE_PLAN.md` | **Plan de fricciones arquitectónicas**: qué tocar, cuándo y en qué orden. Fuente de verdad para decisiones de refactor. |
 | `MODEL_POLICY.md` | Catálogo de modelos, tiers, reglas de ruteo Pro-first + fallback |
+| `ROUTING_CATALOG_VIEW.md` | Objetivos y diseño de la nueva vista consultable de routing por rol |
 | `CONVERSATIONAL_AGENTS_PLAN.md` | Objetivo de agentes con continuidad conversacional real por proyecto |
 | `SECURITY_COMPLIANCE.md` | Políticas de compliance: guardrails, redacción, doble aprobación prod |
 | `PRODUCTION_ROLLOUT_RUNBOOK.md` | Despliegue en stage/prod, health checks, rollback |
@@ -36,16 +50,33 @@
 
 ---
 
+## Documentos historicos del repo raiz
+
+Estos archivos se conservan por trazabilidad, pero no deben usarse como backlog vivo ni como descripción actual del sistema:
+
+| Documento | Estado |
+|---|---|
+| `../TASKS.md` | Historico consolidado |
+| `../PLAN_AGENTIDAD.md` | Historico / exploracion |
+| `../PLAN_MEJORAS.md` | Historico / exploracion |
+| `../ROADMAP_FLUJOS_Y_AGENTES.md` | Historico / supersedido |
+| `../ROADMAP_PRODUCCION_AITEAM.md` | Historico / supersedido |
+
+---
+
 ## Lectura recomendada según objetivo
 
 ### Quiero entender el estado actual y el backlog
-→ `TASKS_2026_03_28.md` + `DESIGN_2026_03_31.md`
+→ `../task.md` + `TASKS_2026_03_28.md`
+
+### Quiero entender la estabilizacion reciente en gamingpc
+→ `../walkthrough.md` + `../task.md`
 
 ### Quiero implementar una nueva feature
 → `DESIGN_2026_03_31.md` → `ARCHITECTURE.md` → `TASKS_2026_03_28.md` (buscar el epic)
 
 ### Quiero entender cómo funciona el routing multimodelo
-→ `MODEL_POLICY.md` → `ARCHITECTURE.md#router`
+→ `MODEL_POLICY.md` → `ROUTING_CATALOG_VIEW.md` → `ARCHITECTURE.md#router`
 
 ### Quiero entender la visión de agentes conversacionales
 → `CONVERSATIONAL_AGENTS_PLAN.md` → `DESIGN_2026_03_28.md`

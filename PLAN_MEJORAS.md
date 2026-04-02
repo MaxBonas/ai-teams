@@ -1,5 +1,7 @@
 # Plan de Mejoras — Segunda Auditoria `aiteam-hybrid`
 
+> Documento historico de exploracion. No usar como backlog activo.
+> Referencias activas: `task.md`, `walkthrough.md`, `docs/TASKS_2026_03_28.md`.
 > Fecha: 2026-03-03
 > Estado: En implementacion
 

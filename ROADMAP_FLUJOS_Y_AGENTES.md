@@ -1,5 +1,7 @@
 # Roadmap Flujos y Agentes — AI Team Hybrid Orchestrator
 
+> Documento historico / supersedido. No usar como fuente de verdad para prioridades actuales.
+> Para estado vivo y prioridades: `task.md`, `walkthrough.md`, `docs/ARCHITECTURE_PLAN.md`, `docs/TASKS_2026_03_28.md`.
 > Fecha: 2026-03-26
 > Fuente: consolidado de `TASKS.md`, `docs/CONVERSATIONAL_AGENTS_PLAN.md` y `docs/TEAM_FLOW_ANALYSIS.md`
 

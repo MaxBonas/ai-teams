@@ -1,5 +1,7 @@
 # Plan de Agentidad — De Pipeline a Equipo Autonomo
 
+> Documento historico de exploracion. No usar como fuente de verdad operativa.
+> Referencias activas: `task.md`, `docs/ARCHITECTURE_PLAN.md`, `docs/TASKS_2026_03_28.md`.
 > Fecha: 2026-03-22
 > Estado: Batch 5 + Batch 6 completados (2026-03-22)
 > Prerequisitos: Batch 1-4 de Agent Flow v2 completados (shared state, gate iteration, sessions, MCP, LLM adapters, communication, skills)

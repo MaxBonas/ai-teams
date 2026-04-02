@@ -1,5 +1,8 @@
 # Roadmap Produccion AI Teams
 
+> Documento historico / supersedido. No usar como backlog activo.
+> Para rollout y estado vigente: `docs/PRODUCTION_ROLLOUT_RUNBOOK.md`, `task.md`, `docs/TASKS_2026_03_28.md`.
+
 Este documento guarda el roadmap completo (41 tareas) para llevar el flujo de AI Teams a produccion real, con evidencia verificable y sin salidas simuladas disfrazadas.
 
 ## Estado actual (iterativo)

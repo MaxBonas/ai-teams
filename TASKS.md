@@ -1,5 +1,8 @@
 # Tasks — AI Team Hybrid Orchestrator
 
+> Estado 2026-04-01: documento historico. No usar como backlog activo.
+> Fuente de verdad operativa: `task.md`, `walkthrough.md`, `docs/ARCHITECTURE_PLAN.md`, `docs/TASKS_2026_03_28.md`.
+
 > Ultima actualizacion: 2026-03-26 (native function calling — 321 tests)
 
 ## Completado
