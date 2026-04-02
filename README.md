@@ -4,9 +4,9 @@ Sistema de orquestacion multi-agente para desarrollo y entrega de software.
 
 ## Estado validado
 
-- Fecha: `2026-04-02`
-- Maquina: `MAX-GAMINGPC`
-- Suite completa: `776 passed`
+- Fecha: `2026-04-03`
+- Maquina: `ORCH-01`
+- Suite completa: `858 passed`
 - Persistencia principal: `runtime/aiteam.db` para `tasks` y `workflow_state`
 - Compatibilidad legacy: JSON residual solo en fixtures/tests y constructores legacy, fuera del camino normal de la API
 
@@ -116,7 +116,7 @@ Invariantes:
 - `CONTRIBUTING.md`: protocolo de contribucion y trabajo entre maquinas
 - `walkthrough.md`: resumen tecnico de la estabilizacion reciente
 - `task.md`: backlog y siguientes pasos validados
-- `docs/TASKS_2026_03_28.md`: backlog ampliado del proyecto
+- `docs/HISTORY.md`: registro de hitos completados por bloque
 - `docs/ROUTING_CATALOG_VIEW.md`: objetivos y diseño de la vista consultable del routing por rol
 - `AGENTS.md`: contexto operativo para agentes en este repo
 
@@ -134,6 +134,6 @@ Referencia: `docs/NAMING_COLLISION_INVESTIGATION.md`
 
 ## Politica de documentacion interna
 
-- Fuente de verdad operativa: `task.md`, `walkthrough.md`, `docs/ARCHITECTURE_PLAN.md`, `docs/TASKS_2026_03_28.md`, `docs/INDEX.md`
+- Fuente de verdad operativa: `task.md`, `walkthrough.md`, `docs/ARCHITECTURE_PLAN.md`, `docs/INDEX.md`
 - Fuente de verdad de codigo: Git + tests + runtime SQLite
-- Los documentos root historicos (`TASKS.md`, `PLAN_AGENTIDAD.md`, `PLAN_MEJORAS.md`, `ROADMAP_*.md`) se conservan como referencia, no como backlog activo
+- Los documentos historicos estan en `docs/archive/`, no usarlos como backlog activo

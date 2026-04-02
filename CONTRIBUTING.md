@@ -73,7 +73,7 @@ git pull
 
 ```powershell
 .\scripts\python_local.bat
-.\scripts\pytest_local.bat
+.\scripts\pytest_local_stable.bat
 ```
 
 ## Estrategia de commits grandes
@@ -92,9 +92,7 @@ No mezclar en el mismo commit:
 
 Si el commit elimina archivos históricamente trackeados en `runtime/`, hacer backup local antes de `pull` en la otra máquina.
 
-Referencia detallada:
-
-- `docs/COMMIT_STRATEGY_2026_04_02.md`
+Referencia: `docs/INDEX.md` → sección "Documentos operativos".
 
 ## Entorno local
 
@@ -113,7 +111,7 @@ Este comando:
 Comandos recomendados:
 
 - Python: `.\scripts\python_local.bat`
-- Tests: `.\scripts\pytest_local.bat`
+- Tests: `.\scripts\pytest_local_stable.bat`
 - IDE completo: `.\start_ide.bat`
 
 ## Configuracion compartida
@@ -154,13 +152,13 @@ Aunque exista SQLite, `runtime/` sigue siendo local por maquina.
 Minimo recomendado:
 
 ```powershell
-.\scripts\pytest_local.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_api_aiteam_state.py -q --tb=line -x
+.\scripts\pytest_local_stable.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_api_aiteam_state.py -q --tb=line -x
 ```
 
 Si el cambio toca varias areas, correr:
 
 ```powershell
-.\scripts\pytest_local.bat tests -q --tb=line
+.\scripts\pytest_local_stable.bat tests -q --tb=line
 ```
 
 ## Reglas practicas

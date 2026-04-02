@@ -4,14 +4,14 @@
 
 Sistema de orquestacion multi-agente para desarrollo y entrega de software.
 Nombre del paquete: `aiteam-hybrid` (v0.1.0). Estado: operativo para orquestacion, observabilidad y continuidad por proyecto.
-Validacion mas reciente: `2026-04-02`, `MAX-GAMINGPC`, `776 passed`.
+Validacion mas reciente: `2026-04-03`, `ORCH-01`, `858 passed`.
 
 ## Stack
 
 - **Backend**: Python 3.10+ con FastAPI (launcher por defecto en puerto 8010)
 - **Frontend**: React 19 + TypeScript 5.9 + Vite (launcher por defecto en puerto 9490)
 - **Persistencia**: SQLite para `tasks` y `workflow_state`, JSONL para ledger/eventos y compatibilidad JSON residual solo en tests/constructores legacy
-- **Tests**: pytest (`776 passed` en `MAX-GAMINGPC`, 2026-04-02)
+- **Tests**: pytest (`858 passed` en `ORCH-01`, 2026-04-03)
 
 ## Estructura del proyecto
 
@@ -106,7 +106,7 @@ Ver guia de comunicacion para desarrolladores en `docs/COMMUNICATION_GUIDE_FOR_D
   - Pytest: `.\scripts\pytest_local.bat`
   - Pytest estable para ORCH-01 / sesiones Windows sensibles: `.\scripts\pytest_local_stable.bat`
   - Reanudacion tras pull: `.\scripts\prepare_dev_env.bat`
-- Tests actuales: **776 passed** (2026-04-02, `MAX-GAMINGPC`). Antes de cualquier cambio, verificar que pasan.
+- Tests actuales: **858 passed** (2026-04-03, `ORCH-01`). Antes de cualquier cambio, verificar que pasan.
 - Smoke test rapido (2s): `.\scripts\pytest_local.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x`
 
 ### Notas operativas de tests en ORCH-01 / Windows
@@ -178,9 +178,7 @@ Regla práctica:
 - el commit 2 debe sacar del repo `runtime/`, snapshots y artefactos locales históricamente trackeados
 - el commit 3 debe llevar el producto
 
-Documento de referencia para este corte:
-
-- `docs/COMMIT_STRATEGY_2026_04_02.md`
+Estrategia de referencia: ver `docs/INDEX.md` → sección "Documentos operativos".
 
 Configuracion compartida:
 

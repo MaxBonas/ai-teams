@@ -4,15 +4,15 @@
 
 Sistema de orquestacion multi-agente para desarrollo y entrega de software.
 
-Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `776 passed`.
+Estado validado: `2026-04-03`, `ORCH-01`, `858 passed`.
 
 Fuentes de verdad operativas:
 
 - `task.md`
 - `walkthrough.md`
 - `docs/ARCHITECTURE_PLAN.md`
-- `docs/TASKS_2026_03_28.md`
 - `docs/INDEX.md`
+- `docs/HISTORY.md`
 
 ## Glosario de capas
 
@@ -105,9 +105,7 @@ Si una tanda mezcla entorno, limpieza del repo y funcionalidad, separarla en com
 2. dejar de trackear estado local
 3. funcionalidad, tests y docu
 
-Documento de referencia:
-
-- `docs/COMMIT_STRATEGY_2026_04_02.md`
+Estrategia de referencia: ver `docs/INDEX.md` → sección "Documentos operativos".
 
 ## Persistencia
 
