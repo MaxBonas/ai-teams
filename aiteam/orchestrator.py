@@ -55,6 +55,8 @@ from aiteam.tool_inventory import (
     normalize_tool_capabilities,
 )
 from aiteam.types import (
+    Complexity,
+    Criticality,
     Role,
     RoutingDecision,
     RoutingRequest,
@@ -307,6 +309,48 @@ class AITeamOrchestrator:
             return "repo_scout"
         return ""
 
+    @staticmethod
+    def _is_best_effort_specialist(specialist_name: str) -> bool:
+        normalized = str(specialist_name or "").strip().lower()
+        return normalized == "context_curator"
+
+    def _invoke_specialist_prefetch(
+        self,
+        *,
+        request: RoutingRequest,
+        prompt: str,
+        task_id: str,
+        messages: list[dict[str, str]],
+        specialist_name: str,
+    ) -> tuple[RoutingDecision, int]:
+        max_attempts = 2
+        last_decision: RoutingDecision | None = None
+        for attempt in range(1, max_attempts + 1):
+            decision = self.router.route_and_invoke(
+                request=request,
+                prompt=prompt,
+                task_id=task_id,
+                messages=messages,
+                tools=None,
+            )
+            last_decision = decision
+            if decision.success:
+                return decision, attempt
+            if decision.reason != "no_eligible_adapter" or attempt >= max_attempts:
+                return decision, attempt
+            self.event_logger.emit(
+                "specialist_prefetch_retry",
+                {
+                    "task_id": task_id.split("::prefetch::", 1)[0],
+                    "specialist": specialist_name,
+                    "attempt": attempt,
+                    "next_attempt": attempt + 1,
+                    "reason": decision.reason,
+                },
+            )
+        assert last_decision is not None
+        return last_decision, max_attempts
+
     def _collect_specialist_prefetch_context(self, task: WorkTask) -> str:
         metadata = task.metadata if isinstance(task.metadata, dict) else {}
         if self._to_bool(metadata.get("skip_specialist_prefetch", False)):
@@ -377,6 +421,8 @@ class AITeamOrchestrator:
 
         metadata["specialist_roster_applied"] = roster.to_metadata()
         reports: list[dict[str, Any]] = []
+        effective_specialists = list(roster.specialists)
+        degraded_specialists: list[dict[str, Any]] = []
         briefing_lines = [
             "Informes compactos de especialistas delegados antes de ejecutar la tarea principal:",
         ]
@@ -436,14 +482,39 @@ class AITeamOrchestrator:
                     ),
                 },
             ]
-            decision = self.router.route_and_invoke(
+            specialist_task_id = f"{task.task_id}::prefetch::{specialist_name}"
+            decision, attempts_used = self._invoke_specialist_prefetch(
                 request=specialist_request,
                 prompt=specialist_prompt,
-                task_id=f"{task.task_id}::prefetch::{specialist_name}",
+                task_id=specialist_task_id,
                 messages=specialist_messages,
-                tools=None,
+                specialist_name=specialist_name,
             )
             if not decision.success:
+                if (
+                    self._is_best_effort_specialist(specialist_name)
+                    and decision.reason == "no_eligible_adapter"
+                ):
+                    effective_specialists = [
+                        item for item in effective_specialists if item != specialist_name
+                    ]
+                    degraded_specialists.append(
+                        {
+                            "specialist": specialist_name,
+                            "reason": decision.reason,
+                            "attempts": attempts_used,
+                        }
+                    )
+                    self.event_logger.emit(
+                        "specialist_prefetch_degraded",
+                        {
+                            "task_id": task.task_id,
+                            "specialist": specialist_name,
+                            "reason": decision.reason,
+                            "attempts": attempts_used,
+                        },
+                    )
+                    continue
                 self.event_logger.emit(
                     "specialist_prefetch_failed",
                     {
@@ -493,12 +564,16 @@ class AITeamOrchestrator:
 
         metadata["_specialist_prefetch_done"] = True
         metadata["specialist_prefetch_reports"] = reports
+        if degraded_specialists:
+            metadata["specialist_prefetch_degraded"] = degraded_specialists
+        else:
+            metadata.pop("specialist_prefetch_degraded", None)
         existing_reports = list(metadata.get("specialist_reports", []) or [])
         metadata["specialist_reports"] = existing_reports + reports
         self._record_specialist_quorum_result(
             task=task,
-            specialists=list(roster.specialists),
-            quorum_required=int(roster.quorum_required),
+            specialists=effective_specialists,
+            quorum_required=min(int(roster.quorum_required), len(effective_specialists)),
             quorum_mode=str(roster.quorum_mode or "any"),
             reports=reports,
         )
@@ -984,6 +1059,7 @@ class AITeamOrchestrator:
                 "skip_quality_gates": True,
                 "skip_evidence_gate": True,
                 "skip_peer_consultation": True,
+                "skip_specialist_prefetch": True,
                 "phase": f"lead_report_{phase_name}",
                 "chat_parent": chat_parent,
                 "lead_run_mode": lead_run_mode,
@@ -1141,6 +1217,7 @@ class AITeamOrchestrator:
                 "skip_quality_gates": True,
                 "skip_evidence_gate": True,
                 "skip_peer_consultation": True,
+                "skip_specialist_prefetch": True,
                 "phase": f"lead_preflight_{phase_name}",
                 "chat_parent": chat_parent,
                 "lead_run_mode": str(task.metadata.get("lead_run_mode", "") or "").strip() or "standard",
@@ -1382,6 +1459,60 @@ class AITeamOrchestrator:
             tags=["task", "inbox"],
         )
 
+    def _maybe_spawn_deferred_delegates(self, task_id: str) -> None:
+        """C1: Spawn evidence delegate tasks that were deferred until the parent
+        phase starts executing. Runs once per task (guarded by delegates_spawned flag)."""
+        task = self.taskboard.get_task(task_id)
+        if task is None:
+            return
+        if task.metadata.get("delegates_spawned"):
+            return
+        deferred_specs = list(task.metadata.get("deferred_evidence_specs", []) or [])
+        if not deferred_specs:
+            return
+        spawned: list[str] = []
+        for spec in deferred_specs:
+            try:
+                child_task_id = str(spec.get("task_id", "")).strip()
+                if not child_task_id:
+                    continue
+                if self.taskboard.get_task(child_task_id) is not None:
+                    spawned.append(child_task_id)
+                    continue
+                role_str = str(spec.get("role", "scout")).strip().lower()
+                try:
+                    role_enum = Role(role_str)
+                except ValueError:
+                    role_enum = Role.SCOUT
+                criticality_str = str(spec.get("criticality", "medium")).strip().lower()
+                try:
+                    criticality_enum = Criticality(criticality_str)
+                except ValueError:
+                    criticality_enum = Criticality.MEDIUM
+                child_task = WorkTask(
+                    task_id=child_task_id,
+                    title=str(spec.get("title", f"Delegate {child_task_id}")),
+                    description=str(spec.get("description", "")),
+                    role=role_enum,
+                    complexity=Complexity.LOW,
+                    criticality=criticality_enum,
+                    dependencies=[task_id],
+                    metadata=dict(spec.get("metadata", {})),
+                )
+                self.submit_task(child_task)
+                spawned.append(child_task_id)
+            except Exception as _e:
+                self.event_logger.emit(
+                    "deferred_delegate_spawn_error",
+                    {"parent_task_id": task_id, "child_task_id": child_task_id, "error": str(_e)},
+                )
+        if spawned:
+            self.taskboard.update_metadata(task_id, {"delegates_spawned": True})
+            self.event_logger.emit(
+                "deferred_delegates_spawned",
+                {"parent_task_id": task_id, "spawned": spawned},
+            )
+
     def _claim_ready_tasks(
         self, active_round: int, sub_iteration: int
     ) -> list[WorkTask]:
@@ -1411,6 +1542,9 @@ class AITeamOrchestrator:
                     "execution_order": execution_order,
                 },
             )
+            # C1: spawn deferred evidence delegate tasks lazily when the parent
+            # phase is first claimed.
+            self._maybe_spawn_deferred_delegates(task.task_id)
             claimed = self.taskboard.get_task(task.task_id)
             if claimed is not None:
                 claimed_tasks.append(claimed)

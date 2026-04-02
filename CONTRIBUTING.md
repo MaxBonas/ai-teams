@@ -35,6 +35,22 @@ Cada maquina mantiene local:
 
 No usar `runtime/` como fuente de verdad compartida.
 
+## Capas y naming
+
+Este repo mezcla tres capas que conviene separar al escribir o documentar cambios:
+
+- Capa 0/1: herramientas externas y desarrollo del sistema (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `HANDOFF.md`)
+- Capa 2: producto AI Teams ejecutandose sobre proyectos externos
+
+Reglas:
+
+- no usar `agent` sin calificar si puede haber ambiguedad
+- no proponer `AGENTS.md`, `CLAUDE.md` o `GEMINI.md` como artefactos de producto
+- para proyectos externos, usar siempre el namespace `.aiteam/`
+- las instrucciones persistentes del proyecto van en `.aiteam/instructions.md`
+
+Referencia: `docs/NAMING_COLLISION_INVESTIGATION.md`
+
 ## Flujo recomendado al cambiar de maquina
 
 1. En la maquina origen:

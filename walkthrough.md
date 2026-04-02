@@ -1,7 +1,7 @@
 # Walkthrough tecnico — estabilizacion 2026-04-02
 
 Maquina validada: `MAX-GAMINGPC`
-Estado validado actual: `763 passed`
+Estado validado actual: `799 passed`
 
 ## Que se cerro en esta fase
 
@@ -100,7 +100,7 @@ Estado validado actual: `763 passed`
   - blockers por adapter
   - diferencia entre configurado y efectivo
 - Esta vista se hizo primero como lectura para dejar visible el estado real del router antes de abrir una fase editable.
-- Queda explícitamente como `MVP consultable`, no como solución final de gobierno del routing.
+- Desde entonces, el contrato backend ya se endurecio y los overrides locales ya se persisten por API; la deuda viva esta ahora en cerrar la experiencia de edicion UI.
 - La siguiente fase no es "maquillaje de UI", sino convertirla en una vista muy completa y editable que permita:
   - asignar providers por rol
   - asignar modelos por rol
@@ -112,7 +112,7 @@ Estado validado actual: `763 passed`
 
 ### 15. Funciones recientes que conviene robustizar antes de abrir la edición
 
-- `/api/aiteam/routing/catalog` necesita un contrato más estable para soportar edición futura sin romper frontend.
+- `/api/aiteam/routing/catalog` ya tiene un contrato más estable; la siguiente deuda es exponer mejor diff, validación y simulación en la UI editable.
 - `RoutingCatalogPanel` aún es principalmente diagnóstico; necesita filtros, drilldown y comparación entre configuración y uso real.
 - La nueva visibilidad de historial de agentes y `task_summaries` ya es útil, pero aún conviene reforzar su relación con el catálogo de routing para poder responder "qué se configuró" frente a "qué se usó".
 - El placeholder gate ya quedó endurecido con prudencia, pero sigue siendo una heurística que debe mantenerse acotada a marcadores claros y no volver a crecer como detector bruto de lenguaje.
@@ -124,7 +124,7 @@ La investigación sobre `test_aiteams` confirmó un problema de producto distint
 
 - el proyecto externo no contiene todavía archivos de producto fuera de `runtime/`
 - el sistema sí crea tareas y delegaciones
-- pero si la run se bloquea pronto, lo único visible en la raíz del proyecto es el estado interno del sistema
+- históricamente, si la run se bloqueaba pronto, lo único visible en la raíz del proyecto era el estado interno del sistema
 
 Además, el runtime local del proyecto externo hoy agrupa:
 
@@ -140,7 +140,7 @@ todo dentro de `workspace/runtime/`.
 
 Esto es funcionalmente cómodo para el sistema, pero malo para la UX del usuario del proyecto externo.
 
-La dirección correcta documentada queda así:
+La dirección correcta documentada quedó así:
 
 - dejar de tratar `runtime/` como carpeta visible genérica del proyecto externo
 - migrar hacia una carpeta reservada del sistema, preferiblemente `.aiteam/`
@@ -153,11 +153,12 @@ Documento de referencia de esta investigación:
 
 ## Estado del entorno en gamingpc
 
-- La suite completa valida en esta maquina: `763 passed`.
+- La suite completa valida en esta maquina: `823 passed`.
 - Se anadio `scripts/ensure_local_venv.ps1` para validar o recrear `venv/` automaticamente.
 - Se anadio `scripts/ensure_local_runtime.ps1` para rehidratar `runtime/` local desde plantillas compartidas.
 - `scripts/ensure_local_runtime.ps1` ahora refresca plantillas compartidas sin pisar overrides locales detectados.
 - Se anadieron `scripts/python_local.bat` y `scripts/pytest_local.bat` como wrappers estables para Python y tests.
+- `scripts/python_local.bat` y `scripts/pytest_local.bat` ya muestran tambien el error real cuando falla el launcher del `venv` o el Python base queda inaccesible.
 - Se anadio `scripts/prepare_dev_env.bat` como comando rapido de `post-pull`.
 - `start_ide.bat` ya intenta reparar el `venv` antes de arrancar servicios.
 
@@ -172,6 +173,20 @@ Documento de referencia de esta investigación:
 - `api/main.py` sigue siendo un archivo grande, pero ya no es la prioridad principal; el siguiente frente real vuelve a ser cerrar deuda legacy JSON, vigilar continuidad entre maquinas y limpiar/unificar documentacion interna.
 - `E10-W6` ya queda cerrado: el orchestrator usa `mcp_manager.list_healthy()` con retry habilitado antes de calcular el roster, y eso vuelve efectiva la seleccion de `mcp_operator` cuando hay capacidad `external_mcp`.
 - `E10-W9` ya queda cerrado: `tests/test_e2e_multiagent.py` cubre delegacion, quorum, replan y force_gate con 8 tests activos y sin `skip`.
+- `URGENTE-2` ya queda cerrado: el prefetch de especialistas reintenta y degrada graceful cuando `context_curator` queda temporalmente sin adapter elegible.
+- `B7a`, `B7b`, `B7c`, `B8a`, `B8b`, `B8c` y `B9a` ya quedaron cerrados en codigo, tests y docu.
 - Quedan documentos historicos que deben leerse como referencia, no como fuente de verdad.
 - Aun existe compatibilidad JSON residual en tests/constructores; la lectura normal de la API ya no depende de ella.
-- La vista `Routing` ya resuelve opacidad, pero todavía no resuelve gobierno completo: falta edición segura por rol y por tipo de tarea.
+- La vista `Routing` ya resuelve opacidad, contrato backend y edición local básica segura; la deuda viva pasa ahora a simulación más profunda, historial y gobierno por tipo de tarea.
+- `B8c` ya tiene un MVP funcional: `quorum: bool` en `TeamChatRequest`, consulta adicional con adapter distinto para modos de planning y consolidacion final del Lead con persistencia del plan resultante.
+- `B9b` ya quedo cerrado: el `context_curator` aísla por `project_root`, migra lectura legacy y usa nombres de fichero cortos con hash para no romper en Windows con paths largos.
+- `B9c` ya quedo cerrado: `last_chat_run` expone `product_artifacts` con mensaje explícito cuando no hubo artefactos y `StatusPanel` separa esa capa del runtime interno.
+- `StatusPanel` ya expone un resumen operativo real de tareas activas con conteos y muestras para `pending`, `blocked`, `waiting_user` y `carried_over`, incluyendo motivos visibles como dependencia, quorum o falta de adapter elegible.
+- Al cerrar ese frente apareció un caso real de robustez en Windows: `resolve_runtime_dir()` ahora reintenta `runtime -> .aiteam` y, si `rename()` falla con `WinError 5`, degrada a absorción segura del contenido legacy en vez de romper el estado.
+- El gap vivo en proyectos externos pasa a ser sobre todo la auditoría del caso `test_aiteams` y la conversión de esa auditoría en fixes priorizados.
+- La tanda `B7` a `B9` queda cerrada; el siguiente frente ya sale de este bloque y debe definirse como nueva prioridad.
+- El caso `test_aiteams` queda auditado en `docs/TEST_AITEAMS_GAME_AUDIT_2026_04_02.md`: sigue siendo útil sobre todo para visibilidad operativa y semántica de estados, aunque el bug `context_curator/no_eligible_adapter` ya no debe bloquear la tarea padre y B9c ya dejó visible la capa de artefactos.
+- `C1` cerrado: delegate tasks creadas lazy. `deferred_evidence_specs` en metadata de fase; `_maybe_spawn_deferred_delegates()` las materializa al reclamar. Fases bloqueadas ya no inflan el backlog.
+- `C2` cerrado: `continuation_policy` (`auto`/`clean_retry`/`force_continue`) en `TeamChatRequest`. Estado `ARCHIVED` en `TaskState`. `taskboard.archive_incomplete_tasks()` limpia deuda de runs previas cuando el usuario elige intento limpio.
+- `C3` cerrado: `_maybe_deposit_minimal_output()` deposita `PROJECT_PLAN.md` en workspace vacío si `lead_intake` completó pero `build` nunca arrancó. Cierra el gap de percepción "trabajó mucho y no entregó nada".
+- Suite tras C-series: `823 passed`.

@@ -1,15 +1,17 @@
 # AI Team Hybrid Orchestrator
 
+<!-- layer: system-development | audiencia: agentes de desarrollo (Codex, Claude Code, Gemini) | NO es artefacto de producto -->
+
 Sistema de orquestacion multi-agente para desarrollo y entrega de software.
 Nombre del paquete: `aiteam-hybrid` (v0.1.0). Estado: operativo para orquestacion, observabilidad y continuidad por proyecto.
-Validacion mas reciente: `2026-04-02`, `MAX-GAMINGPC`, `763 passed`.
+Validacion mas reciente: `2026-04-02`, `MAX-GAMINGPC`, `776 passed`.
 
 ## Stack
 
 - **Backend**: Python 3.10+ con FastAPI (launcher por defecto en puerto 8010)
 - **Frontend**: React 19 + TypeScript 5.9 + Vite (launcher por defecto en puerto 9490)
 - **Persistencia**: SQLite para `tasks` y `workflow_state`, JSONL para ledger/eventos y compatibilidad JSON residual solo en tests/constructores legacy
-- **Tests**: pytest (`763 passed` en `MAX-GAMINGPC`, 2026-04-02)
+- **Tests**: pytest (`776 passed` en `MAX-GAMINGPC`, 2026-04-02)
 
 ## Estructura del proyecto
 
@@ -69,6 +71,27 @@ Workflow base por fases: `lead_intake -> dynamic phases -> lead_close`
 | `api/main.py` | Entrada de la app FastAPI |
 | `ide-frontend/src/` | Interfaz web React |
 
+## Glosario de capas (evitar colisiones de lenguaje)
+
+Este sistema construye otros sistemas. Los mismos terminos tienen significados diferentes segun la capa.
+Ver investigacion completa en `docs/NAMING_COLLISION_INVESTIGATION.md`.
+Ver guia de comunicacion para desarrolladores en `docs/COMMUNICATION_GUIDE_FOR_DEVS.md`.
+
+| Termino | En este repo (desarrollo) | En el orquestador (producto) |
+|---|---|---|
+| `agent` | Agente de desarrollo: Codex, Claude Code, Gemini | Rol LLM interno: Lead, Engineer, Reviewer, QA |
+| `task` | Tarea en `task.md` (backlog de desarrollo) | `WorkTask`: unidad ejecutable del orquestador |
+| `handoff` | Traspaso de sesion de desarrollo (`HANDOFF.md`) | Failover automatico de adapter en el orquestador |
+| `run` | Sesion de trabajo de desarrollo | Ejecucion de chat completa (lead_intake → lead_close) |
+| `phase` | Fase de desarrollo del sistema (B7, B8, B9) | Etapa del WORKFLOW_PLAN (build, review, qa) |
+| `checkpoint` | Punto de revision en el proceso de desarrollo | Tarea especial del Lead (`lead_report_*`, `lead_preflight_*`) |
+| `plan` | Planificacion del sistema | WORKFLOW_PLAN emitido por el Lead |
+| `workspace` | Directorio del repo Ai_Teams | Directorio raiz del proyecto externo gestionado |
+| `project` | El sistema Ai_Teams / el repo | Un proyecto externo gestionado por AI Teams |
+| `agent` (sin calificar) | **AMBIGUO** — calificar siempre | **AMBIGUO** — calificar siempre |
+
+**Norma critica**: AI Teams nunca crea archivos `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` ni similares en proyectos externos. Todos los artefactos de producto van bajo `.aiteam/` del proyecto, y las instrucciones persistentes del usuario para el Lead viven en `.aiteam/instructions.md`. Ver `docs/NAMING_COLLISION_INVESTIGATION.md` seccion "Colision 1".
+
 ## Convenciones
 
 - Documentacion del proyecto en **espanol**.
@@ -82,7 +105,7 @@ Workflow base por fases: `lead_intake -> dynamic phases -> lead_close`
   - Python: `.\scripts\python_local.bat`
   - Pytest: `.\scripts\pytest_local.bat`
   - Reanudacion tras pull: `.\scripts\prepare_dev_env.bat`
-- Tests actuales: **763 passed** (2026-04-02, `MAX-GAMINGPC`). Antes de cualquier cambio, verificar que pasan.
+- Tests actuales: **776 passed** (2026-04-02, `MAX-GAMINGPC`). Antes de cualquier cambio, verificar que pasan.
 - Smoke test rapido (2s): `.\scripts\pytest_local.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x`
 
 ## Infraestructura — dos maquinas

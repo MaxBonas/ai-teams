@@ -1,8 +1,10 @@
+<!-- layer: system-development | audiencia: Gemini CLI | NO es artefacto de producto -->
+
 # AI Team Hybrid Orchestrator — Gemini Context
 
 Sistema de orquestacion multi-agente para desarrollo y entrega de software.
 
-Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `763 passed`.
+Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `776 passed`.
 
 Fuentes de verdad operativas:
 
@@ -11,6 +13,35 @@ Fuentes de verdad operativas:
 - `docs/ARCHITECTURE_PLAN.md`
 - `docs/TASKS_2026_03_28.md`
 - `docs/INDEX.md`
+
+## Glosario de capas
+
+Este archivo describe como contribuir al sistema Ai_Teams. No describe artefactos que AI Teams deba crear en proyectos externos.
+
+| Termino | En este repo | En el producto |
+|---|---|---|
+| `agent` | Agente de desarrollo que edita este repo | Rol interno del orquestador |
+| `workspace` | La raiz del repo `Ai_Teams` | La raiz del proyecto externo del usuario |
+| `handoff` | Documento/sesion de desarrollo (`HANDOFF.md`) | Mecanismo tecnico de failover o traspaso entre adapters |
+| `instructions` | Contexto para Gemini al trabajar en este repo | Instrucciones persistentes del usuario en `.aiteam/instructions.md` |
+
+Norma practica:
+
+- evitar `agent` sin calificar
+- distinguir siempre repo del sistema vs proyecto externo
+- distinguir documento de handoff vs handoff tecnico del orquestador
+
+## Norma critica de naming
+
+AI Teams no debe generar nombres de convencion de proveedor en proyectos externos.
+
+Convencion correcta:
+
+- archivos de proveedor del repo del sistema: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
+- artefactos de producto en proyectos externos: solo bajo `.aiteam/`
+- instrucciones del proyecto: `.aiteam/instructions.md`
+
+Referencia: `docs/NAMING_COLLISION_INVESTIGATION.md`
 
 ## Prioridad de trabajo
 
@@ -129,6 +160,8 @@ Orden tipico:
 
 - `AGENTS.md`
 - `CLAUDE.md`
+- `docs/NAMING_COLLISION_INVESTIGATION.md`
+- `docs/COMMUNICATION_GUIDE_FOR_DEVS.md`
 - `HANDOFF.md`
 - `README.md`
 - `walkthrough.md`

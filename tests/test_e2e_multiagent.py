@@ -9,6 +9,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 import api.main as api_main
+from api.utils import PROJECT_ROOT, resolve_runtime_dir
 from aiteam.adapters.base import ModelAdapter
 from aiteam.config import build_default_router_policy
 from aiteam.orchestrator import AITeamOrchestrator
@@ -37,6 +38,10 @@ def _parse_sse_result(response) -> dict:
         return response.json()
     except Exception:
         return {}
+
+
+def _runtime_dir_for(workspace: Path) -> Path:
+    return resolve_runtime_dir(workspace, PROJECT_ROOT)
 
 
 class LeadDelegateLspIntegrationAdapter(ModelAdapter):
@@ -691,7 +696,7 @@ class MultiagentE2ETests(unittest.TestCase):
                             )
             self.assertEqual(response.status_code, 200)
             payload = _parse_sse_result(response)
-            runtime_dir = workspace / "runtime"
+            runtime_dir = _runtime_dir_for(workspace)
             events_text = (runtime_dir / "events.jsonl").read_text(encoding="utf-8")
             tasks_text = json.dumps(
                 SqliteStore(runtime_dir / "aiteam.db").load_all_tasks(),

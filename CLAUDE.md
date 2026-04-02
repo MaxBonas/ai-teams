@@ -1,8 +1,10 @@
+<!-- layer: system-development | audiencia: Claude Code | NO es artefacto de producto -->
+
 # AI Team Hybrid Orchestrator — Claude Context
 
 Sistema de orquestacion multi-agente para desarrollo y entrega de software.
 
-Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `763 passed`.
+Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `776 passed`.
 
 Fuentes de verdad operativas:
 
@@ -11,6 +13,34 @@ Fuentes de verdad operativas:
 - `docs/ARCHITECTURE_PLAN.md`
 - `docs/TASKS_2026_03_28.md`
 - `docs/INDEX.md`
+
+## Glosario de capas
+
+Este archivo pertenece a la capa de desarrollo del sistema, no a la capa de producto.
+
+| Termino | En este repo | En el producto |
+|---|---|---|
+| `agent` | Agente de desarrollo que trabaja sobre Ai_Teams | Rol interno del orquestador (`team_lead`, `engineer`, `reviewer`, `qa`) |
+| `project` | El repo `Ai_Teams` | Un proyecto externo gestionado por AI Teams |
+| `handoff` | Traspaso de sesion de desarrollo (`HANDOFF.md`) | Handoff tecnico entre adapters/proveedores en el orquestador |
+| `instructions` | Contexto para el agente de desarrollo | Instrucciones persistentes del dueño de un proyecto externo |
+
+Norma de lenguaje:
+
+- si hablas de Capa 1, usa "agente de desarrollo"
+- si hablas de Capa 2, usa "rol", "Lead" o "equipo AI Teams"
+- evita `agent` sin calificar
+
+## Norma critica de naming
+
+AI Teams nunca debe crear `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` ni otros nombres de convencion de proveedor dentro de proyectos externos.
+
+Para Capa 2, el namespace correcto es:
+
+- `.aiteam/` para artefactos internos del sistema
+- `.aiteam/instructions.md` para instrucciones persistentes del proyecto al Lead
+
+Referencia: `docs/NAMING_COLLISION_INVESTIGATION.md`
 
 ## Regla principal
 
@@ -160,6 +190,8 @@ Orden sugerido para fallos tipicos en Windows:
 ## Documentos de referencia
 
 - `AGENTS.md`: contexto operativo general del repo
+- `docs/NAMING_COLLISION_INVESTIGATION.md`: taxonomia de capas y colisiones de nombres
+- `docs/COMMUNICATION_GUIDE_FOR_DEVS.md`: lenguaje recomendado para hablar del sistema sin ambiguedad
 - `README.md`: arranque y flujo recomendado
 - `walkthrough.md`: estabilizacion tecnica reciente
 - `task.md`: backlog y siguientes pasos

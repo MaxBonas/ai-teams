@@ -1,7 +1,24 @@
 # Routing Catalog View
 
 Fecha: `2026-04-02`
-Estado: `MVP consultable completado`
+Estado: `catalogo endurecido + overrides persistidos + MVP editable operativo`
+
+## Vision objetivo completa
+
+Este documento describe el estado vigente del routing visible: el catalogo endurecido ya esta implementado, los overrides locales ya persisten por API y la UI editable minima ya permite operar sin tocar JSON a mano.
+
+La vision completa de producto para la siguiente fase, incluyendo:
+
+- modo edicion
+- overrides por maquina y por proyecto
+- simulacion de resolucion
+- validacion antes de guardar
+- control de coste, capacidades y fallback
+- estetica, errores a evitar y criterio de done
+
+vive en:
+
+- `docs/ROUTING_EDITOR_VISION.md`
 
 ## Objetivo
 
@@ -30,6 +47,8 @@ La vista consultable de routing muestra en un solo lugar:
 - fallbacks efectivos por rol
 - blockers por adapter/rol (`role_targets`, `team_lead_guard`, `adapter_unavailable`, etc.)
 - diferencia entre lo **configurado** y lo **efectivamente elegible**
+- búsqueda y filtros por provider/canal/estado
+- explicación visible de blockers por adapter
 
 ## Superficie implementada
 
@@ -75,16 +94,48 @@ Razón:
 
 ## Lo que aún no hace
 
-Todavía no permite:
+La UI ya permite:
 
-- editar el orden de providers por rol
-- editar el orden de modelos por rol
-- reasignar fallbacks por rol
-- persistir overrides locales desde UI
+- editar providers por rol
+- editar models por rol
+- fijar `primary_provider`
+- excluir providers por rol
+- guardar/resetear overrides locales desde la pestaña `Routing`
+- ver diff pendiente por rol
+- validar localmente antes de guardar
+- ver un preview estimado de primario/fallback tras el cambio
 
-Eso queda como siguiente fase:
+Lo que queda como siguiente fase:
 
-- `vista editable de asignación por rol`
+- `simulador de decisiones del router` mas profundo
+- `historial / rollback` de cambios
+- `diagnostico completo` de por que una ruta se eligio o quedo descartada en una run concreta
+
+## Persistencia local ya disponible
+
+El backend soporta overrides locales persistidos por maquina y la UI ya los consume:
+
+- `GET /api/aiteam/routing/overrides`
+- `PUT /api/aiteam/routing/overrides`
+- `DELETE /api/aiteam/routing/overrides`
+
+Los overrides se guardan en:
+
+- `runtime/routing_overrides.json` dentro del repo `Ai_Teams`
+- `.aiteam/routing_overrides.json` en proyectos externos
+
+Efectos actuales del override:
+
+- reordenar providers por rol
+- reordenar modelos por rol
+- fijar un `primary_provider` preferente
+- excluir providers por rol sin tocar el codigo fuente
+
+El catalogo ya refleja estas tres capas por rol:
+
+- `defaults`
+- `override_local`
+- `effective`
 
 ## Relación con el trabajo reciente
 
@@ -156,8 +207,8 @@ Objetivo de robustez:
 
 La vista actual es buena para leer, pero todavía es una primera versión:
 
-- falta filtrado fuerte por rol, provider, canal y estado
-- falta búsqueda por modelo
+- ya tiene filtrado base por rol, provider, canal y estado
+- ya tiene búsqueda por rol/provider/modelo/adapter
 - falta drilldown completo de blockers y del porqué del primario/fallback actual
 - falta snapshot histórico de una run concreta frente al catálogo actual
 - falta comparación entre "configurado" y "lo que realmente se usó"
@@ -166,19 +217,19 @@ Objetivo de robustez:
 
 - que no sea solo una lista de inventario, sino una herramienta de diagnóstico de routing
 
-### 4. Persistencia futura de overrides
+### 4. Persistencia editable desde frontend
 
-La fase editable todavía no existe, así que aún no está resuelto:
+La persistencia backend ya existe y el MVP editable de frontend tambien:
 
-- dónde se guarda el override local
-- cómo se fusiona con defaults del repo
-- cómo se valida antes de guardar
-- cómo se hace rollback
-- cómo evitar dejar un rol sin fallback viable
+- expone formularios por rol
+- muestra preview de diff
+- muestra validacion local inline antes de guardar
+- permite reset global y limpieza por rol
+- deja comparar `override_local`, `pending` y primario/fallback estimado
 
 Objetivo de robustez:
 
-- que editar policy desde la UI sea seguro, reversible y explicable
+- que editar policy desde la UI sea seguro, reversible y explicable sin dejar de crecer en simulacion avanzada
 
 ## Objetivo de producto de la vista completa
 

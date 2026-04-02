@@ -64,3 +64,4 @@ Thumbs.db
 
 # Claude Code (mantener CLAUDE.md y settings.json pero no lo local)
 .claude/settings.local.json
+.claude/*.local.md

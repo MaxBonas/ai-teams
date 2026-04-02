@@ -2,7 +2,8 @@
 param(
     [switch]$PrintPython,
     [switch]$Quiet,
-    [switch]$ForceRecreate
+    [switch]$ForceRecreate,
+    [switch]$ReportErrors
 )
 
 Set-StrictMode -Version Latest
@@ -52,6 +53,35 @@ function Test-PythonProcess {
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
+    }
+}
+
+function Get-PythonProcessFailure {
+    param(
+        [string]$PythonExe,
+        [string[]]$Arguments
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+        return "python_path_empty"
+    }
+
+    if (-not (Test-Path $PythonExe)) {
+        return "python_not_found"
+    }
+
+    try {
+        & $PythonExe @Arguments *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return ""
+        }
+        return "exit_code_$LASTEXITCODE"
+    } catch {
+        $message = $_.Exception.Message
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            return "exception_without_message"
+        }
+        return ($message -replace "\s+", " ").Trim()
     }
 }
 
@@ -139,6 +169,25 @@ function Get-BasePythonCandidates {
     return $candidates
 }
 
+function Find-WorkingBasePython {
+    $attempts = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidate in Get-BasePythonCandidates) {
+        $failure = Get-PythonProcessFailure -PythonExe $candidate -Arguments @("-c", "import sys")
+        if ([string]::IsNullOrWhiteSpace($failure)) {
+            return @{
+                Python = $candidate
+                Attempts = $attempts
+            }
+        }
+        $attempts.Add("${candidate} => ${failure}") | Out-Null
+    }
+
+    return @{
+        Python = $null
+        Attempts = $attempts
+    }
+}
+
 function Test-VenvHealthy {
     if (-not (Test-PythonProcess -PythonExe $venvPython -Arguments @("-c", "import sys"))) {
         return $false
@@ -206,11 +255,13 @@ function Install-ProjectDependencies {
 try {
     $currentDependencyHash = Get-ProjectDependencyHash
     $needsRecreate = $ForceRecreate
+    $venvLauncherFailure = ""
     if ($needsRecreate) {
         $basePython = $null
     } elseif (-not (Test-PythonProcess -PythonExe $venvPython -Arguments @("-c", "import sys"))) {
         $needsRecreate = $true
         $basePython = $null
+        $venvLauncherFailure = Get-PythonProcessFailure -PythonExe $venvPython -Arguments @("-c", "import sys")
     } elseif (-not (Test-VenvHealthy)) {
         Install-ProjectDependencies
         $needsRecreate = -not (Test-VenvHealthy)
@@ -220,15 +271,23 @@ try {
 
     if ($needsRecreate) {
         $basePython = $null
-        foreach ($candidate in Get-BasePythonCandidates) {
-            if (Test-PythonProcess -PythonExe $candidate -Arguments @("-c", "import sys")) {
-                $basePython = $candidate
-                break
-            }
-        }
+        $basePythonResult = Find-WorkingBasePython
+        $basePython = $basePythonResult.Python
 
         if (-not $basePython) {
-            throw "No se encontro un Python base utilizable. Instala Python 3.10+ localmente."
+            $details = [System.Collections.Generic.List[string]]::new()
+            if (-not [string]::IsNullOrWhiteSpace($venvLauncherFailure)) {
+                $details.Add("launcher_venv: $venvLauncherFailure") | Out-Null
+            }
+            foreach ($attempt in $basePythonResult.Attempts) {
+                $details.Add($attempt) | Out-Null
+            }
+            $detailText = if ($details.Count -gt 0) {
+                " Detalles: " + ($details -join " | ")
+            } else {
+                ""
+            }
+            throw "No se encontro un Python base utilizable o el entorno deniega su ejecucion.$detailText"
         }
 
         Recreate-Venv -BasePython $basePython
@@ -248,7 +307,7 @@ try {
         Write-Info "Venv local listo: $venvPython"
     }
 } catch {
-    if (-not $Quiet) {
+    if (-not $Quiet -or $ReportErrors) {
         Write-Error $_
     }
     exit 1

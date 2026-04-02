@@ -8,7 +8,12 @@ from aiteam.context_curator import (
     estimate_context_compaction_value,
     estimate_context_pressure,
 )
-from api.utils import _build_project_continuity_context
+from api.utils import (
+    _build_project_continuity_context,
+    _load_chat_context_curator_insights,
+    PROJECT_ROOT,
+    resolve_runtime_dir,
+)
 
 
 class ContextCuratorTests(unittest.TestCase):
@@ -221,6 +226,63 @@ class ContextCuratorTests(unittest.TestCase):
 
         # Verificar que el contenido semántico real está presente
         self.assertIn("N+1", continuity_text)
+
+    def test_context_curator_isolates_by_project_root(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        project_a = str((self.workspace / "project-a").resolve())
+        project_b = str((self.workspace / "project-b").resolve())
+
+        store.remember_preplan(
+            project_key=project_a,
+            chat_root="CHAT-shared-root",
+            user_message="Proyecto A: audita auth",
+            surface_hints={"surfaces": ["security"]},
+            curator_summary="- auth_a.py contiene el riesgo principal",
+            lead_summary="P0 revisar auth_a",
+            source_task_ids=["CHAT-shared-root::lead_intake"],
+        )
+        store.remember_preplan(
+            project_key=project_b,
+            chat_root="CHAT-shared-root",
+            user_message="Proyecto B: audita billing",
+            surface_hints={"surfaces": ["research"]},
+            curator_summary="- billing_b.py concentra el problema",
+            lead_summary="P0 revisar billing_b",
+            source_task_ids=["CHAT-shared-root::lead_intake"],
+        )
+
+        chat_a = store.load_chat_context("CHAT-shared-root", project_key=project_a)
+        chat_b = store.load_chat_context("CHAT-shared-root", project_key=project_b)
+
+        self.assertEqual(chat_a["project_key"], project_a)
+        self.assertEqual(chat_b["project_key"], project_b)
+        self.assertIn("auth_a.py", store.build_summary(chat_a))
+        self.assertNotIn("billing_b.py", store.build_summary(chat_a))
+        self.assertIn("billing_b.py", store.build_summary(chat_b))
+        self.assertNotIn("auth_a.py", store.build_summary(chat_b))
+
+    def test_chat_context_insights_survive_external_runtime_migration(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        project_key = str(self.workspace.resolve())
+
+        project_ctx = store.load_project_context(project_key)
+        project_ctx["durable_facts"] = [{"text": "login flow auditado", "confidence": 0.7}]
+        store._write_project_context(project_key, project_ctx)
+
+        chat_ctx = store.load_chat_context("CHAT-econ01", project_key=project_key)
+        chat_ctx["working_set"] = [{"text": "build: revisar auth selector", "confidence": 0.7}]
+        chat_ctx["invalidations"] = [{"text": "replan_partial", "confidence": 0.8}]
+        store._write_chat_context("CHAT-econ01", chat_ctx)
+
+        migrated_runtime = resolve_runtime_dir(self.workspace, PROJECT_ROOT)
+        insights = _load_chat_context_curator_insights(migrated_runtime, "CHAT-econ01")
+        summary = insights.get("context_curator_summary", {}) or {}
+
+        self.assertEqual(int(summary.get("invalidation_count", 0)), 1)
+        self.assertEqual(
+            int((summary.get("chat_layer_counts", {}) or {}).get("working_set", 0)),
+            1,
+        )
 
 
 if __name__ == "__main__":

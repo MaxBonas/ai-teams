@@ -24,6 +24,60 @@ def _truncate_text(value: object, limit: int = 220) -> str:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
+_OPERATIONAL_REASON_LABELS: dict[str, str] = {
+    "dependency_failed": "bloqueada por dependencia fallida",
+    "specialist_quorum_not_met": "bloqueada por quorum de especialistas",
+    "no_eligible_adapter": "bloqueada por falta de adapter elegible",
+    "blocked_by_files": "bloqueada por conflicto de archivos",
+    "waiting_quality_gates": "esperando quality gates",
+    "waiting_user": "esperando aclaracion del usuario",
+    "pending": "pendiente de ejecucion",
+    "ready": "lista para ejecutarse",
+    "claimed": "ya reclamada por un agente",
+    "carryover": "arrastrada desde una run previa",
+    "blocked": "bloqueada por motivo operativo",
+}
+
+
+def _operational_reason_label(code: str) -> str:
+    normalized = str(code or "").strip().lower()
+    return _OPERATIONAL_REASON_LABELS.get(normalized, normalized or "motivo no clasificado")
+
+
+def _classify_operational_bucket(
+    task: dict[str, object],
+    *,
+    task_root: str,
+) -> tuple[str, str, str] | None:
+    task_id = str(task.get("task_id", "") or "").strip()
+    task_state = str(task.get("state", "pending") or "pending").strip().lower()
+    if task_state not in {"pending", "ready", "claimed", "blocked", "waiting_user"}:
+        return None
+
+    root_id = _normalize_task_root(task_id)
+    metadata = task.get("metadata", {})
+    metadata_dict = metadata if isinstance(metadata, dict) else {}
+
+    if root_id and root_id != task_root:
+        return ("carried_over_from_previous_run", "carryover", root_id)
+    if task_state == "waiting_user":
+        return ("waiting_user", "waiting_user", root_id)
+    if task_state == "blocked":
+        if metadata_dict.get("blocked_by_files"):
+            return ("blocked_by_file_lock", "blocked_by_files", root_id)
+        blocked_reason = str(metadata_dict.get("blocked_reason", "") or "").strip().lower()
+        if blocked_reason == "dependency_failed":
+            return ("blocked_by_dependency", blocked_reason, root_id)
+        if blocked_reason == "specialist_quorum_not_met":
+            return ("blocked_by_quorum", blocked_reason, root_id)
+        if blocked_reason == "no_eligible_adapter":
+            return ("blocked_by_no_eligible_adapter", blocked_reason, root_id)
+        if blocked_reason == "waiting_quality_gates":
+            return ("blocked_waiting_quality_gates", blocked_reason, root_id)
+        return ("blocked_other", blocked_reason or "blocked", root_id)
+    return ("pending", task_state or "pending", root_id)
+
+
 def _summarize_chat_tasks(
     tasks_payload: object,
     *,
@@ -89,6 +143,12 @@ def _summarize_chat_tasks(
                     or metadata_dict.get("channel")
                     or ""
                 ).strip(),
+                "blocked_reason": str(metadata_dict.get("blocked_reason", "") or "").strip(),
+                "blocked_dependencies": [
+                    str(dep).strip()
+                    for dep in list(metadata_dict.get("blocked_dependencies", []) or [])
+                    if str(dep).strip()
+                ],
                 "preview": preview,
                 "error": error,
             }
@@ -113,6 +173,98 @@ def _summarize_chat_tasks(
         )
     )
     return summaries
+
+
+def _build_task_operational_summary(
+    tasks_payload: object,
+    *,
+    task_root: str,
+) -> dict[str, object]:
+    normalized_root = _normalize_task_root(task_root)
+    if not normalized_root or not isinstance(tasks_payload, list):
+        return {
+            "has_actionable_items": False,
+            "active_total": 0,
+            "counts": {},
+            "blocked_reasons": [],
+            "sample_items": [],
+            "carryover_roots": [],
+        }
+
+    counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    carryover_roots: list[str] = []
+    sample_items: list[dict[str, object]] = []
+
+    for item in tasks_payload:
+        if not isinstance(item, dict):
+            continue
+        classification = _classify_operational_bucket(item, task_root=normalized_root)
+        if classification is None:
+            continue
+        operational_state, reason_code, source_root = classification
+        counts[operational_state] = int(counts.get(operational_state, 0)) + 1
+        if operational_state.startswith("blocked_"):
+            reason_counts[reason_code] = int(reason_counts.get(reason_code, 0)) + 1
+        if operational_state == "carried_over_from_previous_run" and source_root:
+            if source_root not in carryover_roots:
+                carryover_roots.append(source_root)
+
+        task_id = str(item.get("task_id", "") or "").strip()
+        suffix = task_id.split("::", 1)[1] if "::" in task_id else task_id
+        sample_items.append(
+            {
+                "task_id": task_id,
+                "short_id": suffix,
+                "title": str(item.get("title", "") or "").strip(),
+                "role": str(item.get("role", "") or "").strip(),
+                "state": str(item.get("state", "") or "").strip().lower(),
+                "operational_state": operational_state,
+                "reason_code": reason_code,
+                "reason_label": _operational_reason_label(reason_code),
+                "source_root": source_root,
+            }
+        )
+
+    operational_order = {
+        "blocked_by_no_eligible_adapter": 0,
+        "blocked_by_quorum": 1,
+        "blocked_by_dependency": 2,
+        "blocked_by_file_lock": 3,
+        "blocked_waiting_quality_gates": 4,
+        "blocked_other": 5,
+        "waiting_user": 6,
+        "pending": 7,
+        "carried_over_from_previous_run": 8,
+    }
+    sample_items.sort(
+        key=lambda row: (
+            int(operational_order.get(str(row.get("operational_state", "")), 99)),
+            str(row.get("short_id", "")),
+        )
+    )
+
+    blocked_reasons = [
+        {
+            "code": code,
+            "label": _operational_reason_label(code),
+            "count": count,
+        }
+        for code, count in sorted(
+            reason_counts.items(),
+            key=lambda item: (-int(item[1]), str(item[0])),
+        )
+    ]
+
+    active_total = sum(int(value) for value in counts.values())
+    return {
+        "has_actionable_items": active_total > 0,
+        "active_total": active_total,
+        "counts": counts,
+        "blocked_reasons": blocked_reasons,
+        "sample_items": sample_items[:8],
+        "carryover_roots": carryover_roots[:6],
+    }
 
 
 def _coerce_phase_evidence_plan(
@@ -210,6 +362,10 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
 
     tasks_payload = _read_runtime_tasks_payload(runtime_dir)
     task_summaries = _summarize_chat_tasks(tasks_payload, task_root=normalized_root)
+    task_operational_summary = _build_task_operational_summary(
+        tasks_payload,
+        task_root=normalized_root,
+    )
     if isinstance(tasks_payload, list):
         for item in tasks_payload:
             if not isinstance(item, dict):
@@ -376,6 +532,7 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
         specialist_report_summary=specialist_report_summary,
         peer_consultation_summary=peer_consultation_summary,
         task_summaries=task_summaries,
+        task_operational_summary=task_operational_summary,
     )
 
     if not exists:

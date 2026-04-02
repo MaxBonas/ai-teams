@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 import api.main as api_main
+from api.utils import PROJECT_ROOT, resolve_runtime_dir
 from aiteam.config import build_default_router_policy
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.router import HybridRouter
@@ -38,6 +39,20 @@ def _parse_sse_result(response) -> dict:
 
 def _load_runtime_tasks(runtime_dir: Path) -> list[dict]:
     return SqliteStore(runtime_dir / "aiteam.db").load_all_tasks()
+
+
+def _runtime_dir_for(workspace: Path) -> Path:
+    return resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+
+def _plan_markdown_files(workspace: Path) -> list[Path]:
+    candidates = [workspace / "docs" / "aiteam", workspace / "planning"]
+    files: list[Path] = []
+    for directory in candidates:
+        if not directory.exists():
+            continue
+        files.extend(sorted(path for path in directory.glob("*.md") if path.is_file()))
+    return files
 
 
 class ReplanIntegrationAdapter(ModelAdapter):
@@ -297,6 +312,19 @@ class DelegateSpecialistHelpersTests(unittest.TestCase):
         tempfile.TemporaryDirectory = self._previous_temporary_directory
         shutil.rmtree(self._tmp_root, ignore_errors=True)
 
+    def test_workspace_artifact_snapshot_ignores_aiteam_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = _runtime_dir_for(workspace)
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "events.jsonl").write_text("{}", encoding="utf-8")
+            (workspace / "feature.py").write_text("print('ok')\n", encoding="utf-8")
+
+            snapshot = api_main._workspace_artifact_snapshot(workspace)
+
+            self.assertIn("feature.py", snapshot)
+            self.assertNotIn(".aiteam/events.jsonl", snapshot)
+
     def test_extract_delegate_request_wrapper_supports_specialized_intents(self) -> None:
         request = api_main._extract_delegate_request(
             '[DELEGATE_BROWSER_REPRO: "reproduce el bug"]\n'
@@ -352,7 +380,7 @@ class DelegateSpecialistHelpersTests(unittest.TestCase):
     def test_estimate_preplan_context_pressure_reads_previous_chat_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
-            runtime_dir = workspace / "runtime"
+            runtime_dir = _runtime_dir_for(workspace)
             runtime_dir.mkdir(parents=True, exist_ok=True)
             workflow_state = {
                 "CHAT-prev-ctx": {
@@ -415,7 +443,7 @@ class DelegateSpecialistHelpersTests(unittest.TestCase):
     def test_build_curated_context_block_reads_project_and_chat_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
-            runtime_dir = workspace / "runtime"
+            runtime_dir = _runtime_dir_for(workspace)
             runtime_dir.mkdir(parents=True, exist_ok=True)
             api_main._persist_preplan_context(
                 runtime_dir=runtime_dir,
@@ -1254,6 +1282,157 @@ class AdvisoryModeIntegrationAdapter(ModelAdapter):
         )
 
 
+class AgentsMdIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+        self.intake_prompt = ""
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Lead intake and planning" in joined:
+            self.intake_prompt = joined
+            return AdapterResponse(
+                success=True,
+                content="[DIRECT_ANSWER]\nLeidas instrucciones del proyecto.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=12,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Respuesta generica.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=10,
+        )
+
+
+class QuorumPlanningIntegrationAdapter(ModelAdapter):
+    def __init__(
+        self,
+        *,
+        name: str,
+        provider: str,
+        model: str,
+        record: list[dict[str, str]],
+    ) -> None:
+        super().__init__(
+            name=name,
+            provider=provider,
+            model=model,
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+        self._record = record
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Modo quorum: consolidacion final del Lead." in joined:
+            self._record.append({"adapter": self.name, "stage": "final"})
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: architecture_review]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: discovery\n"
+                    "role: RESEARCHER\n"
+                    "objective: consolidar contexto confirmado\n"
+                    "phase_id: architecture_options\n"
+                    "role: REVIEWER\n"
+                    "objective: comparar opciones con tradeoffs\n"
+                    "depends_on: [discovery]\n"
+                    "phase_id: adr_document\n"
+                    "role: REVIEWER\n"
+                    "objective: documentar la decision consolidada\n"
+                    "depends_on: [architecture_options]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan final consolidado con quorum."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=60,
+            )
+        if "Modo quorum: consultor independiente." in joined:
+            self._record.append({"adapter": self.name, "stage": "consultant"})
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: architecture_review]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: discovery\n"
+                    "role: RESEARCHER\n"
+                    "objective: ampliar restricciones y riesgos\n"
+                    "phase_id: architecture_options\n"
+                    "role: REVIEWER\n"
+                    "objective: contrastar dos alternativas de arquitectura\n"
+                    "depends_on: [discovery]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Recomiendo reforzar discovery antes del ADR."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=50,
+            )
+        if (
+            "Lead intake and planning" in joined
+            or "TRAS TU ANALISIS, incluye un bloque [WORKFLOW_PLAN]" in joined
+            or "Eres Team Lead senior. Convierte el input" in joined
+        ):
+            self._record.append({"adapter": self.name, "stage": "lead"})
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[RUN_MODE: architecture_review]\n"
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: discovery\n"
+                    "role: RESEARCHER\n"
+                    "objective: recopilar contexto tecnico base\n"
+                    "phase_id: architecture_options\n"
+                    "role: REVIEWER\n"
+                    "objective: revisar arquitectura objetivo\n"
+                    "depends_on: [discovery]\n"
+                    "phase_id: adr_document\n"
+                    "role: REVIEWER\n"
+                    "objective: redactar ADR inicial\n"
+                    "depends_on: [architecture_options]\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan inicial del Lead."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=50,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Scout/probe output.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=10,
+        )
+
+
 class LeadFailureDelegateIntegrationAdapter(ModelAdapter):
     def __init__(self) -> None:
         super().__init__(
@@ -1881,7 +2060,7 @@ class APITeamChatTests(unittest.TestCase):
             self.assertIn("discovery", phase_task_ids)
             self.assertIn("build", phase_task_ids)
 
-            events_file = workspace / "runtime" / "events.jsonl"
+            events_file = _runtime_dir_for(workspace) / "events.jsonl"
             self.assertTrue(events_file.exists())
             events_text = events_file.read_text(encoding="utf-8")
             self.assertIn('"directive": "replan"', events_text)
@@ -1937,16 +2116,245 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertEqual(payload.get("delegated_task_ids", []), [])
 
                 tasks_text = json.dumps(
-                    _load_runtime_tasks(workspace / "runtime"),
+                    _load_runtime_tasks(_runtime_dir_for(workspace)),
                     ensure_ascii=False,
                 )
                 self.assertNotIn("::architecture_options", tasks_text)
                 self.assertNotIn("::adr_document", tasks_text)
                 self.assertNotIn("::lead_close", tasks_text)
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"event_type": "chat_probe_completed"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_planning_mode_persists_plan_as_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "docs").mkdir(parents=True, exist_ok=True)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[ProbeIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Haz un analisis de arquitectura del sistema actual",
+                            "mode": "probe",
+                            "max_rounds": 4,
+                        },
+                    )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                plan_files = _plan_markdown_files(workspace)
+                self.assertEqual(len(plan_files), 1)
+                self.assertEqual(plan_files[0].parent, workspace / "docs" / "aiteam")
+                plan_text = plan_files[0].read_text(encoding="utf-8")
+                self.assertIn("# Plan:", plan_text)
+                self.assertIn("## Solicitud", plan_text)
+                self.assertIn("## Fases planificadas", plan_text)
+                self.assertIn("## Salida del Lead", plan_text)
+                self.assertIn("architecture_review", plan_text)
+                self.assertIn("discovery", plan_text)
+                self.assertGreaterEqual(int(payload.get("artifact_created", 0) or 0), 1)
+                self.assertTrue(any(str(item).endswith(".md") for item in payload.get("artifact_files", [])))
+
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"event_type": "chat_plan_persisted"', events_text)
+                self.assertIn(str(plan_files[0]).replace("\\", "\\\\"), events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_standard_mode_does_not_persist_plan_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[ReplanIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Implementa la siguiente mejora y revisa el resultado",
+                            "mode": "sprint5",
+                            "max_rounds": 4,
+                            "allow_low_productivity_override": True,
+                            "auto_extend_weak_runs": False,
+                        },
+                    )
+                self.assertEqual(response.status_code, 200)
+                _ = _parse_sse_result(response)
+                self.assertEqual(_plan_markdown_files(workspace), [])
+
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertNotIn('"event_type": "chat_plan_persisted"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_quorum_runs_multiple_models_for_planning_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "docs").mkdir(parents=True, exist_ok=True)
+            previous_workspace = api_main.get_current_workspace()
+            record: list[dict[str, str]] = []
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[
+                            QuorumPlanningIntegrationAdapter(
+                                name="openai_pro",
+                                provider="openai",
+                                model="gpt-pro",
+                                record=record,
+                            ),
+                            QuorumPlanningIntegrationAdapter(
+                                name="claude_pro",
+                                provider="anthropic",
+                                model="claude-pro",
+                                record=record,
+                            ),
+                        ],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Haz una revision de arquitectura y prepara ADR",
+                            "mode": "probe",
+                            "max_rounds": 4,
+                            "quorum": True,
+                        },
+                    )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertEqual(str(payload.get("lead_run_mode", "")), "architecture_review")
+                self.assertIn("consultant", [item.get("stage") for item in record])
+                self.assertIn("final", [item.get("stage") for item in record])
+                self.assertTrue(
+                    any(
+                        item.get("stage") == "consultant"
+                        and item.get("adapter") == "claude_pro"
+                        for item in record
+                    )
+                )
+                self.assertTrue(
+                    any(
+                        item.get("stage") == "final"
+                        and item.get("adapter") == "openai_pro"
+                        for item in record
+                    )
+                )
+
+                plan_files = _plan_markdown_files(workspace)
+                self.assertEqual(len(plan_files), 1)
+                plan_text = plan_files[0].read_text(encoding="utf-8")
+                self.assertIn("Plan final consolidado con quorum.", plan_text)
+                self.assertIn("## Quorum del Lead", plan_text)
+                self.assertIn("### Consultores", plan_text)
+                self.assertIn("claude_pro", plan_text)
+
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"event_type": "chat_quorum_applied"', events_text)
+                self.assertIn('"consultant_count": 1', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_no_quorum_by_default_for_planning_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            record: list[dict[str, str]] = []
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[
+                            QuorumPlanningIntegrationAdapter(
+                                name="openai_pro",
+                                provider="openai",
+                                model="gpt-pro",
+                                record=record,
+                            ),
+                            QuorumPlanningIntegrationAdapter(
+                                name="claude_pro",
+                                provider="anthropic",
+                                model="claude-pro",
+                                record=record,
+                            ),
+                        ],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Haz una revision de arquitectura y prepara ADR",
+                            "mode": "probe",
+                            "max_rounds": 4,
+                        },
+                    )
+                self.assertEqual(response.status_code, 200)
+                _ = _parse_sse_result(response)
+                self.assertFalse(
+                    any(item.get("stage") == "consultant" for item in record)
+                )
+                self.assertFalse(any(item.get("stage") == "final" for item in record))
+
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertNotIn('"event_type": "chat_quorum_applied"', events_text)
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -1988,13 +2396,13 @@ class APITeamChatTests(unittest.TestCase):
             self.assertIn("build", payload.get("phase_task_ids", {}))
 
             tasks_text = json.dumps(
-                _load_runtime_tasks(workspace / "runtime"),
+                _load_runtime_tasks(_runtime_dir_for(workspace)),
                 ensure_ascii=False,
             )
             self.assertIn("::build::review", tasks_text)
             self.assertIn("::build::qa", tasks_text)
 
-            events_file = workspace / "runtime" / "events.jsonl"
+            events_file = _runtime_dir_for(workspace) / "events.jsonl"
             events_text = events_file.read_text(encoding="utf-8")
             self.assertIn('"directive": "force_gate"', events_text)
             self.assertIn('"target_phase": "build"', events_text)
@@ -2042,14 +2450,14 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertNotIn("qa", payload.get("phase_task_ids", {}))
 
                 tasks_text = json.dumps(
-                    _load_runtime_tasks(workspace / "runtime"),
+                    _load_runtime_tasks(_runtime_dir_for(workspace)),
                     ensure_ascii=False,
                 )
                 self.assertIn("::build", tasks_text)
                 self.assertNotIn("::review", tasks_text)
                 self.assertNotIn("::qa", tasks_text)
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"directive": "abort_phases"', events_text)
                 self.assertIn('"source_phase": "lead_report_build"', events_text)
@@ -2094,7 +2502,7 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertNotIn("review", payload.get("phase_task_ids", {}))
                 self.assertNotIn("qa", payload.get("phase_task_ids", {}))
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"directive": "skip_mid_run"', events_text)
                 self.assertIn('"source_phase": "lead_report_build"', events_text)
@@ -2142,7 +2550,7 @@ class APITeamChatTests(unittest.TestCase):
                 payload = _parse_sse_result(response)
                 self.assertIn("build", payload.get("phase_task_ids", {}))
 
-                tasks_data = _load_runtime_tasks(workspace / "runtime")
+                tasks_data = _load_runtime_tasks(_runtime_dir_for(workspace))
                 by_id = {
                     item.get("task_id"): item
                     for item in tasks_data
@@ -2155,7 +2563,7 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertIn("primary_route", list(metadata.get("excluded_adapters", [])))
                 self.assertTrue(bool(metadata.get("retry_route_requested")))
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"directive": "retry_route"', events_text)
                 self.assertIn('"target_phase": "build"', events_text)
@@ -2198,7 +2606,7 @@ class APITeamChatTests(unittest.TestCase):
                 payload = _parse_sse_result(response)
                 self.assertEqual(int(payload.get("round_budget", 0)), 3)
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"directive": "set_budget_mid_run"', events_text)
                 self.assertIn('"source_phase": "lead_report_build"', events_text)
@@ -2256,7 +2664,7 @@ class APITeamChatTests(unittest.TestCase):
                     )
                 )
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"source_phase": "lead_failure_build"', events_text)
                 self.assertIn('"intent": "delegate_repo_scan"', events_text)
@@ -2315,7 +2723,7 @@ class APITeamChatTests(unittest.TestCase):
                 )
                 self.assertIn("lead_close", str(payload.get("phase_task_ids", {})))
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"source_phase": "lead_close"', events_text)
                 self.assertIn('"intent": "delegate_browser_repro"', events_text)
@@ -2369,10 +2777,58 @@ class APITeamChatTests(unittest.TestCase):
                     list(payload.get("policy_signals", [])),
                 )
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"directive": "advisory_mode"', events_text)
                 self.assertIn('"event_type": "chat_policy_signal"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_lead_intake_injects_project_instructions_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            adapter = AgentsMdIntegrationAdapter()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[adapter],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                instructions_dir = workspace / ".aiteam"
+                instructions_dir.mkdir(parents=True, exist_ok=True)
+                (instructions_dir / "instructions.md").write_text(
+                    "# Reglas del proyecto\nUsa commits pequenos y documenta decisiones.\n",
+                    encoding="utf-8",
+                )
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Planifica la siguiente mejora de backend",
+                            "mode": "sprint5",
+                            "max_rounds": 4,
+                            "allow_low_productivity_override": True,
+                            "auto_extend_weak_runs": False,
+                        },
+                    )
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(
+                    "## Instrucciones del proyecto (.aiteam/instructions.md)",
+                    adapter.intake_prompt,
+                )
+                self.assertIn("Usa commits pequenos y documenta decisiones.", adapter.intake_prompt)
+                self.assertNotIn("AGENTS.md", adapter.intake_prompt)
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -2394,7 +2850,7 @@ class APITeamChatTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 200)
                 payload = _parse_sse_result(response)
-                tasks_data = _load_runtime_tasks(workspace / "runtime")
+                tasks_data = _load_runtime_tasks(_runtime_dir_for(workspace))
                 tasks_text = json.dumps(tasks_data, ensure_ascii=False)
                 self.assertIn(payload.get("lead_task_id"), tasks_text)
                 for phase_id in payload.get("phase_task_ids", {}).values():
@@ -2430,7 +2886,7 @@ class APITeamChatTests(unittest.TestCase):
                     "team_lead",
                 )
 
-                mailbox_file = workspace / "runtime" / "mailbox.jsonl"
+                mailbox_file = _runtime_dir_for(workspace) / "mailbox.jsonl"
                 self.assertTrue(mailbox_file.exists())
                 mailbox_text = mailbox_file.read_text(encoding="utf-8")
                 self.assertIn('"sender": "user"', mailbox_text)
@@ -2442,7 +2898,7 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertIn('"recipient": "user"', mailbox_text)
                 self.assertIn("Resumen del Team Lead para ti:", mailbox_text)
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 self.assertTrue(events_file.exists())
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"event_type": "user_input"', events_text)
@@ -2594,7 +3050,7 @@ class APITeamChatTests(unittest.TestCase):
                 payload = _parse_sse_result(response)
                 self.assertEqual(str(payload.get("validation_owner", "")), "chat_policy")
 
-                tasks_data = _load_runtime_tasks(workspace / "runtime")
+                tasks_data = _load_runtime_tasks(_runtime_dir_for(workspace))
                 by_id = {
                     item.get("task_id"): item
                     for item in tasks_data
@@ -2692,7 +3148,7 @@ class APITeamChatTests(unittest.TestCase):
                     )
                 )
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 event_rows = [
                     json.loads(line)
                     for line in events_file.read_text(encoding="utf-8").splitlines()
@@ -2734,18 +3190,25 @@ class APITeamChatTests(unittest.TestCase):
                 )
 
                 task_root = str(payload.get("task_id", "")).strip()
-                tasks_data = _load_runtime_tasks(workspace / "runtime")
-                build_delegate_rows = [
+                tasks_data = _load_runtime_tasks(_runtime_dir_for(workspace))
+                # C1: delegate evidence tasks are deferred — they're created lazily
+                # when the parent phase is claimed, not at plan time. Verify that the
+                # build task stores its deferred specs and that they have the expected
+                # specialists and metadata.
+                build_task_rows = [
                     item
                     for item in tasks_data
                     if isinstance(item, dict)
-                    and str(item.get("task_id", "")).startswith(f"{task_root}::delegate_build_")
+                    and item.get("task_id") == f"{task_root}::build"
                 ]
-                self.assertTrue(build_delegate_rows)
+                self.assertTrue(build_task_rows, "build phase task should exist")
+                build_task_meta = (build_task_rows[0].get("metadata", {}) or {})
+                deferred_specs = list(build_task_meta.get("deferred_evidence_specs", []) or [])
+                self.assertTrue(deferred_specs, "build task should have deferred_evidence_specs (C1)")
 
                 by_specialist = {
-                    str(((row.get("metadata", {}) or {}).get("tool_specialist", ""))): (row.get("metadata", {}) or {})
-                    for row in build_delegate_rows
+                    str((spec.get("metadata", {}) or {}).get("tool_specialist", "")): (spec.get("metadata", {}) or {})
+                    for spec in deferred_specs
                 }
                 self.assertIn("browser_operator", by_specialist)
                 self.assertTrue(
@@ -2767,14 +3230,14 @@ class APITeamChatTests(unittest.TestCase):
                     list(by_specialist["browser_operator"].get("tool_specialist_skill_targets", [])),
                 )
 
-                browser_rows = [
-                    row for row in build_delegate_rows
-                    if str(((row.get("metadata", {}) or {}).get("tool_specialist", "")) or "") == "browser_operator"
+                browser_specs = [
+                    spec for spec in deferred_specs
+                    if str((spec.get("metadata", {}) or {}).get("tool_specialist", "") or "") == "browser_operator"
                 ]
-                self.assertTrue(browser_rows)
+                self.assertTrue(browser_specs)
                 self.assertIn(
                     "steps_reproduced",
-                    str(browser_rows[0].get("description", "")),
+                    str(browser_specs[0].get("description", "")),
                 )
                 self.assertTrue(isinstance(payload.get("specialist_reports", []), list))
                 summary = dict(payload.get("specialist_report_summary", {}) or {})
@@ -2802,7 +3265,7 @@ class APITeamChatTests(unittest.TestCase):
                 payload = _parse_sse_result(response)
                 task_root = str(payload.get("task_id", "")).strip()
 
-                tasks_data = _load_runtime_tasks(workspace / "runtime")
+                tasks_data = _load_runtime_tasks(_runtime_dir_for(workspace))
                 by_id = {
                     item.get("task_id"): item
                     for item in tasks_data
@@ -2999,7 +3462,7 @@ class APITeamChatTests(unittest.TestCase):
                 ]
                 self.assertTrue(any("build" in item for item in failures))
 
-                events_file = workspace / "runtime" / "events.jsonl"
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 self.assertTrue(events_file.exists())
                 events_rows = [
                     json.loads(line)

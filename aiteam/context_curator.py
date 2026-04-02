@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -44,6 +45,39 @@ def _split_compact_lines(value: str, limit: int = 6) -> list[str]:
     if lines:
         return lines
     return [_compact_text(text, 220)]
+
+
+def project_key_from_runtime_dir(runtime_dir: Path) -> str:
+    return str(Path(runtime_dir).resolve().parent)
+
+
+def _project_keys_match(left: str, right: str) -> bool:
+    normalized_left = str(left or "").strip()
+    normalized_right = str(right or "").strip()
+    if not normalized_left or not normalized_right:
+        return normalized_left == normalized_right
+    if normalized_left == normalized_right:
+        return True
+    try:
+        return (
+            str(Path(normalized_left).resolve()).casefold()
+            == str(Path(normalized_right).resolve()).casefold()
+        )
+    except Exception:
+        return normalized_left.casefold() == normalized_right.casefold()
+
+
+def _storage_slug(value: str, *, prefix_limit: int = 48) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return "default"
+    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+    prefix = _slug(normalized)
+    if prefix_limit > 0:
+        prefix = prefix[:prefix_limit].strip("._-")
+    if prefix:
+        return f"{prefix}-{digest}"
+    return digest
 
 
 def _coerce_non_negative_int(value: Any) -> int:
@@ -391,7 +425,7 @@ class ContextCuratorStore:
         self._finalize_context(project_ctx, project_key=project_key, chat_root="")
         self._finalize_context(chat_ctx, project_key=project_key, chat_root=chat_root)
         self._write_project_context(project_key, project_ctx)
-        self._write_chat_context(chat_root, chat_ctx)
+        self._write_chat_context(chat_root, project_key, chat_ctx)
         return project_ctx, chat_ctx
 
     def remember_phase_summary(
@@ -434,7 +468,7 @@ class ContextCuratorStore:
         self._finalize_context(project_ctx, project_key=project_key, chat_root="")
         self._finalize_context(chat_ctx, project_key=project_key, chat_root=chat_root)
         self._write_project_context(project_key, project_ctx)
-        self._write_chat_context(chat_root, chat_ctx)
+        self._write_chat_context(chat_root, project_key, chat_ctx)
         return project_ctx, chat_ctx, _compact_text(summary_text, 320)
 
     def remember_invalidation(
@@ -488,16 +522,92 @@ class ContextCuratorStore:
         self._finalize_context(project_ctx, project_key=project_key, chat_root="")
         self._finalize_context(chat_ctx, project_key=project_key, chat_root=chat_root)
         self._write_project_context(project_key, project_ctx)
-        self._write_chat_context(chat_root, chat_ctx)
+        self._write_chat_context(chat_root, project_key, chat_ctx)
         return project_ctx, chat_ctx
 
     def load_project_context(self, project_key: str) -> dict[str, Any]:
-        path = self.projects_dir / f"{_slug(project_key)}.json"
-        return self._load_context(path, project_key=project_key, chat_root="")
+        canonical_path = self._project_context_path(project_key)
+        loaded = self._load_context(canonical_path, project_key=project_key, chat_root="")
+        if canonical_path.exists():
+            return loaded
+
+        discovered_path = self._find_matching_project_context_path(project_key)
+        if discovered_path is not None:
+            discovered_loaded = self._load_context(
+                discovered_path,
+                project_key=project_key,
+                chat_root="",
+            )
+            stored_project_key = str(discovered_loaded.get("project_key", "") or "").strip()
+            if _project_keys_match(stored_project_key, project_key):
+                if discovered_path != canonical_path:
+                    self._write_project_context(project_key, discovered_loaded)
+                return discovered_loaded
+
+        legacy_path = self.projects_dir / f"{_slug(project_key)}.json"
+        legacy_loaded = self._load_context(legacy_path, project_key=project_key, chat_root="")
+        stored_project_key = str(legacy_loaded.get("project_key", "") or "").strip()
+        if legacy_path.exists() and _project_keys_match(stored_project_key, project_key):
+            self._write_project_context(project_key, legacy_loaded)
+            return legacy_loaded
+
+        return loaded
 
     def load_chat_context(self, chat_root: str, *, project_key: str = "") -> dict[str, Any]:
-        path = self.chats_dir / f"{_slug(chat_root)}.json"
-        return self._load_context(path, project_key=project_key, chat_root=chat_root)
+        requested_project_key = str(project_key or "").strip()
+        namespaced_path = self._chat_context_path(
+            chat_root,
+            project_key=requested_project_key,
+        )
+        loaded = self._load_context(
+            namespaced_path,
+            project_key=requested_project_key,
+            chat_root=chat_root,
+        )
+        if namespaced_path.exists():
+            return loaded
+
+        discovered_path = self._find_matching_chat_context_path(
+            chat_root,
+            project_key=requested_project_key,
+        )
+        if discovered_path is not None:
+            discovered_loaded = self._load_context(
+                discovered_path,
+                project_key=requested_project_key,
+                chat_root=chat_root,
+            )
+            stored_project_key = str(discovered_loaded.get("project_key", "") or "").strip()
+            if (
+                requested_project_key
+                and stored_project_key
+                and not _project_keys_match(stored_project_key, requested_project_key)
+            ):
+                return self._empty_context(project_key=requested_project_key, chat_root=chat_root)
+            if requested_project_key and discovered_path != namespaced_path:
+                self._write_chat_context(chat_root, requested_project_key, discovered_loaded)
+            return discovered_loaded
+
+        legacy_path = self.chats_dir / f"{_slug(chat_root)}.json"
+        legacy_loaded = self._load_context(
+            legacy_path,
+            project_key=requested_project_key,
+            chat_root=chat_root,
+        )
+        stored_project_key = str(legacy_loaded.get("project_key", "") or "").strip()
+        if (
+            requested_project_key
+            and stored_project_key
+            and not _project_keys_match(stored_project_key, requested_project_key)
+        ):
+            return self._empty_context(project_key=requested_project_key, chat_root=chat_root)
+        if (
+            legacy_path.exists()
+            and requested_project_key
+            and _project_keys_match(stored_project_key, requested_project_key)
+        ):
+            self._write_chat_context(chat_root, requested_project_key, legacy_loaded)
+        return legacy_loaded
 
     def build_summary(self, payload: dict[str, Any], *, max_items_per_section: int = 3) -> str:
         if not isinstance(payload, dict):
@@ -528,20 +638,99 @@ class ContextCuratorStore:
         return self._empty_context(project_key=project_key, chat_root=chat_root)
 
     def _write_project_context(self, project_key: str, payload: dict[str, Any]) -> None:
-        path = self.projects_dir / f"{_slug(project_key)}.json"
+        path = self._project_context_path(project_key)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         except FileNotFoundError:
             pass
 
-    def _write_chat_context(self, chat_root: str, payload: dict[str, Any]) -> None:
-        path = self.chats_dir / f"{_slug(chat_root)}.json"
+    def _write_chat_context(
+        self,
+        chat_root: str,
+        project_key: str | dict[str, Any],
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if payload is None and isinstance(project_key, dict):
+            payload = project_key
+            project_key = str(payload.get("project_key", "") or "").strip()
+        if payload is None:
+            return
+        path = self._chat_context_path(chat_root, project_key=project_key)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         except FileNotFoundError:
             pass
+
+    def _chat_context_path(self, chat_root: str, *, project_key: str) -> Path:
+        normalized_chat_root = _storage_slug(chat_root, prefix_limit=32)
+        normalized_project_key = _storage_slug(project_key, prefix_limit=24) if project_key else ""
+        if normalized_project_key:
+            filename = f"{normalized_project_key}__{normalized_chat_root}.json"
+        else:
+            filename = f"{normalized_chat_root}.json"
+        return self.chats_dir / filename
+
+    def _project_context_path(self, project_key: str) -> Path:
+        return self.projects_dir / f"{_storage_slug(project_key, prefix_limit=32)}.json"
+
+    def _find_matching_project_context_path(self, project_key: str) -> Path | None:
+        requested_project_key = str(project_key or "").strip()
+        if not requested_project_key or not self.projects_dir.exists():
+            return None
+
+        for candidate in self.projects_dir.glob("*.json"):
+            if not candidate.is_file():
+                continue
+            try:
+                raw = json.loads(candidate.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(raw, dict):
+                continue
+            stored_project_key = str(raw.get("project_key", "") or "").strip()
+            if _project_keys_match(stored_project_key, requested_project_key):
+                return candidate
+        return None
+
+    def _find_matching_chat_context_path(self, chat_root: str, *, project_key: str) -> Path | None:
+        requested_chat_root = str(chat_root or "").strip()
+        if not requested_chat_root or not self.chats_dir.exists():
+            return None
+
+        requested_project_key = str(project_key or "").strip()
+        requested_chat_root_folded = requested_chat_root.casefold()
+        exact_project_match: Path | None = None
+        legacy_match: Path | None = None
+
+        for candidate in self.chats_dir.glob("*.json"):
+            if not candidate.is_file():
+                continue
+            try:
+                raw = json.loads(candidate.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(raw, dict):
+                continue
+
+            stored_chat_root = str(raw.get("chat_root", "") or "").strip()
+            if stored_chat_root.casefold() != requested_chat_root_folded:
+                continue
+
+            stored_project_key = str(raw.get("project_key", "") or "").strip()
+            if requested_project_key:
+                if _project_keys_match(stored_project_key, requested_project_key):
+                    exact_project_match = candidate
+                    break
+                if not stored_project_key and legacy_match is None:
+                    legacy_match = candidate
+                continue
+
+            legacy_match = candidate
+            break
+
+        return exact_project_match or legacy_match
 
     def _empty_context(self, *, project_key: str, chat_root: str) -> dict[str, Any]:
         return {

@@ -1,7 +1,7 @@
 # Plan de arquitectura — AI Team Hybrid Orchestrator
 
 Fecha: `2026-04-01` — actualizado `2026-04-02`
-Estado del sistema: `763 passed`
+Estado del sistema: `776 passed`
 
 **Contexto de uso**: el sistema se usa tanto para desarrollarse a sí mismo (dogfooding) como para proyectos externos de programación y planificación. Ese doble uso determina el orden de prioridades.
 
@@ -219,12 +219,40 @@ Hasta ahora había que leer policy, model catalog, adapters efectivos y `provide
   - blockers (`role_targets`, `team_lead_guard`, `adapter_unavailable`, etc.)
   - separación entre **configurado** y **efectivo**
 
+Referencia operativa:
+
+- `docs/ROUTING_CATALOG_VIEW.md`
+- `docs/ROUTING_EDITOR_VISION.md`
+
+### B7 — Vista editable de routing por rol/modelo
+
+**Estado**: `definicion de producto documentada`
+
+**Por qué**: el MVP consultable ya hace visible el estado real del router, pero todavia no da
+gobierno operativo completo. El siguiente salto no es mas observabilidad, sino permitir que el
+operador ajuste la politica de routing de forma segura, reversible y explicable.
+
+**Alcance esperado**:
+
+- editar providers por rol
+- editar modelos por rol
+- definir primario y fallbacks
+- aplicar overrides por maquina y por proyecto
+- simular resolucion antes de guardar
+- bloquear configuraciones invalidas
+- comparar `defaults`, `override` y `efectivo`
+
+**Referencia de producto**:
+
+- `docs/ROUTING_EDITOR_VISION.md`
+- `docs/LEAD_QUORUM_PROJECT_CONTEXT_VISION.md`
+
 **Decisión importante**:
 se hizo primero como vista de lectura. La fase editable queda para después, cuando haya un modelo de persistencia local seguro para overrides por rol.
 
 ### B7 — Vista completa y editable de configuración de routing
 
-**Estado**: pendiente
+**Estado**: parcialmente resuelto
 
 **Por qué**: el MVP consultable ya resuelve opacidad, pero todavía no da gobierno real.
 Si el objetivo es controlar coste, calidad, soberanía del Lead y reparto por rol sin tocar JSON a mano,
@@ -272,19 +300,61 @@ Debe operar sobre overrides locales seguros y reversibles.
 
 ---
 
-### B8 — Separar runtime del sistema en proyectos externos
+### B8 — Planning fuerte con `Plan/Quorum`, planes persistidos y `.aiteam/instructions.md` por proyecto
+
+**Estado**: `vision documentada`
+
+**Por qué**: el sistema ya planifica, pero todavía no trata la planificación como un artefacto
+de proyecto de primera clase ni permite una topología de Lead más fuerte para planificación de
+alta calidad. Tampoco da todavía un canal normativo persistente por proyecto dentro del namespace
+propio del producto.
+
+**Objetivo de producto**:
+
+- `Plan` y `Plan/Quorum` como modos explícitos
+- Lead soberano con consultores avanzados opcionales
+- deliberación previa a la run productiva
+- plan final guardado como archivo visible del proyecto
+- `.aiteam/instructions.md` por proyecto como instrucción persistente del equipo
+
+**Alcance esperado**:
+
+- topología `Lead solo` vs `Lead + consultores`
+- reunión estructurada previa entre Lead y consultores
+- persistencia de planes en `docs/aiteam/` o `planning/`
+- reutilización del plan en runs posteriores
+- lectura y aplicación visible de `.aiteam/instructions.md` del proyecto
+
+**Referencia de producto**:
+
+- `docs/LEAD_QUORUM_PROJECT_CONTEXT_VISION.md`
+
+---
+
+### B9 — Separar runtime del sistema en proyectos externos
 
 **Estado**: pendiente
+
+Caso de referencia investigado:
+
+- `docs/TEST_AITEAMS_GAME_AUDIT_2026_04_02.md`
 
 **Por qué**: hoy el sistema crea `workspace/runtime/` dentro de proyectos externos.
 Eso mezcla estado interno del orquestador con el árbol del producto real del usuario.
 
-Síntomas ya observados en `test_aiteams`:
+Síntomas observados originalmente en `test_aiteams`:
 
-- la raíz del proyecto solo muestra `runtime/`
-- no se distinguen artefactos de producto frente a estado interno del sistema
+- la raíz del proyecto solo mostraba `runtime/`
+- no se distinguían artefactos de producto frente a estado interno del sistema
 - el runtime local del proyecto contiene memoria, sesiones, sandboxes, mailbox, eventos y contexto curado
 - el store de contexto puede llegar a contener claves de otros roots (`Ai_Teams`) dentro del runtime del proyecto externo
+
+**Estado actual**:
+
+- B9a ya movió el runtime externo a `.aiteam/` con migración automática
+- B9b ya aisló el contexto por `project_root`
+- B9c ya expone `product_artifacts` en `last_chat_run` y `StatusPanel` separa artefactos de producto del runtime interno
+- la deuda viva aquí pasa a ser la explicabilidad de estados operativos en UI (`pending`, `blocked`, `carried_over`)
 
 **Objetivo**:
 
@@ -310,8 +380,10 @@ Síntomas ya observados en `test_aiteams`:
   - motivo operativo del bloqueo
 
 **B8d — Visibilidad de artefactos reales**:
-- exponer explícitamente archivos creados/modificados fuera de `.aiteam/`
-- si no hay artefactos de producto, decirlo de forma explícita
+- ya resuelto en B9c:
+  - `last_chat_run.product_artifacts`
+  - mensaje explícito cuando no hubo artefactos
+  - separación visual en `StatusPanel`
 
 ---
 

@@ -55,6 +55,8 @@ class RouterPolicy:
             "qa": ["openai", "google", "groq"],
         }
     )
+    role_primary_provider: dict[str, str] = field(default_factory=dict)
+    role_provider_exclusions: dict[str, list[str]] = field(default_factory=dict)
     peer_consultation_diversity_required: bool = True
     enforce_role_model_preferences: bool = False
     strict_role_policy_environments: list[str] = field(default_factory=lambda: ["prod"])

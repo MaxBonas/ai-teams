@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime, timezone
-import os
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from api.utils import (
@@ -18,18 +17,70 @@ from api.utils import (
     _read_runtime_workflow_state,
     _extract_user_message_from_task_description,
     _event_summary,
+    resolve_runtime_dir,
     PROJECT_ROOT,
     get_current_workspace,
 )
 
 from aiteam.dashboard import build_dashboard_payload
 from aiteam.cli import build_default_orchestrator
+from aiteam.config import build_default_router_policy
 from aiteam.pilot import compute_pilot_metrics
 from aiteam.provider_ops import provider_ops_status
 from aiteam.autotools import AutoToolIntegrator
+from aiteam.routing_overrides import (
+    RoutingOverrides,
+    apply_overrides_to_policy,
+    load_overrides,
+    reset_overrides,
+    save_overrides,
+    validate_overrides,
+)
 from aiteam.types import Complexity, Criticality, Role, RoutingRequest
+from api.chat_observability import _build_task_operational_summary
 
 router = APIRouter()
+
+
+_ROUTING_PAYLOAD_VERSION = 1
+
+_ROUTING_BLOCKER_META: dict[str, dict[str, str]] = {
+    "role_targets": {
+        "label": "adapter restringido a otros roles",
+        "reason": "El adapter limita explícitamente qué roles pueden usarlo.",
+        "severity": "hard",
+    },
+    "team_lead_guard": {
+        "label": "reservado para team_lead",
+        "reason": "La política del Team Lead no permite este adapter para decisiones soberanas.",
+        "severity": "hard",
+    },
+    "adapter_unavailable": {
+        "label": "adapter no disponible",
+        "reason": "El adapter no se reporta como disponible en esta máquina.",
+        "severity": "hard",
+    },
+    "provider_unhealthy": {
+        "label": "provider con problemas",
+        "reason": "El provider o adapter está degradado operacionalmente según provider_ops.",
+        "severity": "soft",
+    },
+    "cost_exceeded": {
+        "label": "excede límite de coste",
+        "reason": "El budget manager no permite usar este adapter API con el presupuesto actual.",
+        "severity": "soft",
+    },
+    "capability_missing": {
+        "label": "falta capacidad requerida",
+        "reason": "El adapter no satisface las capacidades requeridas para esta resolución.",
+        "severity": "hard",
+    },
+    "channel_excluded": {
+        "label": "canal no permitido para este rol",
+        "reason": "El canal del adapter no está permitido para este rol o entorno efectivo.",
+        "severity": "hard",
+    },
+}
 
 
 def _load_chat_workflow_insights(
@@ -76,11 +127,130 @@ def _load_tool_catalog_index(workspace: Path) -> dict[str, dict[str, object]]:
     return output
 
 
+def _routing_blocker_details(blockers: list[str]) -> list[dict[str, str]]:
+    details: list[dict[str, str]] = []
+    for blocker in blockers:
+        meta = dict(_ROUTING_BLOCKER_META.get(str(blocker).strip(), {}) or {})
+        details.append(
+            {
+                "code": str(blocker).strip(),
+                "label": str(meta.get("label", blocker)).strip(),
+                "reason": str(meta.get("reason", "")).strip(),
+                "severity": str(meta.get("severity", "hard")).strip() or "hard",
+            }
+        )
+    return details
+
+
+def _routing_cost_class(adapter, profile) -> str:
+    tier = str(getattr(profile, "tier", "") or "").strip().lower()
+    if tier == "senior_cloud":
+        return "high"
+    if tier == "advanced_api":
+        return "medium"
+    if tier in {"budget_api", "local"}:
+        return "low"
+    cost_tier = int(getattr(adapter, "cost_tier", 1) or 1)
+    if cost_tier >= 2:
+        return "high"
+    if cost_tier <= 0:
+        return "low"
+    return "medium"
+
+
+def _routing_long_context(adapter, profile) -> bool:
+    blob = " ".join(
+        [
+            str(getattr(adapter, "model", "") or ""),
+            str(getattr(profile, "notes", "") or ""),
+        ]
+    ).lower()
+    return any(token in blob for token in ("131k", "128k", "200k", "long context", "ctx"))
+
+
+def _routing_capability_profile(adapter, profile) -> dict[str, object]:
+    capabilities = set(getattr(adapter, "capabilities", set()) or set())
+    return {
+        "channel": adapter.channel.value,
+        "tier": str(getattr(profile, "tier", "") or "").strip(),
+        "cost_class": _routing_cost_class(adapter, profile),
+        "tool_support": "tools" in capabilities,
+        "stream_support": "stream" in capabilities,
+        "vision": "vision" in capabilities,
+        "thinking": "thinking" in capabilities,
+        "long_context": _routing_long_context(adapter, profile),
+    }
+
+
+def _routing_resolution_entry(adapter, profile) -> dict[str, object]:
+    return {
+        "adapter": adapter.name,
+        "provider": adapter.provider,
+        "model": adapter.model,
+        "channel": adapter.channel.value,
+        "tier": str(getattr(profile, "tier", "") or "").strip(),
+    }
+
+
+def _collect_role_blockers(
+    *,
+    router_obj,
+    adapter,
+    request: RoutingRequest,
+    available: bool,
+    operational: bool,
+    budget_signal,
+) -> list[str]:
+    blockers: list[str] = []
+    role_name = request.role.value
+    profile = router_obj._profile_for(adapter)
+    if adapter.role_targets and role_name not in adapter.role_targets:
+        blockers.append("role_targets")
+    if role_name == Role.TEAM_LEAD.value and not router_obj._team_lead_allowed(adapter):
+        blockers.append("team_lead_guard")
+    if (
+        request.required_capabilities
+        and not request.required_capabilities.issubset(set(adapter.capabilities or set()))
+    ):
+        blockers.append("capability_missing")
+    if not available:
+        blockers.append("adapter_unavailable")
+    if not operational:
+        blockers.append("provider_unhealthy")
+    if (
+        adapter.channel.value == "api"
+        and budget_signal is not None
+        and (
+            not bool(getattr(budget_signal, "can_use_api", True))
+            or int(getattr(adapter, "cost_tier", 0) or 0)
+            > int(getattr(budget_signal, "max_api_cost_tier", 999) or 999)
+        )
+    ):
+        blockers.append("cost_exceeded")
+    if (
+        role_name == Role.TEAM_LEAD.value
+        and adapter.channel.value == "api"
+        and profile is not None
+        and not bool(getattr(profile, "api_allowed_for_team_lead", False))
+    ):
+        blockers.append("channel_excluded")
+    return sorted(set(blockers))
+
+
 def _build_routing_catalog(runtime_dir: Path) -> dict[str, object]:
+    default_policy = build_default_router_policy()
+    overrides = load_overrides(runtime_dir)
+    override_local_present = overrides.has_entries()
+    override_local_payload = overrides.to_dict() if override_local_present else None
     orchestrator = build_default_orchestrator(runtime_dir=runtime_dir, environment="dev")
     router_obj = orchestrator.router
-    policy = router_obj.policy
+    effective_policy = router_obj.policy
     ops_status = provider_ops_status(runtime_dir)
+    budget_signal = (
+        router_obj.budget_manager.api_signal()
+        if getattr(router_obj, "budget_manager", None) is not None
+        else None
+    )
 
     adapters = list(router_obj.adapters)
     adapter_rows: list[dict[str, object]] = []
@@ -104,6 +274,7 @@ def _build_routing_catalog(runtime_dir: Path) -> dict[str, object]:
             "routing_priority": int(adapter.routing_priority),
             "requires_approval": bool(adapter.requires_approval),
             "capabilities": sorted(adapter.capabilities),
+            "capability_profile": _routing_capability_profile(adapter, profile),
             "role_targets": sorted(adapter.role_targets),
             "available": available,
             "operational": operational,
@@ -117,6 +288,10 @@ def _build_routing_catalog(runtime_dir: Path) -> dict[str, object]:
             "smoke_healthy": bool(ops_row.get("smoke_healthy", False)),
             "doctor_details": str(ops_row.get("doctor_details", "") or ""),
             "smoke_details": str(ops_row.get("smoke_details", "") or ""),
+            "supports_tools": bool(_routing_capability_profile(adapter, profile).get("tool_support")),
+            "supports_streaming": bool(_routing_capability_profile(adapter, profile).get("stream_support")),
+            "supports_vision": bool(_routing_capability_profile(adapter, profile).get("vision")),
+            "supports_thinking": bool(_routing_capability_profile(adapter, profile).get("thinking")),
         }
         adapter_rows.append(row)
         provider_row = provider_index.setdefault(
@@ -145,13 +320,25 @@ def _build_routing_catalog(runtime_dir: Path) -> dict[str, object]:
         )
         eligible = router_obj.eligible_adapters(request)
         eligible_names = {adapter.name for adapter in eligible}
-        configured_provider_order = list(policy.role_provider_preferences.get(role_name, []) or [])
-        configured_model_order = list(policy.role_model_preferences.get(role_name, []) or [])
-        configured_provider_set = {str(item).strip().lower() for item in configured_provider_order if str(item).strip()}
-        configured_model_set = {str(item).strip().lower() for item in configured_model_order if str(item).strip()}
+        default_provider_order = list(default_policy.role_provider_preferences.get(role_name, []) or [])
+        default_model_order = list(default_policy.role_model_preferences.get(role_name, []) or [])
+        configured_provider_order = list(
+            effective_policy.role_provider_preferences.get(role_name, []) or []
+        )
+        configured_model_order = list(
+            effective_policy.role_model_preferences.get(role_name, []) or []
+        )
+        configured_provider_set = {
+            str(item).strip().lower() for item in configured_provider_order if str(item).strip()
+        }
+        configured_model_set = {
+            str(item).strip().lower() for item in configured_model_order if str(item).strip()
+        }
+        role_override = overrides.overrides_by_role.get(role_name)
 
         effective_rows: list[dict[str, object]] = []
         for adapter in adapters:
+            profile = router_obj._profile_for(adapter)
             ops_row = dict(ops_status.get(adapter.name, {}) or {})
             try:
                 available = bool(adapter.available())
@@ -159,32 +346,30 @@ def _build_routing_catalog(runtime_dir: Path) -> dict[str, object]:
                 available = False
             operational = bool(ops_row.get("operational", available))
             allowed = adapter.name in eligible_names
-            blockers: list[str] = []
-            if adapter.role_targets and role_name not in adapter.role_targets:
-                blockers.append("role_targets")
-            if role_name == Role.TEAM_LEAD.value and not router_obj._team_lead_allowed(adapter):
-                blockers.append("team_lead_guard")
-            if adapter.requires_approval:
-                blockers.append("approval_required")
-            if not available:
-                blockers.append("adapter_unavailable")
-            if getattr(router_obj._profile_for(adapter), "tier", "") == "local":
-                if str(os.getenv("AITEAM_PROVIDER_LOCAL_DEGRADED", "0")).strip() == "1":
-                    blockers.append("local_degraded")
+            blockers = _collect_role_blockers(
+                router_obj=router_obj,
+                adapter=adapter,
+                request=request,
+                available=available,
+                operational=operational,
+                budget_signal=budget_signal,
+            )
             effective_rows.append(
                 {
                     "adapter_name": adapter.name,
                     "provider": adapter.provider,
                     "model": adapter.model,
                     "channel": adapter.channel.value,
-                    "tier": str(getattr(router_obj._profile_for(adapter), "tier", "") or ""),
+                    "tier": str(getattr(profile, "tier", "") or ""),
                     "configured_provider_preferred": adapter.provider.strip().lower() in configured_provider_set,
                     "configured_model_preferred": adapter.model.strip().lower() in configured_model_set,
                     "eligible": allowed,
                     "available": available,
                     "operational": operational,
                     "role_targets": sorted(adapter.role_targets),
-                    "blockers": sorted(set(blockers)),
+                    "capability_profile": _routing_capability_profile(adapter, profile),
+                    "blockers": blockers,
+                    "blocker_details": _routing_blocker_details(blockers),
                 }
             )
 
@@ -198,49 +383,118 @@ def _build_routing_catalog(runtime_dir: Path) -> dict[str, object]:
         )
         effective_providers = list(dict.fromkeys([str(adapter.provider) for adapter in eligible]))
         primary = eligible[0] if eligible else None
+        eligible_count = sum(1 for item in effective_rows if bool(item.get("eligible")))
+        blocked_count = sum(1 for item in effective_rows if not bool(item.get("eligible")))
+        operational_count = sum(1 for item in effective_rows if bool(item.get("operational")))
+        available_count = sum(1 for item in effective_rows if bool(item.get("available")))
         role_matrix.append(
             {
                 "role": role_name,
+                "defaults": {
+                    "providers": default_provider_order,
+                    "models": default_model_order,
+                },
+                "override_local": role_override.to_dict() if role_override is not None else None,
+                "effective": {
+                    "primary": (
+                        _routing_resolution_entry(primary, router_obj._profile_for(primary))
+                        if primary is not None
+                        else None
+                    ),
+                    "fallbacks": [
+                        _routing_resolution_entry(adapter, router_obj._profile_for(adapter))
+                        for adapter in eligible[1:6]
+                    ],
+                },
                 "configured_provider_order": configured_provider_order,
                 "configured_model_order": configured_model_order,
                 "effective_provider_order": effective_providers,
+                "configured_vs_effective_gap": configured_provider_order != effective_providers,
+                "eligibility_summary": {
+                    "eligible_count": eligible_count,
+                    "blocked_count": blocked_count,
+                    "available_count": available_count,
+                    "operational_count": operational_count,
+                },
+                "primary_resolution": {
+                    "status": "resolved" if primary is not None else "no_eligible_adapter",
+                    "reason": (
+                        "first_eligible_after_policy_sort"
+                        if primary is not None
+                        else "no_eligible_adapter"
+                    ),
+                    "strict_role_policy": bool(
+                        effective_policy.enforce_role_model_preferences
+                        or "dev" in set(
+                            str(item).strip().lower()
+                            for item in list(effective_policy.strict_role_policy_environments or [])
+                            if str(item).strip()
+                        )
+                    ),
+                },
                 "primary": (
-                    {
-                        "adapter_name": primary.name,
-                        "provider": primary.provider,
-                        "model": primary.model,
-                        "channel": primary.channel.value,
-                        "tier": str(getattr(router_obj._profile_for(primary), "tier", "") or ""),
-                    }
+                    _routing_resolution_entry(primary, router_obj._profile_for(primary))
                     if primary is not None
                     else {}
                 ),
-                "fallbacks": [
-                    {
-                        "adapter_name": adapter.name,
-                        "provider": adapter.provider,
-                        "model": adapter.model,
-                        "channel": adapter.channel.value,
-                        "tier": str(getattr(router_obj._profile_for(adapter), "tier", "") or ""),
-                    }
-                    for adapter in eligible[1:6]
-                ],
+                "fallbacks": [_routing_resolution_entry(adapter, router_obj._profile_for(adapter)) for adapter in eligible[1:6]],
                 "adapters": effective_rows,
             }
         )
 
     return {
+        "payload_version": _ROUTING_PAYLOAD_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
             "role_count": len(role_matrix),
             "provider_count": len(provider_index),
             "adapter_count": len(adapter_rows),
+            "operational_provider_count": sum(
+                1 for item in provider_index.values() if int(item.get("operational_count", 0)) > 0
+            ),
+        },
+        "policy": {
+            "source": (
+                "defaults_repo_plus_local_override"
+                if override_local_present
+                else "defaults_repo"
+            ),
+            "override_local_present": override_local_present,
+            "override_local": override_local_payload,
+            "preferred_subscription_providers": list(
+                effective_policy.preferred_subscription_providers or []
+            ),
+            "preferred_api_providers": list(effective_policy.preferred_api_providers or []),
+            "enforce_role_model_preferences": bool(
+                effective_policy.enforce_role_model_preferences
+            ),
+            "strict_role_policy_environments": list(
+                effective_policy.strict_role_policy_environments or []
+            ),
         },
         "providers": sorted(provider_index.values(), key=lambda item: str(item.get("provider", ""))),
         "roles": role_order,
         "adapters": adapter_rows,
         "role_matrix": role_matrix,
     }
+
+
+def _routing_overrides_response_payload(overrides: RoutingOverrides) -> dict[str, object]:
+    payload = overrides.to_dict()
+    override_local_present = overrides.has_entries()
+    return {
+        "override_local_present": override_local_present,
+        "override_local": payload if override_local_present else None,
+        **payload,
+    }
+
+
+def _routing_overrides_from_payload(payload: object) -> RoutingOverrides:
+    if not isinstance(payload, dict):
+        return RoutingOverrides()
+    if "overrides_by_role" in payload:
+        return RoutingOverrides.from_dict(payload)
+    return RoutingOverrides.from_dict({"overrides_by_role": payload})
 
 
 def _load_mcp_overview(request: Request) -> dict[str, object]:
@@ -515,7 +769,55 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
     peer_consulted_providers = sorted(consulted_provider_set)
     peer_diversity_observed = peer_diversity_observed or len(peer_consulted_providers) >= 2
 
+    artifact_created = 0
+    artifact_modified = 0
+    artifact_file_count = 0
+    artifact_files_truncated = False
+    artifact_files: list[str] = []
+    for record in reversed(recent_events):
+        event_type = str(record.get("event_type", "") or "")
+        if event_type not in {"chat_artifacts_detected", "chat_probe_completed"}:
+            continue
+        payload = record.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("task_id", "") or "") != task_id:
+            continue
+        artifact_created = _safe_int(
+            payload.get("created", payload.get("artifact_created", 0)),
+            0,
+        )
+        artifact_modified = _safe_int(
+            payload.get("modified", payload.get("artifact_modified", 0)),
+            0,
+        )
+        raw_files = payload.get("files", payload.get("artifact_files", []))
+        if isinstance(raw_files, list):
+            artifact_files = sorted(
+                {
+                    str(item or "").strip()
+                    for item in raw_files
+                    if str(item or "").strip()
+                }
+            )
+        artifact_file_count = max(
+            artifact_created + artifact_modified,
+            _safe_int(payload.get("file_count", payload.get("artifact_file_count", 0)), 0),
+            len(artifact_files),
+        )
+        artifact_files_truncated = bool(
+            payload.get("files_truncated", payload.get("artifact_files_truncated", False))
+        ) or artifact_file_count > len(artifact_files)
+        break
+
     status = "window_exhausted" if exhausted else "completed_or_closed"
+    has_product_artifacts = artifact_file_count > 0 or bool(artifact_files)
+    if has_product_artifacts:
+        artifact_message = (
+            f"Se detectaron {artifact_file_count} artefactos de producto fuera de .aiteam."
+        )
+    else:
+        artifact_message = "Esta run no genero artefactos de producto."
     return {
         "task_id": task_id,
         "mode": mode,
@@ -544,6 +846,21 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
             "unavailable_roles": [],
             "provider_count": len(peer_consulted_providers),
             "diversity_observed": peer_diversity_observed,
+        },
+        "artifact_created": artifact_created,
+        "artifact_modified": artifact_modified,
+        "artifact_file_count": artifact_file_count,
+        "artifact_files_truncated": artifact_files_truncated,
+        "artifact_files": artifact_files,
+        "product_artifacts": {
+            "has_artifacts": has_product_artifacts,
+            "created": artifact_created,
+            "modified": artifact_modified,
+            "file_count": artifact_file_count,
+            "files_preview_truncated": artifact_files_truncated,
+            "files": artifact_files,
+            "message": artifact_message,
+            "internal_runtime_excluded": True,
         },
         "ts": str(latest_plan.get("ts", "") or ""),
     }
@@ -578,9 +895,12 @@ async def get_dashboard(request: Request):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         if not runtime_dir.exists():
-            raise HTTPException(status_code=404, detail="No AI Team environment found (missing runtime/ folder).")
+            raise HTTPException(
+                status_code=404,
+                detail="No AI Team environment found (missing runtime directory: .aiteam/ or runtime/).",
+            )
 
         # Run orchestrator initialization in a thread to avoid blocking the event loop
         def _load_data():
@@ -630,9 +950,12 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         if not runtime_dir.exists():
-            raise HTTPException(status_code=404, detail="No runtime folder found in workspace.")
+            raise HTTPException(
+                status_code=404,
+                detail="No AI Team runtime directory found in workspace (.aiteam/ or runtime/).",
+            )
 
         def _load_state():
             orch = build_default_orchestrator(
@@ -664,14 +987,20 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
             # chat_plan_created events are found even in long sessions with many events.
             all_events = _read_jsonl_records(runtime_dir / "events.jsonl")
             latest_chat_run = _latest_chat_run_summary(all_events if isinstance(all_events, list) else [])
+            latest_task_root = str(latest_chat_run.get("task_id", "") or "")
+            tasks_payload = _read_runtime_tasks_payload(runtime_dir)
             latest_chat_run = {
                 **latest_chat_run,
+                "task_operational_summary": _build_task_operational_summary(
+                    tasks_payload,
+                    task_root=latest_task_root,
+                ),
                 **_load_chat_workflow_insights(
                     runtime_dir,
-                    str(latest_chat_run.get("task_id", "") or ""),
+                    latest_task_root,
                 ),
             }
-            latest_lead_summary = _latest_lead_user_summary(runtime_dir, str(latest_chat_run.get("task_id", "") or ""))
+            latest_lead_summary = _latest_lead_user_summary(runtime_dir, latest_task_root)
             return {
                 "task_total": payload.get("task_total", 0),
                 "task_state_counts": payload.get("task_state_counts", {}),
@@ -702,7 +1031,7 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         mailbox_path = runtime_dir / "mailbox.jsonl"
         events_path = runtime_dir / "events.jsonl"
         records = _read_jsonl_records(mailbox_path)
@@ -767,11 +1096,16 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
         sorted_items = sorted(items, key=lambda item: str(item.get("timestamp", "")), reverse=True)
         top = sorted_items[: max(1, min(limit, 300))]
         latest_chat_run = _latest_chat_run_summary(events if isinstance(events, list) else [])
+        latest_task_root = str(latest_chat_run.get("task_id", "") or "")
         latest_chat_run = {
             **latest_chat_run,
+            "task_operational_summary": _build_task_operational_summary(
+                tasks_payload,
+                task_root=latest_task_root,
+            ),
             **_load_chat_workflow_insights(
                 runtime_dir,
-                str(latest_chat_run.get("task_id", "") or ""),
+                latest_task_root,
             ),
         }
         return {
@@ -793,7 +1127,7 @@ async def get_aiteam_logs(request: Request, limit: int = 100):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         events_path = runtime_dir / "events.jsonl"
 
         event_records = _read_jsonl_records(events_path)
@@ -940,7 +1274,7 @@ async def list_sessions(
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         from aiteam.agent_session import SessionStore
         store = SessionStore(runtime_dir)
         sessions = store.list_sessions(agent_id=agent_id, task_id=task_id, limit=limit)
@@ -956,7 +1290,7 @@ async def get_session_detail(request: Request, session_id: str):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         from aiteam.agent_session import SessionStore
         store = SessionStore(runtime_dir)
         session = store.get_session(session_id)
@@ -975,7 +1309,7 @@ async def agent_activity(request: Request, agent_id: str, limit: int = 20):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         from aiteam.agent_session import SessionStore
         store = SessionStore(runtime_dir)
         activity = store.agent_activity(agent_id, limit=limit)
@@ -991,7 +1325,7 @@ async def list_available_tools(request: Request, role: str | None = None):
     try:
         catalog_path = PROJECT_ROOT / "config" / "tool_sources.catalog.json"
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         from aiteam.tool_dispatch import ToolDispatcher
         dispatcher = ToolDispatcher(catalog_path=catalog_path, runtime_dir=runtime_dir)
         all_tools = dispatcher.available_tools(role=role)
@@ -1028,7 +1362,7 @@ async def tool_access_log(
     try:
         catalog_path = PROJECT_ROOT / "config" / "tool_sources.catalog.json"
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         from aiteam.tool_dispatch import ToolDispatcher
         dispatcher = ToolDispatcher(catalog_path=catalog_path, runtime_dir=runtime_dir)
         history = dispatcher.tool_access_history(agent_id=agent_id, tool_name=tool_name, limit=limit)
@@ -1043,7 +1377,7 @@ async def get_routing_catalog(request: Request):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         runtime_dir.mkdir(parents=True, exist_ok=True)
         return await asyncio.to_thread(_build_routing_catalog, runtime_dir)
     except HTTPException:
@@ -1052,13 +1386,53 @@ async def get_routing_catalog(request: Request):
         return {"error": str(exc), "roles": [], "providers": [], "adapters": [], "role_matrix": []}
 
 
+@router.get("/api/aiteam/routing/overrides")
+async def get_routing_overrides(request: Request):
+    """Devuelve overrides locales actuales del routing."""
+    _require_api_auth_request(request)
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    return _routing_overrides_response_payload(load_overrides(runtime_dir))
+
+
+@router.put("/api/aiteam/routing/overrides")
+async def update_routing_overrides(request: Request):
+    """Actualiza overrides locales del routing con validación previa."""
+    _require_api_auth_request(request)
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    payload = await request.json()
+    overrides = _routing_overrides_from_payload(payload)
+    errors = validate_overrides(overrides, build_default_router_policy())
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+    if overrides.has_entries():
+        save_overrides(runtime_dir, overrides)
+    else:
+        reset_overrides(runtime_dir)
+    return _routing_overrides_response_payload(load_overrides(runtime_dir))
+
+
+@router.delete("/api/aiteam/routing/overrides")
+async def delete_routing_overrides(request: Request):
+    """Borra overrides locales del routing y vuelve a defaults del repo."""
+    _require_api_auth_request(request)
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    reset_overrides(runtime_dir)
+    return {"ok": True, **_routing_overrides_response_payload(load_overrides(runtime_dir))}
+
+
 @router.get("/api/aiteam/skills/usage")
 async def skill_usage_stats(request: Request, limit: int = 20):
     """Estadisticas de uso de skills: veces usado, tasa de exito, ranking."""
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         from aiteam.autotools import AutoToolIntegrator
         integrator = AutoToolIntegrator(
             runtime_dir=runtime_dir,
@@ -1076,7 +1450,7 @@ async def skill_ranking_for_role(role: str, request: Request, limit: int = 10):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         from aiteam.autotools import AutoToolIntegrator
         integrator = AutoToolIntegrator(
             runtime_dir=runtime_dir,
@@ -1094,7 +1468,7 @@ async def get_workflow_state(request: Request):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         return {"workflows": _read_runtime_workflow_state(runtime_dir)}
     except Exception as exc:
         return {"error": str(exc), "workflows": {}}
@@ -1106,7 +1480,7 @@ def _get_mcp_manager(request: Request):
     """Helper para obtener el MCPServerManager."""
     from aiteam.mcp_manager import MCPServerManager
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-    runtime_dir = workspace / "runtime"
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
     catalog_path = workspace / "config" / "tool_sources.catalog.json"
     return MCPServerManager(
         runtime_dir=runtime_dir,
@@ -1160,7 +1534,7 @@ async def refresh_mcp_health(request: Request):
     _require_api_auth_request(request)
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         integrator = AutoToolIntegrator(
             runtime_dir=runtime_dir,
             project_root=PROJECT_ROOT,

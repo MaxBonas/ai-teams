@@ -361,10 +361,17 @@ class HybridRouter:
             for item in self.policy.role_provider_preferences.get(role_key, [])
             if str(item).strip()
         }
+        role_provider_exclusions = {
+            item.strip().lower()
+            for item in self.policy.role_provider_exclusions.get(role_key, [])
+            if str(item).strip()
+        }
         for adapter in self.adapters:
             if adapter.name in request.excluded_adapters:
                 continue
             if adapter.provider.strip().lower() in request.excluded_providers:
+                continue
+            if adapter.provider.strip().lower() in role_provider_exclusions:
                 continue
             if adapter.role_targets and request.role.value not in adapter.role_targets:
                 continue
@@ -434,22 +441,28 @@ class HybridRouter:
             )
             if str(provider).strip()
         }
+        primary_provider = str(
+            self.policy.role_primary_provider.get(role_key, "") or ""
+        ).strip().lower()
 
         def key(adapter: ModelAdapter):
+            provider_key = adapter.provider.strip().lower()
             if adapter.channel == ChannelType.SUBSCRIPTION:
                 provider_rank = provider_priority_sub.get(adapter.provider, 99)
                 channel_rank = 0 if self.policy.pro_first else 1
             else:
                 provider_rank = provider_priority_api.get(adapter.provider, 99)
                 channel_rank = 1 if self.policy.pro_first else 0
+            primary_provider_rank = (
+                0 if primary_provider and provider_key == primary_provider else 1
+            )
             role_model_rank = role_model_priority.get(
                 adapter.model.strip().lower(), 999
             )
-            role_provider_rank = role_provider_priority.get(
-                adapter.provider.strip().lower(), 999
-            )
+            role_provider_rank = role_provider_priority.get(provider_key, 999)
             if self._prefer_tool_economy(request):
                 return (
+                    primary_provider_rank,
                     self._tier_rank(adapter, request),
                     channel_rank,
                     self._role_rank(adapter, role_key),
@@ -461,6 +474,7 @@ class HybridRouter:
                     adapter.name,
                 )
             return (
+                primary_provider_rank,
                 channel_rank,
                 self._tier_rank(adapter, request),
                 self._role_rank(adapter, role_key),

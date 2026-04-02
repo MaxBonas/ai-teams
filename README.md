@@ -6,7 +6,7 @@ Sistema de orquestacion multi-agente para desarrollo y entrega de software.
 
 - Fecha: `2026-04-02`
 - Maquina: `MAX-GAMINGPC`
-- Suite completa: `763 passed`
+- Suite completa: `776 passed`
 - Persistencia principal: `runtime/aiteam.db` para `tasks` y `workflow_state`
 - Compatibilidad legacy: JSON residual solo en fixtures/tests y constructores legacy, fuera del camino normal de la API
 
@@ -119,6 +119,18 @@ Invariantes:
 - `docs/TASKS_2026_03_28.md`: backlog ampliado del proyecto
 - `docs/ROUTING_CATALOG_VIEW.md`: objetivos y diseño de la vista consultable del routing por rol
 - `AGENTS.md`: contexto operativo para agentes en este repo
+
+## Separacion de capas y naming
+
+Este repo contiene documentacion para agentes de desarrollo (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) y documentacion interna del sistema.
+
+Eso no debe confundirse con la capa de producto:
+
+- AI Teams no crea `AGENTS.md`, `CLAUDE.md` o `GEMINI.md` en proyectos externos
+- los artefactos propios del producto van bajo `.aiteam/`
+- las instrucciones persistentes de un proyecto externo viven en `.aiteam/instructions.md`
+
+Referencia: `docs/NAMING_COLLISION_INVESTIGATION.md`
 
 ## Politica de documentacion interna
 

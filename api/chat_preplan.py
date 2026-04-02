@@ -5,6 +5,7 @@ from aiteam.context_curator import (
     ContextCuratorStore,
     estimate_context_compaction_value,
     estimate_context_pressure,
+    project_key_from_runtime_dir,
 )
 from aiteam.workflow_planner import PhaseSpec
 
@@ -176,7 +177,7 @@ def _estimate_preplan_context_pressure(
         curator_store = ContextCuratorStore(runtime_dir)
         chat_context = curator_store.load_chat_context(
             continuation_of,
-            project_key=str(runtime_dir.parent.resolve()),
+            project_key=project_key_from_runtime_dir(runtime_dir),
         )
         previous_invalidations = len(list(chat_context.get("invalidations", []) or []))
         previous_open_questions = len(list(chat_context.get("open_questions", []) or []))

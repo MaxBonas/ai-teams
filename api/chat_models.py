@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -15,11 +17,17 @@ class TeamChatRequest(BaseModel):
     complexity: str = "medium"
     criticality: str = "medium"
     mode: str = "sprint5"
+    quorum: bool = False
     max_rounds: int | None = None
     client_task_id: str = ""
     strict_mode: bool = False
     auto_extend_weak_runs: bool = True
     allow_low_productivity_override: bool = False
+    # C2: explicit continuation policy between runs
+    # "auto"           — current behavior (no archiving)
+    # "clean_retry"    — archive incomplete tasks from prior runs, start fresh
+    # "force_continue" — explicitly continue from prior state
+    continuation_policy: Literal["auto", "clean_retry", "force_continue"] = "auto"
 
 
 class TeamChatResponse(BaseModel):
@@ -115,6 +123,7 @@ class TeamChatProgressResponse(BaseModel):
     specialist_report_summary: dict[str, object] = {}
     peer_consultation_summary: dict[str, object] = {}
     task_summaries: list[dict[str, object]] = []
+    task_operational_summary: dict[str, object] = {}
     waiting_user: bool = False
     clarification_question: str = ""
 

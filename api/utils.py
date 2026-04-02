@@ -1,10 +1,12 @@
 import os
 import re
 import json
+import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from aiteam.context_curator import ContextCuratorStore
+from aiteam.context_curator import ContextCuratorStore, project_key_from_runtime_dir
 
 # Add PROJECT_ROOT here to avoid circular imports
 # Resolved dynamically from the location of this file (api/utils.py → project root)
@@ -21,6 +23,73 @@ def get_current_workspace() -> Path:
 def set_current_workspace(path: Path) -> None:
     global _CURRENT_WORKSPACE
     _CURRENT_WORKSPACE = path
+
+
+def _absorb_legacy_runtime(legacy: Path, dotdir: Path) -> None:
+    dotdir.mkdir(parents=True, exist_ok=True)
+    for candidate in sorted(
+        list(legacy.rglob("*")),
+        key=lambda path: (len(path.parts), str(path)),
+    ):
+        relative = candidate.relative_to(legacy)
+        target = dotdir / relative
+        if candidate.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            continue
+        try:
+            candidate.rename(target)
+        except OSError:
+            shutil.copy2(candidate, target)
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+    for candidate in sorted(
+        [path for path in legacy.rglob("*") if path.is_dir()],
+        key=lambda path: (len(path.parts), str(path)),
+        reverse=True,
+    ):
+        try:
+            candidate.rmdir()
+        except OSError:
+            continue
+    try:
+        legacy.rmdir()
+    except OSError:
+        pass
+
+
+def resolve_runtime_dir(workspace: Path, project_root: Path = PROJECT_ROOT) -> Path:
+    workspace = Path(workspace).resolve()
+    project_root = Path(project_root).resolve()
+    if workspace == project_root:
+        return workspace / "runtime"
+    dotdir = workspace / ".aiteam"
+    legacy = workspace / "runtime"
+    if legacy.exists() and not dotdir.exists():
+        last_error: OSError | None = None
+        for delay in (0.0, 0.05, 0.1):
+            if delay > 0:
+                time.sleep(delay)
+            try:
+                legacy.rename(dotdir)
+                return dotdir
+            except PermissionError as exc:
+                last_error = exc
+                continue
+            except OSError as exc:
+                last_error = exc
+                break
+        if last_error is not None:
+            dotdir.mkdir(parents=True, exist_ok=True)
+            _absorb_legacy_runtime(legacy, dotdir)
+        return dotdir
+    if legacy.exists() and dotdir.exists():
+        _absorb_legacy_runtime(legacy, dotdir)
+    return dotdir
 
 
 from pydantic import BaseModel
@@ -397,7 +466,7 @@ def _load_chat_context_curator_insights(
             workflow_entry = candidate
 
     curator_store = ContextCuratorStore(runtime_dir)
-    project_key = str(runtime_dir.parent.resolve())
+    project_key = project_key_from_runtime_dir(runtime_dir)
     project_context = curator_store.load_project_context(project_key)
     chat_context = curator_store.load_chat_context(raw_root, project_key=project_key)
 
@@ -633,7 +702,7 @@ def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> 
     roots = _group_chat_roots(tasks_payload)
     curator_store = ContextCuratorStore(runtime_dir)
     project_context_summary = curator_store.build_summary(
-        curator_store.load_project_context(str(runtime_dir.parent.resolve())),
+        curator_store.load_project_context(project_key_from_runtime_dir(runtime_dir)),
         max_items_per_section=2,
     )
     if not roots and not project_context_summary:

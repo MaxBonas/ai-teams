@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import api.main as api_main
 from fastapi.testclient import TestClient
+from api.utils import PROJECT_ROOT, resolve_runtime_dir
 from aiteam.context_curator import ContextCuratorStore
 from aiteam.sqlite_store import SqliteStore
 
@@ -65,6 +66,272 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
     @staticmethod
     def _write_runtime_workflow_sqlite(runtime_dir: Path, workflow_state: dict) -> None:
         SqliteStore(runtime_dir / "aiteam.db").save_workflow_state(workflow_state)
+
+    def test_external_project_uses_aiteam_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+            self.assertEqual(runtime_dir, workspace / ".aiteam")
+            self.assertFalse(runtime_dir.exists())
+
+    def test_self_project_uses_runtime_dir(self) -> None:
+        runtime_dir = resolve_runtime_dir(PROJECT_ROOT, PROJECT_ROOT)
+
+        self.assertEqual(runtime_dir, PROJECT_ROOT / "runtime")
+
+    def test_api_state_missing_runtime_mentions_aiteam_and_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.get("/api/aiteam/state?environment=dev")
+                self.assertEqual(response.status_code, 404)
+                self.assertIn(".aiteam/", str(response.json().get("detail", "")))
+                self.assertIn("runtime/", str(response.json().get("detail", "")))
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_dashboard_missing_runtime_mentions_aiteam_and_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.get("/api/dashboard")
+                self.assertEqual(response.status_code, 404)
+                self.assertIn(".aiteam/", str(response.json().get("detail", "")))
+                self.assertIn("runtime/", str(response.json().get("detail", "")))
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_state_last_chat_run_surfaces_product_artifacts_from_probe_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "events.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "ts": "2026-04-02T10:00:00+00:00",
+                                "event_type": "chat_plan_created",
+                                "payload": {
+                                    "task_id": "CHAT-art001",
+                                    "chat_mode": "probe",
+                                    "round_budget": 4,
+                                    "phase_count": 2,
+                                    "delegated_count": 0,
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "ts": "2026-04-02T10:00:03+00:00",
+                                "event_type": "chat_probe_completed",
+                                "payload": {
+                                    "task_id": "CHAT-art001",
+                                    "chat_mode": "probe",
+                                    "artifact_created": 1,
+                                    "artifact_modified": 1,
+                                    "artifact_files": ["docs/aiteam/plan.md", "src/app.py"],
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                payload = client.get("/api/aiteam/state?environment=dev").json()
+                artifacts = ((payload.get("last_chat_run", {}) or {}).get("product_artifacts", {}) or {})
+                self.assertTrue(bool(artifacts.get("has_artifacts")))
+                self.assertEqual(int(artifacts.get("created", 0)), 1)
+                self.assertEqual(int(artifacts.get("modified", 0)), 1)
+                self.assertEqual(
+                    list(artifacts.get("files", []) or []),
+                    ["docs/aiteam/plan.md", "src/app.py"],
+                )
+                self.assertIn("artefactos de producto", str(artifacts.get("message", "")))
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_state_last_chat_run_explicitly_reports_when_no_product_artifacts_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-04-02T11:00:00+00:00",
+                        "event_type": "chat_plan_created",
+                        "payload": {
+                            "task_id": "CHAT-art002",
+                            "chat_mode": "sprint5",
+                            "round_budget": 5,
+                            "phase_count": 3,
+                            "delegated_count": 1,
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                payload = client.get("/api/aiteam/state?environment=dev").json()
+                artifacts = ((payload.get("last_chat_run", {}) or {}).get("product_artifacts", {}) or {})
+                self.assertFalse(bool(artifacts.get("has_artifacts")))
+                self.assertEqual(list(artifacts.get("files", []) or []), [])
+                self.assertEqual(
+                    str(artifacts.get("message", "")),
+                    "Esta run no genero artefactos de producto.",
+                )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_state_last_chat_run_preserves_exact_artifact_count_when_files_are_truncated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            preview_files = [f"src/file_{idx:02d}.py" for idx in range(16)]
+            (runtime_dir / "events.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "ts": "2026-04-02T12:00:00+00:00",
+                                "event_type": "chat_plan_created",
+                                "payload": {
+                                    "task_id": "CHAT-art003",
+                                    "chat_mode": "sprint5",
+                                    "round_budget": 5,
+                                    "phase_count": 3,
+                                    "delegated_count": 1,
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "ts": "2026-04-02T12:00:10+00:00",
+                                "event_type": "chat_artifacts_detected",
+                                "payload": {
+                                    "task_id": "CHAT-art003",
+                                    "created": 12,
+                                    "modified": 9,
+                                    "file_count": 21,
+                                    "files_truncated": True,
+                                    "files": preview_files,
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                payload = client.get("/api/aiteam/state?environment=dev").json()
+                artifacts = ((payload.get("last_chat_run", {}) or {}).get("product_artifacts", {}) or {})
+                self.assertTrue(bool(artifacts.get("has_artifacts")))
+                self.assertEqual(int(artifacts.get("file_count", 0)), 21)
+                self.assertTrue(bool(artifacts.get("files_preview_truncated")))
+                self.assertEqual(list(artifacts.get("files", []) or []), preview_files)
+                self.assertIn("21 artefactos", str(artifacts.get("message", "")))
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_migration_from_runtime_to_aiteam(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            legacy_runtime = workspace / "runtime"
+            legacy_runtime.mkdir(parents=True, exist_ok=True)
+            marker = legacy_runtime / "events.jsonl"
+            marker.write_text("migrated", encoding="utf-8")
+
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+            self.assertEqual(runtime_dir, workspace / ".aiteam")
+            self.assertTrue(runtime_dir.exists())
+            self.assertFalse(legacy_runtime.exists())
+            self.assertEqual(
+                (runtime_dir / "events.jsonl").read_text(encoding="utf-8"),
+                "migrated",
+            )
+
+    def test_migration_from_runtime_to_aiteam_recovers_after_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            legacy_runtime = workspace / "runtime"
+            legacy_runtime.mkdir(parents=True, exist_ok=True)
+            (legacy_runtime / "events.jsonl").write_text("migrated", encoding="utf-8")
+            original_rename = Path.rename
+            attempts = {"count": 0}
+
+            def _rename_once_denied(path_obj: Path, target: Path | str) -> Path:
+                target_path = Path(target)
+                if (
+                    path_obj == legacy_runtime
+                    and target_path == workspace / ".aiteam"
+                    and attempts["count"] == 0
+                ):
+                    attempts["count"] += 1
+                    raise PermissionError(5, "Acceso denegado")
+                return original_rename(path_obj, target)
+
+            with patch("pathlib.Path.rename", autospec=True, side_effect=_rename_once_denied):
+                runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+            self.assertEqual(attempts["count"], 1)
+            self.assertEqual(runtime_dir, workspace / ".aiteam")
+            self.assertTrue(runtime_dir.exists())
+            self.assertEqual(
+                (runtime_dir / "events.jsonl").read_text(encoding="utf-8"),
+                "migrated",
+            )
+
+    def test_existing_aiteam_dir_absorbs_missing_legacy_runtime_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            dotdir = workspace / ".aiteam"
+            dotdir.mkdir(parents=True, exist_ok=True)
+            (dotdir / "events.jsonl").write_text("current", encoding="utf-8")
+
+            legacy_runtime = workspace / "runtime"
+            legacy_runtime.mkdir(parents=True, exist_ok=True)
+            (legacy_runtime / "mailbox.jsonl").write_text("legacy-mailbox", encoding="utf-8")
+            (legacy_runtime / "nested").mkdir(parents=True, exist_ok=True)
+            (legacy_runtime / "nested" / "ledger.jsonl").write_text("legacy-ledger", encoding="utf-8")
+
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+            self.assertEqual(runtime_dir, dotdir)
+            self.assertEqual((dotdir / "events.jsonl").read_text(encoding="utf-8"), "current")
+            self.assertEqual((dotdir / "mailbox.jsonl").read_text(encoding="utf-8"), "legacy-mailbox")
+            self.assertEqual(
+                (dotdir / "nested" / "ledger.jsonl").read_text(encoding="utf-8"),
+                "legacy-ledger",
+            )
+            self.assertFalse(legacy_runtime.exists())
 
     def test_notebooklm_status_reports_manual_export_when_no_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
@@ -139,7 +406,8 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 payload = response.json()
                 self.assertEqual(payload.get("mode"), "dry_run")
-                self.assertTrue((workspace / "runtime" / "notebooklm_sync_status.json").exists())
+                runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+                self.assertTrue((runtime_dir / "notebooklm_sync_status.json").exists())
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -584,6 +852,8 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
             project_ctx["decisions"] = [{"text": "priorizar browser evidence", "confidence": 0.8}]
             project_ctx["updated_at"] = now_iso
             curator_store._write_project_context(str(workspace.resolve()), project_ctx)
+            reloaded_project_ctx = curator_store.load_project_context(str(workspace.resolve()))
+            self.assertEqual(len(list(reloaded_project_ctx.get("durable_facts", []) or [])), 1)
             chat_ctx = curator_store.load_chat_context("CHAT-econ01", project_key=str(workspace.resolve()))
             chat_ctx["working_set"] = [{"text": "build: revisar auth selector", "confidence": 0.7}]
             chat_ctx["durable_facts"] = [{"text": "auth.py es hotspot", "confidence": 0.7}]
@@ -594,6 +864,20 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
             chat_ctx["source_task_ids"] = ["CHAT-econ01::lead_intake"]
             chat_ctx["updated_at"] = now_iso
             curator_store._write_chat_context("CHAT-econ01", chat_ctx)
+            reloaded_chat_ctx = curator_store.load_chat_context("CHAT-econ01", project_key=str(workspace.resolve()))
+            self.assertEqual(len(list(reloaded_chat_ctx.get("invalidations", []) or [])), 1)
+            legacy_project_files = list((runtime_dir / "context" / "projects").glob("*.json"))
+            legacy_chat_files = list((runtime_dir / "context" / "chats").glob("*.json"))
+            self.assertTrue(legacy_project_files)
+            self.assertTrue(legacy_chat_files)
+            self.assertEqual(
+                len(list((json.loads(legacy_project_files[0].read_text(encoding="utf-8")) or {}).get("durable_facts", []) or [])),
+                1,
+            )
+            self.assertEqual(
+                len(list((json.loads(legacy_chat_files[0].read_text(encoding="utf-8")) or {}).get("invalidations", []) or [])),
+                1,
+            )
             self._write_runtime_tasks_sqlite(
                 runtime_dir,
                 [
@@ -668,7 +952,11 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                 self.assertTrue(bool(peer_summary.get("diversity_observed", False)))
                 curator_summary = last_chat.get("context_curator_summary", {}) or {}
                 self.assertEqual(str(curator_summary.get("freshness_status", "")), "fresh")
-                self.assertEqual(int(curator_summary.get("invalidation_count", 0)), 1)
+                self.assertEqual(
+                    int(curator_summary.get("invalidation_count", 0)),
+                    1,
+                    msg=json.dumps(curator_summary, ensure_ascii=False, indent=2),
+                )
                 self.assertEqual(
                     int((curator_summary.get("chat_layer_counts", {}) or {}).get("working_set", 0)),
                     1,
@@ -1318,10 +1606,10 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
-    def test_routing_catalog_endpoint_exposes_roles_adapters_and_effective_fallbacks(self) -> None:
+    def _fetch_routing_catalog_payload(self) -> dict:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=False):
             workspace = Path(tmp)
-            runtime_dir = workspace / "runtime"
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
             runtime_dir.mkdir(parents=True, exist_ok=True)
 
             previous_workspace = api_main.get_current_workspace()
@@ -1334,36 +1622,473 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                 self.assertIn("team_lead", list(payload.get("roles", []) or []))
                 self.assertIn("engineer", list(payload.get("roles", []) or []))
                 self.assertGreaterEqual(int((payload.get("summary", {}) or {}).get("adapter_count", 0)), 1)
-                adapter_rows = {
-                    str(item.get("adapter_name", "") or ""): item
-                    for item in list(payload.get("adapters", []) or [])
-                    if isinstance(item, dict)
-                }
-                self.assertIn("claude_pro", adapter_rows)
                 self.assertEqual(
-                    list((adapter_rows.get("claude_pro", {}) or {}).get("role_targets", []) or []),
-                    ["team_lead"],
+                    dict(payload.get("policy", {}) or {}).get("source"),
+                    "defaults_repo",
                 )
-                matrix_rows = {
-                    str(item.get("role", "") or ""): item
-                    for item in list(payload.get("role_matrix", []) or [])
-                    if isinstance(item, dict)
-                }
-                engineer = dict(matrix_rows.get("engineer", {}) or {})
+                return payload
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_routing_catalog_has_payload_version(self) -> None:
+        payload = self._fetch_routing_catalog_payload()
+
+        self.assertEqual(payload.get("payload_version"), 1)
+
+    def test_routing_catalog_separates_defaults_and_effective(self) -> None:
+        payload = self._fetch_routing_catalog_payload()
+
+        self.assertFalse(
+            bool(dict(payload.get("policy", {}) or {}).get("override_local_present", True))
+        )
+        matrix_rows = {
+            str(item.get("role", "") or ""): item
+            for item in list(payload.get("role_matrix", []) or [])
+            if isinstance(item, dict)
+        }
+        engineer = dict(matrix_rows.get("engineer", {}) or {})
+        self.assertEqual(
+            list(dict(engineer.get("defaults", {}) or {}).get("providers", []) or []),
+            ["openai", "google", "groq"],
+        )
+        self.assertEqual(
+            list(dict(engineer.get("defaults", {}) or {}).get("models", []) or []),
+            list(engineer.get("configured_model_order", []) or []),
+        )
+        self.assertIsNone(engineer.get("override_local"))
+        effective = dict(engineer.get("effective", {}) or {})
+        self.assertIn("primary", effective)
+        self.assertIn("fallbacks", effective)
+        self.assertEqual(
+            effective.get("primary"),
+            engineer.get("primary") if engineer.get("primary") else None,
+        )
+        self.assertEqual(
+            list(effective.get("fallbacks", []) or []),
+            list(engineer.get("fallbacks", []) or []),
+        )
+
+    def test_routing_catalog_blockers_have_stable_codes(self) -> None:
+        payload = self._fetch_routing_catalog_payload()
+
+        stable_codes = {
+            "role_targets",
+            "team_lead_guard",
+            "adapter_unavailable",
+            "provider_unhealthy",
+            "cost_exceeded",
+            "capability_missing",
+            "channel_excluded",
+        }
+        matrix_rows = {
+            str(item.get("role", "") or ""): item
+            for item in list(payload.get("role_matrix", []) or [])
+            if isinstance(item, dict)
+        }
+        engineer = dict(matrix_rows.get("engineer", {}) or {})
+        engineer_adapters = {
+            str(item.get("adapter_name", "") or ""): item
+            for item in list(engineer.get("adapters", []) or [])
+            if isinstance(item, dict)
+        }
+        self.assertIn("claude_pro", engineer_adapters)
+        blockers = list((engineer_adapters.get("claude_pro", {}) or {}).get("blockers", []) or [])
+        self.assertTrue(blockers)
+        self.assertTrue(set(blockers).issubset(stable_codes))
+        blocker_details = list(
+            (engineer_adapters.get("claude_pro", {}) or {}).get("blocker_details", []) or []
+        )
+        self.assertTrue(blocker_details)
+        self.assertTrue(
+            {
+                str(item.get("code", "") or "")
+                for item in blocker_details
+                if isinstance(item, dict)
+            }.issubset(stable_codes)
+        )
+        self.assertEqual(blocker_details[0].get("code"), "role_targets")
+        self.assertIn(
+            "adapter restringido a otros roles",
+            str(blocker_details[0].get("label", "")),
+        )
+
+    def test_routing_catalog_exposes_capabilities(self) -> None:
+        payload = self._fetch_routing_catalog_payload()
+
+        adapter_rows = {
+            str(item.get("adapter_name", "") or ""): item
+            for item in list(payload.get("adapters", []) or [])
+            if isinstance(item, dict)
+        }
+        self.assertIn("claude_pro", adapter_rows)
+        claude_pro = dict(adapter_rows.get("claude_pro", {}) or {})
+        capability_profile = dict(claude_pro.get("capability_profile", {}) or {})
+        self.assertIn("channel", capability_profile)
+        self.assertIn("tier", capability_profile)
+        self.assertIn("cost_class", capability_profile)
+        self.assertIn("tool_support", capability_profile)
+        self.assertIn("stream_support", capability_profile)
+        self.assertIn("vision", capability_profile)
+        self.assertIn("thinking", capability_profile)
+        self.assertIn("long_context", capability_profile)
+        self.assertEqual(capability_profile.get("channel"), "subscription")
+        self.assertEqual(capability_profile.get("tier"), claude_pro.get("tier"))
+        self.assertEqual(capability_profile.get("thinking"), claude_pro.get("supports_thinking"))
+
+    def test_api_update_overrides_validates_before_saving(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=False):
+            workspace = Path(tmp)
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.put(
+                    "/api/aiteam/routing/overrides",
+                    json={
+                        "overrides_by_role": {
+                            "engineer": {
+                                "excluded_providers": ["openai", "google", "groq"],
+                            }
+                        }
+                    },
+                )
+                self.assertEqual(response.status_code, 400)
+                detail = dict(response.json().get("detail", {}) or {})
+                self.assertIn("errors", detail)
+                self.assertFalse((runtime_dir / "routing_overrides.json").exists())
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_api_routing_overrides_roundtrip_and_catalog_reflects_effective_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=False):
+            workspace = Path(tmp)
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                update_response = client.put(
+                    "/api/aiteam/routing/overrides",
+                    json={
+                        "overrides_by_role": {
+                            "engineer": {
+                                "providers": ["google", "groq"],
+                                "primary_provider": "google",
+                                "excluded_providers": ["openai"],
+                            }
+                        }
+                    },
+                )
+                self.assertEqual(update_response.status_code, 200)
+                updated = update_response.json()
+                self.assertTrue(bool(updated.get("override_local_present")))
                 self.assertEqual(
-                    list(engineer.get("configured_provider_order", []) or []),
-                    ["openai", "google", "groq"],
+                    (
+                        dict(updated.get("override_local", {}) or {})
+                        .get("overrides_by_role", {})
+                        .get("engineer", {})
+                        .get("primary_provider")
+                    ),
+                    "google",
                 )
-                engineer_adapters = {
-                    str(item.get("adapter_name", "") or ""): item
-                    for item in list(engineer.get("adapters", []) or [])
+                self.assertTrue((runtime_dir / "routing_overrides.json").exists())
+
+                get_response = client.get("/api/aiteam/routing/overrides")
+                self.assertEqual(get_response.status_code, 200)
+                current = get_response.json()
+                self.assertTrue(bool(current.get("override_local_present")))
+
+                catalog_response = client.get("/api/aiteam/routing/catalog")
+                self.assertEqual(catalog_response.status_code, 200)
+                catalog = catalog_response.json()
+                self.assertTrue(
+                    bool(dict(catalog.get("policy", {}) or {}).get("override_local_present"))
+                )
+                engineer = next(
+                    item
+                    for item in list(catalog.get("role_matrix", []) or [])
+                    if str((item or {}).get("role", "") or "") == "engineer"
+                )
+                self.assertEqual(
+                    dict(engineer.get("override_local", {}) or {}).get("primary_provider"),
+                    "google",
+                )
+                self.assertEqual(
+                    list(engineer.get("configured_provider_order", []) or [])[:2],
+                    ["google", "groq"],
+                )
+                self.assertEqual(
+                    dict(dict(engineer.get("effective", {}) or {}).get("primary", {}) or {}).get(
+                        "provider"
+                    ),
+                    "google",
+                )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_api_reset_overrides_deletes_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=False):
+            workspace = Path(tmp)
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                client.put(
+                    "/api/aiteam/routing/overrides",
+                    json={
+                        "overrides_by_role": {
+                            "engineer": {
+                                "providers": ["google", "groq"],
+                                "primary_provider": "google",
+                            }
+                        }
+                    },
+                )
+                self.assertTrue((runtime_dir / "routing_overrides.json").exists())
+
+                response = client.delete("/api/aiteam/routing/overrides")
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertTrue(bool(payload.get("ok")))
+                self.assertFalse(bool(payload.get("override_local_present")))
+                self.assertFalse((runtime_dir / "routing_overrides.json").exists())
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_state_last_chat_run_exposes_operational_task_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-04-02T14:00:00+00:00",
+                        "event_type": "chat_plan_created",
+                        "payload": {
+                            "task_id": "CHAT-A1B2C3D4",
+                            "chat_mode": "sprint5",
+                            "round_budget": 5,
+                            "phase_count": 3,
+                            "delegated_count": 1,
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-A1B2C3D4::lead_intake",
+                        "title": "Lead intake",
+                        "description": "desc",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {},
+                    },
+                    {
+                        "task_id": "CHAT-A1B2C3D4::plan_research",
+                        "title": "Plan research",
+                        "description": "desc",
+                        "role": "scout",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "blocked",
+                        "assignee": "scout-1",
+                        "metadata": {"blocked_reason": "dependency_failed"},
+                    },
+                    {
+                        "task_id": "CHAT-A1B2C3D4::build",
+                        "title": "Build",
+                        "description": "desc",
+                        "role": "engineer",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "blocked",
+                        "assignee": "eng-1",
+                        "metadata": {"blocked_reason": "no_eligible_adapter"},
+                    },
+                    {
+                        "task_id": "CHAT-A1B2C3D4::qa",
+                        "title": "QA",
+                        "description": "desc",
+                        "role": "qa",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "pending",
+                        "assignee": "qa-1",
+                        "metadata": {},
+                    },
+                    {
+                        "task_id": "CHAT-0BADF00D::build",
+                        "title": "Old build",
+                        "description": "desc",
+                        "role": "engineer",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "pending",
+                        "assignee": "eng-2",
+                        "metadata": {},
+                    },
+                ],
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                payload = client.get("/api/aiteam/state?environment=dev").json()
+                summary = (
+                    ((payload.get("last_chat_run", {}) or {}).get("task_operational_summary", {}) or {})
+                )
+                counts = dict(summary.get("counts", {}) or {})
+                self.assertTrue(bool(summary.get("has_actionable_items")))
+                self.assertEqual(int(summary.get("active_total", 0)), 4)
+                self.assertEqual(int(counts.get("blocked_by_dependency", 0)), 1)
+                self.assertEqual(int(counts.get("blocked_by_no_eligible_adapter", 0)), 1)
+                self.assertEqual(int(counts.get("pending", 0)), 1)
+                self.assertEqual(int(counts.get("carried_over_from_previous_run", 0)), 1)
+
+                blocked_reasons = {
+                    str(item.get("code", "")): int(item.get("count", 0))
+                    for item in list(summary.get("blocked_reasons", []) or [])
                     if isinstance(item, dict)
                 }
-                self.assertIn("claude_pro", engineer_adapters)
-                self.assertIn(
-                    "role_targets",
-                    list((engineer_adapters.get("claude_pro", {}) or {}).get("blockers", []) or []),
+                self.assertEqual(blocked_reasons.get("dependency_failed"), 1)
+                self.assertEqual(blocked_reasons.get("no_eligible_adapter"), 1)
+                self.assertIn("CHAT-0BADF00D", list(summary.get("carryover_roots", []) or []))
+
+                sample_items = list(summary.get("sample_items", []) or [])
+                self.assertTrue(
+                    any(
+                        str(item.get("operational_state", "")) == "carried_over_from_previous_run"
+                        and str(item.get("source_root", "")) == "CHAT-0BADF00D"
+                        for item in sample_items
+                        if isinstance(item, dict)
+                    )
                 )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_conversations_last_chat_run_exposes_operational_task_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-04-02T14:30:00+00:00",
+                        "event_type": "chat_plan_created",
+                        "payload": {
+                            "task_id": "CHAT-B2C3D4E5",
+                            "chat_mode": "sprint5",
+                            "round_budget": 4,
+                            "phase_count": 2,
+                            "delegated_count": 0,
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-B2C3D4E5::lead_intake",
+                        "title": "Lead intake",
+                        "description": "## User Request\ncrear MVP",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {},
+                    },
+                    {
+                        "task_id": "CHAT-B2C3D4E5::review",
+                        "title": "Review",
+                        "description": "desc",
+                        "role": "reviewer",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "blocked",
+                        "assignee": "review-1",
+                        "metadata": {"blocked_reason": "specialist_quorum_not_met"},
+                    },
+                    {
+                        "task_id": "CHAT-B2C3D4E5::qa",
+                        "title": "QA",
+                        "description": "desc",
+                        "role": "qa",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "waiting_user",
+                        "assignee": "qa-1",
+                        "metadata": {},
+                    },
+                    {
+                        "task_id": "CHAT-DEADBEEF::scout",
+                        "title": "Old scout",
+                        "description": "desc",
+                        "role": "scout",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "blocked",
+                        "assignee": "scout-2",
+                        "metadata": {"blocked_reason": "dependency_failed"},
+                    },
+                ],
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                payload = client.get("/api/aiteam/conversations?limit=10").json()
+                summary = (
+                    ((payload.get("last_chat_run", {}) or {}).get("task_operational_summary", {}) or {})
+                )
+                counts = dict(summary.get("counts", {}) or {})
+                self.assertTrue(
+                    bool(summary.get("has_actionable_items")),
+                    msg=json.dumps(payload, ensure_ascii=False, indent=2),
+                )
+                self.assertEqual(int(summary.get("active_total", 0)), 3)
+                self.assertEqual(int(counts.get("blocked_by_quorum", 0)), 1)
+                self.assertEqual(int(counts.get("waiting_user", 0)), 1)
+                self.assertEqual(int(counts.get("carried_over_from_previous_run", 0)), 1)
+                self.assertEqual(
+                    list(summary.get("carryover_roots", []) or []),
+                    ["CHAT-DEADBEEF"],
+                )
+
+                blocked_reasons = {
+                    str(item.get("code", "")): int(item.get("count", 0))
+                    for item in list(summary.get("blocked_reasons", []) or [])
+                    if isinstance(item, dict)
+                }
+                self.assertEqual(blocked_reasons.get("specialist_quorum_not_met"), 1)
             finally:
                 api_main.set_current_workspace(previous_workspace)
 

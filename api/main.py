@@ -151,6 +151,12 @@ from aiteam.lead_control import (
 )
 from aiteam.persistence import AtomicFileWriter
 from aiteam.pilot import compute_pilot_metrics
+from aiteam.quorum import (
+    PLANNING_QUORUM_RUN_MODES,
+    QuorumResult,
+    run_planning_quorum,
+    should_apply_planning_quorum,
+)
 from aiteam.tool_specialists import (
     build_tool_specialist_metadata,
     replacement_specialists_from_metadata,
@@ -249,6 +255,7 @@ def _extract_delegate_directive(text: str) -> str | None:
 def _workspace_artifact_snapshot(workspace: Path) -> dict[str, tuple[int, int]]:
     skip_dirs = {
         "runtime",
+        ".aiteam",
         ".git",
         "node_modules",
         "venv",
@@ -261,12 +268,13 @@ def _workspace_artifact_snapshot(workspace: Path) -> dict[str, tuple[int, int]]:
     snapshot: dict[str, tuple[int, int]] = {}
     if not workspace.exists():
         return snapshot
+    runtime_dir_name = resolve_runtime_dir(workspace, PROJECT_ROOT).name
 
     for path in workspace.rglob("*"):
         if not path.is_file():
             continue
         relative = path.relative_to(workspace)
-        if any(part in skip_dirs for part in relative.parts):
+        if any(part in skip_dirs or part == runtime_dir_name for part in relative.parts):
             continue
         key = relative.as_posix()
         try:
@@ -286,6 +294,135 @@ def _workspace_artifact_diff(
         path for path in after.keys() if path in before and after[path] != before[path]
     )
     return created, modified
+
+
+def _project_instructions_block(project_root: Path) -> str:
+    instructions_path = Path(project_root) / ".aiteam" / "instructions.md"
+    if not instructions_path.exists():
+        return ""
+    try:
+        instructions_content = instructions_path.read_text(encoding="utf-8")[:4000].strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    if not instructions_content:
+        return ""
+    return (
+        "\n\n## Instrucciones del proyecto (.aiteam/instructions.md)\n"
+        f"{instructions_content}"
+    )
+
+
+_PLANNING_RUN_MODES = set(PLANNING_QUORUM_RUN_MODES)
+
+
+def _safe_plan_slug(value: str, *, fallback: str = "plan") -> str:
+    normalized = re.sub(r"[^a-z0-9_-]+", "-", str(value or "").strip().lower()).strip("-")
+    return normalized or fallback
+
+
+def _resolve_project_plan_dir(workspace: Path) -> Path:
+    docs_dir = workspace / "docs"
+    if docs_dir.exists():
+        return docs_dir / "aiteam"
+    return workspace / "planning"
+
+
+def _persist_planning_markdown(
+    *,
+    workspace: Path,
+    task_root: str,
+    run_mode: str,
+    message: str,
+    lead_output: str,
+    planned_phases: list[dict[str, object]],
+    quorum_result: QuorumResult | None = None,
+) -> Path | None:
+    normalized_mode = str(run_mode or "").strip().lower()
+    if normalized_mode not in _PLANNING_RUN_MODES:
+        return None
+
+    output_dir = _resolve_project_plan_dir(workspace)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    title_source = next(
+        (line.strip() for line in str(message or "").splitlines() if line.strip()),
+        "",
+    )
+    title = title_source[:120] if title_source else f"Plan {task_root}"
+    timestamp = datetime.now(timezone.utc)
+    file_name = (
+        f"{timestamp.strftime('%Y-%m-%d_%H-%M-%S')}"
+        f"_{_safe_plan_slug(normalized_mode)}"
+        f"_{_safe_plan_slug(task_root, fallback='chat')[:48]}.md"
+    )
+    plan_path = output_dir / file_name
+
+    phase_lines = []
+    for item in planned_phases:
+        phase_id = str(item.get("phase_id", "") or "").strip()
+        role = str(item.get("role", "") or "").strip()
+        objective = str(item.get("objective", "") or "").strip()
+        depends_on = [str(dep).strip() for dep in list(item.get("depends_on", []) or []) if str(dep).strip()]
+        line = f"- `{phase_id}` · {role} · {objective or 'sin objetivo'}"
+        if depends_on:
+            line += f" · depends_on: {', '.join(depends_on)}"
+        phase_lines.append(line)
+
+    plan_sections = [
+        f"# Plan: {title}",
+        "",
+        f"**Modo**: `{normalized_mode}`",
+        f"**Fecha**: `{timestamp.isoformat()}`",
+        f"**Task ID**: `{task_root}`",
+        "",
+        "## Solicitud",
+        str(message or "").strip() or "_sin mensaje_",
+        "",
+        "## Fases planificadas",
+        "\n".join(phase_lines) if phase_lines else "_sin fases dinamicas_",
+        "",
+        "## Salida del Lead",
+        str(lead_output or "").strip() or "_sin salida_",
+        "",
+    ]
+    if quorum_result is not None and (
+        quorum_result.applied or list(quorum_result.consultant_plans or [])
+    ):
+        consultant_lines = [
+            (
+                f"- `{item.adapter or 'unknown'}`"
+                f" · {item.provider or 'unknown'}"
+                f" · {item.model or 'unknown'}"
+                f" · status={item.status or 'consulted'}"
+            )
+            for item in list(quorum_result.consultant_plans or [])
+        ]
+        plan_sections.extend(
+            [
+                "## Quorum del Lead",
+                f"- origen: `{'lead_quorum' if quorum_result.applied else 'lead_only_fallback'}`",
+                (
+                    f"- lead_inicial: `{quorum_result.lead_adapter or 'unknown'}`"
+                    f" · {quorum_result.lead_provider or 'unknown'}"
+                    f" · {quorum_result.lead_model or 'unknown'}"
+                ),
+                (
+                    f"- lead_final: `{quorum_result.final_adapter or quorum_result.lead_adapter or 'unknown'}`"
+                    f" · {quorum_result.final_provider or quorum_result.lead_provider or 'unknown'}"
+                    f" · {quorum_result.final_model or quorum_result.lead_model or 'unknown'}"
+                ),
+                (
+                    f"- skipped_reason: `{quorum_result.skipped_reason}`"
+                    if quorum_result.skipped_reason
+                    else "- skipped_reason: `_none_`"
+                ),
+                "### Consultores",
+                "\n".join(consultant_lines) if consultant_lines else "_sin consultores efectivos_",
+                "",
+            ]
+        )
+    plan_path.write_text("\n".join(plan_sections), encoding="utf-8")
+    return plan_path
 
 
 
@@ -316,6 +453,7 @@ from api.utils import (
     _sanitize_project_name,
     _allocate_project_path,
     _detect_notebooklm_status,
+    resolve_runtime_dir,
     PROJECT_ROOT,
     get_current_workspace,
     set_current_workspace,
@@ -335,7 +473,7 @@ async def post_notebooklm_sync(payload: NotebookLMSyncRequest, request: Request)
         workspace = _workspace_from_request(
             request, get_current_workspace(), PROJECT_ROOT
         )
-        runtime_dir = workspace / "runtime"
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
         def _sync():
@@ -360,11 +498,72 @@ async def post_notebooklm_sync(payload: NotebookLMSyncRequest, request: Request)
         return {"error": str(e)}
 
 
+def _maybe_deposit_minimal_output(
+    workspace: Path,
+    lead_output: str,
+    chat_id: str,
+    run_mode: str = "",
+) -> "str | None":
+    """C3: Deposita PROJECT_PLAN.md en el workspace si esta vacio de artefactos de producto.
+
+    Condiciones de activacion (TODAS deben cumplirse):
+    1. Existe workspace (proyecto externo, no el propio repo AI Teams)
+    2. El workspace no tiene archivos de producto fuera de .aiteam/
+    3. lead_intake completo con output valido (lead_output no vacio)
+    4. La run NO es de modo probe (probe ya devuelve el plan via API)
+
+    Retorna el path del archivo creado, o None si no se deposito nada.
+    """
+    if not workspace or not workspace.exists():
+        return None
+    if not lead_output or not lead_output.strip():
+        return None
+    if str(run_mode or "").strip().lower() == "probe":
+        return None
+    # Skip if workspace IS the project root (ai teams itself, not an external project)
+    try:
+        workspace_resolved = workspace.resolve()
+        project_resolved = Path(PROJECT_ROOT).resolve()
+        if workspace_resolved == project_resolved:
+            return None
+    except Exception:
+        return None
+    # Check if there are product files outside .aiteam/
+    aiteam_dir = workspace / ".aiteam"
+    try:
+        product_files = [
+            f for f in workspace.rglob("*")
+            if f.is_file()
+            and not str(f.resolve()).startswith(str(aiteam_dir.resolve()))
+            and f.name not in {".gitignore", ".gitkeep"}
+        ]
+    except Exception:
+        return None
+    if product_files:
+        return None  # Already has product artifacts
+    # Deposit minimal plan
+    plan_path = workspace / "PROJECT_PLAN.md"
+    plan_content = (
+        "# Plan del Proyecto\n\n"
+        f"> Generado automáticamente por AI Teams · Run `{chat_id}`\n"
+        ">\n"
+        "> La run planificó correctamente pero no alcanzó la fase de ejecución.\n"
+        "> Este archivo es el punto de partida para la siguiente run.\n\n"
+        "---\n\n"
+        f"{lead_output.strip()}\n"
+    )
+    try:
+        plan_path.write_text(plan_content, encoding="utf-8")
+        return str(plan_path)
+    except Exception:
+        return None
+
+
 @app.post("/api/aiteam/chat")
 async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
     _require_api_auth_request(request)
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-    runtime_dir = workspace / "runtime"
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
     role_map = {
@@ -423,6 +622,17 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             _token_queue.put(("agent_event", event))
 
         orch.agent_event_callback = _on_agent_event
+
+        # C2: apply continuation_policy before the run starts
+        _continuation_policy = str(getattr(payload, "continuation_policy", "auto") or "auto").strip().lower()
+        if _continuation_policy == "clean_retry":
+            _archived_ids = orch.taskboard.archive_incomplete_tasks(reason="clean_retry_requested")
+            if _archived_ids:
+                orch.event_logger.emit(
+                    "clean_retry_archived",
+                    {"archived_count": len(_archived_ids), "archived_task_ids": _archived_ids},
+                )
+
         previous_runs = _recent_chat_roots(runtime_dir, max_chats=3)
         previous_root = previous_runs[0] if previous_runs else {}
         previous_by_root: dict[str, dict[str, object]] = {
@@ -509,6 +719,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             workspace=workspace,
             continuation_of=continuation_of,
         )
+        project_instructions_block = _project_instructions_block(workspace)
 
         orch.mailbox.send(
             sender="user",
@@ -546,6 +757,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "Entrega: objetivos, supuestos, riesgos y orden de trabajo del equipo."
                 f"{preplan_signal_block}"
                 f"{curated_context_block}"
+                f"{project_instructions_block}"
                 f"{_WORKFLOW_PLAN_INSTRUCTION}"
                 f"{continuity_block}"
             )
@@ -557,6 +769,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 " que se intentara completar en esta corrida."
                 f"{preplan_signal_block}"
                 f"{curated_context_block}"
+                f"{project_instructions_block}"
                 f"{_WORKFLOW_PLAN_INSTRUCTION}"
                 f"{continuity_block}"
             )
@@ -800,6 +1013,87 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         _lcp = _lcp_resolution.directives
         _lead_output_clean = _lcp_resolution.cleaned_output
         _lead_run_mode = str(_lcp.get("run_mode", "") or "").strip() or "standard"
+        _quorum_result: QuorumResult | None = None
+        if should_apply_planning_quorum(
+            requested=bool(payload.quorum),
+            run_mode=_lead_run_mode,
+        ) and _lcp_resolution.early_exit is None:
+            _lead_task = orch.taskboard.get_task(lead_task_id)
+            _lead_metadata = dict(_lead_task.metadata if _lead_task is not None else {})
+            _quorum_result = run_planning_quorum(
+                router=orch.router,
+                task_root=task_root,
+                message=payload.message,
+                base_prompt=lead_intake_description,
+                lead_output=_lead_output_clean,
+                lead_adapter=str(_lead_metadata.get("last_adapter_name", "") or "").strip(),
+                lead_provider=str(_lead_metadata.get("last_provider", "") or "").strip(),
+                lead_model=str(_lead_metadata.get("last_model", "") or "").strip(),
+                complexity=complexity,
+                criticality=criticality,
+                environment="dev",
+            )
+            _ws["lead_quorum"] = _quorum_result.to_metadata()
+            if _quorum_result.applied:
+                _lead_output = _quorum_result.final_plan
+                _ws.setdefault("phase_outputs", {})["lead_intake"] = _lead_output
+                _lcp_resolution = _lead_control_resolve_lead_intake(
+                    lead_output=_lead_output,
+                    chat_mode=chat_mode,
+                    complexity=complexity,
+                    criticality=criticality,
+                    round_budget=round_budget,
+                )
+                _lcp = _lcp_resolution.directives
+                _lead_output_clean = _lcp_resolution.cleaned_output
+                _lead_run_mode = str(_lcp.get("run_mode", "") or "").strip() or "standard"
+                orch.taskboard.update_metadata(
+                    lead_task_id,
+                    {
+                        "quorum_requested": True,
+                        "quorum_applied": True,
+                        "quorum_summary": _quorum_result.to_metadata(),
+                        "result": _lead_output_clean,
+                    },
+                )
+                orch.event_logger.emit(
+                    "chat_quorum_applied",
+                    {
+                        "task_id": task_root,
+                        "lead_adapter": _quorum_result.lead_adapter,
+                        "consultant_count": len(_quorum_result.consultant_plans),
+                        "final_adapter": _quorum_result.final_adapter,
+                    },
+                )
+            else:
+                orch.taskboard.update_metadata(
+                    lead_task_id,
+                    {
+                        "quorum_requested": True,
+                        "quorum_applied": False,
+                        "quorum_summary": _quorum_result.to_metadata(),
+                    },
+                )
+                orch.event_logger.emit(
+                    "chat_quorum_skipped",
+                    {
+                        "task_id": task_root,
+                        "reason": _quorum_result.skipped_reason or "not_applied",
+                    },
+                )
+            orch._save_workflow_state()
+        elif payload.quorum:
+            orch.event_logger.emit(
+                "chat_quorum_skipped",
+                {
+                    "task_id": task_root,
+                    "reason": (
+                        "lead_early_exit"
+                        if _lcp_resolution.early_exit is not None
+                        else f"run_mode_{_lead_run_mode}_not_supported"
+                    ),
+                },
+            )
         _curator_output = str(_ws.get("phase_outputs", {}).get("scout_context_curator", "") or "")
         _project_context_payload, _chat_context_payload = _persist_preplan_context(
             runtime_dir=runtime_dir,
@@ -878,7 +1172,33 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             }
             for spec in _lcp_resolution.phases
         ]
+        _persisted_plan_path = _persist_planning_markdown(
+            workspace=workspace,
+            task_root=task_root,
+            run_mode=_lead_run_mode,
+            message=payload.message,
+            lead_output=_lead_output_clean,
+            planned_phases=_planned_phases,
+            quorum_result=_quorum_result,
+        )
+        if _persisted_plan_path is not None:
+            orch.event_logger.emit(
+                "chat_plan_persisted",
+                {
+                    "task_id": task_root,
+                    "path": str(_persisted_plan_path),
+                    "run_mode": _lead_run_mode,
+                    "phase_count": len(_planned_phases),
+                },
+            )
         if probe_mode:
+            artifact_after = _workspace_artifact_snapshot(workspace)
+            created_artifacts, modified_artifacts = _workspace_artifact_diff(
+                artifact_before, artifact_after
+            )
+            artifact_created = len(created_artifacts)
+            artifact_modified = len(modified_artifacts)
+            artifact_files = sorted(set(created_artifacts + modified_artifacts))
             orch.event_logger.emit(
                 "chat_probe_completed",
                 {
@@ -887,6 +1207,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     "lead_run_mode": _lead_run_mode,
                     "planned_phases": [item["phase_id"] for item in _planned_phases],
                     "round_budget": _lcp_resolution.round_budget,
+                    "artifact_created": artifact_created,
+                    "artifact_modified": artifact_modified,
+                    "artifact_file_count": len(artifact_files),
+                    "artifact_files_truncated": len(artifact_files) > 16,
+                    "artifact_files": artifact_files[:16],
                 },
             )
             return TeamChatResponse(
@@ -913,6 +1238,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 probe_mode=True,
                 lead_run_mode=_lead_run_mode,
                 planned_phases=_planned_phases,
+                artifact_created=artifact_created,
+                artifact_modified=artifact_modified,
+                artifact_files=artifact_files,
             )
         _chat_run_state = ChatRunState(
             chat_root=task_root,
@@ -997,64 +1325,85 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     _spec.phase_id,
                     _state.phase_evidence_plan,
                 )
+                _phase_deferred_specs: list[dict] = []
                 for _evidence_spec in _evidence_specs:
                     _evidence_task_id = f"{task_root}::{_evidence_spec['phase_id']}"
                     if orch.taskboard.get_task(_evidence_task_id) is not None:
                         local_delegated_task_ids.append(_evidence_task_id)
                         continue
-                    orch.submit_task(
-                        WorkTask(
-                            task_id=_evidence_task_id,
-                            title=f"Evidencia {str(_evidence_spec['source_phase']).replace('_', ' ')}",
-                            description=(
-                                f"{_evidence_spec['instruction']}\n\n"
-                                f"Fase origen: {_spec.phase_id}\n"
-                                f"Objetivo de la fase: {_spec.objective}\n"
-                                f"Solicitud original: {payload.message}\n"
-                                f"{_evidence_spec['report_contract']}"
-                                f"{continuity_block}"
-                            ),
-                            role=_evidence_spec["role"],
-                            complexity=Complexity.LOW,
-                            criticality=_resolved_criticality,
-                            dependencies=[local_phase_task_ids[_spec.phase_id]],
-                            metadata={
-                                **build_chat_task_policy_metadata(),
-                                "required_capabilities": _evidence_spec["required_capabilities"],
-                                "skip_quality_gates": True,
-                                "skip_evidence_gate": True,
-                                "phase": _evidence_spec["phase_id"],
-                                "chat_parent": task_root,
-                                "run_mode": _lead_run_mode,
-                                "lead_run_mode": _lead_run_mode,
-                                "delegated_by": "team_lead",
-                                "delegation_brief": (
-                                    f"Evidencia estructurada para {_spec.phase_id}: "
-                                    f"{_evidence_spec['intent']}"
-                                ),
-                                "delegation_from_role": "team_lead",
-                                "delegate_intent": _evidence_spec["intent"],
-                                "delegate_wait_policy": _evidence_spec["wait_policy"],
-                                "delegate_budget_rounds": _evidence_spec["delegate_budget"],
-                                "evidence_source_phase": _spec.phase_id,
-                                "structured_evidence_task": True,
-                                "delegate_report_contract_version": "operator_report_v1",
-                                "skill_targets": _evidence_spec["skill_targets"],
-                                "lsp_targets": _evidence_spec["lsp_targets"],
-                                **build_tool_specialist_metadata(
-                                    specialist=str(_evidence_spec["specialist"]),
-                                    required_capabilities=_evidence_spec["required_capabilities"],
-                                    reason=(
-                                        f"evidence_plan para la fase {_spec.phase_id}; "
-                                        f"intent={_evidence_spec['intent']}"
-                                    ),
-                                    skill_targets=_evidence_spec["skill_targets"],
-                                    lsp_targets=_evidence_spec["lsp_targets"],
-                                ),
-                            },
-                        )
+                    # C1: delegate evidence tasks are created lazily when the parent
+                    # phase starts (CLAIMED). We pre-compute the full task spec and
+                    # store it in the parent phase task's metadata so the orchestrator
+                    # can spawn it at execution time without needing api/ context.
+                    _specialist_meta = build_tool_specialist_metadata(
+                        specialist=str(_evidence_spec["specialist"]),
+                        required_capabilities=_evidence_spec["required_capabilities"],
+                        reason=(
+                            f"evidence_plan para la fase {_spec.phase_id}; "
+                            f"intent={_evidence_spec['intent']}"
+                        ),
+                        skill_targets=_evidence_spec["skill_targets"],
+                        lsp_targets=_evidence_spec["lsp_targets"],
                     )
+                    _deferred_spec = {
+                        "task_id": _evidence_task_id,
+                        "title": f"Evidencia {str(_evidence_spec['source_phase']).replace('_', ' ')}",
+                        "description": (
+                            f"{_evidence_spec['instruction']}\n\n"
+                            f"Fase origen: {_spec.phase_id}\n"
+                            f"Objetivo de la fase: {_spec.objective}\n"
+                            f"Solicitud original: {payload.message}\n"
+                            f"{_evidence_spec['report_contract']}"
+                            f"{continuity_block}"
+                        ),
+                        "role": (
+                            _evidence_spec["role"].value
+                            if hasattr(_evidence_spec["role"], "value")
+                            else str(_evidence_spec["role"])
+                        ),
+                        "criticality": _resolved_criticality.value,
+                        "metadata": {
+                            **build_chat_task_policy_metadata(),
+                            "required_capabilities": _evidence_spec["required_capabilities"],
+                            "skip_quality_gates": True,
+                            "skip_evidence_gate": True,
+                            "phase": _evidence_spec["phase_id"],
+                            "chat_parent": task_root,
+                            "run_mode": _lead_run_mode,
+                            "lead_run_mode": _lead_run_mode,
+                            "delegated_by": "team_lead",
+                            "delegation_brief": (
+                                f"Evidencia estructurada para {_spec.phase_id}: "
+                                f"{_evidence_spec['intent']}"
+                            ),
+                            "delegation_from_role": "team_lead",
+                            "delegate_intent": _evidence_spec["intent"],
+                            "delegate_wait_policy": _evidence_spec["wait_policy"],
+                            "delegate_budget_rounds": _evidence_spec["delegate_budget"],
+                            "evidence_source_phase": _spec.phase_id,
+                            "structured_evidence_task": True,
+                            "delegate_report_contract_version": "operator_report_v1",
+                            "skill_targets": _evidence_spec["skill_targets"],
+                            "lsp_targets": _evidence_spec["lsp_targets"],
+                            **_specialist_meta,
+                        },
+                    }
+                    _phase_deferred_specs.append(_deferred_spec)
                     local_delegated_task_ids.append(_evidence_task_id)
+                # Attach deferred specs to the parent phase task metadata so the
+                # orchestrator can spawn them lazily when the phase is claimed.
+                if _phase_deferred_specs:
+                    _phase_task = orch.taskboard.get_task(local_phase_task_ids[_spec.phase_id])
+                    if _phase_task is not None and not _phase_task.metadata.get("delegates_spawned"):
+                        _existing = list(
+                            _phase_task.metadata.get("deferred_evidence_specs", []) or []
+                        )
+                        _merged = {s["task_id"]: s for s in _existing}
+                        _merged.update({s["task_id"]: s for s in _phase_deferred_specs})
+                        orch.taskboard.update_metadata(
+                            local_phase_task_ids[_spec.phase_id],
+                            {"deferred_evidence_specs": list(_merged.values())},
+                        )
             local_delegated_task_ids = list(dict.fromkeys(local_delegated_task_ids))
 
             _close_deps = local_delegated_task_ids if local_delegated_task_ids else [lead_task_id]
@@ -2068,6 +2417,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     "task_id": task_root,
                     "created": artifact_created,
                     "modified": artifact_modified,
+                    "file_count": len(artifact_files),
+                    "files_truncated": len(artifact_files) > 16,
                     "files": artifact_files[:16],
                 },
             )
@@ -2154,6 +2505,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                                 "task_id": task_root,
                                 "created": artifact_created,
                                 "modified": artifact_modified,
+                                "file_count": len(artifact_files),
+                                "files_truncated": len(artifact_files) > 16,
                                 "files": artifact_files[:16],
                             },
                         )
@@ -2828,6 +3181,19 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             lead_run_mode=_lead_run_mode,
             planned_phases=_planned_phases,
         )
+        # C3: if workspace has no product artifacts and lead_intake completed,
+        # deposit a minimal PROJECT_PLAN.md so the user sees tangible output.
+        _c3_deposited = _maybe_deposit_minimal_output(
+            workspace=workspace,
+            lead_output=_lead_output_clean,
+            chat_id=task_root,
+            run_mode=_lead_run_mode,
+        )
+        if _c3_deposited:
+            orch.event_logger.emit(
+                "minimal_output_deposited",
+                {"path": _c3_deposited, "chat_id": task_root},
+            )
         return result
 
     async def _event_stream():
@@ -3119,7 +3485,7 @@ async def post_aiteam_chat_clarify(payload: ClarifyRequest, request: Request):
     """
     _require_api_auth_request(request)
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-    runtime_dir = workspace / "runtime"
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
 
     task_root = _normalize_task_root(payload.chat_id)
     pending_file = runtime_dir / f"pending_clarification_{task_root}.json"
@@ -3181,7 +3547,7 @@ async def post_aiteam_chat_clarify(payload: ClarifyRequest, request: Request):
 async def get_aiteam_chat_progress(task_id: str, request: Request):
     _require_api_auth_request(request)
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-    runtime_dir = workspace / "runtime"
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
     normalized_root = _normalize_task_root(task_id)
     if not normalized_root:
         return TeamChatProgressResponse(task_id="", exists=False)
@@ -3195,7 +3561,7 @@ async def get_aiteam_chat_load(task_id: str, request: Request):
     """Devuelve los mensajes reconstruidos de un chat pasado (user + lead response)."""
     _require_api_auth_request(request)
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-    runtime_dir = workspace / "runtime"
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
     normalized_root = _normalize_task_root(task_id)
     if not normalized_root or not runtime_dir.exists():
         return {"task_id": normalized_root or task_id, "messages": []}
@@ -3234,7 +3600,7 @@ async def post_aiteam_chat_async(payload: TeamChatRequest, request: Request):
     """
     _require_api_auth_request(request)
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-    runtime_dir = workspace / "runtime"
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
     import queue as queue_module
@@ -3424,7 +3790,7 @@ async def get_aiteam_operator_timeline(
 ):
     _require_api_auth_request(request)
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-    runtime_dir = workspace / "runtime"
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
     if not runtime_dir.exists():
         return OperatorTimelineResponse()
     return await asyncio.to_thread(
@@ -3441,7 +3807,7 @@ async def get_mailbox_inbox(request: Request):
     """Query agent mailbox with optional filters."""
     _require_api_auth_request(request)
     workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-    runtime_dir = Path(workspace) / "runtime"
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
     mailbox_path = runtime_dir / "mailbox.jsonl"
     if not mailbox_path.exists():
         return {"messages": [], "total": 0, "unread": 0}

@@ -251,6 +251,58 @@ class SpecialistPrefetchAdapter(ModelAdapter):
         )
 
 
+class ContextCuratorAvailabilityAdapter(ModelAdapter):
+    def __init__(
+        self,
+        *,
+        available_after: int = 1,
+        role_targets: set[str] | None = None,
+    ) -> None:
+        super().__init__(
+            name="context_curator_api",
+            provider="openai",
+            model="gpt-cheap",
+            channel=ChannelType.API,
+            capabilities={"analysis", "reasoning", "repo_read"},
+            role_targets=role_targets,
+        )
+        self.available_after = max(0, int(available_after))
+        self.available_calls = 0
+        self.invoke_calls = 0
+
+    def available(self) -> bool:
+        self.available_calls += 1
+        return self.available_calls > self.available_after
+
+    def invoke(self, prompt, messages=None, tools=None):
+        self.invoke_calls += 1
+        prompt_text = str(prompt or "")
+        if "Specialist precheck:" in prompt_text:
+            return AdapterResponse(
+                success=True,
+                content=json.dumps(
+                    {
+                        "summary": "Contexto compacto listo para continuar la fase.",
+                        "evidence": ["workflow_state compactado"],
+                        "artifacts": [],
+                        "risks": [],
+                        "recommendation": "usar el resumen y continuar",
+                        "confidence": 0.74,
+                    }
+                ),
+                latency_ms=1,
+                input_tokens=8,
+                output_tokens=12,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Respuesta principal tras prefetch de contexto.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
 class PeerDiversityCaptureAdapter(ModelAdapter):
     def __init__(
         self,
@@ -738,6 +790,97 @@ class OrchestratorTests(unittest.TestCase):
             prefetch_reports = list(stored.metadata.get("specialist_prefetch_reports", []) or [])
             self.assertEqual(len(prefetch_reports), 1)
             self.assertEqual(prefetch_reports[0].get("specialist"), "test_runner")
+
+    def test_specialist_prefetch_retries_on_transient_unavailability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapter = ContextCuratorAvailabilityAdapter(available_after=1)
+            router = HybridRouter(
+                adapters=[adapter],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="root::plan_research",
+                title="Planificar investigacion",
+                description="Compacta el contexto antes de seguir.",
+                role=Role.SCOUT,
+                metadata={"context_curator_requested": True},
+            )
+
+            context = orchestrator._collect_specialist_prefetch_context(task)
+
+            self.assertGreaterEqual(adapter.available_calls, 2)
+            self.assertEqual(adapter.invoke_calls, 1)
+            self.assertIn("context_curator", context)
+            quorum_result = dict(task.metadata.get("specialist_quorum_result", {}) or {})
+            self.assertTrue(quorum_result.get("quorum_met"))
+            self.assertEqual(
+                list(quorum_result.get("received_specialists", []) or []),
+                ["context_curator"],
+            )
+
+    def test_context_curator_prefetch_degrades_gracefully_when_no_adapter_is_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            unavailable_curator = ContextCuratorAvailabilityAdapter(
+                available_after=99,
+                role_targets={"scout"},
+            )
+            engineer_adapter = ApiAdapter(
+                name="engineer_api",
+                provider="openai",
+                model="gpt-engineer",
+                capabilities={"coding", "reasoning", "analysis"},
+                role_targets={"engineer"},
+                response_content="Implementacion principal completada.",
+            )
+            router = HybridRouter(
+                adapters=[unavailable_curator, engineer_adapter],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="root::build_with_context_pressure",
+                title="Implementar ajuste principal",
+                description="Necesita continuar aunque el compactado de contexto no este disponible.",
+                role=Role.ENGINEER,
+                metadata={
+                    "context_curator_recommended": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            stored = orchestrator.taskboard.get_task("root::build_with_context_pressure")
+            assert stored is not None
+            self.assertEqual(stored.state, TaskState.COMPLETED)
+            degraded = list(stored.metadata.get("specialist_prefetch_degraded", []) or [])
+            self.assertEqual(len(degraded), 1)
+            self.assertEqual(degraded[0].get("specialist"), "context_curator")
+            self.assertEqual(degraded[0].get("reason"), "no_eligible_adapter")
+            quorum_result = dict(stored.metadata.get("specialist_quorum_result", {}) or {})
+            self.assertTrue(quorum_result.get("quorum_met"))
+            self.assertEqual(int(quorum_result.get("responses_required", 0)), 0)
+            self.assertEqual(list(quorum_result.get("missing_specialists", []) or []), [])
 
     def test_specialist_quorum_all_blocks_main_task_when_missing_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1391,7 +1534,12 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("build", ws.get("phase_context_summaries", {}))
             self.assertTrue(bool(str(ws.get("chat_context_summary", "") or "").strip()))
             self.assertTrue(
-                (runtime_dir / "context" / "chats" / "CHAT-CTX-1.json").exists()
+                bool(
+                    orchestrator.context_curator.load_chat_context(
+                        "CHAT-CTX-1",
+                        project_key=str(project_root.resolve()),
+                    ).get("working_set", [])
+                )
             )
 
     def test_context_pressure_updates_from_delegate_batches_and_invalidations(self) -> None:
@@ -3822,6 +3970,567 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(chunk_events[0].get("chunk"), "Analizando...")
             self.assertEqual(chunk_events[1].get("chunk_type"), "output")
             self.assertEqual(chunk_events[1].get("chunk"), "Respuesta final")
+
+
+class MinimalOutputDepositTests(unittest.TestCase):
+    """C3: _maybe_deposit_minimal_output — deposit PROJECT_PLAN.md for empty workspaces."""
+
+    def _get_fn(self):
+        import api.main as api_main
+        return api_main._maybe_deposit_minimal_output
+
+    def test_minimal_output_deposited_when_workspace_empty_and_build_blocked(self) -> None:
+        fn = self._get_fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            result = fn(
+                workspace=workspace,
+                lead_output="# Plan\n\nAnálisis completo. Propuesta técnica lista.",
+                chat_id="CHAT-TEST123",
+                run_mode="standard",
+            )
+            self.assertIsNotNone(result, "Should deposit PROJECT_PLAN.md in empty workspace")
+            plan_path = workspace / "PROJECT_PLAN.md"
+            self.assertTrue(plan_path.exists())
+            content = plan_path.read_text(encoding="utf-8")
+            self.assertIn("CHAT-TEST123", content)
+            self.assertIn("Análisis completo", content)
+
+    def test_minimal_output_not_deposited_when_workspace_has_files(self) -> None:
+        fn = self._get_fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "main.py").write_text("# code", encoding="utf-8")
+            result = fn(
+                workspace=workspace,
+                lead_output="# Plan",
+                chat_id="CHAT-TEST456",
+                run_mode="standard",
+            )
+            self.assertIsNone(result, "Should not deposit when workspace has product files")
+            self.assertFalse((workspace / "PROJECT_PLAN.md").exists())
+
+    def test_minimal_output_not_deposited_when_lead_intake_failed(self) -> None:
+        fn = self._get_fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            result = fn(
+                workspace=workspace,
+                lead_output="",
+                chat_id="CHAT-TEST789",
+                run_mode="standard",
+            )
+            self.assertIsNone(result, "Should not deposit when lead_output is empty")
+            self.assertFalse((workspace / "PROJECT_PLAN.md").exists())
+
+    def test_minimal_output_not_deposited_in_probe_mode(self) -> None:
+        fn = self._get_fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            result = fn(
+                workspace=workspace,
+                lead_output="# Plan detallado con análisis completo",
+                chat_id="CHAT-PROBE",
+                run_mode="probe",
+            )
+            self.assertIsNone(result, "Should not deposit in probe mode")
+            self.assertFalse((workspace / "PROJECT_PLAN.md").exists())
+
+    def test_minimal_output_not_deposited_when_workspace_is_project_root(self) -> None:
+        from api.utils import PROJECT_ROOT
+        fn = self._get_fn()
+        result = fn(
+            workspace=Path(PROJECT_ROOT),
+            lead_output="# Plan",
+            chat_id="CHAT-SELF",
+            run_mode="standard",
+        )
+        self.assertIsNone(result, "Should not deposit when workspace is the project root itself")
+
+    def test_minimal_output_skips_aiteam_dir_files(self) -> None:
+        fn = self._get_fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            aiteam_dir = workspace / ".aiteam"
+            aiteam_dir.mkdir()
+            (aiteam_dir / "instructions.md").write_text("instructions", encoding="utf-8")
+            # Only .aiteam/ contents — workspace is otherwise empty
+            result = fn(
+                workspace=workspace,
+                lead_output="# Plan",
+                chat_id="CHAT-AITEAM",
+                run_mode="standard",
+            )
+            self.assertIsNotNone(result, "Should deposit when only .aiteam/ exists")
+
+
+class ContinuationPolicyTests(unittest.TestCase):
+    """C2: continuation_policy — archive incomplete tasks for clean_retry."""
+
+    def _make_taskboard(self, tmp_dir: Path):
+        from aiteam.taskboard import TaskBoard
+        return TaskBoard.from_runtime_dir(tmp_dir)
+
+    def test_clean_retry_archives_previous_incomplete_tasks(self) -> None:
+        """C2: archive_incomplete_tasks marks PENDING/BLOCKED/WAITING_USER as ARCHIVED."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tb = self._make_taskboard(tmp_path)
+
+            tb.add_task(WorkTask(task_id="r1::phase_a", title="Phase A", description="", role=Role.ENGINEER))
+            tb.add_task(WorkTask(task_id="r1::phase_b", title="Phase B", description="", role=Role.RESEARCHER))
+            tb.mark_blocked("r1::phase_b", "no_eligible_adapter")
+
+            archived = tb.archive_incomplete_tasks("clean_retry_requested")
+
+            self.assertIn("r1::phase_a", archived)
+            self.assertIn("r1::phase_b", archived)
+            self.assertEqual(tb.get_task("r1::phase_a").state, TaskState.ARCHIVED)
+            self.assertEqual(tb.get_task("r1::phase_b").state, TaskState.ARCHIVED)
+            self.assertEqual(
+                tb.get_task("r1::phase_a").metadata.get("archived_reason"),
+                "clean_retry_requested",
+            )
+
+    def test_clean_retry_does_not_archive_completed_or_failed(self) -> None:
+        """C2: COMPLETED and FAILED tasks are not archived."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tb = self._make_taskboard(tmp_path)
+
+            tb.add_task(WorkTask(task_id="r2::done", title="Done", description="", role=Role.ENGINEER))
+            tb.claim_task("r2::done", "agent1")
+            tb.mark_completed("r2::done", "ok")
+
+            tb.add_task(WorkTask(task_id="r2::failed", title="Failed", description="", role=Role.ENGINEER))
+            tb.claim_task("r2::failed", "agent1")
+            tb.mark_failed("r2::failed", "error")
+
+            archived = tb.archive_incomplete_tasks("clean_retry_requested")
+
+            self.assertNotIn("r2::done", archived)
+            self.assertNotIn("r2::failed", archived)
+            self.assertEqual(tb.get_task("r2::done").state, TaskState.COMPLETED)
+            self.assertEqual(tb.get_task("r2::failed").state, TaskState.FAILED)
+
+    def test_clean_retry_starts_fresh_workflow(self) -> None:
+        """C2: After clean_retry, ARCHIVED tasks don't block new tasks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tb = self._make_taskboard(tmp_path)
+
+            # Simulate prior run with a blocked task
+            tb.add_task(WorkTask(task_id="r3::old_phase", title="Old", description="", role=Role.ENGINEER))
+            tb.mark_blocked("r3::old_phase", "no_eligible_adapter")
+
+            # Archive incomplete tasks (clean_retry)
+            tb.archive_incomplete_tasks("clean_retry_requested")
+
+            # Add a new task with no dependencies — should be READY
+            tb.add_task(WorkTask(task_id="r4::new_phase", title="New", description="", role=Role.ENGINEER))
+
+            ready = tb.ready_tasks()
+            ready_ids = [t.task_id for t in ready]
+            self.assertIn("r4::new_phase", ready_ids)
+
+    def test_auto_policy_preserves_existing_behavior(self) -> None:
+        """C2: 'auto' policy (default) does not archive any tasks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tb = self._make_taskboard(tmp_path)
+
+            tb.add_task(WorkTask(task_id="r5::phase_a", title="Phase A", description="", role=Role.ENGINEER))
+            tb.mark_blocked("r5::phase_a", "some_reason")
+
+            # No archiving happens with auto policy (no call to archive_incomplete_tasks)
+            self.assertEqual(tb.get_task("r5::phase_a").state, TaskState.BLOCKED)
+            ready = tb.ready_tasks()
+            self.assertNotIn("r5::phase_a", [t.task_id for t in ready])
+
+
+class DeferredDelegateTests(unittest.TestCase):
+    """C1: Delegate evidence tasks created lazily when parent phase is claimed."""
+
+    def _make_orch(self, tmp_dir: Path) -> AITeamOrchestrator:
+        return AITeamOrchestrator(
+            router=HybridRouter(
+                adapters=[FakeSuccessAdapter()],
+                policy=build_default_router_policy(),
+            ),
+            runtime_dir=tmp_dir,
+        )
+
+    def test_delegate_tasks_not_created_until_phase_starts(self) -> None:
+        """C1: Deferred specs stored in task metadata, no delegate tasks in board at plan time."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            orch = self._make_orch(tmp_path)
+
+            parent_id = "run1::build"
+            parent_task = WorkTask(
+                task_id=parent_id,
+                title="Build",
+                description="Build phase",
+                role=Role.ENGINEER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "deferred_evidence_specs": [
+                        {
+                            "task_id": "run1::delegate_build_test_runner_0",
+                            "title": "Evidencia build",
+                            "description": "Ejecuta tests",
+                            "role": "qa",
+                            "criticality": "low",
+                            "metadata": {
+                                "required_capabilities": ["test_execute"],
+                                "skip_quality_gates": True,
+                                "skip_evidence_gate": True,
+                                "structured_evidence_task": True,
+                            },
+                        }
+                    ]
+                },
+            )
+            orch.submit_task(parent_task)
+
+            # Before phase starts: no delegate tasks
+            delegate = orch.taskboard.get_task("run1::delegate_build_test_runner_0")
+            self.assertIsNone(delegate, "Delegate task must not exist before phase starts")
+
+            # Claim parent task → should trigger lazy spawn
+            orch.taskboard.claim_task(parent_id, "agent1")
+            orch._maybe_spawn_deferred_delegates(parent_id)
+
+            # After claim: delegate task now exists
+            delegate = orch.taskboard.get_task("run1::delegate_build_test_runner_0")
+            self.assertIsNotNone(delegate, "Delegate task should exist after parent phase starts")
+            self.assertEqual(delegate.dependencies, [parent_id])
+
+            # Flag set to prevent re-spawn
+            refreshed_parent = orch.taskboard.get_task(parent_id)
+            self.assertTrue(refreshed_parent.metadata.get("delegates_spawned"))
+
+    def test_blocked_phase_does_not_create_delegates(self) -> None:
+        """C1: If parent phase is blocked (dependency failed), delegates are never created."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            orch = self._make_orch(tmp_path)
+
+            dep_id = "run2::plan_research"
+            dep_task = WorkTask(
+                task_id=dep_id,
+                title="Plan research",
+                description="Research phase",
+                role=Role.RESEARCHER,
+            )
+            orch.submit_task(dep_task)
+            # Mark dependency as blocked
+            orch.taskboard.mark_blocked(dep_id, "no_eligible_adapter")
+
+            parent_id = "run2::build"
+            parent_task = WorkTask(
+                task_id=parent_id,
+                title="Build",
+                description="Build phase",
+                role=Role.ENGINEER,
+                dependencies=[dep_id],
+                metadata={
+                    "deferred_evidence_specs": [
+                        {
+                            "task_id": "run2::delegate_build_test_runner_0",
+                            "title": "Evidencia build",
+                            "description": "Ejecuta tests",
+                            "role": "qa",
+                            "criticality": "low",
+                            "metadata": {"required_capabilities": ["test_execute"]},
+                        }
+                    ]
+                },
+            )
+            orch.submit_task(parent_task)
+
+            # Run the orchestrator — parent should end up BLOCKED (dep failed)
+            orch.run_until_idle(max_rounds=3)
+
+            # Verify parent is blocked
+            parent_current = orch.taskboard.get_task(parent_id)
+            self.assertEqual(parent_current.state, TaskState.BLOCKED)
+
+            # Verify no delegate was ever created
+            delegate = orch.taskboard.get_task("run2::delegate_build_test_runner_0")
+            self.assertIsNone(delegate, "Delegates must not be created when parent is blocked")
+
+    # ── C1 spec-named tests ──────────────────────────────────────────────────
+
+    def test_delegate_tasks_not_in_taskboard_before_phase_starts(self) -> None:
+        """C1 spec: After plan creation, delegate tasks do not exist in taskboard yet."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            orch = self._make_orch(tmp_path)
+
+            parent_id = "c1s::build"
+            parent_task = WorkTask(
+                task_id=parent_id,
+                title="Build",
+                description="Build phase",
+                role=Role.ENGINEER,
+                metadata={
+                    "deferred_evidence_specs": [
+                        {
+                            "task_id": "c1s::delegate_build_scout_0",
+                            "title": "Evidence build",
+                            "description": "Run tests",
+                            "role": "qa",
+                            "criticality": "low",
+                            "metadata": {"skip_evidence_gate": True},
+                        }
+                    ]
+                },
+            )
+            orch.submit_task(parent_task)
+
+            # Delegate must not exist before phase is claimed
+            self.assertIsNone(
+                orch.taskboard.get_task("c1s::delegate_build_scout_0"),
+                "Delegate task must not exist in taskboard before the parent phase starts",
+            )
+
+    def test_delegate_tasks_created_when_phase_is_claimed(self) -> None:
+        """C1 spec: Claiming the parent phase spawns its deferred delegate tasks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            orch = self._make_orch(tmp_path)
+
+            parent_id = "c1c::build"
+            delegate_id = "c1c::delegate_build_scout_0"
+            parent_task = WorkTask(
+                task_id=parent_id,
+                title="Build",
+                description="Build phase",
+                role=Role.ENGINEER,
+                metadata={
+                    "deferred_evidence_specs": [
+                        {
+                            "task_id": delegate_id,
+                            "title": "Evidence build",
+                            "description": "Run tests",
+                            "role": "qa",
+                            "criticality": "low",
+                            "metadata": {"skip_evidence_gate": True},
+                        }
+                    ]
+                },
+            )
+            orch.submit_task(parent_task)
+
+            # Claim parent then spawn deferred delegates
+            orch.taskboard.claim_task(parent_id, "agent1")
+            orch._maybe_spawn_deferred_delegates(parent_id)
+
+            delegate = orch.taskboard.get_task(delegate_id)
+            self.assertIsNotNone(delegate, "Delegate task should exist after parent phase is claimed")
+            self.assertEqual(delegate.dependencies, [parent_id])
+            refreshed = orch.taskboard.get_task(parent_id)
+            self.assertTrue(refreshed.metadata.get("delegates_spawned"))
+
+    def test_blocked_phase_never_creates_delegates(self) -> None:
+        """C1 spec: A blocked phase never creates its delegate tasks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            orch = self._make_orch(tmp_path)
+
+            dep_id = "c1b::plan"
+            orch.submit_task(WorkTask(
+                task_id=dep_id,
+                title="Plan",
+                description="",
+                role=Role.RESEARCHER,
+            ))
+            orch.taskboard.mark_blocked(dep_id, "no_eligible_adapter")
+
+            parent_id = "c1b::build"
+            delegate_id = "c1b::delegate_build_scout_0"
+            orch.submit_task(WorkTask(
+                task_id=parent_id,
+                title="Build",
+                description="",
+                role=Role.ENGINEER,
+                dependencies=[dep_id],
+                metadata={
+                    "deferred_evidence_specs": [
+                        {
+                            "task_id": delegate_id,
+                            "title": "Evidence",
+                            "description": "",
+                            "role": "qa",
+                            "criticality": "low",
+                            "metadata": {},
+                        }
+                    ]
+                },
+            ))
+
+            orch.run_until_idle(max_rounds=3)
+
+            parent_current = orch.taskboard.get_task(parent_id)
+            self.assertEqual(parent_current.state, TaskState.BLOCKED)
+            self.assertIsNone(
+                orch.taskboard.get_task(delegate_id),
+                "Delegates must not be created when parent phase is blocked",
+            )
+
+
+class ContinuationPolicySpecTests(unittest.TestCase):
+    """C2 spec-named tests: continuation_policy clean_retry and auto behaviour."""
+
+    def _make_taskboard(self, tmp_dir: Path):
+        from aiteam.taskboard import TaskBoard
+        return TaskBoard.from_runtime_dir(tmp_dir)
+
+    def test_archive_incomplete_tasks_marks_pending_as_archived(self) -> None:
+        """C2 spec: archive_incomplete_tasks transitions PENDING tasks to ARCHIVED."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tb = self._make_taskboard(Path(tmp))
+            tb.add_task(WorkTask(task_id="cs::pending", title="P", description="", role=Role.ENGINEER))
+
+            archived = tb.archive_incomplete_tasks("test_reason")
+
+            self.assertIn("cs::pending", archived)
+            self.assertEqual(tb.get_task("cs::pending").state, TaskState.ARCHIVED)
+            self.assertEqual(tb.get_task("cs::pending").metadata.get("archived_reason"), "test_reason")
+
+    def test_archive_incomplete_tasks_does_not_touch_completed(self) -> None:
+        """C2 spec: archive_incomplete_tasks leaves COMPLETED and FAILED tasks untouched."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tb = self._make_taskboard(Path(tmp))
+
+            tb.add_task(WorkTask(task_id="cs::done", title="Done", description="", role=Role.ENGINEER))
+            tb.claim_task("cs::done", "agent1")
+            tb.mark_completed("cs::done", "ok")
+
+            tb.add_task(WorkTask(task_id="cs::fail", title="Fail", description="", role=Role.ENGINEER))
+            tb.claim_task("cs::fail", "agent1")
+            tb.mark_failed("cs::fail", "err")
+
+            archived = tb.archive_incomplete_tasks("test_reason")
+
+            self.assertNotIn("cs::done", archived)
+            self.assertNotIn("cs::fail", archived)
+            self.assertEqual(tb.get_task("cs::done").state, TaskState.COMPLETED)
+            self.assertEqual(tb.get_task("cs::fail").state, TaskState.FAILED)
+
+    def test_clean_retry_archives_previous_tasks_before_run(self) -> None:
+        """C2 spec: clean_retry policy archives all incomplete tasks before the new run starts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tb = self._make_taskboard(Path(tmp))
+
+            tb.add_task(WorkTask(task_id="cr::old_a", title="A", description="", role=Role.ENGINEER))
+            tb.add_task(WorkTask(task_id="cr::old_b", title="B", description="", role=Role.RESEARCHER))
+            tb.mark_blocked("cr::old_b", "dependency_failed")
+
+            archived = tb.archive_incomplete_tasks("clean_retry_requested")
+
+            self.assertIn("cr::old_a", archived)
+            self.assertIn("cr::old_b", archived)
+            for tid in ("cr::old_a", "cr::old_b"):
+                self.assertEqual(tb.get_task(tid).state, TaskState.ARCHIVED)
+
+            # New task added after archiving is unaffected
+            tb.add_task(WorkTask(task_id="cr::new_phase", title="New", description="", role=Role.ENGINEER))
+            ready_ids = [t.task_id for t in tb.ready_tasks()]
+            self.assertIn("cr::new_phase", ready_ids)
+
+    def test_auto_policy_preserves_existing_tasks(self) -> None:
+        """C2 spec: 'auto' policy does not archive any existing tasks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tb = self._make_taskboard(Path(tmp))
+
+            tb.add_task(WorkTask(task_id="auto::blocked", title="B", description="", role=Role.ENGINEER))
+            tb.mark_blocked("auto::blocked", "some_reason")
+
+            # auto policy: no archiving call is made
+            self.assertEqual(tb.get_task("auto::blocked").state, TaskState.BLOCKED)
+            self.assertNotIn("auto::blocked", [t.task_id for t in tb.ready_tasks()])
+
+
+class MinimalOutputSpecTests(unittest.TestCase):
+    """C3 spec-named tests: _maybe_deposit_minimal_output behaviour."""
+
+    def _fn(self):
+        import api.main as api_main
+        return api_main._maybe_deposit_minimal_output
+
+    def test_minimal_output_deposited_when_workspace_empty(self) -> None:
+        """C3 spec: deposits PROJECT_PLAN.md when workspace has no product files."""
+        fn = self._fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            result = fn(
+                workspace=workspace,
+                lead_output="# Plan\n\nAnalysis complete.",
+                chat_id="SPEC-001",
+                run_mode="standard",
+            )
+            self.assertIsNotNone(result)
+            plan = workspace / "PROJECT_PLAN.md"
+            self.assertTrue(plan.exists())
+            self.assertIn("SPEC-001", plan.read_text(encoding="utf-8"))
+
+    def test_minimal_output_not_deposited_when_files_exist(self) -> None:
+        """C3 spec: does not deposit when workspace already contains product files."""
+        fn = self._fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "main.py").write_text("# code", encoding="utf-8")
+            result = fn(
+                workspace=workspace,
+                lead_output="# Plan",
+                chat_id="SPEC-002",
+                run_mode="standard",
+            )
+            self.assertIsNone(result)
+            self.assertFalse((workspace / "PROJECT_PLAN.md").exists())
+
+    def test_minimal_output_not_deposited_when_no_lead_output(self) -> None:
+        """C3 spec: does not deposit when lead_output is empty or blank."""
+        fn = self._fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            result = fn(
+                workspace=workspace,
+                lead_output="",
+                chat_id="SPEC-003",
+                run_mode="standard",
+            )
+            self.assertIsNone(result)
+            self.assertFalse((workspace / "PROJECT_PLAN.md").exists())
+
+    def test_minimal_output_not_deposited_in_probe_mode(self) -> None:
+        """C3 spec: does not deposit in probe mode."""
+        fn = self._fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            result = fn(
+                workspace=workspace,
+                lead_output="# Full plan with analysis",
+                chat_id="SPEC-004",
+                run_mode="probe",
+            )
+            self.assertIsNone(result)
+            self.assertFalse((workspace / "PROJECT_PLAN.md").exists())
+
+    def test_minimal_output_not_deposited_in_aiteams_repo(self) -> None:
+        """C3 spec: does not deposit when the workspace is the AI Teams project root."""
+        from api.utils import PROJECT_ROOT
+        fn = self._fn()
+        result = fn(
+            workspace=Path(PROJECT_ROOT),
+            lead_output="# Plan",
+            chat_id="SPEC-005",
+            run_mode="standard",
+        )
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from api.utils import (
     PROJECT_ROOT,
     _build_scout_project_state_context,
     _build_scout_session_history_context,
+    resolve_runtime_dir,
 )
 
 
@@ -235,7 +236,7 @@ def _resolve_delegate_rewiring(
 
     project_root = Path(workspace or PROJECT_ROOT)
     integrator = AutoToolIntegrator(
-        runtime_dir=project_root / "runtime",
+        runtime_dir=resolve_runtime_dir(project_root, PROJECT_ROOT),
         project_root=project_root,
     )
     discovery_caps = _delegate_catalog_capabilities(

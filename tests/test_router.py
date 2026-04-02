@@ -13,6 +13,7 @@ from aiteam.adapters import (
 )
 from aiteam.config import build_default_router_policy
 from aiteam.finops import BudgetManager, BudgetPolicy
+from aiteam.model_catalog import load_model_catalog
 from aiteam.router import HybridRouter
 from aiteam.types import (
     AdapterResponse,
@@ -248,6 +249,70 @@ class RouterTests(unittest.TestCase):
 
         self.assertTrue(decision.success)
         self.assertEqual(decision.provider, "anthropic")
+
+    def test_eligible_adapters_respects_role_provider_exclusions_from_policy(self) -> None:
+        policy = build_default_router_policy()
+        policy.role_provider_exclusions["engineer"] = ["openai"]
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                ),
+                SubscriptionAdapter(
+                    name="gemini_pro",
+                    provider="google",
+                    model="gemini-pro",
+                    capabilities={"coding"},
+                ),
+            ],
+            policy=policy,
+        )
+
+        eligible = router.eligible_adapters(
+            RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                required_capabilities={"coding"},
+            )
+        )
+
+        self.assertEqual([adapter.name for adapter in eligible], ["gemini_pro"])
+
+    def test_eligible_adapters_prefers_role_primary_provider(self) -> None:
+        policy = build_default_router_policy()
+        policy.role_primary_provider["engineer"] = "google"
+        router = HybridRouter(
+            adapters=[
+                SubscriptionAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                ),
+                SubscriptionAdapter(
+                    name="gemini_pro",
+                    provider="google",
+                    model="gemini-pro",
+                    capabilities={"coding"},
+                ),
+            ],
+            policy=policy,
+        )
+
+        eligible = router.eligible_adapters(
+            RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                required_capabilities={"coding"},
+            )
+        )
+
+        self.assertEqual([adapter.name for adapter in eligible[:2]], ["gemini_pro", "openai_pro"])
 
     def test_tool_specialist_prefers_lower_api_cost_tier(self) -> None:
         router = HybridRouter(
@@ -980,6 +1045,37 @@ class RouterTests(unittest.TestCase):
             )
             self.assertTrue(decision.success)
             self.assertEqual(decision.provider, "google")
+
+    def test_load_model_catalog_reads_aiteam_runtime_for_external_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            runtime_dir = project_root / ".aiteam"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "model_catalog.json").write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {
+                                "adapter_name": "gemini_pro_cli",
+                                "provider": "google",
+                                "model": "gemini-external-runtime",
+                                "tier": "senior_cloud",
+                                "intelligence_rank": 99,
+                                "coding_rank": 99,
+                                "reasoning_rank": 99,
+                                "trust_rank": 99,
+                                "local_allowed_for_team_lead": False,
+                                "api_allowed_for_team_lead": True,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            catalog = load_model_catalog(project_root=project_root)
+
+            self.assertEqual(catalog["gemini_pro_cli"].model, "gemini-external-runtime")
 
     def test_team_lead_uses_provider_ops_operational_state_as_source_of_truth(
         self,

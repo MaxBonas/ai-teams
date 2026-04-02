@@ -162,8 +162,8 @@ Pero hoy su raíz contiene también:
 Eso tiene varios efectos malos:
 
 1. ensucia visualmente el proyecto
-2. hace difícil distinguir "archivos del producto" de "estado interno del sistema"
-3. transmite la impresión de que el proyecto no avanza, porque lo único visible son archivos del sistema
+2. hacía difícil distinguir "archivos del producto" de "estado interno del sistema"
+3. transmitía la impresión de que el proyecto no avanza, porque lo único visible eran archivos del sistema
 4. complica backup, versionado y limpieza del proyecto externo
 
 ## Contaminación cruzada de contexto
@@ -249,19 +249,21 @@ No basta con un contador bruto.
 
 ### G2 — Superficie clara para artefactos de producto
 
-La UI debería poder responder:
+Estado actual: resuelto en B9c.
+
+La UI ya puede responder:
 
 - qué archivos de producto se crearon
 - qué archivos de producto se modificaron
-- en qué fase ocurrió
+- si no hubo artefactos de producto, decirlo de forma explícita
 
-Hoy, cuando no se crea nada fuera de `runtime/`, eso debería verse explícitamente como:
-
-- "no se generaron artefactos de producto"
+Queda como posible mejora futura enriquecer la trazabilidad por fase, pero la separación básica producto/runtime ya no es deuda abierta.
 
 ### G3 — Separación física del estado del sistema
 
-Hay que mover el runtime del proyecto externo a una carpeta reservada del sistema:
+Estado actual: resuelto en B9a.
+
+El runtime del proyecto externo ya va a una carpeta reservada del sistema:
 
 - preferiblemente `.aiteam/`
 
@@ -280,14 +282,15 @@ Lo que ocurrió fue:
 - pero se bloqueó pronto en `plan_research`
 - no llegó a ejecutar pasos reales de build
 - no produjo artefactos de producto
-- y el único rastro visible en el proyecto es el `runtime/` del sistema
+- y en aquel momento el único rastro visible en el proyecto era el `runtime/` del sistema
 
-Eso confirma una deuda de producto importante:
+Ese caso confirmó una deuda de producto importante, hoy ya parcialmente cerrada:
 
-- AI Teams ya muestra más observabilidad de runs
-- pero todavía no separa bien el estado interno del sistema del proyecto externo real
+- AI Teams ya separa el runtime externo en `.aiteam/`
+- AI Teams ya muestra `product_artifacts` por separado en `last_chat_run` y `StatusPanel`
+- la deuda viva pasa a ser explicar mejor tareas pendientes/bloqueadas/heredadas
 
 La siguiente mejora estructural correcta no es solo más UI:
 
-- es separar el runtime operativo del árbol de producto del usuario
-- y hacer que las tareas pendientes expliquen claramente si están esperando, bloqueadas o heredadas
+- es hacer que las tareas pendientes expliquen claramente si están esperando, bloqueadas o heredadas
+- y aterrizar esa semántica en el caso real de `test_aiteams`

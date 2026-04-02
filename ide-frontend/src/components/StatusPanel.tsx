@@ -44,6 +44,44 @@ interface PeerConsultationSummary {
   diversity_observed: boolean;
 }
 
+interface ProductArtifactsSummary {
+  has_artifacts: boolean;
+  created: number;
+  modified: number;
+  file_count: number;
+  files_preview_truncated: boolean;
+  files: string[];
+  message: string;
+  internal_runtime_excluded: boolean;
+}
+
+interface OperationalSummaryItem {
+  task_id: string;
+  short_id: string;
+  title: string;
+  role: string;
+  state: string;
+  operational_state: string;
+  reason_code: string;
+  reason_label: string;
+  source_root: string;
+}
+
+interface OperationalReason {
+  code: string;
+  label: string;
+  count: number;
+}
+
+interface OperationalTaskSummary {
+  has_actionable_items: boolean;
+  active_total: number;
+  counts: Record<string, number>;
+  blocked_reasons: OperationalReason[];
+  sample_items: OperationalSummaryItem[];
+  carryover_roots: string[];
+}
+
 type WorkbenchTab = 'status' | 'routing' | 'files' | 'terminal';
 
 export default function StatusPanel({ workspacePath, minimized, onToggleMinimize, onLoadChat }: StatusPanelProps) {
@@ -52,6 +90,8 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
   const [taskCounts, setTaskCounts] = useState({ total: 0, completed: 0, failed: 0 });
   const [leadDecisions, setLeadDecisions] = useState<LeadDecisions | null>(null);
   const [peerConsultation, setPeerConsultation] = useState<PeerConsultationSummary | null>(null);
+  const [productArtifacts, setProductArtifacts] = useState<ProductArtifactsSummary | null>(null);
+  const [operationalSummary, setOperationalSummary] = useState<OperationalTaskSummary | null>(null);
   const [activeTab, setActiveTab] = useState<WorkbenchTab>('status');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileRefreshToken, setFileRefreshToken] = useState(0);
@@ -133,9 +173,81 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
           } else {
             setPeerConsultation(null);
           }
+          const artifactRaw = r.product_artifacts;
+          if (artifactRaw && typeof artifactRaw === 'object') {
+            const artifact = artifactRaw as Record<string, unknown>;
+            setProductArtifacts({
+                has_artifacts: Boolean(artifact.has_artifacts),
+                created: Number.isFinite(Number(artifact.created)) ? Number(artifact.created) : 0,
+                modified: Number.isFinite(Number(artifact.modified)) ? Number(artifact.modified) : 0,
+                file_count: Number.isFinite(Number(artifact.file_count))
+                  ? Number(artifact.file_count)
+                  : (
+                    (Number.isFinite(Number(artifact.created)) ? Number(artifact.created) : 0)
+                    + (Number.isFinite(Number(artifact.modified)) ? Number(artifact.modified) : 0)
+                  ),
+                files_preview_truncated: Boolean(artifact.files_preview_truncated),
+                files: Array.isArray(artifact.files)
+                  ? (artifact.files as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0)
+                  : [],
+                message: String(artifact.message ?? ''),
+                internal_runtime_excluded: Boolean(artifact.internal_runtime_excluded),
+            });
+          } else {
+            setProductArtifacts(null);
+          }
+          const operationalRaw = r.task_operational_summary;
+          if (operationalRaw && typeof operationalRaw === 'object') {
+            const operational = operationalRaw as Record<string, unknown>;
+            const blockedReasonsRaw = Array.isArray(operational.blocked_reasons)
+              ? operational.blocked_reasons
+              : [];
+            const sampleItemsRaw = Array.isArray(operational.sample_items)
+              ? operational.sample_items
+              : [];
+            setOperationalSummary({
+              has_actionable_items: Boolean(operational.has_actionable_items),
+              active_total: Number.isFinite(Number(operational.active_total)) ? Number(operational.active_total) : 0,
+              counts: typeof operational.counts === 'object' && operational.counts !== null
+                ? Object.fromEntries(
+                  Object.entries(operational.counts as Record<string, unknown>)
+                    .map(([key, value]) => [key, Number.isFinite(Number(value)) ? Number(value) : 0]),
+                )
+                : {},
+              blocked_reasons: blockedReasonsRaw.map((item) => {
+                const row = (item && typeof item === 'object') ? item as Record<string, unknown> : {};
+                return {
+                  code: String(row.code ?? ''),
+                  label: String(row.label ?? ''),
+                  count: Number.isFinite(Number(row.count)) ? Number(row.count) : 0,
+                };
+              }).filter((item) => item.code.length > 0),
+              sample_items: sampleItemsRaw.map((item) => {
+                const row = (item && typeof item === 'object') ? item as Record<string, unknown> : {};
+                return {
+                  task_id: String(row.task_id ?? ''),
+                  short_id: String(row.short_id ?? ''),
+                  title: String(row.title ?? ''),
+                  role: String(row.role ?? ''),
+                  state: String(row.state ?? ''),
+                  operational_state: String(row.operational_state ?? ''),
+                  reason_code: String(row.reason_code ?? ''),
+                  reason_label: String(row.reason_label ?? ''),
+                  source_root: String(row.source_root ?? ''),
+                };
+              }).filter((item) => item.task_id.length > 0),
+              carryover_roots: Array.isArray(operational.carryover_roots)
+                ? (operational.carryover_roots as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0)
+                : [],
+            });
+          } else {
+            setOperationalSummary(null);
+          }
         } else {
           setLeadDecisions(null);
           setPeerConsultation(null);
+          setProductArtifacts(null);
+          setOperationalSummary(null);
         }
       } catch { /* ignore */ }
     };
@@ -307,6 +419,96 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
                         {peerConsultation.provider_count > 0 ? ` (${peerConsultation.provider_count} provider${peerConsultation.provider_count === 1 ? '' : 's'})` : ''}
                       </span>
                     </div>
+                  </div>
+                </section>
+              )}
+
+              {productArtifacts && (
+                <section className="status-section">
+                  <div className="status-section-label">Artefactos de producto</div>
+                  <div className="status-artifact-summary">
+                    <div className={`status-artifact-banner ${productArtifacts.has_artifacts ? 'status-artifact-banner--ok' : 'status-artifact-banner--muted'}`}>
+                      <span className="status-artifact-banner-icon">{productArtifacts.has_artifacts ? '✓' : '·'}</span>
+                      <span>{productArtifacts.message || 'Esta run no genero artefactos de producto.'}</span>
+                    </div>
+                    {productArtifacts.has_artifacts && (
+                      <>
+                        <div className="status-counts">
+                          <span className="status-count-ok">{productArtifacts.created} nuevos</span>
+                          {productArtifacts.modified > 0 && (
+                            <span className="status-count-total">{productArtifacts.modified} modificados</span>
+                          )}
+                        </div>
+                        <div className="status-artifact-files">
+                          {productArtifacts.files.slice(0, 6).map((file) => (
+                            <span key={file} className="status-artifact-file">{file}</span>
+                          ))}
+                        </div>
+                        {productArtifacts.files_preview_truncated && productArtifacts.file_count > productArtifacts.files.length && (
+                          <div className="status-empty-hint">
+                            +{productArtifacts.file_count - productArtifacts.files.length} mas no listados en este resumen.
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {operationalSummary && operationalSummary.has_actionable_items && (
+                <section className="status-section">
+                  <div className="status-section-label">Estado operativo</div>
+                  <div className="status-lead-decisions">
+                    <div className="status-lead-decision status-lead-decision--info">
+                      <span className="status-lead-decision-icon">≡</span>
+                      <span>Activas: {operationalSummary.active_total}</span>
+                    </div>
+                    {(operationalSummary.counts.pending ?? 0) > 0 && (
+                      <div className="status-lead-decision status-lead-decision--info">
+                        <span className="status-lead-decision-icon">…</span>
+                        <span>Pendientes: {operationalSummary.counts.pending}</span>
+                      </div>
+                    )}
+                    {(operationalSummary.counts.blocked_by_dependency ?? 0) > 0 && (
+                      <div className="status-lead-decision status-lead-decision--warn">
+                        <span className="status-lead-decision-icon">!</span>
+                        <span>Bloqueadas por dependencia: {operationalSummary.counts.blocked_by_dependency}</span>
+                      </div>
+                    )}
+                    {(operationalSummary.counts.blocked_by_quorum ?? 0) > 0 && (
+                      <div className="status-lead-decision status-lead-decision--warn">
+                        <span className="status-lead-decision-icon">!</span>
+                        <span>Bloqueadas por quorum: {operationalSummary.counts.blocked_by_quorum}</span>
+                      </div>
+                    )}
+                    {(operationalSummary.counts.blocked_by_no_eligible_adapter ?? 0) > 0 && (
+                      <div className="status-lead-decision status-lead-decision--warn">
+                        <span className="status-lead-decision-icon">!</span>
+                        <span>Bloqueadas sin adapter elegible: {operationalSummary.counts.blocked_by_no_eligible_adapter}</span>
+                      </div>
+                    )}
+                    {(operationalSummary.counts.carried_over_from_previous_run ?? 0) > 0 && (
+                      <div className="status-lead-decision status-lead-decision--info">
+                        <span className="status-lead-decision-icon">↺</span>
+                        <span>Arrastradas de runs previas: {operationalSummary.counts.carried_over_from_previous_run}</span>
+                      </div>
+                    )}
+                    {operationalSummary.blocked_reasons.slice(0, 3).map((reason) => (
+                      <div key={reason.code} className="status-lead-decision status-lead-decision--warn">
+                        <span className="status-lead-decision-icon">·</span>
+                        <span>{reason.label}: {reason.count}</span>
+                      </div>
+                    ))}
+                    {operationalSummary.sample_items.slice(0, 4).map((item) => (
+                      <div key={item.task_id} className="status-lead-decision status-lead-decision--info">
+                        <span className="status-lead-decision-icon">{item.operational_state === 'carried_over_from_previous_run' ? '↺' : '•'}</span>
+                        <span>
+                          {item.short_id || item.task_id}
+                          {item.reason_label ? ` — ${item.reason_label}` : ''}
+                          {item.source_root && item.operational_state === 'carried_over_from_previous_run' ? ` (${item.source_root})` : ''}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </section>
               )}

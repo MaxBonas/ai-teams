@@ -1,6 +1,8 @@
+<!-- layer: system-development | audiencia: sesiones de desarrollo | NO es mecanismo de producto -->
+
 # AI Team Hybrid Orchestrator — Handoff Actual
 
-Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `763 passed`.
+Estado validado: `2026-04-02`, `MAX-GAMINGPC`, `776 passed`.
 
 Este archivo sustituye el handoff historico de fin de marzo como punto de entrada rapido para retomar el proyecto.
 
@@ -11,6 +13,24 @@ Fuentes de verdad operativas:
 - `docs/ARCHITECTURE_PLAN.md`
 - `docs/TASKS_2026_03_28.md`
 - `docs/INDEX.md`
+
+## Aclaracion de capas
+
+Este `HANDOFF.md` es un documento de traspaso entre sesiones de desarrollo del sistema.
+
+No debe confundirse con:
+
+- el handoff tecnico entre adapters del orquestador
+- instrucciones persistentes de proyectos externos
+- artefactos creados por AI Teams en productos del usuario
+
+Regla de naming:
+
+- nombres de proveedor como `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` pertenecen a la capa de desarrollo del sistema
+- los artefactos de producto de AI Teams van bajo `.aiteam/`
+- las instrucciones persistentes del proyecto externo viven en `.aiteam/instructions.md`
+
+Referencia: `docs/NAMING_COLLISION_INVESTIGATION.md`
 
 ## Objetivo operativo
 

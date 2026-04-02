@@ -27,6 +27,7 @@ from aiteam.observability import EventLogger
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.pilot import PilotThresholds, compute_pilot_metrics, evaluate_pilot
 from aiteam.provider_ops import build_provider_ops_view, sync_provider_ops_alerts
+from aiteam.routing_overrides import apply_overrides_to_policy, load_overrides
 from aiteam.router import HybridRouter
 from aiteam.snapshots import SnapshotManager
 from aiteam.tool_inventory import write_inventory
@@ -138,6 +139,7 @@ def build_default_orchestrator(
         _prepend_provider_priority(
             policy.preferred_api_providers, external_adapters, "api"
         )
+    policy = apply_overrides_to_policy(policy, load_overrides(runtime_dir))
 
     shared_tools_root = Path(
         os.getenv("AITEAM_SHARED_TOOLS_ROOT", str(Path.cwd().parent))

@@ -174,6 +174,27 @@ class TaskBoard:
             task.metadata.update(patch)
             self._persist_task_changes(before)
 
+    def archive_incomplete_tasks(self, reason: str) -> list[str]:
+        """C2: Marca como ARCHIVED las tareas no terminadas de runs previas.
+
+        Las tareas en PENDING, BLOCKED o WAITING_USER quedan archivadas con el
+        motivo indicado. Las tareas COMPLETED, FAILED o ARCHIVED no se tocan.
+        Retorna la lista de task_ids archivadas.
+        """
+        archivable_states = {TaskState.PENDING, TaskState.READY, TaskState.BLOCKED, TaskState.WAITING_USER}
+        with self._lock:
+            before = self._snapshot_tasks()
+            archived: list[str] = []
+            for task in self._tasks.values():
+                if task.state in archivable_states:
+                    self._file_locks.release_for_task(task.task_id)
+                    task.state = TaskState.ARCHIVED
+                    task.metadata["archived_reason"] = reason
+                    archived.append(task.task_id)
+            if archived:
+                self._persist_task_changes(before)
+            return archived
+
     def remove_tasks(self, task_ids: list[str]) -> None:
         """Elimina tareas del taskboard (usado para limpiar gates antes de re-iteracion)."""
         with self._lock:
@@ -206,6 +227,7 @@ class TaskBoard:
             if task.state in (
                 TaskState.COMPLETED, TaskState.CLAIMED, TaskState.FAILED,
                 TaskState.WAITING_USER,  # E7-D4: no propagar ni resetear tareas en pausa
+                TaskState.ARCHIVED,      # C2: terminal state, no propagate or reset
             ):
                 continue
             if task.state == TaskState.BLOCKED:

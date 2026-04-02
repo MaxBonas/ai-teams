@@ -318,9 +318,11 @@ def load_model_catalog(
         return catalog
     candidates: list[Path] = []
     if project_root is not None:
+        project_root = Path(project_root)
         candidates.extend(
             [
                 project_root / "config" / "model_catalog.json",
+                project_root / ".aiteam" / "model_catalog.json",
                 project_root / "runtime" / "model_catalog.json",
             ]
         )
