@@ -1,7 +1,7 @@
 # Plan de arquitectura — AI Team Hybrid Orchestrator
 
-Fecha: `2026-04-01` — actualizado `2026-04-02`
-Estado del sistema: `776 passed`
+Fecha: `2026-04-01` — actualizado `2026-04-03`
+Estado del sistema: `858 passed`
 
 **Contexto de uso**: el sistema se usa tanto para desarrollarse a sí mismo (dogfooding) como para proyectos externos de programación y planificación. Ese doble uso determina el orden de prioridades.
 

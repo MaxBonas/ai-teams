@@ -1,9 +1,10 @@
 # Visión objetivo — quorum del Team Lead, planes persistidos y `.aiteam/instructions.md` por proyecto
 
 Fecha: `2026-04-02`
-Estado: `vision objetivo de producto`
+Estado: ✅ IMPLEMENTADO (2026-04-02) — B8a/B8b/B8c completos. Suite: `823 passed`.
 Relacionado con:
 
+- `docs/HISTORY.md` (bloque 3)
 - `docs/ROUTING_EDITOR_VISION.md`
 - `docs/EXTERNAL_PROJECT_RUNTIME_GAPS.md`
 - `docs/ARCHITECTURE_PLAN.md`

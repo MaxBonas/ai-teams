@@ -1,8 +1,9 @@
 # Visión: Lead Adaptativo — Autodiagnóstico, Recuperación y Pausa Conversacional
 
 **Fecha**: 2026-04-02
-**Estado**: Visión planificada. No comenzada. Hacer después de URGENTE-1 (tests LCP fallidos).
-**Relacionado**: `IMPLEMENTATION_PLAYBOOK.md`, `DESIGN_2026_03_31.md`, `CONVERSATIONAL_AGENTS_PLAN.md`
+**Estado**: ✅ IMPLEMENTADO (2026-04-03) — A1/A2/A3/A4/A5 completos. Suite: `858 passed`.
+**Módulos**: `aiteam/run_health.py`, `aiteam/lead_memory.py`, `aiteam/lead_control.py`
+**Relacionado**: `docs/HISTORY.md` (bloque 5), `CONVERSATIONAL_AGENTS_PLAN.md`
 
 ---
 
