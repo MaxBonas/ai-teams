@@ -59,6 +59,8 @@ class HybridRouter:
         self._tool_economics_cache_ts: float = 0.0
         self._tool_economics_cache_ttl: float = 30.0
         self._tool_economics_cache_lock = threading.Lock()
+        self._routing_failures: list[dict[str, str]] = []
+        self._routing_failures_lock = threading.Lock()
         if self.budget_manager is not None:
             self.runtime_dir = self.budget_manager.runtime_dir
         project_root = None
@@ -497,6 +499,66 @@ class HybridRouter:
         compact = compact.replace(" ", "_")
         return compact[:96]
 
+    def _record_routing_failure(
+        self,
+        *,
+        task_id: str,
+        request: RoutingRequest,
+        adapter: ModelAdapter | None,
+        error: str,
+        reason: str,
+    ) -> None:
+        phase = task_id.split("::")[-1] if "::" in task_id else task_id
+        entry = {
+            "task_id": str(task_id or "").strip(),
+            "phase": str(phase or "").strip(),
+            "role": request.role.value,
+            "provider": str(adapter.provider if adapter is not None else "").strip(),
+            "model": str(adapter.model if adapter is not None else "").strip(),
+            "adapter_name": str(adapter.name if adapter is not None else "").strip(),
+            "error": str(error or "").strip(),
+            "reason": str(reason or "").strip(),
+        }
+        with self._routing_failures_lock:
+            self._routing_failures.append(entry)
+            if len(self._routing_failures) > 200:
+                self._routing_failures = self._routing_failures[-200:]
+
+    def get_recent_routing_failures(self, task_root: str = "") -> list[dict[str, str]]:
+        prefix = str(task_root or "").strip()
+        with self._routing_failures_lock:
+            items = list(self._routing_failures)
+        if not prefix:
+            return items
+        return [
+            item
+            for item in items
+            if str(item.get("task_id", "") or "").startswith(prefix)
+        ]
+
+    def get_missing_api_keys(self, task_root: str = "") -> list[str]:
+        missing: set[str] = set()
+        for item in self.get_recent_routing_failures(task_root):
+            error = str(item.get("error", "") or "").strip()
+            if not error.startswith("missing_api_key:"):
+                continue
+            _, _, env_name = error.partition(":")
+            if env_name.strip():
+                missing.add(env_name.strip())
+        return sorted(missing)
+
+    def get_unavailable_models(self, task_root: str = "") -> list[str]:
+        unavailable: set[str] = set()
+        for item in self.get_recent_routing_failures(task_root):
+            error = str(item.get("error", "") or "").strip().lower()
+            model = str(item.get("model", "") or "").strip()
+            if not model:
+                continue
+            if error.startswith("missing_api_key:"):
+                continue
+            unavailable.add(model)
+        return sorted(unavailable)
+
     def _must_include_api(self, request: RoutingRequest) -> bool:
         if self._prefer_tool_economy(request):
             return True
@@ -575,6 +637,13 @@ class HybridRouter:
 
         eligible = self.eligible_adapters(request)
         if not eligible:
+            self._record_routing_failure(
+                task_id=task_id,
+                request=request,
+                adapter=None,
+                error="no_eligible_adapter",
+                reason="no_eligible_adapter",
+            )
             decision = RoutingDecision(
                 success=False,
                 provider="none",
@@ -706,6 +775,13 @@ class HybridRouter:
                 f"{'ok' if response.success else 'fail'}"
             )
             if not response.success:
+                self._record_routing_failure(
+                    task_id=task_id,
+                    request=request,
+                    adapter=adapter,
+                    error=str(response.error or ""),
+                    reason="adapter_invoke_failed",
+                )
                 error_hint = self._attempt_error_hint(response.error)
                 if error_hint:
                     attempt = f"{attempt}:{error_hint}"

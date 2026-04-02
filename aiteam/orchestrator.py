@@ -36,6 +36,7 @@ from aiteam.lead_control import extract_lcp_directives
 from aiteam.memory import AgentMemoryStore
 from aiteam.observability import EventLogger
 from aiteam.profiles import build_prompt, build_system_prompt, role_charter_for
+from aiteam.run_health import RunHealthReport, build_run_health_report
 from aiteam.router import HybridRouter
 from aiteam.runtime import SandboxManager
 from aiteam.sim_mode import sim_mode_enabled
@@ -1398,6 +1399,114 @@ class AITeamOrchestrator:
                 )
         return "\n".join(lines[:8])
 
+    def _phase_tasks_for_run_health(self, task_root: str) -> dict[str, WorkTask]:
+        ws = self._get_workflow_state(task_root)
+        phase_task_ids = dict(ws.get("phase_task_ids", {}) or {})
+        phase_tasks: dict[str, WorkTask] = {}
+        for phase_name, task_id in phase_task_ids.items():
+            if not isinstance(phase_name, str):
+                continue
+            normalized_phase = phase_name.strip()
+            if not normalized_phase or normalized_phase in {"lead_intake", "lead_close"}:
+                continue
+            task = self.taskboard.get_task(str(task_id or "").strip())
+            if task is not None:
+                phase_tasks[normalized_phase] = task
+        if phase_tasks:
+            return phase_tasks
+        prefix = f"{task_root}::"
+        for task in self.taskboard.list_tasks():
+            if not task.task_id.startswith(prefix):
+                continue
+            phase_name = str(task.metadata.get("phase", "") or "").strip()
+            if not phase_name or phase_name in {"lead_intake", "lead_close"}:
+                continue
+            if task.metadata.get("is_gate"):
+                continue
+            phase_tasks.setdefault(phase_name, task)
+        return phase_tasks
+
+    def _gate_tasks_for_run_health(self, phase_tasks: dict[str, WorkTask]) -> dict[str, WorkTask]:
+        gate_tasks: dict[str, WorkTask] = {}
+        for task in phase_tasks.values():
+            for gate_id in list(task.metadata.get("quality_gate_tasks", []) or []):
+                gate_task = self.taskboard.get_task(str(gate_id or "").strip())
+                if gate_task is not None:
+                    gate_tasks[gate_task.task_id] = gate_task
+        return gate_tasks
+
+    def _run_health_budget_summary(self, task_root: str) -> tuple[int, int]:
+        round_budget = 0
+        auto_extensions = 0
+        for event in self.event_logger.recent_events(hours=72):
+            payload = event.get("payload", {}) or {}
+            if not isinstance(payload, dict):
+                continue
+            event_task_id = str(payload.get("task_id", "") or "").strip()
+            if not event_task_id:
+                continue
+            if not event_task_id.startswith(task_root):
+                continue
+            for key_name in ("round_budget", "new_round_budget", "to_round_budget"):
+                try:
+                    round_budget = max(round_budget, int(payload.get(key_name, 0) or 0))
+                except (TypeError, ValueError):
+                    continue
+            try:
+                from_budget = int(payload.get("from_round_budget", 0) or 0)
+                to_budget = int(payload.get("to_round_budget", 0) or 0)
+            except (TypeError, ValueError):
+                from_budget = 0
+                to_budget = 0
+            if to_budget > from_budget:
+                auto_extensions += to_budget - from_budget
+        return round_budget, auto_extensions
+
+    def _build_run_health_report(self, task_root: str) -> RunHealthReport:
+        phase_tasks = self._phase_tasks_for_run_health(task_root)
+        gate_tasks = self._gate_tasks_for_run_health(phase_tasks)
+        rounds_used = 0
+        for task in self.taskboard.list_tasks():
+            if not task.task_id.startswith(f"{task_root}::"):
+                continue
+            try:
+                rounds_used = max(rounds_used, int(task.metadata.get("execution_round", 0) or 0))
+            except (TypeError, ValueError):
+                continue
+        round_budget, auto_extensions = self._run_health_budget_summary(task_root)
+        return build_run_health_report(
+            phase_tasks=phase_tasks,
+            gate_tasks=gate_tasks,
+            routing_failures=self.router.get_recent_routing_failures(task_root=task_root),
+            missing_api_keys=self.router.get_missing_api_keys(task_root=task_root),
+            unavailable_models=self.router.get_unavailable_models(task_root=task_root),
+            rounds_used=rounds_used,
+            round_budget=round_budget,
+            auto_extensions=auto_extensions,
+        )
+
+    def _build_run_health_prompt_block(self, task: WorkTask) -> str:
+        phase_name = str(task.metadata.get("phase", "") or "").strip()
+        if phase_name != "lead_close":
+            return ""
+        task_root = str(task.metadata.get("chat_parent", "") or self._task_root(task.task_id)).strip()
+        report = self._build_run_health_report(task_root)
+        block = report.to_prompt_block()
+        self.event_logger.emit(
+            "run_health_report_built",
+            {
+                "task_id": task.task_id,
+                "task_root": task_root,
+                "phase_count": len(report.phases),
+                "rounds_used": report.rounds_used,
+                "round_budget": report.round_budget,
+                "auto_extensions": report.auto_extensions,
+                "missing_api_keys": report.missing_api_keys,
+                "unavailable_models": report.unavailable_models,
+            },
+        )
+        return block
+
     # ── Gate feedback collection ────────────────────────────────────
 
     def _collect_gate_feedback(self, failed_gate_ids: list[str]) -> str:
@@ -2127,6 +2236,8 @@ class AITeamOrchestrator:
                     f"resumen={self._compact_text(last_summary or '', 200)}"
                 )
 
+        run_health_report = self._build_run_health_prompt_block(task)
+
         current_user_turn = self._build_current_task_message(
             task,
             context=context,
@@ -2137,6 +2248,7 @@ class AITeamOrchestrator:
             review_feedback=review_feedback_text,
             gate_iteration=gate_iteration,
             prev_summary=prev_summary,
+            run_health_report=run_health_report,
         )
         messages = self._build_task_messages(
             task,
@@ -2151,6 +2263,7 @@ class AITeamOrchestrator:
             review_feedback=review_feedback_text,
             gate_iteration=gate_iteration,
             prev_summary=prev_summary,
+            run_health_report=run_health_report,
         )
         thread.append_turn(
             role="user",
@@ -4649,6 +4762,7 @@ class AITeamOrchestrator:
         review_feedback: str,
         gate_iteration: int,
         prev_summary: str,
+        run_health_report: str,
     ) -> str:
         delegation_brief = str(task.metadata.get("delegation_brief", "") or "").strip()
         if gate_iteration > 0:
@@ -4679,11 +4793,12 @@ class AITeamOrchestrator:
             "Entrega: propuesta, evidencia, aportes considerados, decision final, plan ejecutable inmediato y definition of done.",
         ]
         for block in (
-            self._context_block("Delegation brief", delegation_brief, 800),
-            self._context_block("Contexto de equipo", context, 1200),
-            self._context_block("Consulta entre pares", peer_context, 1000),
-            self._context_block("Gobernanza de decision", decision_governance, 900),
-            self._context_block("Skills y MCP relevantes", skill_mcp_context, 800),
+                self._context_block("Delegation brief", delegation_brief, 800),
+                self._context_block("Run Health Report", run_health_report, 2400),
+                self._context_block("Contexto de equipo", context, 1200),
+                self._context_block("Consulta entre pares", peer_context, 1000),
+                self._context_block("Gobernanza de decision", decision_governance, 900),
+                self._context_block("Skills y MCP relevantes", skill_mcp_context, 800),
             self._context_block("Resultados de ejecucion", execution_context, 1000),
             self._context_block("Feedback de revision", review_feedback, 1000),
             self._context_block("Historial del intento previo", prev_summary, 700),
@@ -4710,6 +4825,7 @@ class AITeamOrchestrator:
         review_feedback: str,
         gate_iteration: int,
         prev_summary: str,
+        run_health_report: str,
     ) -> list[dict[str, str]]:
         system_message = build_system_prompt(
             task.role,
@@ -4726,6 +4842,7 @@ class AITeamOrchestrator:
             review_feedback=review_feedback,
             gate_iteration=gate_iteration,
             prev_summary=prev_summary,
+            run_health_report=run_health_report,
         )
         thread_messages = self._thread_messages(thread, limit=6)
         messages = [{"role": "system", "content": system_message}]

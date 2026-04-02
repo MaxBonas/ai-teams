@@ -1718,6 +1718,169 @@ class OrchestratorTests(unittest.TestCase):
                 "¿Debo priorizar velocidad o calidad?",
             )
 
+    def test_lead_close_messages_include_run_health_report(self) -> None:
+        captured: dict[str, object] = {}
+
+        class CaptureLeadCloseAdapter(SubscriptionAdapter):
+            def invoke(
+                self,
+                prompt: str,
+                messages: list[dict[str, str]] | None = None,
+            ) -> AdapterResponse:
+                captured["messages"] = messages
+                return AdapterResponse(
+                    success=True,
+                    content="Cierre del Team Lead.",
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=20,
+                )
+
+        class FailingApiAdapter(ModelAdapter):
+            def __init__(self) -> None:
+                super().__init__(
+                    name="openai_api",
+                    provider="openai",
+                    model="gpt-cheap",
+                    channel=ChannelType.API,
+                    capabilities={"coding", "reasoning", "analysis"},
+                )
+
+            def available(self) -> bool:
+                return True
+
+            def invoke(self, prompt, messages=None, tools=None):
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    error="rate_limit",
+                    latency_ms=1,
+                    input_tokens=5,
+                    output_tokens=0,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    CaptureLeadCloseAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"reasoning", "analysis"},
+                    ),
+                    FailingApiAdapter(),
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            router.route_and_invoke(
+                RoutingRequest(
+                    role=Role.ENGINEER,
+                    complexity=Complexity.MEDIUM,
+                    criticality=Criticality.MEDIUM,
+                    required_capabilities={"coding"},
+                    excluded_adapters={"openai_pro"},
+                ),
+                "Fase build previa con fallo de routing.",
+                task_id="CHAT-RUN-HEALTH::build",
+            )
+
+            build_task = WorkTask(
+                task_id="CHAT-RUN-HEALTH::build",
+                title="Build",
+                description="Implementa el cambio principal.",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "build",
+                    "gate_iteration": 2,
+                    "max_gate_iterations": 3,
+                    "review_feedback": "Placeholder detectado en el output final.",
+                    "quality_gate_tasks": ["CHAT-RUN-HEALTH::build_review"],
+                    "execution_round": 2,
+                },
+            )
+            orchestrator.taskboard.add_task(build_task)
+            orchestrator.taskboard.mark_blocked(
+                "CHAT-RUN-HEALTH::build",
+                "gate_rejected",
+            )
+
+            gate_task = WorkTask(
+                task_id="CHAT-RUN-HEALTH::build_review",
+                title="Build review gate",
+                description="Valida la evidencia de build.",
+                role=Role.REVIEWER,
+                metadata={"phase": "build", "is_gate": True},
+            )
+            orchestrator.taskboard.add_task(gate_task)
+            orchestrator.taskboard.claim_task(
+                "CHAT-RUN-HEALTH::build_review",
+                "rev-1",
+            )
+            orchestrator.taskboard.mark_completed(
+                "CHAT-RUN-HEALTH::build_review",
+                "Gate completado.",
+            )
+
+            workflow_state = orchestrator._get_workflow_state("CHAT-RUN-HEALTH")
+            workflow_state["phase_task_ids"] = {
+                "build": "CHAT-RUN-HEALTH::build",
+                "lead_close": "CHAT-RUN-HEALTH::lead_close",
+            }
+            orchestrator.event_logger.emit(
+                "chat_plan_created",
+                {
+                    "task_id": "CHAT-RUN-HEALTH",
+                    "round_budget": 4,
+                },
+            )
+
+            lead_close = WorkTask(
+                task_id="CHAT-RUN-HEALTH::lead_close",
+                title="Lead synthesis and response",
+                description="Sintetiza el run y decide el siguiente paso.",
+                role=Role.TEAM_LEAD,
+                metadata={
+                    "required_capabilities": ["reasoning"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "lead_close",
+                    "chat_parent": "CHAT-RUN-HEALTH",
+                },
+            )
+            orchestrator.submit_task(lead_close)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            messages = list(captured.get("messages") or [])
+            self.assertTrue(messages)
+            final_user = str(messages[-1].get("content", ""))
+            self.assertIn("== RUN HEALTH REPORT ==", final_user)
+            self.assertIn("GATE REJECTIONS:", final_user)
+            self.assertIn("phase=build, iterations=2/3", final_user)
+            self.assertIn("Placeholder detectado", final_user)
+            self.assertIn("ROUTING ERRORS:", final_user)
+            self.assertIn("error=rate_limit", final_user)
+            self.assertIn("PRESUPUESTO:", final_user)
+            self.assertIn("Rondas usadas: 2 / 4", final_user)
+
+            events = orchestrator.event_logger.recent_events(hours=1)
+            self.assertTrue(
+                any(
+                    item.get("event_type") == "run_health_report_built"
+                    for item in events
+                )
+            )
+
     def test_lead_intake_still_does_not_pause_inside_orchestrator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"

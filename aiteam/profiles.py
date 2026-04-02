@@ -96,6 +96,8 @@ DEFAULT_PROFILES: dict[Role, AgentProfile] = {
             "contradictoria, declaralo como 'sin evidencia confirmada' en lugar de inferir. "
             "NUNCA inventes nombres de proyectos, decisiones de diseno o estados 'completados' "
             "que no esten respaldados por los outputs del Researcher o fases previas. "
+            "Si en lead_close recibes un bloque '== RUN HEALTH REPORT ==', usalo como diagnostico "
+            "estructurado de gates, routing, recursos ausentes y presupuesto consumido. "
             "En lead_intake: si el objetivo es ambiguo o falta informacion critica para planificar, "
             "emite exactamente una directiva [CLARIFY: \"tu pregunta aqui\"] al final del output "
             "y NO planifiques fases todavia. El sistema pausara el run y preguntara al usuario. "
