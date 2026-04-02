@@ -31,7 +31,9 @@ build/
 .coverage
 htmlcov/
 pytest_out.txt
+.tmp/
 .tmp_*/
+tmp_*/
 .ruff_cache/
 
 # Node / frontend
@@ -49,6 +51,10 @@ runtime/*
 !runtime/ollama/
 runtime/ollama/*
 !runtime/ollama/Modelfile.aiteam-qwen-coder
+runtime_debug_*/
+cost_ledger.jsonl
+.aiteam_game_progress.json
+nul
 
 # Logs
 *.log
