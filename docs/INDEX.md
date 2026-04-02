@@ -29,6 +29,7 @@
 | `ARCHITECTURE_PLAN.md` | **Plan de fricciones arquitectónicas**: qué tocar, cuándo y en qué orden. Fuente de verdad para decisiones de refactor. |
 | `MODEL_POLICY.md` | Catálogo de modelos, tiers, reglas de ruteo Pro-first + fallback |
 | `ROUTING_CATALOG_VIEW.md` | Objetivos y diseño de la nueva vista consultable de routing por rol |
+| `EXTERNAL_PROJECT_RUNTIME_GAPS.md` | Investigación de gaps en proyectos externos: tareas bloqueadas, artefactos no creados y separación pendiente entre producto y estado interno |
 | `CONVERSATIONAL_AGENTS_PLAN.md` | Objetivo de agentes con continuidad conversacional real por proyecto |
 | `SECURITY_COMPLIANCE.md` | Políticas de compliance: guardrails, redacción, doble aprobación prod |
 | `PRODUCTION_ROLLOUT_RUNBOOK.md` | Despliegue en stage/prod, health checks, rollback |

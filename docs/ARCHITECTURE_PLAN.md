@@ -272,6 +272,49 @@ Debe operar sobre overrides locales seguros y reversibles.
 
 ---
 
+### B8 — Separar runtime del sistema en proyectos externos
+
+**Estado**: pendiente
+
+**Por qué**: hoy el sistema crea `workspace/runtime/` dentro de proyectos externos.
+Eso mezcla estado interno del orquestador con el árbol del producto real del usuario.
+
+Síntomas ya observados en `test_aiteams`:
+
+- la raíz del proyecto solo muestra `runtime/`
+- no se distinguen artefactos de producto frente a estado interno del sistema
+- el runtime local del proyecto contiene memoria, sesiones, sandboxes, mailbox, eventos y contexto curado
+- el store de contexto puede llegar a contener claves de otros roots (`Ai_Teams`) dentro del runtime del proyecto externo
+
+**Objetivo**:
+
+- mover el estado operativo visible del sistema a una carpeta reservada y reconocible, preferiblemente `.aiteam/`
+- separar claramente:
+  - archivos del producto
+  - estado interno del sistema
+
+**Alcance recomendado**:
+
+**B8a — Cambio de raíz runtime para proyectos externos**:
+- sustituir `workspace / "runtime"` por `workspace / ".aiteam"` en API/UI/orchestrator
+- mantener migración de compatibilidad temporal desde `runtime/`
+
+**B8b — Aislamiento de contexto por proyecto**:
+- impedir que el store local del proyecto externo persista contexto de otros roots dentro del mismo runtime
+
+**B8c — UX de explicabilidad**:
+- distinguir en UI:
+  - tarea pendiente
+  - tarea bloqueada
+  - tarea heredada de continuación
+  - motivo operativo del bloqueo
+
+**B8d — Visibilidad de artefactos reales**:
+- exponer explícitamente archivos creados/modificados fuera de `.aiteam/`
+- si no hay artefactos de producto, decirlo de forma explícita
+
+---
+
 ### Orden de ejecución
 
 ```

@@ -27,6 +27,9 @@ Suite validada: `763 passed`
 - [ ] Robustizar la vista `Routing`: payload estable, blockers exhaustivos, separación explícita entre defaults, override local y estado efectivo
 - [ ] Fase editable de `Routing`: asignación por rol de providers, modelos, primario/fallbacks, validación previa, persistencia local segura y reset a defaults
 - [ ] Extender la futura vista editable para cubrir reglas por tipo de tarea, límites de coste, capacidades mínimas, canales preferidos y simulación de resolución del router
+- [ ] Proyectos externos: separar el estado interno del sistema del árbol del producto; dejar de usar `workspace/runtime` como carpeta visible genérica y migrar hacia una carpeta reservada como `.aiteam/`
+- [ ] Proyectos externos: distinguir en UI tareas `pending` vs `blocked` vs `carried_over`, con motivo operativo visible (`no_eligible_adapter`, quorum, dependencia, etc.)
+- [ ] Proyectos externos: exponer explícitamente "artefactos de producto creados/modificados" frente a "solo estado interno del sistema"
 
 ## Siguiente prioridad tecnica
 
@@ -48,3 +51,4 @@ Suite validada: `763 passed`
 - [ ] La sincronizacion entre `MAX-GAMINGPC` y `ORCH-01` puede reintroducir entornos Python rotos si se sincroniza `venv/`
 - [ ] Parte de la documentacion historica sigue presente y puede confundir si se toma como vigente
 - [ ] La vista de routing aun no es centro de control completo: falta edición segura, overrides locales, validación previa y simulación explicable del routing
+- [ ] El runtime de proyectos externos sigue ensuciando la raíz del proyecto y puede mezclar contexto del sistema dentro del store local del proyecto

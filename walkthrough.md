@@ -118,6 +118,39 @@ Estado validado actual: `763 passed`
 - El placeholder gate ya quedó endurecido con prudencia, pero sigue siendo una heurística que debe mantenerse acotada a marcadores claros y no volver a crecer como detector bruto de lenguaje.
 - La restricción de Anthropic al `team_lead` ya está aplicada por defecto, pero la futura vista editable debe preservar ese control como política visible y modificable con validación.
 
+### 16. Gap detectado en proyectos externos: `runtime/` visible y mezcla de estado del sistema
+
+La investigación sobre `test_aiteams` confirmó un problema de producto distinto al routing:
+
+- el proyecto externo no contiene todavía archivos de producto fuera de `runtime/`
+- el sistema sí crea tareas y delegaciones
+- pero si la run se bloquea pronto, lo único visible en la raíz del proyecto es el estado interno del sistema
+
+Además, el runtime local del proyecto externo hoy agrupa:
+
+- SQLite
+- eventos
+- mailbox
+- memoria de agentes
+- sesiones
+- sandboxes
+- contexto curado
+
+todo dentro de `workspace/runtime/`.
+
+Esto es funcionalmente cómodo para el sistema, pero malo para la UX del usuario del proyecto externo.
+
+La dirección correcta documentada queda así:
+
+- dejar de tratar `runtime/` como carpeta visible genérica del proyecto externo
+- migrar hacia una carpeta reservada del sistema, preferiblemente `.aiteam/`
+- separar con claridad archivos del producto frente a estado interno del orquestador
+- impedir que el store local del proyecto externo mezcle contexto de otros roots del sistema
+
+Documento de referencia de esta investigación:
+
+- `docs/EXTERNAL_PROJECT_RUNTIME_GAPS.md`
+
 ## Estado del entorno en gamingpc
 
 - La suite completa valida en esta maquina: `763 passed`.
