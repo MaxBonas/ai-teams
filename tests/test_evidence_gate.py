@@ -62,10 +62,11 @@ class TestVerifyTaskEvidence:
         monkeypatch.setenv("AITEAM_ENABLE_LIVE_API", "1")
         task = _make_task(metadata={"_last_agent_output": ""})
         # Patch subprocess to simulate a repo with changes
+        top_level_result = MagicMock(returncode=0, stdout=str(tmp_path))
         porcelain_result = MagicMock(returncode=0, stdout=" M somefile.py\n")
         diff_result = MagicMock(stdout="diff --git a/somefile.py b/somefile.py\n+added line\n")
         with patch("aiteam.evidence_gate.subprocess.run") as mock_run:
-            mock_run.side_effect = [porcelain_result, diff_result]
+            mock_run.side_effect = [top_level_result, porcelain_result, diff_result]
             ok, reason = verify_task_evidence(task, tmp_path, project_root=tmp_path, runtime_dir=tmp_path)
         assert ok
         assert reason == "git_diff_detected"
@@ -74,11 +75,12 @@ class TestVerifyTaskEvidence:
     def test_git_diff_falls_back_to_cached(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AITEAM_ENABLE_LIVE_API", "1")
         task = _make_task(metadata={"_last_agent_output": ""})
+        top_level_result = MagicMock(returncode=0, stdout=str(tmp_path))
         porcelain_result = MagicMock(returncode=0, stdout="M  staged.py\n")
         diff_empty = MagicMock(stdout="")
         diff_cached = MagicMock(stdout="diff --git a/staged.py b/staged.py\n+new line\n")
         with patch("aiteam.evidence_gate.subprocess.run") as mock_run:
-            mock_run.side_effect = [porcelain_result, diff_empty, diff_cached]
+            mock_run.side_effect = [top_level_result, porcelain_result, diff_empty, diff_cached]
             ok, reason = verify_task_evidence(task, tmp_path, project_root=tmp_path, runtime_dir=tmp_path)
         assert ok
         assert reason == "git_diff_detected"
@@ -86,10 +88,11 @@ class TestVerifyTaskEvidence:
     def test_git_diff_uses_safe_utf8_decoding(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AITEAM_ENABLE_LIVE_API", "1")
         task = _make_task(metadata={"_last_agent_output": ""})
+        top_level_result = MagicMock(returncode=0, stdout=str(tmp_path))
         porcelain_result = MagicMock(returncode=0, stdout=" M somefile.py\n")
         diff_result = MagicMock(stdout="diff --git a/somefile.py b/somefile.py\n+added line\n")
         with patch("aiteam.evidence_gate.subprocess.run") as mock_run:
-            mock_run.side_effect = [porcelain_result, diff_result]
+            mock_run.side_effect = [top_level_result, porcelain_result, diff_result]
             ok, reason = verify_task_evidence(
                 task,
                 tmp_path,
@@ -101,6 +104,32 @@ class TestVerifyTaskEvidence:
         for call in mock_run.call_args_list:
             assert call.kwargs.get("encoding") == "utf-8"
             assert call.kwargs.get("errors") == "replace"
+
+    def test_nested_workspace_ignores_unrelated_parent_repo_diff(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AITEAM_ENABLE_LIVE_API", "1")
+        nested_workspace = tmp_path / "sandbox" / "workspace"
+        nested_workspace.mkdir(parents=True)
+        task = _make_task(metadata={"_last_agent_output": "He completado la tarea."})
+        top_level_result = MagicMock(returncode=0, stdout=str(tmp_path))
+        porcelain_result = MagicMock(returncode=0, stdout="")
+        with patch("aiteam.evidence_gate.subprocess.run") as mock_run:
+            mock_run.side_effect = [top_level_result, porcelain_result]
+            ok, reason = verify_task_evidence(
+                task,
+                nested_workspace,
+                project_root=nested_workspace,
+                runtime_dir=tmp_path / "runtime",
+            )
+        assert not ok
+        assert "Strict Evidence Gate" in reason
+        status_call = mock_run.call_args_list[1]
+        assert status_call.args[0] == [
+            "git",
+            "status",
+            "--porcelain",
+            "--",
+            "sandbox/workspace",
+        ]
 
     def test_conversational_accepts_any_output(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AITEAM_ENABLE_LIVE_API", "0")

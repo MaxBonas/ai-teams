@@ -315,12 +315,15 @@ def _provider_connection_specs() -> list[dict]:
     ]
 
 
-def _resolve_provider_command(spec: dict) -> list[str] | None:
+def _resolve_provider_command(
+    spec: dict,
+    probe_timeout_seconds: int = 15,
+) -> list[str] | None:
     env_key = str(spec.get("env_command", "")).strip()
     if env_key:
         raw = os.getenv(env_key, "").strip()
         parsed = _parse_command_value(raw)
-        if parsed and _probe_command(parsed):
+        if parsed and _probe_command(parsed, timeout_seconds=probe_timeout_seconds):
             return parsed
 
     candidates = spec.get("candidates", [])
@@ -332,7 +335,7 @@ def _resolve_provider_command(spec: dict) -> list[str] | None:
         command = [str(item) for item in candidate if str(item).strip()]
         if not command:
             continue
-        if _probe_command(command):
+        if _probe_command(command, timeout_seconds=probe_timeout_seconds):
             template = spec.get("command_template")
             if isinstance(template, list) and all(
                 isinstance(item, str) for item in template
@@ -370,21 +373,29 @@ def _resolve_provider_command(spec: dict) -> list[str] | None:
     return None
 
 
-def _provider_runtime_health(spec: dict, command: list[str] | None) -> tuple[bool, str]:
+def _provider_runtime_health(
+    spec: dict,
+    command: list[str] | None,
+    timeout_seconds: int = 30,
+) -> tuple[bool, str]:
     if not command:
         return False, "command_missing"
+    if timeout_seconds <= 0:
+        return True, "runtime_check_skipped"
     provider = str(spec.get("provider", "")).strip().lower()
     if provider == "openai":
-        return _openai_pro_health()
+        return _openai_pro_health(timeout_seconds=timeout_seconds)
     if provider == "google":
-        return _gemini_health(command)
+        return _gemini_health(command, timeout_seconds=timeout_seconds)
     if provider == "anthropic":
-        return _claude_auth_health(command)
+        return _claude_auth_health(command, timeout_seconds=timeout_seconds)
     return True, "command_ok"
 
 
 def _collect_provider_health(
     specs: list[dict] | None = None,
+    probe_timeout_seconds: int = 15,
+    runtime_timeout_seconds: int = 30,
 ) -> tuple[list[dict], int, int]:
     provider_specs = specs if specs is not None else _provider_connection_specs()
     rows: list[dict] = []
@@ -392,8 +403,14 @@ def _collect_provider_health(
     required_total = 0
 
     for spec in provider_specs:
-        command = _resolve_provider_command(spec)
-        healthy, details = _provider_runtime_health(spec, command)
+        command = _resolve_provider_command(
+            spec, probe_timeout_seconds=probe_timeout_seconds
+        )
+        healthy, details = _provider_runtime_health(
+            spec,
+            command,
+            timeout_seconds=runtime_timeout_seconds,
+        )
         required = bool(spec.get("required", False))
         if required:
             required_total += 1
@@ -422,13 +439,30 @@ def _required_provider_health_minimum(environment: str, required_total: int) -> 
     return required_total
 
 
-def _probe_command(command: list[str]) -> bool:
+def _system_check_provider_timeouts(doctor_timeout: int) -> tuple[int, int]:
+    hint = max(1, int(doctor_timeout))
+    probe_timeout = min(hint, 3)
+    runtime_timeout = min(hint, 5)
+    return probe_timeout, runtime_timeout
+
+
+def _system_check_skip_provider_runtime_health(
+    environment: str,
+    strict: bool,
+) -> bool:
+    return environment.strip().lower() == "dev" and not strict
+
+
+def _probe_command(command: list[str], timeout_seconds: int = 15) -> bool:
     if not command:
         return False
     executable = command[0]
     resolved = _resolve_executable(executable)
     if resolved is None:
         return False
+    executable_name = Path(resolved).name.lower()
+    if executable_name.startswith("npx"):
+        return True
     args = [resolved] + command[1:]
     try:
         proc = subprocess.run(
@@ -437,7 +471,7 @@ def _probe_command(command: list[str]) -> bool:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=15,
+            timeout=timeout_seconds,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -445,7 +479,10 @@ def _probe_command(command: list[str]) -> bool:
     return proc.returncode == 0
 
 
-def _claude_auth_health(command: list[str] | None = None) -> tuple[bool, str]:
+def _claude_auth_health(
+    command: list[str] | None = None,
+    timeout_seconds: int = 20,
+) -> tuple[bool, str]:
     auth_command: list[str] | None = None
     if command:
         normalized = [
@@ -481,7 +518,7 @@ def _claude_auth_health(command: list[str] | None = None) -> tuple[bool, str]:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=20,
+            timeout=timeout_seconds,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -557,7 +594,7 @@ def _detect_local_coding_runtime() -> tuple[bool, dict[str, object]]:
     }
 
 
-def _openai_pro_health() -> tuple[bool, str]:
+def _openai_pro_health(timeout_seconds: int = 30) -> tuple[bool, str]:
     npx = _resolve_executable("npx")
     if not npx:
         return False, "npx_not_found"
@@ -569,7 +606,7 @@ def _openai_pro_health() -> tuple[bool, str]:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30,
+            timeout=timeout_seconds,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -587,7 +624,10 @@ def _openai_pro_health() -> tuple[bool, str]:
     return False, "openai_not_logged_in"
 
 
-def _gemini_health(command: list[str]) -> tuple[bool, str]:
+def _gemini_health(
+    command: list[str],
+    timeout_seconds: int = 30,
+) -> tuple[bool, str]:
     if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
         return True, "gemini_auth_env_key"
 
@@ -607,7 +647,7 @@ def _gemini_health(command: list[str]) -> tuple[bool, str]:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30,
+            timeout=timeout_seconds,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -1892,11 +1932,20 @@ def cmd_system_check(
     tool_integrator = AutoToolIntegrator(
         runtime_dir=runtime_dir, project_root=Path.cwd()
     )
+    mcp_probe_timeout = min(doctor_timeout, 5)
     mcp_report = tool_integrator.mcp_doctor(
-        timeout=doctor_timeout, enable_healthy=False
+        timeout=mcp_probe_timeout, enable_healthy=False
     )
     skill_coverage = tool_integrator.skill_coverage(runtime_dir=runtime_dir)
-    provider_rows, required_healthy, required_total = _collect_provider_health()
+    provider_probe_timeout, provider_runtime_timeout = (
+        _system_check_provider_timeouts(doctor_timeout)
+    )
+    if _system_check_skip_provider_runtime_health(environment, strict):
+        provider_runtime_timeout = 0
+    provider_rows, required_healthy, required_total = _collect_provider_health(
+        probe_timeout_seconds=provider_probe_timeout,
+        runtime_timeout_seconds=provider_runtime_timeout,
+    )
     required_minimum = _required_provider_health_minimum(environment, required_total)
 
     subscription_available = 0

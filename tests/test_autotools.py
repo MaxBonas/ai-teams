@@ -529,6 +529,32 @@ class AutoToolsTests(unittest.TestCase):
             self.assertFalse(row["enabled"])
             self.assertEqual(row["health_category"], "package_unavailable")
 
+    def test_probe_mcp_command_short_circuits_windows_npx_cmd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            project = root / "project"
+            project.mkdir()
+
+            integrator = AutoToolIntegrator(runtime_dir=runtime, project_root=project)
+            with (
+                patch.object(
+                    AutoToolIntegrator,
+                    "_resolve_executable",
+                    return_value="C:/Program Files/nodejs/npx.cmd",
+                ),
+                patch("aiteam.autotools.subprocess.run") as run_mock,
+            ):
+                ok, reason = integrator._probe_mcp_command(
+                    command="npx.cmd",
+                    args=["-y", "@modelcontextprotocol/server-github"],
+                    timeout=1,
+                )
+            self.assertTrue(ok)
+            self.assertEqual(reason, "npx_available")
+            run_mock.assert_not_called()
+
     def test_skill_coverage_counts_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

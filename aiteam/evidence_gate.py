@@ -159,9 +159,28 @@ def verify_task_evidence(
 
     # ── 2. Git diff ──────────────────────────────────────────────────────────
     try:
-        repo = project_root or workspace
+        repo = (project_root or workspace).resolve()
+        pathspec_args: list[str] = []
+        top_level_proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        if top_level_proc.returncode == 0:
+            git_root = Path(top_level_proc.stdout.strip()).resolve()
+            if git_root != repo:
+                try:
+                    scoped_path = repo.relative_to(git_root)
+                except ValueError:
+                    scoped_path = None
+                if scoped_path is not None:
+                    pathspec_args = ["--", scoped_path.as_posix()]
         proc = subprocess.run(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", *pathspec_args],
             cwd=str(repo),
             capture_output=True,
             text=True,
@@ -171,7 +190,7 @@ def verify_task_evidence(
         )
         if proc.returncode == 0 and proc.stdout.strip():
             diff_proc = subprocess.run(
-                ["git", "diff"],
+                ["git", "diff", *pathspec_args],
                 cwd=str(repo),
                 capture_output=True,
                 text=True,
@@ -182,7 +201,7 @@ def verify_task_evidence(
             diff_content = diff_proc.stdout.strip()
             if not diff_content:
                 diff_proc = subprocess.run(
-                    ["git", "diff", "--cached"],
+                    ["git", "diff", "--cached", *pathspec_args],
                     cwd=str(repo),
                     capture_output=True,
                     text=True,

@@ -154,6 +154,35 @@ class CliProviderTests(unittest.TestCase):
             self.assertEqual(details, "gemini_auth_env_key")
             run_mock.assert_not_called()
 
+    def test_probe_command_short_circuits_npx(self) -> None:
+        with (
+            patch("aiteam.cli._resolve_executable", return_value="C:/Program Files/nodejs/npx.cmd"),
+            patch("aiteam.cli.subprocess.run") as run_mock,
+        ):
+            healthy = cli._probe_command(["npx", "-y", "@openai/codex", "--version"])
+            self.assertTrue(healthy)
+            run_mock.assert_not_called()
+
+    def test_system_check_provider_timeouts_are_bounded(self) -> None:
+        self.assertEqual(cli._system_check_provider_timeouts(1), (1, 1))
+        self.assertEqual(cli._system_check_provider_timeouts(20), (3, 5))
+
+    def test_provider_runtime_health_can_skip_expensive_probe(self) -> None:
+        with patch("aiteam.cli.subprocess.run") as run_mock:
+            healthy, details = cli._provider_runtime_health(
+                {"provider": "openai"},
+                ["npx", "-y", "@openai/codex", "{prompt}"],
+                timeout_seconds=0,
+            )
+        self.assertTrue(healthy)
+        self.assertEqual(details, "runtime_check_skipped")
+        run_mock.assert_not_called()
+
+    def test_system_check_skips_provider_runtime_health_only_in_dev_non_strict(self) -> None:
+        self.assertTrue(cli._system_check_skip_provider_runtime_health("dev", False))
+        self.assertFalse(cli._system_check_skip_provider_runtime_health("dev", True))
+        self.assertFalse(cli._system_check_skip_provider_runtime_health("stage", False))
+
     def test_required_provider_health_minimum_depends_on_environment(self) -> None:
         self.assertEqual(cli._required_provider_health_minimum("dev", 3), 1)
         self.assertEqual(cli._required_provider_health_minimum("stage", 3), 3)

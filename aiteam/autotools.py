@@ -1263,12 +1263,11 @@ class AutoToolIntegrator:
         if lower in {"python", "python3", "py"}:
             return True, "python_available"
 
+        executable_name = Path(resolved).name.lower()
+        if lower == "npx" or executable_name in {"npx", "npx.cmd", "npx.exe", "npx.bat"}:
+            return True, "npx_available"
+
         probe_args = list(args)
-        if lower == "npx":
-            if not probe_args:
-                return False, "npx_missing_package"
-            if "--help" not in probe_args:
-                probe_args = probe_args + ["--help"]
 
         try:
             proc = subprocess.run(
