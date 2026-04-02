@@ -163,6 +163,7 @@ def _summarize_chat_tasks(
         "waiting_user": 2,
         "pending": 3,
         "ready": 3,
+        "skipped": 4,
         "completed": 4,
     }
     summaries.sort(

@@ -16,6 +16,7 @@ class TaskState(str, Enum):
     CLAIMED = "claimed"
     BLOCKED = "blocked"
     COMPLETED = "completed"
+    SKIPPED = "skipped"
     FAILED = "failed"
     WAITING_USER = "waiting_user"  # E7-D4: pausa mid-run esperando respuesta del usuario
     ARCHIVED = "archived"         # C2: terminal state set by clean_retry policy

@@ -132,6 +132,20 @@ class TaskBoard:
             self._refresh_readiness()
             self._persist_task_changes(before)
 
+    def skip_task(self, task_id: str, reason: str) -> None:
+        with self._lock:
+            before = self._snapshot_tasks()
+            task = self._require(task_id)
+            previous_state = (
+                task.state.value if hasattr(task.state, "value") else str(task.state)
+            )
+            self._file_locks.release_for_task(task_id)
+            task.state = TaskState.SKIPPED
+            task.metadata["skipped_reason"] = reason
+            task.metadata["skipped_from_state"] = previous_state
+            self._refresh_readiness()
+            self._persist_task_changes(before)
+
     def mark_failed(self, task_id: str, error: str) -> None:
         with self._lock:
             before = self._snapshot_tasks()
@@ -225,7 +239,7 @@ class TaskBoard:
     def _refresh_readiness(self) -> None:
         for task in self._tasks.values():
             if task.state in (
-                TaskState.COMPLETED, TaskState.CLAIMED, TaskState.FAILED,
+                TaskState.COMPLETED, TaskState.SKIPPED, TaskState.CLAIMED, TaskState.FAILED,
                 TaskState.WAITING_USER,  # E7-D4: no propagar ni resetear tareas en pausa
                 TaskState.ARCHIVED,      # C2: terminal state, no propagate or reset
             ):

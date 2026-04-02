@@ -101,11 +101,14 @@ from api.chat_replan import (
     _extract_abort_request_from_outputs,
     _extract_advisory_request_from_outputs,
     _extract_budget_adjustments_from_outputs,
+    _extract_degrade_request_from_outputs,
     _extract_delegate_request_from_outputs,
     _extract_force_gate_request_from_outputs,
+    _extract_pause_for_user_request_from_outputs,
     _extract_replan_phases_from_outputs,
     _extract_retry_route_request_from_outputs,
     _extract_skip_request_from_outputs,
+    _extract_skip_phase_request_from_outputs,
     _merge_replanned_phases,
     _phase_started_for_replan,
     _prune_phases_for_mid_run_lead_action,
@@ -149,6 +152,11 @@ from aiteam.lead_control import (
     strip_selected_lcp_directives as _lead_control_strip_selected_lcp_directives,
     strip_lcp_directives as _lead_control_strip_lcp_directives,
 )
+from aiteam.lead_memory import (
+    build_memory_prompt_block,
+    observe_capabilities_snapshot,
+    update_lead_memory,
+)
 from aiteam.persistence import AtomicFileWriter
 from aiteam.pilot import compute_pilot_metrics
 from aiteam.quorum import (
@@ -157,6 +165,7 @@ from aiteam.quorum import (
     run_planning_quorum,
     should_apply_planning_quorum,
 )
+from aiteam.run_health import build_capabilities_briefing
 from aiteam.tool_specialists import (
     build_tool_specialist_metadata,
     replacement_specialists_from_metadata,
@@ -719,7 +728,25 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             workspace=workspace,
             continuation_of=continuation_of,
         )
-        project_instructions_block = _project_instructions_block(workspace)
+        lead_memory_block = build_memory_prompt_block(
+            runtime_dir=runtime_dir,
+            project_root=workspace,
+        )
+        mcp_status_rows = (
+            orch.mcp_manager.server_status()
+            if getattr(orch, "mcp_manager", None) is not None
+            else []
+        )
+        lead_memory_prompt_block = (
+            f"\n\n{lead_memory_block}\n" if lead_memory_block else ""
+        )
+        capabilities_briefing = build_capabilities_briefing(
+            router=orch.router,
+            mcp_status=mcp_status_rows,
+        )
+        capabilities_briefing_block = (
+            f"\n\n{capabilities_briefing}\n" if capabilities_briefing else ""
+        )
 
         orch.mailbox.send(
             sender="user",
@@ -755,9 +782,10 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "Eres Team Lead senior. Escucha al usuario, define alcance y estrategia de ejecucion.\n"
                 f"Solicitud original:\n{payload.message}\n"
                 "Entrega: objetivos, supuestos, riesgos y orden de trabajo del equipo."
+                f"{lead_memory_prompt_block}"
+                f"{capabilities_briefing_block}"
                 f"{preplan_signal_block}"
                 f"{curated_context_block}"
-                f"{project_instructions_block}"
                 f"{_WORKFLOW_PLAN_INSTRUCTION}"
                 f"{continuity_block}"
             )
@@ -767,9 +795,10 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 f"Solicitud original:\n{payload.message}\n"
                 "Entrega en <=12 lineas: objetivo, backlog priorizado (P0/P1), riesgos y"
                 " que se intentara completar en esta corrida."
+                f"{lead_memory_prompt_block}"
+                f"{capabilities_briefing_block}"
                 f"{preplan_signal_block}"
                 f"{curated_context_block}"
-                f"{project_instructions_block}"
                 f"{_WORKFLOW_PLAN_INSTRUCTION}"
                 f"{continuity_block}"
             )
@@ -865,6 +894,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "context_curator_recommended": bool(
                     preplan_context_pressure.get("recommend_context_curator", False)
                 ),
+                "lead_memory_present": bool(lead_memory_block),
+                "capabilities_briefing_present": bool(capabilities_briefing),
             },
         )
 
@@ -907,6 +938,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         _preplan_ws["context_curator_recommended"] = bool(
             preplan_context_pressure.get("recommend_context_curator", False)
         )
+        _preplan_ws["lead_memory"] = lead_memory_block
+        _preplan_ws["capabilities_briefing"] = capabilities_briefing
         orch._save_workflow_state()
         orch.event_logger.emit(
             "lead_preplan_surface_hints",
@@ -918,6 +951,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 ),
                 "context_pressure_score": int(preplan_context_pressure.get("score", 0) or 0),
                 "context_pressure_level": str(preplan_context_pressure.get("level", "") or "").strip(),
+                "lead_memory_present": bool(lead_memory_block),
+                "capabilities_briefing_present": bool(capabilities_briefing),
             },
         )
 
@@ -975,7 +1010,10 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "lead_output": _lead_output[:800],
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            _pending_file.write_text(json.dumps(_pending_state, ensure_ascii=False, indent=2))
+            _pending_file.write_text(
+                json.dumps(_pending_state, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
             orch.event_logger.emit(
                 "chat_waiting_user",
                 {"task_id": task_root, "question": _clarify_question},
@@ -1266,6 +1304,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         _chat_round_budget_cap = 80
         lead_advisory_mode = False
         lead_advisory_reason = ""
+        lead_degraded_delivery = False
+        lead_degrade_scope = ""
+        lead_degrade_reason = ""
+        skipped_phase_ids: list[str] = []
+        skipped_phase_reasons: dict[str, str] = {}
         policy_signals: list[str] = []
         phases: list[PhaseSpec] = _chat_run_state.phases
         def _submit_chat_plan(
@@ -2339,6 +2382,133 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     orch.run_until_idle(max_rounds=round_budget)
                     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
+        _pause_for_user_request = _extract_pause_for_user_request_from_outputs(
+            _ws.get("phase_outputs", {})
+        )
+        _pause_for_user_applied = False
+        if _pause_for_user_request is not None:
+            _pause_source_phase, _pause_question = _pause_for_user_request
+            _pause_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_pause_source_phase, "") or ""
+            )
+            _ws.setdefault("phase_outputs", {})[_pause_source_phase] = _strip_selected_directives(
+                _pause_source_output,
+                ["PAUSE_FOR_USER"],
+            )
+            orch._save_workflow_state()
+            _pause_task_id = phase_task_ids.get(_pause_source_phase, "")
+            _pause_task = orch.taskboard.get_task(_pause_task_id) if _pause_task_id else None
+            if _pause_source_phase == "lead_close" and _pause_task is not None:
+                orch.taskboard.mark_waiting_user(_pause_task.task_id, question=_pause_question)
+                _pause_for_user_applied = True
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "pause_for_user",
+                        "source_phase": _pause_source_phase,
+                        "question": _pause_question,
+                    },
+                )
+            else:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "pause_for_user",
+                        "source_phase": _pause_source_phase,
+                        "reason": "target_phase_missing_or_not_from_lead_close",
+                    },
+                )
+
+        _skip_phase_request = None
+        if not _pause_for_user_applied:
+            _skip_phase_request = _extract_skip_phase_request_from_outputs(
+                _ws.get("phase_outputs", {})
+            )
+        if _skip_phase_request is not None:
+            _skip_phase_source, _skip_phase_payload = _skip_phase_request
+            _skip_phase_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_skip_phase_source, "") or ""
+            )
+            _ws.setdefault("phase_outputs", {})[_skip_phase_source] = _strip_selected_directives(
+                _skip_phase_source_output,
+                ["SKIP_PHASE"],
+            )
+            orch._save_workflow_state()
+            _skip_phase_target = str(_skip_phase_payload.get("phase_id", "") or "").strip()
+            _skip_phase_reason = str(_skip_phase_payload.get("reason", "") or "").strip()
+            _target_task_id = phase_task_ids.get(_skip_phase_target, "")
+            _target_task = orch.taskboard.get_task(_target_task_id) if _target_task_id else None
+            if _skip_phase_source == "lead_close" and _target_task is not None:
+                orch.taskboard.skip_task(
+                    _target_task.task_id,
+                    _skip_phase_reason or f"Lead skipped phase {_skip_phase_target}",
+                )
+                skipped_phase_ids.append(_skip_phase_target)
+                skipped_phase_reasons[_skip_phase_target] = _skip_phase_reason
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "skip_phase",
+                        "source_phase": _skip_phase_source,
+                        "target_phase": _skip_phase_target,
+                        "reason": _skip_phase_reason,
+                    },
+                )
+            else:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "skip_phase",
+                        "source_phase": _skip_phase_source,
+                        "target_phase": _skip_phase_target,
+                        "reason": "target_phase_missing_or_not_from_lead_close",
+                    },
+                )
+
+        _degrade_request = None
+        if not _pause_for_user_applied:
+            _degrade_request = _extract_degrade_request_from_outputs(
+                _ws.get("phase_outputs", {})
+            )
+        if _degrade_request is not None:
+            _degrade_source_phase, _degrade_payload = _degrade_request
+            _degrade_source_output = str(
+                (_ws.get("phase_outputs", {}) or {}).get(_degrade_source_phase, "") or ""
+            )
+            _ws.setdefault("phase_outputs", {})[_degrade_source_phase] = _strip_selected_directives(
+                _degrade_source_output,
+                ["DEGRADE"],
+            )
+            orch._save_workflow_state()
+            if _degrade_source_phase == "lead_close":
+                lead_degraded_delivery = True
+                lead_degrade_scope = str(_degrade_payload.get("scope", "") or "").strip().lower()
+                lead_degrade_reason = str(_degrade_payload.get("reason", "") or "").strip()
+                orch.event_logger.emit(
+                    "lcp_directive_applied",
+                    {
+                        "task_id": task_root,
+                        "directive": "degrade",
+                        "source_phase": _degrade_source_phase,
+                        "scope": lead_degrade_scope,
+                        "reason": lead_degrade_reason,
+                    },
+                )
+            else:
+                orch.event_logger.emit(
+                    "lcp_directive_skipped",
+                    {
+                        "task_id": task_root,
+                        "directive": "degrade",
+                        "source_phase": _degrade_source_phase,
+                        "reason": "not_from_lead_close",
+                    },
+                )
+
         # ── E7-D4: Pausa mid-run — algún agente emitió [CLARIFY] ─────────────
         _mid_waiting = [
             t for t in orch.taskboard.list_tasks()
@@ -2366,7 +2536,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             _mid_pending_file.write_text(
-                json.dumps(_mid_state, ensure_ascii=False, indent=2, default=str)
+                json.dumps(_mid_state, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
             )
             orch.event_logger.emit(
                 "chat_waiting_user",
@@ -2971,6 +3142,30 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     f"Advisory mode: {lead_advisory_reason or 'El Lead decidió cerrar en modo advisory.'}",
                 ]
             )
+        if lead_degraded_delivery:
+            degrade_label = lead_degrade_scope or "partial"
+            degrade_reason_text = (
+                lead_degrade_reason
+                or "El Lead decidió cerrar con entrega degradada y diagnóstico explícito."
+            )
+            response_lines.extend(
+                [
+                    "",
+                    f"Degraded delivery ({degrade_label}): {degrade_reason_text}",
+                ]
+            )
+        if skipped_phase_ids:
+            skipped_lines = [
+                f"- {phase_id}: {skipped_phase_reasons.get(phase_id, '') or 'sin razon explicitada'}"
+                for phase_id in skipped_phase_ids
+            ]
+            response_lines.extend(
+                [
+                    "",
+                    "Skipped phases by Lead:",
+                    "\n".join(skipped_lines),
+                ]
+            )
         if (
             bool(payload.strict_mode)
             or live_mode_required
@@ -3103,6 +3298,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 f"Strict mode: {_strict_mode_label}",
                 f"Low productivity gate: {_low_productivity_label}",
                 f"Advisory mode: {'on' if lead_advisory_mode else 'off'} ({lead_advisory_reason or '-'})",
+                f"Degraded delivery: {'on' if lead_degraded_delivery else 'off'} ({lead_degrade_scope or '-'} | {lead_degrade_reason or '-'})",
+                f"Skipped phases: {', '.join(skipped_phase_ids) if skipped_phase_ids else 'none'}",
                 f"Policy review required: {'yes' if policy_review_required else 'no'}",
                 f"Policy signals: {', '.join(policy_signals) if policy_signals else 'none'}",
                 f"Auto-extended rounds: +{auto_extended_rounds}",
@@ -3151,6 +3348,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             live_mode_rejected=live_mode_rejected,
             advisory_mode=lead_advisory_mode,
             advisory_reason=lead_advisory_reason,
+            degraded_delivery=lead_degraded_delivery,
+            degrade_scope=lead_degrade_scope,
+            degrade_reason=lead_degrade_reason,
+            skipped_phase_ids=skipped_phase_ids,
+            skipped_phase_reasons=skipped_phase_reasons,
             policy_review_required=policy_review_required,
             validation_owner=CHAT_VALIDATION_OWNER,
             policy_signals=policy_signals,
@@ -3181,6 +3383,81 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             lead_run_mode=_lead_run_mode,
             planned_phases=_planned_phases,
         )
+        _memory_phases = [
+            phase_name
+            for phase_name in workflow_phase_keys
+            if phase_name != "lead_intake"
+        ]
+        _memory_completed = sum(
+            1
+            for phase_name in _memory_phases
+            if phase_states.get(phase_name) == "completed"
+        )
+        _memory_errors = [
+            f"phase_failed:{phase_name}" for phase_name in failed_phases
+        ] + list(evidence_gate_failures[:4])
+        _memory_errors.extend(
+            _compact_text_line(
+                f"routing:{str(item.get('phase', '') or '-')}:"
+                f"{str(item.get('error', '') or item.get('reason', '') or 'unknown')}",
+                limit=120,
+            )
+            for item in orch.router.get_recent_routing_failures(task_root)[:4]
+        )
+        _memory_decisions: list[str] = []
+        if lead_advisory_mode:
+            _memory_decisions.append(
+                f"ADVISORY_MODE:{_compact_text_line(lead_advisory_reason or 'active', limit=80)}"
+            )
+        if lead_degraded_delivery:
+            _memory_decisions.append(
+                f"DEGRADE:{lead_degrade_scope or 'partial'}"
+            )
+        _memory_decisions.extend(
+            f"SKIP_PHASE:{phase_id}" for phase_id in skipped_phase_ids
+        )
+        try:
+            _memory_result = "parcial"
+            if final_state == "completed":
+                if (
+                    not lead_advisory_mode
+                    and not lead_degraded_delivery
+                    and not failed_phases
+                    and not evidence_gate_failures
+                ):
+                    _memory_result = "exitoso"
+            elif final_state in {"failed", "rejected"}:
+                _memory_result = "fallido"
+            update_lead_memory(
+                runtime_dir=runtime_dir,
+                project_root=workspace,
+                chat_id=task_root,
+                objective=payload.message,
+                result=_memory_result,
+                phases_completed=_memory_completed,
+                phases_total=len(_memory_phases),
+                significant_errors=_memory_errors,
+                lead_decisions=_memory_decisions,
+                duration_seconds=max(1, elapsed_ms // 1000),
+                capabilities=observe_capabilities_snapshot(
+                    runtime_dir=runtime_dir,
+                    mcp_status=mcp_status_rows,
+                ),
+            )
+            orch.event_logger.emit(
+                "lead_memory_updated",
+                {
+                    "task_id": task_root,
+                    "result": _memory_result,
+                    "phases_completed": _memory_completed,
+                    "phases_total": len(_memory_phases),
+                },
+            )
+        except Exception as exc:
+            orch.event_logger.emit(
+                "lead_memory_update_failed",
+                {"task_id": task_root, "error": str(exc)[:200]},
+            )
         # C3: if workspace has no product artifacts and lead_intake completed,
         # deposit a minimal PROJECT_PLAN.md so the user sees tangible output.
         _c3_deposited = _maybe_deposit_minimal_output(

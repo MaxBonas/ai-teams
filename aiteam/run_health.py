@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+from pathlib import Path
 
 from aiteam.types import TaskState, WorkTask
 
@@ -24,6 +26,140 @@ def _unique_sorted(values: list[str]) -> list[str]:
         seen.add(item)
         output.append(item)
     return sorted(output)
+
+
+def _read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+
+
+_PROVIDER_API_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+}
+
+
+def build_capabilities_briefing(*, router, mcp_status: object | None = None) -> str:
+    runtime_dir_value = getattr(router, "runtime_dir", None)
+    runtime_dir = Path(runtime_dir_value) if runtime_dir_value else None
+    doctor_payload = (
+        _read_json(runtime_dir / "provider_doctor.json")
+        if runtime_dir is not None
+        else {}
+    )
+    api_key_status = dict(doctor_payload.get("api_keys", {}) or {})
+
+    available_rows: list[tuple[str, str, str]] = []
+    unavailable_rows: list[tuple[str, str, str]] = []
+    seen_available: set[tuple[str, str]] = set()
+    seen_unavailable: set[tuple[str, str, str]] = set()
+
+    for adapter in list(getattr(router, "adapters", []) or []):
+        profile = router._profile_for(adapter) if hasattr(router, "_profile_for") else None
+        tier = str(getattr(profile, "tier", "") or adapter.channel.value or "unknown").strip()
+        model_name = str(getattr(adapter, "model", "") or getattr(adapter, "name", "") or "unknown").strip()
+        provider_name = str(getattr(adapter, "provider", "") or "").strip().lower()
+        channel_value = str(getattr(getattr(adapter, "channel", None), "value", "") or "").strip().lower()
+        key_env = _PROVIDER_API_KEY_ENV.get(provider_name, "")
+
+        try:
+            available = bool(adapter.available())
+        except Exception:
+            available = False
+
+        operational = True
+        if hasattr(router, "_operational_ok"):
+            try:
+                operational = bool(router._operational_ok(adapter))
+            except Exception:
+                operational = available
+
+        if (
+            channel_value == "api"
+            and key_env
+            and str(api_key_status.get(key_env, "")).strip().lower() == "missing"
+        ):
+            row = (model_name, tier, f"{key_env} ausente")
+            if row not in seen_unavailable:
+                unavailable_rows.append(row)
+                seen_unavailable.add(row)
+            continue
+
+        if not available:
+            row = (model_name, tier, "adapter no disponible")
+            if row not in seen_unavailable:
+                unavailable_rows.append(row)
+                seen_unavailable.add(row)
+            continue
+
+        if not operational:
+            reason = "estado no operativo"
+            if hasattr(router, "_cached_ops_status"):
+                try:
+                    ops_status = dict(router._cached_ops_status().get(adapter.name, {}) or {})
+                except Exception:
+                    ops_status = {}
+                reason = (
+                    str(ops_status.get("smoke_details", "") or "").strip()
+                    or str(ops_status.get("doctor_details", "") or "").strip()
+                    or reason
+                )
+            row = (model_name, tier, _compact(reason, 120))
+            if row not in seen_unavailable:
+                unavailable_rows.append(row)
+                seen_unavailable.add(row)
+            continue
+
+        row = (model_name, tier, "disponible")
+        if (model_name, tier) not in seen_available:
+            available_rows.append(row)
+            seen_available.add((model_name, tier))
+
+    mcp_rows = list(mcp_status) if isinstance(mcp_status, list) else list(dict(mcp_status or {}).values()) if isinstance(mcp_status, dict) and "servers" not in dict(mcp_status or {}) else list(dict(mcp_status or {}).get("servers", []) or []) if isinstance(mcp_status, dict) else []
+    working_mcps: list[str] = []
+    broken_mcps: list[str] = []
+    for item in mcp_rows:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "") or item.get("server", "") or "").strip()
+        if not name or not bool(item.get("enabled", True)):
+            continue
+        health_status = str(item.get("health_status", "") or item.get("status", "") or "").strip().lower()
+        health_reason = str(item.get("health_reason", "") or item.get("reason", "") or "").strip()
+        if health_status in {"", "healthy", "ok", "running"}:
+            working_mcps.append(name)
+        else:
+            broken_mcps.append(
+                f"{name} ({_compact(health_reason or health_status, 80)})"
+            )
+
+    if not unavailable_rows and not broken_mcps:
+        return ""
+
+    lines = ["== SYSTEM CAPABILITIES =="]
+    if available_rows:
+        lines.append("Modelos disponibles:")
+        for model_name, tier, _status in sorted(available_rows):
+            lines.append(f"  - {model_name} ({tier}) - disponible")
+    if unavailable_rows:
+        lines.append("")
+        lines.append("Modelos NO disponibles:")
+        for model_name, tier, reason in sorted(unavailable_rows):
+            lines.append(f"  - {model_name} ({tier}) - {reason}")
+    if working_mcps:
+        lines.append("")
+        lines.append(f"MCPs disponibles: {', '.join(sorted(dict.fromkeys(working_mcps)))}")
+    if broken_mcps:
+        lines.append(f"MCPs con error: {', '.join(sorted(dict.fromkeys(broken_mcps)))}")
+    lines.append("== FIN CAPABILITIES ==")
+    return "\n".join(lines)
 
 
 @dataclass
@@ -150,9 +286,12 @@ def build_run_health_report(
                 and gate_lookup[gate_id].state == TaskState.COMPLETED
                 for gate_id in quality_gate_ids
             )
-        skipped = task.state == TaskState.ARCHIVED
+        skipped = task.state in {TaskState.ARCHIVED, TaskState.SKIPPED}
         skip_reason = str(
-            task.metadata.get("archived_reason", "") or task.metadata.get("skip_reason", "") or ""
+            task.metadata.get("archived_reason", "")
+            or task.metadata.get("skipped_reason", "")
+            or task.metadata.get("skip_reason", "")
+            or ""
         ).strip()
         phase_entries.append(
             PhaseHealthEntry(

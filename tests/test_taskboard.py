@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aiteam.runtime import FileLockRegistry
 from aiteam.taskboard import TaskBoard
-from aiteam.types import Role, WorkTask
+from aiteam.types import Role, TaskState, WorkTask
 
 
 class TaskBoardTests(unittest.TestCase):
@@ -141,6 +141,25 @@ class TaskBoardTests(unittest.TestCase):
             self.assertEqual(board.legacy_snapshot_path, runtime_dir / "tasks.json")
             self.assertTrue((runtime_dir / "aiteam.db").exists())
             self.assertFalse((runtime_dir / "tasks.json").exists())
+
+    def test_skip_task_marks_terminal_state_and_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            board = TaskBoard(Path(tmp) / "tasks.json")
+            task = WorkTask(
+                task_id="A",
+                title="Root",
+                description="x",
+                role=Role.TEAM_LEAD,
+            )
+            board.add_task(task)
+            self.assertTrue(board.claim_task("A", assignee="lead-1"))
+            board.skip_task("A", reason="lead_close_skip_phase")
+
+            stored = board.get_task("A")
+            assert stored is not None
+            self.assertEqual(stored.state, TaskState.SKIPPED)
+            self.assertEqual(stored.metadata.get("skipped_reason"), "lead_close_skip_phase")
+            self.assertEqual(stored.metadata.get("skipped_from_state"), "claimed")
 
     def test_file_lock_registry_retries_transient_windows_replace_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

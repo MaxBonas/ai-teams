@@ -110,6 +110,7 @@ class AITeamOrchestrator:
     ) -> None:
         self.router = router
         self.runtime_dir = runtime_dir
+        self.router.runtime_dir = runtime_dir
         self._sqlite_store = SqliteStore(runtime_dir / "aiteam.db")
         self.taskboard = TaskBoard.from_runtime_dir(runtime_dir)
         self.mailbox = Mailbox(runtime_dir / "mailbox.jsonl")

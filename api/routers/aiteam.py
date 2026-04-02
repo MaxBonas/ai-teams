@@ -699,6 +699,11 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
     # ── Lead autonomous decisions ────────────────────────────────────────────
     advisory_mode = False
     advisory_reason = ""
+    degraded_delivery = False
+    degrade_scope = ""
+    degrade_reason = ""
+    skipped_phase_ids: list[str] = []
+    skipped_phase_reasons: dict[str, str] = {}
     auto_extended_rounds = 0
     lead_budget_extended = False
     lead_budget_extension = 0
@@ -718,6 +723,16 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
         if directive == "advisory_mode" and not advisory_mode:
             advisory_mode = True
             advisory_reason = str(payload.get("reason", "") or "")
+        if directive == "degrade" and not degraded_delivery:
+            degraded_delivery = True
+            degrade_scope = str(payload.get("scope", "") or "")
+            degrade_reason = str(payload.get("reason", "") or "")
+        if directive == "skip_phase":
+            target_phase = str(payload.get("target_phase", "") or "").strip()
+            if target_phase and target_phase not in skipped_phase_ids:
+                skipped_phase_ids.append(target_phase)
+            if target_phase:
+                skipped_phase_reasons[target_phase] = str(payload.get("reason", "") or "")
         if directive == "extend_budget_mid_run" and not lead_budget_extended:
             lead_budget_extended = True
             lead_budget_extension = _safe_int(payload.get("extension", 0), 0)
@@ -837,6 +852,11 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
         "evidence_gate_rejected": evidence_gate_rejected,
         "advisory_mode": advisory_mode,
         "advisory_reason": advisory_reason,
+        "degraded_delivery": degraded_delivery,
+        "degrade_scope": degrade_scope,
+        "degrade_reason": degrade_reason,
+        "skipped_phase_ids": skipped_phase_ids,
+        "skipped_phase_reasons": skipped_phase_reasons,
         "auto_extended_rounds": auto_extended_rounds,
         "lead_budget_extended": lead_budget_extended,
         "lead_budget_extension": lead_budget_extension,
@@ -1682,4 +1702,3 @@ async def mcp_event_history(request: Request, server: str | None = None, limit: 
         return {"events": events}
     except Exception as exc:
         return {"error": str(exc), "events": []}
-

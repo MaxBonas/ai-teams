@@ -78,6 +78,11 @@ class TeamChatResponse(BaseModel):
     live_mode_rejected: bool = False
     advisory_mode: bool = False
     advisory_reason: str = ""
+    degraded_delivery: bool = False
+    degrade_scope: str = ""
+    degrade_reason: str = ""
+    skipped_phase_ids: list[str] = []
+    skipped_phase_reasons: dict[str, str] = {}
     policy_review_required: bool = False
     validation_owner: str = ""
     policy_signals: list[str] = []

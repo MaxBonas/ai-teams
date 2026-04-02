@@ -790,12 +790,33 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const canSend = useMemo(() => input.trim().length > 0 && !loading, [input, loading]);
   const currentExecutionMode = chatProgress?.execution_mode || lastChatRun?.execution_mode || 'unknown';
 
+  const parseClarifyResult = (raw: string): Record<string, unknown> => {
+    let currentEvent = '';
+    for (const line of raw.split(/\r?\n/)) {
+      if (line.startsWith('event: ')) {
+        currentEvent = line.slice(7).trim();
+        continue;
+      }
+      if (line.startsWith('data: ')) {
+        if (currentEvent === 'result') {
+          return JSON.parse(line.slice(6)) as Record<string, unknown>;
+        }
+        if (currentEvent === 'error') {
+          const payload = JSON.parse(line.slice(6)) as { error?: string };
+          throw new Error(payload.error ?? 'SSE error');
+        }
+      }
+    }
+    return {};
+  };
+
   const sendClarification = async () => {
     if (!pendingClarification || !clarificationInput.trim() || loading) return;
     const { chatId } = pendingClarification;
+    const answerText = clarificationInput.trim();
     setMessages((prev) => [
       ...prev,
-      { id: `user-clarify-${Date.now()}`, sender: 'user', text: clarificationInput.trim(), meta: 'clarification' },
+      { id: `user-clarify-${Date.now()}`, sender: 'user', text: answerText, meta: 'clarification' },
     ]);
     setPendingClarification(null);
     setClarificationInput('');
@@ -804,25 +825,62 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
       const res = await apiFetch('/api/aiteam/chat/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-workspace-path': workspacePath },
-        body: JSON.stringify({ chat_id: chatId, clarification: clarificationInput.trim() }),
+        body: JSON.stringify({ chat_id: chatId, clarification: answerText }),
       });
       if (!res.ok) {
         const err = await res.text();
         throw new Error(err || `HTTP ${res.status}`);
       }
-      const json = await res.json() as Record<string, unknown>;
-      // Reutilizar la misma lógica de muestra que el path normal
-      const answer = typeof json.response === 'string' && json.response.trim() ? json.response : 'Respuesta del equipo recibida.';
-      setMessages((prev) => [
-        ...prev,
-        { id: `team-${Date.now()}`, sender: 'team', text: answer, meta: `state ${String(json.state ?? '-')}` },
-      ]);
+      const contentType = res.headers.get('content-type') || '';
+      const json = contentType.includes('text/event-stream')
+        ? parseClarifyResult(await res.text())
+        : await res.json() as Record<string, unknown>;
+      const answer = typeof json.response === 'string' && json.response.trim()
+        ? json.response
+        : 'Respuesta del equipo recibida.';
+      if (json.waiting_user === true && typeof json.clarification_question === 'string') {
+        setPendingClarification({
+          chatId: String(json.task_id ?? chatId),
+          question: json.clarification_question,
+        });
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `team-clarify-${Date.now()}`,
+            sender: 'team',
+            text: `El agente necesita tu respuesta: "${json.clarification_question}"`,
+            meta: 'waiting_user',
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { id: `team-${Date.now()}`, sender: 'team', text: answer, meta: `state ${String(json.state ?? '-')}` },
+        ]);
+      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
         { id: `team-err-${Date.now()}`, sender: 'team', text: `Error al reanudar: ${err instanceof Error ? err.message : String(err)}`, meta: 'error' },
       ]);
     } finally {
+      try {
+        const finalProgressResponse = await apiFetch(`/api/aiteam/chat/progress/${encodeURIComponent(chatId)}`, {
+          headers: {
+            'x-workspace-path': workspacePath,
+          },
+        });
+        if (finalProgressResponse.ok) {
+          const finalProgressPayload = await finalProgressResponse.json();
+          const parsed = parseChatProgress(finalProgressPayload, chatId);
+          if (parsed) {
+            setChatProgress(parsed);
+            setAgentLanes((prev) => mergeAgentLaneMaps(prev, buildTaskHistoryLanes(parsed.task_summaries)));
+          }
+        }
+      } catch {
+        // keep the latest in-memory clarify state
+      }
       setLoading(false);
     }
   };
@@ -1153,7 +1211,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       {
                         id: `team-clarify-${Date.now()}`,
                         sender: 'team',
-                        text: `El agente necesita aclaración: "${json.clarification_question}"`,
+                        text: `El agente necesita tu respuesta: "${json.clarification_question}"`,
                         meta: 'waiting_user',
                       },
                     ]);

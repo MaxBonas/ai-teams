@@ -65,6 +65,32 @@ class TestExtractLcpDirectives(unittest.TestCase):
             "Cerrar como advisory por falta de evidencia live",
         )
 
+    def test_pause_for_user_detected(self):
+        text = '[PAUSE_FOR_USER: "¿Quieres cambiar la ruta de build o ajustar el objetivo?"]'
+        result = _extract_lcp_directives(text)
+        self.assertEqual(
+            result.get("pause_for_user"),
+            "¿Quieres cambiar la ruta de build o ajustar el objetivo?",
+        )
+
+    def test_skip_phase_detected(self):
+        text = '[SKIP_PHASE: "build" reason="gate rechazado varias veces"]'
+        result = _extract_lcp_directives(text)
+        self.assertEqual(result.get("skip_phase", {}).get("phase_id"), "build")
+        self.assertEqual(
+            result.get("skip_phase", {}).get("reason"),
+            "gate rechazado varias veces",
+        )
+
+    def test_degrade_detected(self):
+        text = '[DEGRADE: scope="partial" reason="solo researcher produjo hallazgos utiles"]'
+        result = _extract_lcp_directives(text)
+        self.assertEqual(result.get("degrade", {}).get("scope"), "partial")
+        self.assertEqual(
+            result.get("degrade", {}).get("reason"),
+            "solo researcher produjo hallazgos utiles",
+        )
+
     # ── ESCALATE ─────────────────────────────────────────────────────
 
     def test_escalate_complexity_detected(self):
@@ -217,6 +243,24 @@ class TestStripLcpDirectives(unittest.TestCase):
         clean = _strip_lcp_directives(text)
         self.assertNotIn("[ADVISORY_MODE", clean)
         self.assertIn("Cierro como advisory.", clean)
+
+    def test_strips_pause_for_user(self):
+        text = 'Necesito tu decision. [PAUSE_FOR_USER: "¿Priorizo A o B?"]'
+        clean = _strip_lcp_directives(text)
+        self.assertNotIn("[PAUSE_FOR_USER", clean)
+        self.assertIn("Necesito tu decision.", clean)
+
+    def test_strips_skip_phase(self):
+        text = 'Fase aceptada como saltada. [SKIP_PHASE: "build" reason="fallo irrecuperable"]'
+        clean = _strip_lcp_directives(text)
+        self.assertNotIn("[SKIP_PHASE", clean)
+        self.assertIn("Fase aceptada como saltada.", clean)
+
+    def test_strips_degrade(self):
+        text = 'Entrega parcial aceptada. [DEGRADE: scope="minimal" reason="solo diagnostico"]'
+        clean = _strip_lcp_directives(text)
+        self.assertNotIn("[DEGRADE", clean)
+        self.assertIn("Entrega parcial aceptada.", clean)
 
     def test_strips_workflow_plan_block(self):
         text = "Plan:\n[WORKFLOW_PLAN]\nphase: build\n[/WORKFLOW_PLAN]\nResumen."

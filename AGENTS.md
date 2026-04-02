@@ -104,9 +104,20 @@ Ver guia de comunicacion para desarrolladores en `docs/COMMUNICATION_GUIDE_FOR_D
 - Wrappers locales:
   - Python: `.\scripts\python_local.bat`
   - Pytest: `.\scripts\pytest_local.bat`
+  - Pytest estable para ORCH-01 / sesiones Windows sensibles: `.\scripts\pytest_local_stable.bat`
   - Reanudacion tras pull: `.\scripts\prepare_dev_env.bat`
 - Tests actuales: **776 passed** (2026-04-02, `MAX-GAMINGPC`). Antes de cualquier cambio, verificar que pasan.
 - Smoke test rapido (2s): `.\scripts\pytest_local.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x`
+
+### Notas operativas de tests en ORCH-01 / Windows
+
+- En ORCH-01 y en algunas sesiones de Codex sobre Windows, la suite monolítica `tests -q --tb=short` puede tardar demasiado o pegar con temporales/permisos. En esos casos, usar `.\scripts\pytest_local_stable.bat`.
+- No lances varias corridas de pytest en paralelo en esta máquina: el `venv` y algunos temporales quedan bloqueados con facilidad y aparecen errores espurios de acceso.
+- Si una batería grande se acerca al timeout de la sesión, partirla en 2 o 3 fases en vez de insistir con una sola corrida larga. Orden recomendado:
+  1. `tests/test_lcp_directives.py tests/test_taskboard.py tests/test_run_health.py tests/test_mid_run_clarify.py tests/test_orchestrator.py`
+  2. `tests/test_api_team_chat.py`
+  3. `tests/test_api_aiteam_state.py`
+- Cuando se toque frontend además de backend, cerrar siempre con `cd ide-frontend && node_modules\\.bin\\tsc.cmd -b`.
 
 ## Infraestructura — dos maquinas
 

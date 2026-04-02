@@ -65,6 +65,9 @@ class LeadIntakeResolution:
 
 _SELECTIVE_LCP_PATTERNS: dict[str, str] = {
     "ADVISORY_MODE": r'\[ADVISORY_MODE:\s*"[^"]+"\]',
+    "PAUSE_FOR_USER": r'\[PAUSE_FOR_USER:\s*"[^"]+"\]',
+    "SKIP_PHASE": r'\[SKIP_PHASE:\s*"[^"]+"(?:\s+reason="[^"]*")?\]',
+    "DEGRADE": r'\[DEGRADE:\s*scope="(?:minimal|partial)"(?:\s+reason="[^"]*")?\]',
     "ESCALATE": r"\[ESCALATE:\s*[^\]]+\]",
     "EXTEND_BUDGET": r"\[EXTEND_BUDGET:\s*\+\d+\]",
     "SET_BUDGET": r"\[SET_BUDGET:\s*\d+\]",
@@ -98,6 +101,32 @@ def extract_lcp_directives(text: str) -> dict:
     m = re.search(r'\[ADVISORY_MODE:\s*"(.+?)"\]', t, re.DOTALL | re.IGNORECASE)
     if m:
         result["advisory_mode"] = m.group(1).strip()
+
+    m = re.search(r'\[PAUSE_FOR_USER:\s*"(.+?)"\]', t, re.DOTALL | re.IGNORECASE)
+    if m:
+        result["pause_for_user"] = m.group(1).strip()
+
+    m = re.search(
+        r'\[SKIP_PHASE:\s*"([^"]+)"(?:\s+reason="([^"]*)")?\]',
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        result["skip_phase"] = {
+            "phase_id": m.group(1).strip(),
+            "reason": str(m.group(2) or "").strip(),
+        }
+
+    m = re.search(
+        r'\[DEGRADE:\s*scope="(minimal|partial)"(?:\s+reason="([^"]*)")?\]',
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        result["degrade"] = {
+            "scope": m.group(1).strip().lower(),
+            "reason": str(m.group(2) or "").strip(),
+        }
 
     m = re.search(r'\[REJECT:\s*"(.+?)"\]', t, re.DOTALL | re.IGNORECASE)
     if m:
@@ -181,7 +210,7 @@ def strip_lcp_directives(text: str) -> str:
     )
     lcp_pattern = (
         r"\["
-        r"(?:DIRECT_ANSWER|REJECT|ABORT_PHASES|ADVISORY_MODE|ESCALATE|SKIP|ADD_PHASE"
+        r"(?:DIRECT_ANSWER|REJECT|ABORT_PHASES|ADVISORY_MODE|PAUSE_FOR_USER|SKIP_PHASE|DEGRADE|ESCALATE|SKIP|ADD_PHASE"
         r"|EXTEND_BUDGET|SET_BUDGET|CLARIFY|FORCE_GATE|RETRY_ROUTE|REPLAN|DELEGATE"
         r"|DELEGATE_REPO_SCAN|DELEGATE_BROWSER_REPRO|DELEGATE_LSP_IMPACT"
         r"|DELEGATE_TEST_RUN|DELEGATE_MCP_PROBE|WAIT_POLICY|DELEGATE_BUDGET)"

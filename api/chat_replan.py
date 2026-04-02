@@ -135,6 +135,66 @@ def _extract_advisory_request_from_outputs(
     return None
 
 
+def _extract_pause_for_user_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, str] | None:
+    """Busca un PAUSE_FOR_USER emitido por el Lead al cierre del run."""
+
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=True,
+    ):
+        question = str(directives.get("pause_for_user", "") or "").strip()
+        if question:
+            return phase_name, question
+    return None
+
+
+def _extract_skip_phase_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, dict[str, str]] | None:
+    """Busca un SKIP_PHASE emitido por el Lead al cierre del run."""
+
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=True,
+    ):
+        payload = directives.get("skip_phase")
+        if not isinstance(payload, dict):
+            continue
+        phase_id = str(payload.get("phase_id", "") or "").strip()
+        if phase_id:
+            return phase_name, {
+                "phase_id": phase_id,
+                "reason": str(payload.get("reason", "") or "").strip(),
+            }
+    return None
+
+
+def _extract_degrade_request_from_outputs(
+    phase_outputs: dict[str, str],
+) -> tuple[str, dict[str, str]] | None:
+    """Busca un DEGRADE emitido por el Lead al cierre del run."""
+
+    for phase_name, _output, directives in _lead_control_iter_lead_checkpoint_directives(
+        phase_outputs,
+        include_lead_intake=False,
+        reverse=True,
+    ):
+        payload = directives.get("degrade")
+        if not isinstance(payload, dict):
+            continue
+        scope = str(payload.get("scope", "") or "").strip().lower()
+        if scope in {"minimal", "partial"}:
+            return phase_name, {
+                "scope": scope,
+                "reason": str(payload.get("reason", "") or "").strip(),
+            }
+    return None
+
+
 def _extract_budget_adjustments_from_outputs(
     phase_outputs: dict[str, str],
 ) -> list[tuple[str, dict[str, object]]]:
@@ -180,7 +240,7 @@ def _phase_started_for_replan(task: WorkTask | None) -> bool:
     if task is None:
         return False
     state = str(task.state.value if hasattr(task.state, "value") else task.state).strip().lower()
-    if state in {"claimed", "completed", "failed", "waiting_user"}:
+    if state in {"claimed", "completed", "skipped", "failed", "waiting_user"}:
         return True
     if _safe_int_value(task.metadata.get("execution_round", 0), 0) > 0:
         return True

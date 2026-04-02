@@ -81,11 +81,11 @@ Guia tecnica: `docs/IMPLEMENTATION_PLAYBOOK.md` seccion C-series (por anadir).
 
 Prerequisito: URGENTE-1 resuelto (ya). Orden recomendado: A1 → A3 → A2 → A4 → A5.
 
-- [ ] **A1**: RunHealthReport — bloque estructurado inyectado en `lead_close` con gate rejections, routing errors, recursos ausentes y presupuesto consumido
-- [ ] **A3**: `[SKIP_PHASE]` y `[DEGRADE]` en lead_close — Lead acepta entrega parcial o salta fases irrecuperables con diagnostico
-- [ ] **A2**: `[PAUSE_FOR_USER]` en lead_close — Lead pausa la run y pregunta al usuario cuando el bloqueo no es resolvible internamente; requiere frontend + endpoint `/resume`
-- [ ] **A4**: Briefing de capacidades pre-run — Lead sabe que modelos y MCPs tiene disponibles antes de planificar
-- [ ] **A5**: Memoria primaria del Lead por proyecto (`lead_memory.md`) — historial de runs, decisiones, capacidades observadas, inyectado antes de `lead_intake`
+- [x] **A1**: RunHealthReport — bloque estructurado inyectado en `lead_close` con gate rejections, routing errors, recursos ausentes y presupuesto consumido
+- [x] **A3**: `[SKIP_PHASE]` y `[DEGRADE]` en lead_close — Lead acepta entrega parcial o salta fases irrecuperables con diagnostico
+- [x] **A2**: `[PAUSE_FOR_USER]` en lead_close — Lead pausa la run y pregunta al usuario cuando el bloqueo no es resolvible internamente; reutiliza `WAITING_USER` y reanudacion via chat
+- [x] **A4**: Briefing de capacidades pre-run — `lead_intake` recibe `== SYSTEM CAPABILITIES ==` cuando faltan API keys/modelos o hay MCPs degradados; omite el bloque cuando todo esta sano
+- [x] **A5**: Memoria primaria del Lead por proyecto (`lead_memory.md`) — historial reciente, capacidades observadas e instrucciones del proyecto inyectadas antes de `lead_intake`
 
 Diseno completo en `docs/LEAD_ADAPTIVE_FLOW_VISION.md`.
 
@@ -94,6 +94,7 @@ Diseno completo en `docs/LEAD_ADAPTIVE_FLOW_VISION.md`.
 - [ ] Queda compatibilidad JSON residual en tests/constructores; ya no gobierna la lectura normal
 - [x] `TaskBoard` ya se instancia desde runtime SQLite-first; `tasks.json` queda como snapshot legacy auxiliar
 - [ ] La sincronizacion entre `MAX-GAMINGPC` y `ORCH-01` puede reintroducir entornos Python rotos si se sincroniza `venv/`
+- [ ] En ORCH-01 / sesiones Windows de Codex, la validacion amplia de pytest no debe lanzarse en paralelo y a veces conviene partirla en 2-3 fases para evitar timeouts y locks del `venv`; usar `.\scripts\pytest_local_stable.bat`
 - [ ] Parte de la documentacion historica sigue presente y puede confundir si se toma como vigente
 - [ ] La vista de routing aun no es centro de control completo: falta edición segura, overrides locales, validación previa y simulación explicable del routing
 - [ ] La UI de routing todavia puede crecer en simulacion avanzada e historial, pero el MVP editable seguro ya está operativo

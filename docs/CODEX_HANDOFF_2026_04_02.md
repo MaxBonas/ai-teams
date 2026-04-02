@@ -143,6 +143,26 @@ cd ide-frontend && npm exec -- tsc -b
 
 **Regla**: verificar suite antes de empezar. Si hay tests rotos que no son tuyos, documentarlo y no proceder hasta entender por que.
 
+### Nota operativa para ORCH-01 / Codex en Windows
+
+En ORCH-01 y en algunas sesiones de Codex sobre Windows, una corrida monolítica de pytest puede acercarse al timeout de la sesión o chocar con temporales/permisos del entorno. Además, ejecutar dos corridas a la vez puede bloquear el `venv`.
+
+Usar preferentemente:
+
+```bash
+.\scripts\pytest_local_stable.bat ...
+```
+
+Y, si la validación amplia tarda demasiado, partirla en 2 o 3 fases:
+
+```bash
+.\scripts\pytest_local_stable.bat tests/test_lcp_directives.py tests/test_taskboard.py tests/test_run_health.py tests/test_mid_run_clarify.py tests/test_orchestrator.py -q --tb=short
+.\scripts\pytest_local_stable.bat tests/test_api_team_chat.py -q --tb=short
+.\scripts\pytest_local_stable.bat tests/test_api_aiteam_state.py -q --tb=short
+```
+
+No lanzar esas baterías en paralelo en Windows.
+
 ---
 
 ## Normas criticas que no debes olvidar
