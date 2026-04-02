@@ -93,6 +93,12 @@ class AdapterResponse:
     tool_calls: list["ToolCall"] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class StreamChunk:
+    text: str
+    chunk_type: str = "output"
+
+
 @dataclass
 class RoutingDecision:
     success: bool

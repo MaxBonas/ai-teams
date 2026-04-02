@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 
 class FileLockRegistry:
     """Registro persistente de ownership de archivos por tarea."""
+
+    _TRANSIENT_WINERRORS = {5, 32}
+    _SAVE_RETRY_DELAYS_SECONDS = (
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2,
+    )
 
     def __init__(self, lock_file: Path) -> None:
         self.lock_file = lock_file
@@ -56,14 +67,37 @@ class FileLockRegistry:
             try:
                 tmp.write(content)
                 tmp.flush()
+                os.fsync(tmp.fileno())
             except Exception:
                 tmp_path.unlink(missing_ok=True)
                 raise
-        try:
-            tmp_path.replace(self.lock_file)
-        except Exception:
+        self._replace_with_retry(tmp_path)
+
+    def _replace_with_retry(self, tmp_path: Path) -> None:
+        last_error: Exception | None = None
+        for delay in (*self._SAVE_RETRY_DELAYS_SECONDS, None):
+            try:
+                tmp_path.replace(self.lock_file)
+                return
+            except Exception as exc:
+                last_error = exc
+                if not self._is_transient_lock_error(exc) or delay is None:
+                    tmp_path.unlink(missing_ok=True)
+                    raise
+                time.sleep(delay)
+        if last_error is not None:
             tmp_path.unlink(missing_ok=True)
-            raise
+            raise last_error
+
+    @classmethod
+    def _is_transient_lock_error(cls, exc: Exception) -> bool:
+        if isinstance(exc, PermissionError):
+            winerror = getattr(exc, "winerror", None)
+            return winerror in cls._TRANSIENT_WINERRORS or winerror is None
+        if isinstance(exc, OSError):
+            winerror = getattr(exc, "winerror", None)
+            return winerror in cls._TRANSIENT_WINERRORS
+        return False
 
 
 class SandboxManager:

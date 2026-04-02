@@ -48,11 +48,11 @@ class RouterPolicy:
     )
     role_provider_preferences: dict[str, list[str]] = field(
         default_factory=lambda: {
-            "team_lead": ["openai", "anthropic", "google"],
-            "researcher": ["google", "anthropic", "openai", "groq"],
-            "engineer": ["openai", "anthropic", "google", "groq"],
-            "reviewer": ["anthropic", "openai", "google", "groq"],
-            "qa": ["anthropic", "openai", "google", "groq"],
+            "team_lead": ["openai", "google", "anthropic"],
+            "researcher": ["google", "openai", "groq"],
+            "engineer": ["openai", "google", "groq"],
+            "reviewer": ["openai", "google", "groq"],
+            "qa": ["openai", "google", "groq"],
         }
     )
     peer_consultation_diversity_required: bool = True

@@ -22,6 +22,9 @@ from aiteam.types import (
     Complexity,
     Criticality,
     Role,
+    RoutingDecision,
+    RoutingRequest,
+    StreamChunk,
     TaskState,
     WorkTask,
 )
@@ -373,6 +376,58 @@ class SpecialistQuorumAdapter(ModelAdapter):
         )
 
 
+class WeakSpecialistReportAdapter(SpecialistQuorumAdapter):
+    def __init__(self, weak_specialists: set[str] | None = None) -> None:
+        super().__init__(failing_specialists=set())
+        self.weak_specialists = {
+            str(item).strip().lower() for item in (weak_specialists or set()) if str(item).strip()
+        }
+
+    def invoke(self, prompt, messages=None, tools=None):
+        prompt_text = str(prompt or "")
+        if "Specialist precheck:" in prompt_text:
+            specialist_name = self._extract_specialist_name(messages)
+            if specialist_name in self.weak_specialists:
+                return AdapterResponse(
+                    success=True,
+                    content=json.dumps(
+                        {
+                            "summary": f"Informe debil de {specialist_name}",
+                            "evidence": [],
+                            "artifacts": [],
+                            "risks": [],
+                            "recommendation": "",
+                            "confidence": 0.41,
+                        }
+                    ),
+                    latency_ms=1,
+                    input_tokens=8,
+                    output_tokens=10,
+                )
+        return super().invoke(prompt, messages=messages, tools=tools)
+
+
+class RecordingRetryMCPManager:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def list_healthy(
+        self,
+        *,
+        retry_unhealthy: bool = True,
+        retry_after_seconds: int = 900,
+        timeout: int = 10,
+    ) -> list[str]:
+        self.calls.append(
+            {
+                "retry_unhealthy": retry_unhealthy,
+                "retry_after_seconds": retry_after_seconds,
+                "timeout": timeout,
+            }
+        )
+        return ["filesystem_mcp"] if retry_unhealthy else []
+
+
 class OrchestratorTests(unittest.TestCase):
     def setUp(self) -> None:
         self._previous_tempdir = tempfile.tempdir
@@ -505,6 +560,81 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(task.metadata["tool_specialist"], "skill_worker")
             self.assertTrue(task.metadata["tool_rewiring_suppress_mcp_operator"])
             self.assertIn("semgrep_security_skill", list(task.metadata.get("tool_rewiring_candidates", []) or []))
+
+    def test_specialist_prefetch_uses_mcp_health_retry_for_mcp_operator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    ApiAdapter(
+                        name="openai_api",
+                        provider="openai",
+                        model="gpt-cheap",
+                        capabilities={"reasoning", "analysis"},
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            mcp_manager = RecordingRetryMCPManager()
+            orchestrator.mcp_manager = mcp_manager
+            task = WorkTask(
+                task_id="chat_root::review_mcp",
+                title="Auditar integracion MCP",
+                description="Necesita comprobar servidores externos MCP.",
+                role=Role.REVIEWER,
+                metadata={"required_capabilities": ["external_mcp"]},
+            )
+            captured_requests: list[RoutingRequest] = []
+
+            def _capture_route(request, prompt, task_id="", messages=None, tools=None, on_chunk=None):
+                if isinstance(request, RoutingRequest):
+                    captured_requests.append(request)
+                return RoutingDecision(
+                    success=True,
+                    provider="openai",
+                    model="gpt-cheap",
+                    channel=ChannelType.API,
+                    reason="captured",
+                    response=AdapterResponse(
+                        success=True,
+                        content=json.dumps(
+                            {
+                                "summary": "MCP recuperado y disponible para operar.",
+                                "evidence": ["filesystem_mcp healthy tras retry"],
+                                "artifacts": [],
+                                "risks": [],
+                                "recommendation": "continuar",
+                                "confidence": 0.81,
+                            }
+                        ),
+                        latency_ms=1,
+                        input_tokens=8,
+                        output_tokens=12,
+                    ),
+                )
+
+            with patch.object(router, "route_and_invoke", side_effect=_capture_route):
+                context = orchestrator._collect_specialist_prefetch_context(task)
+
+            self.assertTrue(mcp_manager.calls)
+            self.assertTrue(bool(mcp_manager.calls[-1].get("retry_unhealthy")))
+            applied = dict(task.metadata.get("specialist_roster_applied", {}) or {})
+            self.assertIn("mcp_operator", list(applied.get("specialist_roster", []) or []))
+            mcp_requests = [
+                request
+                for request in captured_requests
+                if isinstance(request, RoutingRequest) and request.tool_specialist == "mcp_operator"
+            ]
+            self.assertTrue(mcp_requests)
+            self.assertIn("mcp_operator", context)
 
     def test_persists_structured_specialist_report_in_task_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -754,6 +884,139 @@ class OrchestratorTests(unittest.TestCase):
                 [],
             )
 
+    def test_specialist_quorum_ignores_reports_without_operational_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapter = WeakSpecialistReportAdapter(weak_specialists={"test_runner"})
+            router = HybridRouter(
+                adapters=[adapter],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="root::critical_signal_check",
+                title="Validacion critica con evidencia de especialistas",
+                description="No debe avanzar si uno de los informes no trae evidencia operativa.",
+                role=Role.ENGINEER,
+                criticality=Criticality.HIGH,
+                metadata={
+                    "required_capabilities": ["test_execute"],
+                    "specialist_roster": ["test_runner", "repo_scout"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=2)
+
+            stored = orchestrator.taskboard.get_task("root::critical_signal_check")
+            assert stored is not None
+            self.assertEqual(stored.state, TaskState.BLOCKED)
+            self.assertEqual(stored.metadata.get("blocked_reason"), "specialist_quorum_not_met")
+            quorum_result = dict(stored.metadata.get("specialist_quorum_result", {}) or {})
+            self.assertFalse(quorum_result.get("quorum_met"))
+            self.assertEqual(int(quorum_result.get("responses_received", 0)), 1)
+            self.assertEqual(int(quorum_result.get("responses_required", 0)), 2)
+            self.assertIn("test_runner", list(quorum_result.get("invalid_specialists", []) or []))
+            self.assertIn("test_runner", list(quorum_result.get("missing_specialists", []) or []))
+            self.assertEqual(adapter.main_calls, 0)
+
+    def test_specialist_roster_preferred_tool_tier_drives_main_routing_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    ApiAdapter(
+                        name="openai_api_budget",
+                        provider="openai",
+                        model="gpt-budget",
+                        capabilities={"test_execute"},
+                        cost_tier=1,
+                        response_content="budget",
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            captured_requests: list[dict[str, object]] = []
+
+            def _capture_route(request, prompt, task_id="", messages=None, tools=None, on_chunk=None):
+                captured_requests.append(
+                    {
+                        "request": request,
+                        "prompt": str(prompt or ""),
+                        "task_id": str(task_id or ""),
+                    }
+                )
+                return RoutingDecision(
+                    success=True,
+                    provider="openai",
+                    model="gpt-budget",
+                    channel=ChannelType.API,
+                    reason="captured",
+                    response=AdapterResponse(
+                        success=True,
+                        content="Respuesta principal con tier del roster.",
+                        latency_ms=1,
+                        input_tokens=8,
+                        output_tokens=12,
+                    ),
+                )
+
+            task = WorkTask(
+                task_id="root::specialist_roster_routing",
+                title="Ejecutar validacion con roster",
+                description="La tarea principal debe heredar el tier preferido del roster.",
+                role=Role.ENGINEER,
+                metadata={
+                    "required_capabilities": ["test_execute"],
+                    "tool_specialist": "test_runner",
+                    "tool_specialist_default_tier": "budget_api",
+                    "tool_specialist_economic_routing": True,
+                    "_specialist_prefetch_done": True,
+                    "specialist_roster_applied": {
+                        "specialist_roster": ["test_runner", "repo_scout"],
+                        "specialist_roster_preferred_tool_tier": "advanced_api",
+                    },
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                },
+            )
+
+            with patch.object(router, "route_and_invoke", side_effect=_capture_route):
+                orchestrator.submit_task(task)
+                orchestrator.run_until_idle(max_rounds=2)
+
+            stored = orchestrator.taskboard.get_task("root::specialist_roster_routing")
+            assert stored is not None
+            self.assertEqual(stored.state, TaskState.COMPLETED)
+            main_requests = [
+                item["request"]
+                for item in captured_requests
+                if isinstance(item.get("request"), RoutingRequest)
+                and item["request"].role == Role.ENGINEER
+                and item["request"].tool_specialist == "test_runner"
+            ]
+            self.assertTrue(main_requests)
+            self.assertEqual(main_requests[-1].preferred_tool_tier, "advanced_api")
+
     def test_sensitive_chat_phase_spawns_lead_preflight_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -813,6 +1076,45 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn(
                 "require_execution_plan",
                 build_task.metadata.get("lead_preflight_sensitive_reasons", []),
+            )
+
+    def test_sim_mode_skips_missing_execution_plan_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            router = HybridRouter(
+                adapters=[SensitivePreflightCheckpointAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+            )
+
+            task = WorkTask(
+                task_id="SIM-PLAN-1",
+                title="Sim mode task",
+                description="Resume el siguiente paso sin ejecutar comandos.",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "require_execution_plan": True,
+                },
+            )
+
+            with patch.dict("os.environ", {"AITEAM_SIM_MODE": "1"}, clear=False):
+                orchestrator.submit_task(task)
+                orchestrator.run_until_idle(max_rounds=4)
+
+            stored = orchestrator.taskboard.get_task("SIM-PLAN-1")
+            assert stored is not None
+            self.assertNotEqual(stored.state, TaskState.FAILED)
+            self.assertNotIn(
+                "missing_execution_plan_required",
+                str(stored.metadata.get("error", "")),
             )
 
     def test_non_sensitive_chat_phase_does_not_spawn_lead_preflight_checkpoint(self) -> None:
@@ -2591,6 +2893,13 @@ class OrchestratorTests(unittest.TestCase):
             ]
             self.assertGreaterEqual(len(round1_providers), 3)
             self.assertGreaterEqual(len(set(round1_providers)), 3)
+            stored = orchestrator.taskboard.get_task("PEER-DIVERSITY-1")
+            assert stored is not None
+            self.assertEqual(
+                set(stored.metadata.get("consulted_providers", [])),
+                set(round1_providers),
+            )
+            self.assertTrue(bool(stored.metadata.get("peer_diversity_observed")))
 
             events = orchestrator.event_logger.recent_events(hours=1)
             self.assertFalse(
@@ -2644,6 +2953,10 @@ class OrchestratorTests(unittest.TestCase):
             ]
             self.assertGreaterEqual(len(round1_providers), 2)
             self.assertEqual(set(round1_providers), {"openai"})
+            stored = orchestrator.taskboard.get_task("PEER-DIVERSITY-2")
+            assert stored is not None
+            self.assertEqual(stored.metadata.get("consulted_providers", []), ["openai"])
+            self.assertFalse(bool(stored.metadata.get("peer_diversity_observed")))
 
             events = orchestrator.event_logger.recent_events(hours=1)
             self.assertTrue(
@@ -3376,6 +3689,139 @@ class OrchestratorTests(unittest.TestCase):
                           "El output anterior del agente debe aparecer en el contexto del retry")
             self.assertIn("iteracion 0", context.lower() if "iteracion" in context.lower() else context,
                           "El contexto debe mencionar la iteracion anterior")
+
+    def test_placeholder_gate_does_not_fail_for_generic_placeholder_word(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(adapters=[], policy=build_default_router_policy())
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="LEAD-PLACEHOLDER-1",
+                title="Analizar briefing",
+                description="Preparar plan realista.",
+                role=Role.RESEARCHER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "skip_peer_consultation": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                },
+            )
+            orchestrator.submit_task(task)
+
+            def _route(request, prompt, task_id="", messages=None, tools=None, on_chunk=None):
+                return RoutingDecision(
+                    success=True,
+                    provider="anthropic",
+                    model="claude-sonnet-4-5",
+                    channel=ChannelType.SUBSCRIPTION,
+                    reason="selected_by_policy",
+                    response=AdapterResponse(
+                        success=True,
+                        content=(
+                            "El documento evita respuestas genericas. "
+                            "La palabra placeholder aparece aqui como ejemplo de un falso positivo, "
+                            "pero no hay marcadores TODO ni texto simulado."
+                        ),
+                        latency_ms=5,
+                        input_tokens=10,
+                        output_tokens=30,
+                    ),
+                )
+
+            with patch.object(router, "route_and_invoke", side_effect=_route):
+                orchestrator.run_until_idle(max_rounds=3)
+
+            final_task = orchestrator.taskboard.get_task("LEAD-PLACEHOLDER-1")
+            assert final_task is not None
+            self.assertEqual(final_task.state.value, "completed")
+            self.assertNotIn("error", final_task.metadata)
+
+    def test_streaming_thinking_chunks_only_hit_agent_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(adapters=[], policy=build_default_router_policy())
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            token_chunks: list[tuple[str, str]] = []
+            agent_events: list[dict] = []
+            orchestrator.token_chunk_callback = (
+                lambda task_id, chunk: token_chunks.append((task_id, chunk))
+            )
+            orchestrator.agent_event_callback = lambda event: agent_events.append(event)
+
+            task = WorkTask(
+                task_id="THINK-1",
+                title="Analizar arquitectura",
+                description="Revisar el diseno y devolver una recomendacion.",
+                role=Role.RESEARCHER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "skip_peer_consultation": True,
+                },
+            )
+            orchestrator.submit_task(task)
+
+            def _route(request, prompt, task_id="", messages=None, tools=None, on_chunk=None):
+                if on_chunk is not None:
+                    on_chunk(StreamChunk(text="Analizando...", chunk_type="thinking"))
+                    on_chunk("Respuesta final")
+                return RoutingDecision(
+                    success=True,
+                    provider="anthropic",
+                    model="claude-3-7-sonnet",
+                    channel=ChannelType.API,
+                    reason="selected_by_policy",
+                    response=AdapterResponse(
+                        success=True,
+                        content="Respuesta final",
+                        latency_ms=5,
+                        input_tokens=10,
+                        output_tokens=4,
+                    ),
+                )
+
+            with patch.object(router, "route_and_invoke", side_effect=_route):
+                orchestrator.run_until_idle(max_rounds=3)
+
+            self.assertEqual(token_chunks, [("THINK-1", "Respuesta final")])
+            chunk_events = [
+                item for item in agent_events if item.get("type") == "agent_chunk"
+            ]
+            routed_events = [
+                item for item in agent_events if item.get("type") == "agent_routed"
+            ]
+            completed_events = [
+                item for item in agent_events if item.get("type") == "agent_completed"
+            ]
+            self.assertEqual(len(chunk_events), 2)
+            self.assertEqual(len(routed_events), 1)
+            self.assertEqual(routed_events[0].get("provider"), "anthropic")
+            self.assertEqual(routed_events[0].get("model"), "claude-3-7-sonnet")
+            self.assertEqual(len(completed_events), 1)
+            self.assertEqual(completed_events[0].get("provider"), "anthropic")
+            self.assertEqual(completed_events[0].get("model"), "claude-3-7-sonnet")
+            self.assertEqual(chunk_events[0].get("chunk_type"), "thinking")
+            self.assertEqual(chunk_events[0].get("chunk"), "Analizando...")
+            self.assertEqual(chunk_events[1].get("chunk_type"), "output")
+            self.assertEqual(chunk_events[1].get("chunk"), "Respuesta final")
 
 
 if __name__ == "__main__":

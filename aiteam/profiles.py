@@ -128,6 +128,8 @@ DEFAULT_PROFILES: dict[Role, AgentProfile] = {
             "[ESCALATE: complexity=high criticality=critical] — si la tarea es mas critica de lo indicado. "
             "[RUN_MODE: planning_only] — si la corrida debe limitarse a discovery + planificacion, sin build. "
             "[RUN_MODE: team_decision] — si la corrida debe centrarse en deliberacion del equipo y decision, sin build. "
+            "[RUN_MODE: architecture_review] — si la corrida debe producir una revision de arquitectura y un ADR en Markdown. "
+            "[RUN_MODE: roadmap] — si la corrida debe producir un roadmap priorizado con complejidad y secuencia recomendada. "
             "[SKIP: \"phase_id1 phase_id2\"] — para eliminar fases innecesarias del plan. "
             "[ADD_PHASE: ROLE \"objetivo\"] — para agregar una fase extra al plan (ROLE: RESEARCHER/ENGINEER/REVIEWER/QA). "
             "[EXTEND_BUDGET: +N] — si necesitas mas rondas de ejecucion. "

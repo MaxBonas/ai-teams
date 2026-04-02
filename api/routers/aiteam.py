@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime, timezone
+import os
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from api.utils import (
@@ -7,10 +9,13 @@ from api.utils import (
     _build_project_continuity_context,
     _detect_notebooklm_status,
     _load_chat_context_curator_insights,
+    _peer_consultation_summary_fields,
     _load_chat_rewiring_insights,
     _load_chat_specialist_insights,
     _read_jsonl_records,
     _read_json_payload,
+    _read_runtime_tasks_payload,
+    _read_runtime_workflow_state,
     _extract_user_message_from_task_description,
     _event_summary,
     PROJECT_ROOT,
@@ -20,7 +25,9 @@ from api.utils import (
 from aiteam.dashboard import build_dashboard_payload
 from aiteam.cli import build_default_orchestrator
 from aiteam.pilot import compute_pilot_metrics
+from aiteam.provider_ops import provider_ops_status
 from aiteam.autotools import AutoToolIntegrator
+from aiteam.types import Complexity, Criticality, Role, RoutingRequest
 
 router = APIRouter()
 
@@ -32,7 +39,7 @@ def _load_chat_workflow_insights(
     normalized_task_id = str(task_id or "").strip()
     if not normalized_task_id:
         return {}
-    workflow_state = _read_json_payload(runtime_dir / "workflow_state.json", fallback={})
+    workflow_state = _read_runtime_workflow_state(runtime_dir)
     if not isinstance(workflow_state, dict):
         return {}
     entry = workflow_state.get(normalized_task_id, {})
@@ -44,6 +51,7 @@ def _load_chat_workflow_insights(
         "delegate_economics": dict(entry.get("delegate_economics_summary", {}) or {}),
         "lead_run_mode": str(entry.get("lead_run_mode", "") or ""),
         **_load_chat_context_curator_insights(runtime_dir, normalized_task_id),
+        **_peer_consultation_summary_fields(runtime_dir, normalized_task_id),
         **_load_chat_rewiring_insights(runtime_dir, normalized_task_id),
         **_load_chat_specialist_insights(runtime_dir, normalized_task_id),
     }
@@ -66,6 +74,173 @@ def _load_tool_catalog_index(workspace: Path) -> dict[str, dict[str, object]]:
             continue
         output[name] = dict(item)
     return output
+
+
+def _build_routing_catalog(runtime_dir: Path) -> dict[str, object]:
+    orchestrator = build_default_orchestrator(runtime_dir=runtime_dir, environment="dev")
+    router_obj = orchestrator.router
+    policy = router_obj.policy
+    ops_status = provider_ops_status(runtime_dir)
+
+    adapters = list(router_obj.adapters)
+    adapter_rows: list[dict[str, object]] = []
+    provider_index: dict[str, dict[str, object]] = {}
+    role_order = [role.value for role in Role]
+
+    for adapter in adapters:
+        profile = router_obj.model_catalog.get(adapter.name)
+        ops_row = dict(ops_status.get(adapter.name, {}) or {})
+        try:
+            available = bool(adapter.available())
+        except Exception:
+            available = False
+        operational = bool(ops_row.get("operational", available))
+        row = {
+            "adapter_name": adapter.name,
+            "provider": adapter.provider,
+            "model": adapter.model,
+            "channel": adapter.channel.value,
+            "cost_tier": int(adapter.cost_tier),
+            "routing_priority": int(adapter.routing_priority),
+            "requires_approval": bool(adapter.requires_approval),
+            "capabilities": sorted(adapter.capabilities),
+            "role_targets": sorted(adapter.role_targets),
+            "available": available,
+            "operational": operational,
+            "tier": getattr(profile, "tier", ""),
+            "intelligence_rank": int(getattr(profile, "intelligence_rank", 0) or 0),
+            "coding_rank": int(getattr(profile, "coding_rank", 0) or 0),
+            "reasoning_rank": int(getattr(profile, "reasoning_rank", 0) or 0),
+            "trust_rank": int(getattr(profile, "trust_rank", 0) or 0),
+            "notes": str(getattr(profile, "notes", "") or ""),
+            "doctor_healthy": bool(ops_row.get("doctor_healthy", False)),
+            "smoke_healthy": bool(ops_row.get("smoke_healthy", False)),
+            "doctor_details": str(ops_row.get("doctor_details", "") or ""),
+            "smoke_details": str(ops_row.get("smoke_details", "") or ""),
+        }
+        adapter_rows.append(row)
+        provider_row = provider_index.setdefault(
+            str(adapter.provider),
+            {"provider": str(adapter.provider), "adapter_count": 0, "operational_count": 0},
+        )
+        provider_row["adapter_count"] = int(provider_row.get("adapter_count", 0)) + 1
+        if operational:
+            provider_row["operational_count"] = int(provider_row.get("operational_count", 0)) + 1
+
+    adapter_rows.sort(
+        key=lambda item: (
+            str(item.get("provider", "")),
+            str(item.get("channel", "")),
+            str(item.get("adapter_name", "")),
+        )
+    )
+
+    role_matrix: list[dict[str, object]] = []
+    for role_name in role_order:
+        request = RoutingRequest(
+            role=Role(role_name),
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            environment="dev",
+        )
+        eligible = router_obj.eligible_adapters(request)
+        eligible_names = {adapter.name for adapter in eligible}
+        configured_provider_order = list(policy.role_provider_preferences.get(role_name, []) or [])
+        configured_model_order = list(policy.role_model_preferences.get(role_name, []) or [])
+        configured_provider_set = {str(item).strip().lower() for item in configured_provider_order if str(item).strip()}
+        configured_model_set = {str(item).strip().lower() for item in configured_model_order if str(item).strip()}
+
+        effective_rows: list[dict[str, object]] = []
+        for adapter in adapters:
+            ops_row = dict(ops_status.get(adapter.name, {}) or {})
+            try:
+                available = bool(adapter.available())
+            except Exception:
+                available = False
+            operational = bool(ops_row.get("operational", available))
+            allowed = adapter.name in eligible_names
+            blockers: list[str] = []
+            if adapter.role_targets and role_name not in adapter.role_targets:
+                blockers.append("role_targets")
+            if role_name == Role.TEAM_LEAD.value and not router_obj._team_lead_allowed(adapter):
+                blockers.append("team_lead_guard")
+            if adapter.requires_approval:
+                blockers.append("approval_required")
+            if not available:
+                blockers.append("adapter_unavailable")
+            if getattr(router_obj._profile_for(adapter), "tier", "") == "local":
+                if str(os.getenv("AITEAM_PROVIDER_LOCAL_DEGRADED", "0")).strip() == "1":
+                    blockers.append("local_degraded")
+            effective_rows.append(
+                {
+                    "adapter_name": adapter.name,
+                    "provider": adapter.provider,
+                    "model": adapter.model,
+                    "channel": adapter.channel.value,
+                    "tier": str(getattr(router_obj._profile_for(adapter), "tier", "") or ""),
+                    "configured_provider_preferred": adapter.provider.strip().lower() in configured_provider_set,
+                    "configured_model_preferred": adapter.model.strip().lower() in configured_model_set,
+                    "eligible": allowed,
+                    "available": available,
+                    "operational": operational,
+                    "role_targets": sorted(adapter.role_targets),
+                    "blockers": sorted(set(blockers)),
+                }
+            )
+
+        effective_rows.sort(
+            key=lambda item: (
+                0 if bool(item.get("eligible")) else 1,
+                0 if bool(item.get("configured_provider_preferred")) else 1,
+                str(item.get("provider", "")),
+                str(item.get("model", "")),
+            )
+        )
+        effective_providers = list(dict.fromkeys([str(adapter.provider) for adapter in eligible]))
+        primary = eligible[0] if eligible else None
+        role_matrix.append(
+            {
+                "role": role_name,
+                "configured_provider_order": configured_provider_order,
+                "configured_model_order": configured_model_order,
+                "effective_provider_order": effective_providers,
+                "primary": (
+                    {
+                        "adapter_name": primary.name,
+                        "provider": primary.provider,
+                        "model": primary.model,
+                        "channel": primary.channel.value,
+                        "tier": str(getattr(router_obj._profile_for(primary), "tier", "") or ""),
+                    }
+                    if primary is not None
+                    else {}
+                ),
+                "fallbacks": [
+                    {
+                        "adapter_name": adapter.name,
+                        "provider": adapter.provider,
+                        "model": adapter.model,
+                        "channel": adapter.channel.value,
+                        "tier": str(getattr(router_obj._profile_for(adapter), "tier", "") or ""),
+                    }
+                    for adapter in eligible[1:6]
+                ],
+                "adapters": effective_rows,
+            }
+        )
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "role_count": len(role_matrix),
+            "provider_count": len(provider_index),
+            "adapter_count": len(adapter_rows),
+        },
+        "providers": sorted(provider_index.values(), key=lambda item: str(item.get("provider", ""))),
+        "roles": role_order,
+        "adapters": adapter_rows,
+        "role_matrix": role_matrix,
+    }
 
 
 def _load_mcp_overview(request: Request) -> dict[str, object]:
@@ -267,6 +442,79 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
             )
         break
 
+    # ── Lead autonomous decisions ────────────────────────────────────────────
+    advisory_mode = False
+    advisory_reason = ""
+    auto_extended_rounds = 0
+    lead_budget_extended = False
+    lead_budget_extension = 0
+    peer_consulted_roles: list[str] = []
+    peer_consulted_providers: list[str] = []
+    peer_diversity_observed = False
+
+    for record in reversed(recent_events):
+        if str(record.get("event_type", "")) != "lcp_directive_applied":
+            continue
+        payload = record.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("task_id", "") or "") != task_id:
+            continue
+        directive = str(payload.get("directive", "") or "")
+        if directive == "advisory_mode" and not advisory_mode:
+            advisory_mode = True
+            advisory_reason = str(payload.get("reason", "") or "")
+        if directive == "extend_budget_mid_run" and not lead_budget_extended:
+            lead_budget_extended = True
+            lead_budget_extension = _safe_int(payload.get("extension", 0), 0)
+
+    for record in reversed(recent_events):
+        if str(record.get("event_type", "")) != "chat_auto_rounds_extended":
+            continue
+        payload = record.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("task_id", "") or "") != task_id:
+            continue
+        from_b = _safe_int(payload.get("from_round_budget", 0), 0)
+        to_b = _safe_int(payload.get("to_round_budget", 0), 0)
+        auto_extended_rounds = max(auto_extended_rounds, to_b - from_b)
+        break
+
+    task_prefix = f"{task_id}::" if task_id else ""
+    consulted_role_set: set[str] = set()
+    consulted_provider_set: set[str] = set()
+    for record in reversed(recent_events):
+        if str(record.get("event_type", "")) != "decision_recorded":
+            continue
+        payload = record.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        decision_task_id = str(payload.get("task_id", "") or "")
+        if decision_task_id != task_id and (not task_prefix or not decision_task_id.startswith(task_prefix)):
+            continue
+        raw_roles = payload.get("consulted_roles", [])
+        if isinstance(raw_roles, list):
+            consulted_role_set.update(
+                str(item or "").strip()
+                for item in raw_roles
+                if str(item or "").strip()
+            )
+        raw_providers = payload.get("consulted_providers", [])
+        if isinstance(raw_providers, list):
+            consulted_provider_set.update(
+                str(item or "").strip()
+                for item in raw_providers
+                if str(item or "").strip()
+            )
+        peer_diversity_observed = bool(
+            payload.get("peer_diversity_observed", False)
+        ) or peer_diversity_observed
+
+    peer_consulted_roles = sorted(consulted_role_set)
+    peer_consulted_providers = sorted(consulted_provider_set)
+    peer_diversity_observed = peer_diversity_observed or len(peer_consulted_providers) >= 2
+
     status = "window_exhausted" if exhausted else "completed_or_closed"
     return {
         "task_id": task_id,
@@ -285,6 +533,18 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
         "live_mode_required": live_mode_required,
         "live_mode_rejected": live_mode_rejected,
         "evidence_gate_rejected": evidence_gate_rejected,
+        "advisory_mode": advisory_mode,
+        "advisory_reason": advisory_reason,
+        "auto_extended_rounds": auto_extended_rounds,
+        "lead_budget_extended": lead_budget_extended,
+        "lead_budget_extension": lead_budget_extension,
+        "peer_consultation_summary": {
+            "consulted_roles": peer_consulted_roles,
+            "consulted_providers": peer_consulted_providers,
+            "unavailable_roles": [],
+            "provider_count": len(peer_consulted_providers),
+            "diversity_observed": peer_diversity_observed,
+        },
         "ts": str(latest_plan.get("ts", "") or ""),
     }
 
@@ -357,6 +617,8 @@ async def get_dashboard(request: Request):
 
         payload = await asyncio.to_thread(_load_data)
         return payload
+    except HTTPException:
+        raise
     except Exception as e:
         import logging
         logging.getLogger(__name__).exception("Unhandled error in aiteam router")
@@ -427,6 +689,8 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
             }
 
         return await asyncio.to_thread(_load_state)
+    except HTTPException:
+        raise
     except Exception as e:
         import logging
         logging.getLogger(__name__).exception("Unhandled error in aiteam router")
@@ -440,7 +704,6 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
         runtime_dir = workspace / "runtime"
         mailbox_path = runtime_dir / "mailbox.jsonl"
-        tasks_path = runtime_dir / "tasks.json"
         events_path = runtime_dir / "events.jsonl"
         records = _read_jsonl_records(mailbox_path)
         items: list[dict[str, object]] = []
@@ -475,7 +738,7 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
             if task_id and task_id not in started_ts:
                 started_ts[task_id] = str(event.get("ts", ""))
 
-        tasks_payload = _read_json_payload(tasks_path, fallback=[])
+        tasks_payload = _read_runtime_tasks_payload(runtime_dir)
         if isinstance(tasks_payload, list):
             for item in tasks_payload:
                 if not isinstance(item, dict):
@@ -517,6 +780,8 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
             "last_chat_run": latest_chat_run,
             "mcp_overview": _load_mcp_overview(request),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         import logging
         logging.getLogger(__name__).exception("Unhandled error in aiteam router")
@@ -530,7 +795,6 @@ async def get_aiteam_logs(request: Request, limit: int = 100):
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
         runtime_dir = workspace / "runtime"
         events_path = runtime_dir / "events.jsonl"
-        tasks_path = runtime_dir / "tasks.json"
 
         event_records = _read_jsonl_records(events_path)
         top_records = sorted(event_records, key=lambda item: str(item.get("ts", "")), reverse=True)[
@@ -576,7 +840,7 @@ async def get_aiteam_logs(request: Request, limit: int = 100):
                 }
             )
 
-        tasks_payload = _read_json_payload(tasks_path, fallback=[])
+        tasks_payload = _read_runtime_tasks_payload(runtime_dir)
         synthetic_user_events: list[dict[str, object]] = []
         task_outputs: list[dict[str, object]] = []
         if isinstance(tasks_payload, list):
@@ -773,6 +1037,21 @@ async def tool_access_log(
         return {"error": str(exc), "access_log": []}
 
 
+@router.get("/api/aiteam/routing/catalog")
+async def get_routing_catalog(request: Request):
+    """Vista consultable del routing: catálogo, roles, primarios y fallbacks efectivos."""
+    _require_api_auth_request(request)
+    try:
+        workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+        runtime_dir = workspace / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        return await asyncio.to_thread(_build_routing_catalog, runtime_dir)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"error": str(exc), "roles": [], "providers": [], "adapters": [], "role_matrix": []}
+
+
 @router.get("/api/aiteam/skills/usage")
 async def skill_usage_stats(request: Request, limit: int = 20):
     """Estadisticas de uso de skills: veces usado, tasa de exito, ranking."""
@@ -816,13 +1095,7 @@ async def get_workflow_state(request: Request):
     try:
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
         runtime_dir = workspace / "runtime"
-        ws_path = runtime_dir / "workflow_state.json"
-        if not ws_path.exists():
-            return {"workflows": {}}
-        import json
-        raw = ws_path.read_text(encoding="utf-8")
-        data = json.loads(raw) if raw.strip() else {}
-        return {"workflows": data}
+        return {"workflows": _read_runtime_workflow_state(runtime_dir)}
     except Exception as exc:
         return {"error": str(exc), "workflows": {}}
 

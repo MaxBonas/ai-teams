@@ -13,7 +13,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch
 
+from aiteam.sqlite_store import SqliteStore
 from aiteam.types import (
     AdapterResponse,
     Complexity,
@@ -233,6 +235,21 @@ class TestScoutContextBuilders(unittest.TestCase):
         # Debe contener alguna referencia a los archivos o estructura
         self.assertTrue(len(result) > 20)
 
+    def test_scout_project_state_forces_safe_git_decoding(self):
+        from api.utils import _build_scout_project_state_context
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(stdout="", returncode=0),
+                MagicMock(stdout="", returncode=0),
+            ]
+            _build_scout_project_state_context(self.workspace)
+
+        self.assertEqual(mock_run.call_count, 2)
+        for call in mock_run.call_args_list:
+            self.assertEqual(call.kwargs.get("encoding"), "utf-8")
+            self.assertEqual(call.kwargs.get("errors"), "replace")
+
     def test_scout_session_history_no_sessions(self):
         from api.utils import _build_scout_session_history_context
         result = _build_scout_session_history_context(self.runtime)
@@ -241,7 +258,7 @@ class TestScoutContextBuilders(unittest.TestCase):
         self.assertTrue("Sin sesiones previas" in result or len(result) < 100)
 
     def test_scout_session_history_with_sessions(self):
-        # Crear tasks.json mínimo
+        # Crear runtime SQLite mínimo
         tasks = [
             {
                 "task_id": "CHAT-ABC::lead_intake",
@@ -260,7 +277,7 @@ class TestScoutContextBuilders(unittest.TestCase):
                 "metadata": {"result": "Entregado: API REST con 2 endpoints"},
             },
         ]
-        (self.runtime / "tasks.json").write_text(json.dumps(tasks))
+        SqliteStore(self.runtime / "aiteam.db").save_all_tasks(tasks)
         from api.utils import _build_scout_session_history_context
         result = _build_scout_session_history_context(self.runtime)
         self.assertIn("HISTORIAL DE SESIONES", result)

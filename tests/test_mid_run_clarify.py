@@ -16,6 +16,7 @@ import threading
 import unittest
 from pathlib import Path
 
+from aiteam.sqlite_store import SqliteStore
 from aiteam.types import TaskState, WorkTask, Role, Complexity, Criticality
 from aiteam.taskboard import TaskBoard
 
@@ -132,7 +133,7 @@ class TestRefreshReadinessSkipsWaitingUser(unittest.TestCase):
 
 
 class TestWaitingUserSerialization(unittest.TestCase):
-    """WAITING_USER se persiste y carga correctamente desde JSON."""
+    """WAITING_USER se persiste y carga correctamente desde SQLite."""
 
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
@@ -157,7 +158,7 @@ class TestWaitingUserSerialization(unittest.TestCase):
         task = _make_task("t1")
         board.add_task(task)
         board.mark_waiting_user("t1", question="¿?")
-        raw = json.loads(self._path.read_text(encoding="utf-8"))
+        raw = SqliteStore(self._path.with_name("aiteam.db")).load_all_tasks()
         states = [item["state"] for item in raw if item["task_id"] == "t1"]
         self.assertEqual(states[0], "waiting_user")
 

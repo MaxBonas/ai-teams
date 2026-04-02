@@ -8,7 +8,8 @@ import urllib.request
 from typing import Iterator
 
 from aiteam.adapters.base import ModelAdapter, messages_to_prompt, normalize_messages
-from aiteam.types import AdapterResponse, ChannelType
+from aiteam.sim_mode import sim_mode_enabled
+from aiteam.types import AdapterResponse, ChannelType, StreamChunk
 
 
 class ApiAdapter(ModelAdapter):
@@ -92,13 +93,7 @@ class ApiAdapter(ModelAdapter):
         first_line = (
             prompt_text.splitlines()[0][:80] if prompt_text.strip() else "tarea"
         )
-        demo_fast_mode = os.getenv("AITEAM_CHAT_DEMO_FAST", "0").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        if demo_fast_mode:
+        if sim_mode_enabled():
             content = (
                 f"[DEMO] Avance preparado para: {first_line!r}. "
                 f"Se mantiene el flujo operativo en modo demostracion."
@@ -245,7 +240,7 @@ class ApiAdapter(ModelAdapter):
 
     def invoke_stream(
         self, prompt: str, messages: list[dict[str, str]] | None = None
-    ) -> Iterator[str]:
+    ) -> Iterator[str | StreamChunk]:
         """Streaming invoke — yields text chunks as they arrive from the provider."""
         normalized = normalize_messages(messages, prompt)
         if not self._live_api_enabled():
@@ -276,7 +271,7 @@ class ApiAdapter(ModelAdapter):
 
     def _stream_openai_compatible(
         self, *, url: str, api_key_env: str, messages: list[dict]
-    ) -> Iterator[str]:
+    ) -> Iterator[str | StreamChunk]:
         """Parsea SSE de la API compatible con OpenAI y hace yield de chunks de texto."""
         api_key = os.getenv(api_key_env, "").strip()
         if not api_key:
@@ -314,8 +309,8 @@ class ApiAdapter(ModelAdapter):
         except (urllib.error.URLError, urllib.error.HTTPError):
             return
 
-    def _stream_anthropic(self, *, messages: list[dict]) -> Iterator[str]:
-        """Parsea SSE de Anthropic Messages API y hace yield de chunks de texto."""
+    def _stream_anthropic(self, *, messages: list[dict]) -> Iterator[str | StreamChunk]:
+        """Parsea SSE de Anthropic y preserva thinking cuando el provider lo emite."""
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
             return
@@ -346,11 +341,36 @@ class ApiAdapter(ModelAdapter):
                     data = line[6:]
                     try:
                         parsed = json.loads(data)
+                        if parsed.get("type") == "content_block_start":
+                            content_block = parsed.get("content_block", {})
+                            if not isinstance(content_block, dict):
+                                continue
+                            block_type = str(content_block.get("type") or "").strip().lower()
+                            if block_type == "thinking":
+                                thinking = str(content_block.get("thinking") or "").strip()
+                                if thinking:
+                                    yield StreamChunk(
+                                        text=thinking,
+                                        chunk_type="thinking",
+                                    )
                         if parsed.get("type") == "content_block_delta":
                             delta = parsed.get("delta", {})
+                            if not isinstance(delta, dict):
+                                continue
+                            delta_type = str(delta.get("type") or "").strip().lower()
+                            if delta_type == "thinking_delta":
+                                thinking = str(
+                                    delta.get("thinking") or delta.get("text") or ""
+                                )
+                                if thinking:
+                                    yield StreamChunk(
+                                        text=thinking,
+                                        chunk_type="thinking",
+                                    )
+                                continue
                             text = delta.get("text") or ""
                             if text:
-                                yield text
+                                yield str(text)
                     except (json.JSONDecodeError, KeyError):
                         continue
         except (urllib.error.URLError, urllib.error.HTTPError):

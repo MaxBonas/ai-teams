@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from aiteam.adapters import ApiAdapter
+from aiteam.types import StreamChunk
 
 
 class _MockHttpResponse:
@@ -29,6 +30,28 @@ class ApiAdapterLiveTests(unittest.TestCase):
             response = adapter.invoke("hello")
         self.assertFalse(response.success)
         self.assertIn("live_api_disabled", str(response.error))
+
+    def test_api_adapter_uses_canonical_sim_mode_env_for_demo_placeholder(self) -> None:
+        adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
+        with patch.dict(
+            "os.environ",
+            {"AITEAM_SIM_MODE": "1", "AITEAM_CHAT_DEMO_FAST": "0"},
+            clear=False,
+        ):
+            response = adapter._simulated_response("build", start=1.0)
+        self.assertTrue(response.success)
+        self.assertIn("[DEMO]", response.content)
+
+    def test_api_adapter_canonical_sim_mode_overrides_legacy_demo_env(self) -> None:
+        adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
+        with patch.dict(
+            "os.environ",
+            {"AITEAM_SIM_MODE": "0", "AITEAM_CHAT_DEMO_FAST": "1"},
+            clear=False,
+        ):
+            response = adapter._simulated_response("build", start=1.0)
+        self.assertTrue(response.success)
+        self.assertIn("[SIMULADO | openai:gpt-4.1-mini:api]", response.content)
 
     def test_api_adapter_calls_openai_compatible_endpoint_in_live_mode(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
@@ -104,6 +127,23 @@ class ApiAdapterLiveTests(unittest.TestCase):
             response = adapter.invoke("hello")
         self.assertFalse(response.success)
         self.assertIn("missing_api_key", str(response.error))
+
+    def test_subscription_adapter_keeps_legacy_demo_env_as_fallback(self) -> None:
+        from aiteam.adapters import SubscriptionAdapter
+
+        adapter = SubscriptionAdapter(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-4.1",
+        )
+        with patch.dict(
+            "os.environ",
+            {"AITEAM_SIM_MODE": "", "AITEAM_CHAT_DEMO_FAST": "1"},
+            clear=False,
+        ):
+            response = adapter._simulated_response("lead", start=1.0)
+        self.assertTrue(response.success)
+        self.assertIn("[DEMO]", response.content)
 
     def test_api_adapter_retries_transient_http_error(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
@@ -812,6 +852,38 @@ class StreamingInvokeTests(unittest.TestCase):
 
         self.assertEqual(chunks, ["Hello"])
 
+    def test_subscription_invoke_stream_openai_yields_chunks(self):
+        from unittest.mock import MagicMock
+        from aiteam.adapters import SubscriptionAdapter
+
+        adapter = SubscriptionAdapter(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-4.1",
+        )
+
+        mock_response = MagicMock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.__iter__ = lambda s: iter(
+            [
+                b'data: {"choices":[{"delta":{"content":"Hola"}}]}\n',
+                b"data: [DONE]\n",
+            ]
+        )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"AITEAM_ENABLE_LIVE_API": "1", "OPENAI_API_KEY": "test-key"},
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", return_value=mock_response),
+        ):
+            chunks = list(adapter.invoke_stream("test prompt"))
+
+        self.assertEqual(chunks, ["Hola"])
+
     def test_invoke_stream_anthropic_yields_chunks(self):
         """_stream_anthropic parsea SSE de Anthropic y hace yield de chunks."""
         from unittest.mock import MagicMock
@@ -843,6 +915,87 @@ class StreamingInvokeTests(unittest.TestCase):
             chunks = list(adapter.invoke_stream("test prompt"))
 
         self.assertEqual(chunks, ["Hi"])
+
+    def test_invoke_stream_anthropic_preserves_thinking_chunks(self):
+        from unittest.mock import MagicMock
+
+        adapter = ApiAdapter(
+            name="anthropic_api",
+            provider="anthropic",
+            model="claude-3-7-sonnet-20250219",
+        )
+
+        mock_response = MagicMock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.__iter__ = lambda s: iter(
+            [
+                b'data: {"type":"content_block_start","content_block":{"type":"thinking","thinking":"Plan inicial. "}}\n',
+                b'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Siguiente paso. "}}\n',
+                b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Respuesta final"}}\n',
+                b'data: {"type":"message_stop"}\n',
+            ]
+        )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"AITEAM_ENABLE_LIVE_API": "1", "ANTHROPIC_API_KEY": "test-key"},
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", return_value=mock_response),
+        ):
+            chunks = list(adapter.invoke_stream("test prompt"))
+
+        self.assertEqual(
+            chunks,
+            [
+                StreamChunk(text="Plan inicial.", chunk_type="thinking"),
+                StreamChunk(text="Siguiente paso. ", chunk_type="thinking"),
+                "Respuesta final",
+            ],
+        )
+
+    def test_subscription_invoke_stream_anthropic_preserves_thinking_chunks(self):
+        from unittest.mock import MagicMock
+        from aiteam.adapters import SubscriptionAdapter
+
+        adapter = SubscriptionAdapter(
+            name="claude_pro",
+            provider="anthropic",
+            model="claude-3-7-sonnet-20250219",
+        )
+
+        mock_response = MagicMock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.__iter__ = lambda s: iter(
+            [
+                b'data: {"type":"content_block_start","content_block":{"type":"thinking","thinking":"Primer paso. "}}\n',
+                b'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Segundo paso. "}}\n',
+                b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Respuesta pro"}}\n',
+                b'data: {"type":"message_stop"}\n',
+            ]
+        )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"AITEAM_ENABLE_LIVE_API": "1", "ANTHROPIC_API_KEY": "test-key"},
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", return_value=mock_response),
+        ):
+            chunks = list(adapter.invoke_stream("test prompt"))
+
+        self.assertEqual(
+            chunks,
+            [
+                StreamChunk(text="Primer paso.", chunk_type="thinking"),
+                StreamChunk(text="Segundo paso. ", chunk_type="thinking"),
+                "Respuesta pro",
+            ],
+        )
 
     def test_router_on_chunk_callback_receives_chunks(self):
         """route_and_invoke con on_chunk llama callback por chunk."""
@@ -881,6 +1034,46 @@ class StreamingInvokeTests(unittest.TestCase):
         self.assertTrue(decision.success)
         self.assertEqual(received_chunks, ["foo", "bar"])
         self.assertEqual(decision.response.content, "foobar")
+
+    def test_router_stream_keeps_thinking_out_of_final_content(self):
+        from aiteam.config import build_default_router_policy
+        from aiteam.router import HybridRouter
+        from aiteam.types import Complexity, Criticality, Role, RoutingRequest
+
+        class _ThinkingStreamingAdapter(ApiAdapter):
+            def available(self):
+                return True
+
+            def invoke_stream(self, prompt, messages=None):
+                yield StreamChunk(text="Analizando...", chunk_type="thinking")
+                yield "respuesta"
+
+        adapter = _ThinkingStreamingAdapter(
+            name="anthropic_api",
+            provider="anthropic",
+            model="claude-3-7-sonnet-20250219",
+            capabilities={"analysis"},
+        )
+        router = HybridRouter(adapters=[adapter], policy=build_default_router_policy())
+
+        received_chunks: list[object] = []
+        request = RoutingRequest(
+            role=Role.RESEARCHER,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+        )
+        decision = router.route_and_invoke(
+            request,
+            "test prompt",
+            on_chunk=lambda c: received_chunks.append(c),
+        )
+
+        self.assertTrue(decision.success)
+        self.assertEqual(
+            received_chunks,
+            [StreamChunk(text="Analizando...", chunk_type="thinking"), "respuesta"],
+        )
+        self.assertEqual(decision.response.content, "respuesta")
 
 
 if __name__ == "__main__":

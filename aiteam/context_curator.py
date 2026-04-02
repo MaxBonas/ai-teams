@@ -529,11 +529,19 @@ class ContextCuratorStore:
 
     def _write_project_context(self, project_key: str, payload: dict[str, Any]) -> None:
         path = self.projects_dir / f"{_slug(project_key)}.json"
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except FileNotFoundError:
+            pass
 
     def _write_chat_context(self, chat_root: str, payload: dict[str, Any]) -> None:
         path = self.chats_dir / f"{_slug(chat_root)}.json"
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except FileNotFoundError:
+            pass
 
     def _empty_context(self, *, project_key: str, chat_root: str) -> dict[str, Any]:
         return {

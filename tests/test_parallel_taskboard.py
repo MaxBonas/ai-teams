@@ -9,11 +9,63 @@ from aiteam.adapters.base import ModelAdapter
 from aiteam.config import build_default_router_policy
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.router import HybridRouter
+from aiteam.sqlite_store import SqliteStore
 from aiteam.taskboard import TaskBoard
 from aiteam.types import Role, TaskState, WorkTask
 
 
 class ParallelTaskBoardTests(unittest.TestCase):
+    def test_multiple_taskboards_do_not_overwrite_each_other(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = Path(tmp) / "tasks.json"
+            board_a = TaskBoard(storage)
+            board_b = TaskBoard(storage)
+
+            board_a.add_task(
+                WorkTask(
+                    task_id="A",
+                    title="Task A",
+                    description="x",
+                    role=Role.ENGINEER,
+                )
+            )
+            board_b.add_task(
+                WorkTask(
+                    task_id="B",
+                    title="Task B",
+                    description="x",
+                    role=Role.REVIEWER,
+                )
+            )
+
+            board_a.mark_completed("A", details="done")
+            board_b = TaskBoard(storage)
+            board_b.update_metadata("B", {"note": "keep"})
+
+            reloaded = TaskBoard(storage)
+            tasks = {task.task_id: task for task in reloaded.list_tasks()}
+            self.assertEqual(set(tasks.keys()), {"A", "B"})
+            self.assertEqual(tasks["A"].state, TaskState.COMPLETED)
+            self.assertEqual(tasks["A"].metadata.get("result"), "done")
+            self.assertEqual(tasks["B"].metadata.get("note"), "keep")
+
+    def test_workflow_entries_preserve_other_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SqliteStore(Path(tmp) / "aiteam.db")
+            store.save_workflow_entry("CHAT-A1B2C3D4", {"phase_outputs": {"build": "A"}})
+            store.save_workflow_entry("CHAT-B1C2D3E4", {"phase_outputs": {"review": "B"}})
+            store.save_workflow_entry("CHAT-A1B2C3D4", {"phase_outputs": {"build": "A2"}})
+
+            state = store.load_workflow_state()
+            self.assertEqual(
+                (state.get("CHAT-A1B2C3D4", {}) or {}).get("phase_outputs", {}).get("build"),
+                "A2",
+            )
+            self.assertEqual(
+                (state.get("CHAT-B1C2D3E4", {}) or {}).get("phase_outputs", {}).get("review"),
+                "B",
+            )
+
     def test_parallel_claim_is_safe_with_shared_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             board = TaskBoard(Path(tmp) / "tasks.json")

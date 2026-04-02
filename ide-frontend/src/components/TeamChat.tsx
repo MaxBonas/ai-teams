@@ -115,6 +115,22 @@ interface LastChatRun {
   ts?: string;
 }
 
+interface TaskSummary {
+  task_id: string;
+  short_id: string;
+  title: string;
+  role: string;
+  state: string;
+  assignee: string;
+  category: string;
+  phase: string;
+  provider: string;
+  model: string;
+  channel: string;
+  preview: string;
+  error: string;
+}
+
 interface TeamChatProgress {
   task_id: string;
   exists: boolean;
@@ -140,6 +156,14 @@ interface TeamChatProgress {
   last_event_ts: string;
   dynamic_phases_ready: boolean;
   phase_task_ids: Record<string, string>;
+  peer_consultation_summary: {
+    consulted_roles: string[];
+    consulted_providers: string[];
+    unavailable_roles: string[];
+    provider_count: number;
+    diversity_observed: boolean;
+  };
+  task_summaries: TaskSummary[];
 }
 
 const parseNumber = (value: unknown, fallback = 0): number => {
@@ -182,6 +206,39 @@ const parseChatProgress = (payload: unknown, fallbackTaskId: string): TeamChatPr
   const taskId = typeof row.task_id === 'string' && row.task_id.trim().length > 0
     ? row.task_id
     : fallbackTaskId;
+  const peerSummaryRaw = row.peer_consultation_summary;
+  const peerConsultationSummary = {
+    consulted_roles: Array.isArray((peerSummaryRaw as Record<string, unknown> | undefined)?.consulted_roles)
+      ? (((peerSummaryRaw as Record<string, unknown>).consulted_roles as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0))
+      : [],
+    consulted_providers: Array.isArray((peerSummaryRaw as Record<string, unknown> | undefined)?.consulted_providers)
+      ? (((peerSummaryRaw as Record<string, unknown>).consulted_providers as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0))
+      : [],
+    unavailable_roles: Array.isArray((peerSummaryRaw as Record<string, unknown> | undefined)?.unavailable_roles)
+      ? (((peerSummaryRaw as Record<string, unknown>).unavailable_roles as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0))
+      : [],
+    provider_count: parseNumber((peerSummaryRaw as Record<string, unknown> | undefined)?.provider_count, 0),
+    diversity_observed: Boolean((peerSummaryRaw as Record<string, unknown> | undefined)?.diversity_observed),
+  };
+  const taskSummaries: TaskSummary[] = Array.isArray(row.task_summaries)
+    ? (row.task_summaries as unknown[])
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+        .map((item) => ({
+          task_id: String(item.task_id ?? ''),
+          short_id: String(item.short_id ?? ''),
+          title: String(item.title ?? ''),
+          role: String(item.role ?? ''),
+          state: String(item.state ?? ''),
+          assignee: String(item.assignee ?? ''),
+          category: String(item.category ?? ''),
+          phase: String(item.phase ?? ''),
+          provider: String(item.provider ?? ''),
+          model: String(item.model ?? ''),
+          channel: String(item.channel ?? ''),
+          preview: String(item.preview ?? ''),
+          error: String(item.error ?? ''),
+        }))
+    : [];
   return {
     task_id: taskId,
     exists: Boolean(row.exists),
@@ -206,6 +263,8 @@ const parseChatProgress = (payload: unknown, fallbackTaskId: string): TeamChatPr
     last_event: typeof row.last_event === 'string' ? row.last_event : '',
     last_event_ts: typeof row.last_event_ts === 'string' ? row.last_event_ts : '',
     dynamic_phases_ready: Boolean(row.dynamic_phases_ready),
+    peer_consultation_summary: peerConsultationSummary,
+    task_summaries: taskSummaries,
     phase_task_ids: (() => {
       const raw = row.phase_task_ids;
       if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -218,6 +277,75 @@ const parseChatProgress = (payload: unknown, fallbackTaskId: string): TeamChatPr
       return {};
     })(),
   };
+};
+
+const laneStatusFromTaskState = (state: string): AgentLaneState['status'] => {
+  if (state === 'completed') return 'completed';
+  if (state === 'failed') return 'failed';
+  if (state === 'claimed' || state === 'running') return 'active';
+  return 'waiting';
+};
+
+const buildTaskHistoryLanes = (tasks: TaskSummary[]): Map<string, AgentLaneState> => {
+  const next = new Map<string, AgentLaneState>();
+  const relevant = tasks.filter((task) => (
+    task.state === 'completed'
+    || task.state === 'failed'
+    || Boolean(task.provider)
+    || Boolean(task.model)
+    || task.category === 'scout'
+  ));
+  const baseStartedAt = Date.now();
+  relevant.forEach((task, index) => {
+    next.set(task.task_id, {
+      taskId: task.task_id,
+      agentId: task.assignee || task.role || task.short_id,
+      role: task.role || 'unknown',
+      phase: task.phase || task.short_id || task.title,
+      title: task.title || task.short_id || task.task_id,
+      provider: task.provider,
+      model: task.model,
+      channel: task.channel,
+      status: laneStatusFromTaskState(task.state),
+      outputText: '',
+      thinkingText: '',
+      preview: task.error || task.preview,
+      durationMs: 0,
+      startedAt: baseStartedAt - (relevant.length - index) * 1000,
+    });
+  });
+  return next;
+};
+
+const mergeAgentLaneMaps = (
+  current: Map<string, AgentLaneState>,
+  incoming: Map<string, AgentLaneState>,
+): Map<string, AgentLaneState> => {
+  if (incoming.size === 0) {
+    return current;
+  }
+  const next = new Map(current);
+  incoming.forEach((lane, taskId) => {
+    const existing = next.get(taskId);
+    if (!existing) {
+      next.set(taskId, lane);
+      return;
+    }
+    next.set(taskId, {
+      ...lane,
+      ...existing,
+      provider: existing.provider || lane.provider,
+      model: existing.model || lane.model,
+      channel: existing.channel || lane.channel,
+      title: existing.title || lane.title,
+      phase: existing.phase || lane.phase,
+      agentId: existing.agentId || lane.agentId,
+      preview: existing.preview || lane.preview,
+      status: existing.status === 'active' ? existing.status : lane.status,
+      startedAt: existing.startedAt || lane.startedAt,
+    });
+  });
+  return next;
 };
 
 const createClientTaskId = (): string => {
@@ -281,6 +409,7 @@ function parseDecision(text: string) {
   const assignee = field('assignee');
   const role = field('role');
   const consulted = field('consulted');
+  const consultedProviders = field('consulted_providers');
   const provider = field('provider');
   const modelRaw = text.match(/model=([^\s;]+)/)?.[1] ?? '';
   const channel = field('channel');
@@ -288,7 +417,7 @@ function parseDecision(text: string) {
   const attempts = attemptRaw.replace(/[\[\]']/g, '');
   const summaryIdx = text.indexOf('output_summary=');
   const outputSummary = summaryIdx >= 0 ? text.slice(summaryIdx + 'output_summary='.length).trim() : '';
-  return { rank, assignee, role, consulted, provider, model: modelRaw, channel, attempts, outputSummary };
+  return { rank, assignee, role, consulted, consultedProviders, provider, model: modelRaw, channel, attempts, outputSummary };
 }
 
 function MessageMeta({ meta }: { meta: string }) {
@@ -330,6 +459,7 @@ function InspectorTrace({ text, onExpand }: { text: string; onExpand: () => void
         </span>
       </div>
       {d.consulted && <div className="inspector-row"><span>Consultó</span><span>{d.consulted}</span></div>}
+      {d.consultedProviders && <div className="inspector-row"><span>Providers</span><span>{d.consultedProviders}</span></div>}
       {d.attempts && <div className="inspector-row"><span>Ruta</span><span>{d.attempts}</span></div>}
       {d.outputSummary && (
         <div className="inspector-output">
@@ -380,6 +510,15 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
           {progress.evidence_gate_rejected && (
             <div className="team-chat-progress-line">evidence gate rejected · {progress.evidence_gate_failures.slice(0, 4).join(' | ') || 'missing evidence'}</div>
           )}
+          {(progress.peer_consultation_summary.consulted_roles.length > 0 || progress.peer_consultation_summary.consulted_providers.length > 0) && (
+            <div className="team-chat-progress-line">
+              peers {progress.peer_consultation_summary.consulted_roles.join(', ') || 'none'}
+              {' · '}
+              providers {progress.peer_consultation_summary.consulted_providers.join(', ') || 'none'}
+              {' · '}
+              diversity {progress.peer_consultation_summary.diversity_observed ? 'yes' : 'no'}
+            </div>
+          )}
           {!progress.dynamic_phases_ready && progress.state !== 'completed' && loading && (
             <div className="team-chat-progress-line planning-indicator">
               Team Lead planificando workflow...
@@ -392,6 +531,74 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
         </div>
       )}
     </div>
+  );
+}
+
+function RunTaskSection({
+  title,
+  rows,
+  defaultOpen = false,
+}: {
+  title: string;
+  rows: TaskSummary[];
+  defaultOpen?: boolean;
+}) {
+  if (rows.length === 0) {
+    return null;
+  }
+  return (
+    <details className="team-run-details-section" open={defaultOpen}>
+      <summary>
+        {title} <span>{rows.length}</span>
+      </summary>
+      <div className="team-run-task-list">
+        {rows.map((task) => (
+          <article key={task.task_id} className={`team-run-task team-run-task-${task.state || 'unknown'}`}>
+            <div className="team-run-task-main">
+              <div className="team-run-task-title">
+                {task.title || task.short_id || task.task_id}
+              </div>
+              <div className="team-run-task-meta">
+                <span className={`team-run-badge team-run-badge-${task.state || 'unknown'}`}>{task.state || 'unknown'}</span>
+                <span>{task.role || '-'}</span>
+                {task.assignee && <span>{task.assignee}</span>}
+                {(task.provider || task.model) && (
+                  <span>{[task.provider, task.model].filter(Boolean).join('/')}</span>
+                )}
+              </div>
+            </div>
+            {(task.error || task.preview) && (
+              <div className="team-run-task-preview">
+                {task.error || task.preview}
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function RunDetailsPanel({ progress }: { progress: TeamChatProgress | null }) {
+  const tasks = progress?.task_summaries || [];
+  if (!progress || tasks.length === 0) {
+    return null;
+  }
+  const phaseTasks = tasks.filter((task) => task.category === 'phase');
+  const scoutTasks = tasks.filter((task) => task.category === 'scout');
+  const delegateTasks = tasks.filter((task) => task.category === 'delegate');
+  const otherTasks = tasks.filter((task) => !['phase', 'scout', 'delegate'].includes(task.category));
+  return (
+    <section className="team-run-details">
+      <div className="team-run-details-header">
+        <strong>Tareas creadas</strong>
+        <span>{tasks.length} registradas</span>
+      </div>
+      <RunTaskSection title="Fases principales" rows={phaseTasks} defaultOpen />
+      <RunTaskSection title="Scouts y soporte" rows={scoutTasks} />
+      <RunTaskSection title="Delegadas" rows={delegateTasks} />
+      <RunTaskSection title="Otras" rows={otherTasks} />
+    </section>
   );
 }
 
@@ -425,22 +632,33 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   useEffect(() => {
     if (!chatToLoad || !workspacePath) return;
     const taskId = chatToLoad;
-    apiFetch(`/api/aiteam/chat/load/${encodeURIComponent(taskId)}`, {
-      headers: { 'x-workspace-path': workspacePath },
-    })
-      .then(r => r.json())
-      .then((data: unknown) => {
+    Promise.all([
+      apiFetch(`/api/aiteam/chat/load/${encodeURIComponent(taskId)}`, {
+        headers: { 'x-workspace-path': workspacePath },
+      }).then(r => r.json()),
+      apiFetch(`/api/aiteam/chat/progress/${encodeURIComponent(taskId)}`, {
+        headers: { 'x-workspace-path': workspacePath },
+      }).then(async (r) => (r.ok ? r.json() : null)).catch(() => null),
+    ])
+      .then(([data, progressPayload]) => {
         const d = data as { messages?: Array<{ sender: string; text: string }> };
-        if (!d.messages?.length) return;
-        setMessages(
-          d.messages.map((m, i) => ({
-            id: `history-${taskId}-${i}`,
-            sender: m.sender as 'user' | 'team',
-            text: m.text,
-          }))
-        );
+        if (d.messages?.length) {
+          setMessages(
+            d.messages.map((m, i) => ({
+              id: `history-${taskId}-${i}`,
+              sender: m.sender as 'user' | 'team',
+              text: m.text,
+            }))
+          );
+        }
+        const parsed = parseChatProgress(progressPayload, taskId);
         setStreamingText(null);
-        setAgentLanes(new Map());
+        if (parsed) {
+          setChatProgress(parsed);
+          setAgentLanes(buildTaskHistoryLanes(parsed.task_summaries));
+        } else {
+          setAgentLanes(new Map());
+        }
       })
       .catch(() => { /* ignore */ })
       .finally(() => onChatLoaded?.());
@@ -671,6 +889,14 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
       last_event_ts: '',
       dynamic_phases_ready: false,
       phase_task_ids: {},
+      peer_consultation_summary: {
+        consulted_roles: [],
+        consulted_providers: [],
+        unavailable_roles: [],
+        provider_count: 0,
+        diversity_observed: false,
+      },
+      task_summaries: [],
     });
     void pollProgress();
     progressIntervalId = window.setInterval(() => {
@@ -757,12 +983,37 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                         role: ev.role ?? '',
                         phase: ev.phase ?? '',
                         title: ev.title ?? '',
+                        provider: '',
+                        model: '',
+                        channel: '',
                         status: 'active',
                         outputText: '',
                         thinkingText: '',
                         preview: '',
                         durationMs: 0,
                         startedAt: Date.now(),
+                      });
+                      return next;
+                    });
+                  }
+                } catch { /* ignore */ }
+                currentEventType = '';
+              } else if (currentEventType === 'agent_routed') {
+                try {
+                  const ev = JSON.parse(rawData) as {
+                    task_id?: string; provider?: string; model?: string; channel?: string;
+                  };
+                  const tid = ev.task_id ?? '';
+                  if (tid) {
+                    setAgentLanes(prev => {
+                      const lane = prev.get(tid);
+                      if (!lane) return prev;
+                      const next = new Map(prev);
+                      next.set(tid, {
+                        ...lane,
+                        provider: ev.provider ?? lane.provider,
+                        model: ev.model ?? lane.model,
+                        channel: ev.channel ?? lane.channel,
                       });
                       return next;
                     });
@@ -796,6 +1047,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                 try {
                   const ev = JSON.parse(rawData) as {
                     task_id?: string; preview?: string; duration_ms?: number;
+                    provider?: string; model?: string; channel?: string;
                   };
                   const tid = ev.task_id ?? '';
                   if (tid) {
@@ -808,6 +1060,9 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                         status: 'completed',
                         preview: ev.preview ?? '',
                         durationMs: ev.duration_ms ?? 0,
+                        provider: ev.provider ?? lane.provider,
+                        model: ev.model ?? lane.model,
+                        channel: ev.channel ?? lane.channel,
                       });
                       return next;
                     });
@@ -818,6 +1073,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                 try {
                   const ev = JSON.parse(rawData) as {
                     task_id?: string; error?: string;
+                    provider?: string; model?: string; channel?: string;
                   };
                   const tid = ev.task_id ?? '';
                   if (tid) {
@@ -829,6 +1085,9 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                         ...lane,
                         status: 'failed',
                         preview: ev.error ?? '',
+                        provider: ev.provider ?? lane.provider,
+                        model: ev.model ?? lane.model,
+                        channel: ev.channel ?? lane.channel,
                       });
                       return next;
                     });
@@ -836,7 +1095,6 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                 } catch { /* ignore */ }
                 currentEventType = '';
               } else if (currentEventType === 'result') {
-                setAgentLanes(new Map()); // limpiar lanes al terminar
                 setStreamingText(null);
                 setStreamingTaskId('');
                 try {
@@ -958,7 +1216,31 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                     last_event: typeof json.state === 'string' ? `Run ${json.state}` : (prev?.last_event ?? ''),
                     last_event_ts: new Date().toISOString(),
                     dynamic_phases_ready: typeof json.dynamic_phases_ready === 'boolean' ? json.dynamic_phases_ready : (prev?.dynamic_phases_ready ?? false),
+                    peer_consultation_summary: json.peer_consultation_summary != null && typeof json.peer_consultation_summary === 'object'
+                      ? {
+                          consulted_roles: Array.isArray((json.peer_consultation_summary as Record<string, unknown>).consulted_roles)
+                            ? ((json.peer_consultation_summary as Record<string, unknown>).consulted_roles as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
+                            : (prev?.peer_consultation_summary.consulted_roles ?? []),
+                          consulted_providers: Array.isArray((json.peer_consultation_summary as Record<string, unknown>).consulted_providers)
+                            ? ((json.peer_consultation_summary as Record<string, unknown>).consulted_providers as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
+                            : (prev?.peer_consultation_summary.consulted_providers ?? []),
+                          unavailable_roles: Array.isArray((json.peer_consultation_summary as Record<string, unknown>).unavailable_roles)
+                            ? ((json.peer_consultation_summary as Record<string, unknown>).unavailable_roles as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
+                            : (prev?.peer_consultation_summary.unavailable_roles ?? []),
+                          provider_count: Number.isFinite(Number((json.peer_consultation_summary as Record<string, unknown>).provider_count))
+                            ? Number((json.peer_consultation_summary as Record<string, unknown>).provider_count)
+                            : (prev?.peer_consultation_summary.provider_count ?? 0),
+                          diversity_observed: Boolean((json.peer_consultation_summary as Record<string, unknown>).diversity_observed),
+                        }
+                      : (prev?.peer_consultation_summary ?? {
+                          consulted_roles: [],
+                          consulted_providers: [],
+                          unavailable_roles: [],
+                          provider_count: 0,
+                          diversity_observed: false,
+                        }),
                     phase_task_ids: json.phase_task_ids != null && typeof json.phase_task_ids === 'object' ? (json.phase_task_ids as Record<string, string>) : (prev?.phase_task_ids ?? {}),
+                    task_summaries: prev?.task_summaries ?? [],
                   }));
 
                   if (json.decision_justification) {
@@ -1031,6 +1313,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
         const parsed = parseChatProgress(finalProgressPayload, clientTaskId);
         if (parsed) {
           setChatProgress(parsed);
+          setAgentLanes((prev) => mergeAgentLaneMaps(prev, buildTaskHistoryLanes(parsed.task_summaries)));
         }
       } catch {
         // keep the latest in-memory progress snapshot
@@ -1107,6 +1390,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
 
           {/* Agent lanes dentro del thread */}
           <AgentPanel lanes={agentLanes} visible={loading || agentLanes.size > 0} />
+          <RunDetailsPanel progress={chatProgress} />
 
           {streamingText !== null && (() => {
             // Mientras el buffer está vacío, mostrar la fase activa del agente
@@ -1298,6 +1582,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                   <span>Rol</span><span>{d.role} ({d.rank})</span>
                   <span>Agente</span><span>{d.assignee}</span>
                   <span>Consultó</span><span>{d.consulted || '—'}</span>
+                  <span>Providers</span><span>{d.consultedProviders || '—'}</span>
                   <span>Proveedor</span><span>{d.provider} / {d.model}</span>
                   <span>Canal</span><span>{d.channel}</span>
                   <span>Intentos</span><span>{d.attempts || '—'}</span>

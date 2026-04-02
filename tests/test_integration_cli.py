@@ -15,7 +15,9 @@ def test_e2e_cli_flow(tmp_path: Path):
     # 1. Initialize runtime
     cmd_init(runtime_dir)
     assert runtime_dir.exists()
+    assert (runtime_dir / "aiteam.db").exists()
     assert (runtime_dir / "adapters.json").exists()
+    assert not (runtime_dir / "tasks.json").exists()
     
     # 2. Create a dummy catalog
     catalog_path = tmp_path / "catalog.json"

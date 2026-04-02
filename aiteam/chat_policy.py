@@ -57,7 +57,6 @@ class ChatPolicyInput:
     strict_mode: bool
     continuation_requested: bool
     allow_low_productivity_override: bool
-    demo_fast_chat_active: bool
     lead_advisory_mode: bool
     live_mode_required: bool
     execution_mode: str
@@ -298,7 +297,6 @@ def evaluate_chat_policy(
     low_productivity_override = (
         policy.allow_low_productivity_override
         or policy.continuation_requested
-        or policy.demo_fast_chat_active
         or (
             run_type_policy.is_context_query
             and run_type_policy.passes_by_reasoning

@@ -203,6 +203,44 @@ class LeadControlTests(unittest.TestCase):
             ["RESEARCHER", "REVIEWER", "QA"],
         )
 
+    def test_run_mode_architecture_review_uses_architecture_preset(self) -> None:
+        result = resolve_lead_intake(
+            lead_output="[RUN_MODE: architecture_review]\nRevisa arquitectura.",
+            chat_mode="classic",
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            round_budget=5,
+        )
+
+        self.assertEqual(
+            [item.phase_id for item in result.phases],
+            ["discovery", "architecture_options", "adr_document"],
+        )
+        self.assertEqual(
+            [item.role for item in result.phases],
+            ["RESEARCHER", "REVIEWER", "REVIEWER"],
+        )
+        self.assertEqual(result.directives.get("run_mode"), "architecture_review")
+
+    def test_run_mode_roadmap_uses_roadmap_preset(self) -> None:
+        result = resolve_lead_intake(
+            lead_output="[RUN_MODE: roadmap]\nDefine roadmap.",
+            chat_mode="classic",
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            round_budget=5,
+        )
+
+        self.assertEqual(
+            [item.phase_id for item in result.phases],
+            ["discovery", "roadmap_prioritization", "roadmap_document"],
+        )
+        self.assertEqual(
+            [item.role for item in result.phases],
+            ["RESEARCHER", "REVIEWER", "REVIEWER"],
+        )
+        self.assertEqual(result.directives.get("run_mode"), "roadmap")
+
     def test_explicit_workflow_plan_takes_precedence_over_run_mode(self) -> None:
         result = resolve_lead_intake(
             lead_output=(

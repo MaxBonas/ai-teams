@@ -5,9 +5,11 @@ import os
 import time
 import urllib.error
 import urllib.request
+from typing import Iterator
 
 from aiteam.adapters.base import ModelAdapter, messages_to_prompt, normalize_messages
-from aiteam.types import AdapterResponse, ChannelType
+from aiteam.sim_mode import sim_mode_enabled
+from aiteam.types import AdapterResponse, ChannelType, StreamChunk
 
 # requests tiene mejor TLS fingerprint que urllib — necesario para Groq (Cloudflare)
 try:
@@ -131,6 +133,37 @@ class SubscriptionAdapter(ModelAdapter):
             error="live_api_disabled",
         )
 
+    def invoke_stream(
+        self, prompt: str, messages: list[dict[str, str]] | None = None
+    ) -> Iterator[str | StreamChunk]:
+        normalized = normalize_messages(messages, prompt)
+        if not self._live_api_enabled():
+            response = self.invoke(prompt, messages=messages)
+            if response.success and response.content:
+                yield response.content
+            return
+        provider = self.provider.strip().lower()
+        if provider == "openai":
+            yield from self._stream_openai_compatible(
+                url="https://api.openai.com/v1/chat/completions",
+                api_key_env="OPENAI_API_KEY",
+                messages=normalized,
+            )
+            return
+        if provider == "groq":
+            yield from self._stream_openai_compatible(
+                url="https://api.groq.com/openai/v1/chat/completions",
+                api_key_env="GROQ_API_KEY",
+                messages=normalized,
+            )
+            return
+        if provider == "anthropic":
+            yield from self._stream_anthropic(messages=normalized)
+            return
+        response = self.invoke(prompt, messages=messages)
+        if response.success and response.content:
+            yield response.content
+
     def _simulated_response(
         self,
         prompt_text: str,
@@ -142,13 +175,7 @@ class SubscriptionAdapter(ModelAdapter):
         first_line = (
             prompt_text.splitlines()[0][:80] if prompt_text.strip() else "tarea"
         )
-        demo_fast_mode = os.getenv("AITEAM_CHAT_DEMO_FAST", "0").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        if demo_fast_mode:
+        if sim_mode_enabled():
             content = (
                 f"[DEMO] Avance preparado para: {first_line!r}. "
                 f"Se mantiene el flujo operativo en modo demostracion."
@@ -256,6 +283,111 @@ class SubscriptionAdapter(ModelAdapter):
         return self._invoke_openai_compatible(
             config["url"], api_key, prompt, messages, tools=tools
         )
+
+    def _stream_openai_compatible(
+        self, *, url: str, api_key_env: str, messages: list[dict]
+    ) -> Iterator[str | StreamChunk]:
+        api_key = os.getenv(api_key_env, "").strip()
+        if not api_key:
+            return
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.2,
+            "stream": True,
+        }
+        payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+        request = urllib.request.Request(
+            url, data=payload, headers=headers, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        parsed = json.loads(data)
+                        delta = parsed["choices"][0]["delta"].get("content") or ""
+                        if delta:
+                            yield str(delta)
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+        except (urllib.error.URLError, urllib.error.HTTPError):
+            return
+
+    def _stream_anthropic(self, *, messages: list[dict]) -> Iterator[str | StreamChunk]:
+        api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            return
+        body = {
+            "model": self.model,
+            "max_tokens": 4096,
+            "messages": messages,
+            "stream": True,
+        }
+        payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+        request = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    try:
+                        parsed = json.loads(data)
+                        if parsed.get("type") == "content_block_start":
+                            content_block = parsed.get("content_block", {})
+                            if not isinstance(content_block, dict):
+                                continue
+                            block_type = str(content_block.get("type") or "").strip().lower()
+                            if block_type == "thinking":
+                                thinking = str(content_block.get("thinking") or "").strip()
+                                if thinking:
+                                    yield StreamChunk(
+                                        text=thinking,
+                                        chunk_type="thinking",
+                                    )
+                        if parsed.get("type") == "content_block_delta":
+                            delta = parsed.get("delta", {})
+                            if not isinstance(delta, dict):
+                                continue
+                            delta_type = str(delta.get("type") or "").strip().lower()
+                            if delta_type == "thinking_delta":
+                                thinking = str(
+                                    delta.get("thinking") or delta.get("text") or ""
+                                )
+                                if thinking:
+                                    yield StreamChunk(
+                                        text=thinking,
+                                        chunk_type="thinking",
+                                    )
+                                continue
+                            text = delta.get("text") or ""
+                            if text:
+                                yield str(text)
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        except (urllib.error.URLError, urllib.error.HTTPError):
+            return
 
     def _invoke_openai_compatible(
         self,

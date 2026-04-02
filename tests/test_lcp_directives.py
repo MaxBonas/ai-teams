@@ -149,6 +149,14 @@ class TestExtractLcpDirectives(unittest.TestCase):
         result = _extract_lcp_directives("[RUN_MODE: team_decision]")
         self.assertEqual(result.get("run_mode"), "team_decision")
 
+    def test_run_mode_architecture_review_detected(self):
+        result = _extract_lcp_directives("[RUN_MODE: architecture_review]")
+        self.assertEqual(result.get("run_mode"), "architecture_review")
+
+    def test_run_mode_roadmap_detected(self):
+        result = _extract_lcp_directives("[RUN_MODE: roadmap]")
+        self.assertEqual(result.get("run_mode"), "roadmap")
+
     def test_replan_detected(self):
         result = _extract_lcp_directives("[REPLAN]")
         self.assertTrue(result.get("replan"))

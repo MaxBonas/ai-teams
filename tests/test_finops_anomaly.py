@@ -1,5 +1,6 @@
 """Tests for finops anomaly detection and per-model daily caps."""
 
+import calendar
 import json
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -189,17 +190,33 @@ class TestFinopsAnomalyDetection(TestCase):
         """Return 'no_variance' when all daily costs are identical.
         
         Setup:
-        - 7 records: each day $0.10 cost (StdDev = 0)
+        - 7 records in the current month
+        - each day $0.10 cost (StdDev = 0)
         """
-        self._inject_daily_costs({
-            6: 0.10,
-            5: 0.10,
-            4: 0.10,
-            3: 0.10,
-            2: 0.10,
-            1: 0.10,
-            0: 0.10,
-        })
+        now = datetime.now(timezone.utc)
+        _, days_in_month = calendar.monthrange(now.year, now.month)
+        self.assertGreaterEqual(days_in_month, 7)
+
+        entries = []
+        for hour, day_number in enumerate(range(1, 8)):
+            day = datetime(now.year, now.month, day_number, tzinfo=timezone.utc).date()
+            entries.append(
+                {
+                    "ts": f"{day.isoformat()}T{hour:02d}:00:00+00:00",
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "channel": "api",
+                    "reason": "test",
+                    "success": True,
+                    "input_tokens": 1000,
+                    "output_tokens": 1000,
+                    "cost_usd": 0.10,
+                }
+            )
+
+        for entry in entries:
+            with open(self.manager.ledger_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
         
         anomaly_detected, reason = self.manager.detect_cost_anomaly()
         

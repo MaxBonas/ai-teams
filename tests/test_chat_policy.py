@@ -21,7 +21,6 @@ class ChatPolicyTests(unittest.TestCase):
             "strict_mode": False,
             "continuation_requested": False,
             "allow_low_productivity_override": False,
-            "demo_fast_chat_active": False,
             "lead_advisory_mode": False,
             "live_mode_required": False,
             "execution_mode": "simulated",

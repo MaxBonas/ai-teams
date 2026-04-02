@@ -81,15 +81,11 @@ export default function TeamLogOutputViewer({ workspacePath }: TeamLogOutputView
         setOutputTotal(Number(json.output_total || 0));
         setError(json.error || '');
       } else {
-        const [eventsResp, tasksResp] = await Promise.all([
-          apiFetch(`/api/fs/file?path=${encodeURIComponent('runtime/events.jsonl')}`),
-          apiFetch(`/api/fs/file?path=${encodeURIComponent('runtime/tasks.json')}`),
-        ]);
+        const eventsResp = await apiFetch(`/api/fs/file?path=${encodeURIComponent('runtime/events.jsonl')}`);
         const eventsJson = await eventsResp.json() as { content?: string; error?: string };
-        const tasksJson = await tasksResp.json() as { content?: string; error?: string };
 
-        if (!eventsResp.ok || !tasksResp.ok || eventsJson.error || tasksJson.error) {
-          const detail = json.detail || json.error || eventsJson.error || tasksJson.error || `HTTP ${response.status}`;
+        if (!eventsResp.ok || eventsJson.error) {
+          const detail = json.detail || json.error || eventsJson.error || `HTTP ${response.status}`;
           setError(`Log endpoint unavailable: ${detail}`);
           setEventLogs([]);
           setTaskOutputs([]);
@@ -139,44 +135,11 @@ export default function TeamLogOutputViewer({ workspacePath }: TeamLogOutputView
           }
         });
 
-        let parsedTaskList: unknown = [];
-        try {
-          parsedTaskList = JSON.parse(tasksJson.content || '[]');
-        } catch {
-          parsedTaskList = [];
-        }
-
-        const parsedOutputs: TaskOutputItem[] = Array.isArray(parsedTaskList)
-          ? parsedTaskList
-              .map((item) => {
-                if (!item || typeof item !== 'object') {
-                  return null;
-                }
-                const row = item as Record<string, unknown>;
-                const metadata = (row.metadata && typeof row.metadata === 'object') ? (row.metadata as Record<string, unknown>) : {};
-                const raw = metadata.result || metadata.error || metadata.execution_plan_result;
-                if (!raw) {
-                  return null;
-                }
-                const taskId = String(row.task_id || '');
-                return {
-                  task_id: taskId,
-                  role: String(row.role || ''),
-                  state: String(row.state || ''),
-                  ts: taskLastTs.get(taskId) || '',
-                  output: String(raw),
-                };
-              })
-              .filter((item): item is TaskOutputItem => item !== null)
-              .sort((a, b) => b.ts.localeCompare(a.ts))
-              .slice(0, 100)
-          : [];
-
         setEventLogs(parsedEventLogs);
-        setTaskOutputs(parsedOutputs);
+        setTaskOutputs([]);
         setEventTotal(rawEventItems.length);
-        setOutputTotal(parsedOutputs.length);
-        setError('');
+        setOutputTotal(0);
+        setError('Log endpoint unavailable: mostrando solo eventos; task outputs requieren el endpoint backend.');
       }
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Unknown request failure';

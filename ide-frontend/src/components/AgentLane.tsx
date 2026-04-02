@@ -6,6 +6,9 @@ export interface AgentLaneState {
   role: string;
   phase: string;
   title: string;
+  provider?: string;
+  model?: string;
+  channel?: string;
   status: 'waiting' | 'active' | 'completed' | 'failed';
   outputText: string;
   thinkingText: string;
@@ -89,6 +92,11 @@ export default function AgentLane({ lane }: AgentLaneProps) {
         <span className="lane-icon" style={{ backgroundColor: color }}>{icon}</span>
         <span className="lane-phase">{lane.phase}</span>
         <span className="lane-agent-id">{lane.agentId}</span>
+        {(lane.provider || lane.model) && (
+          <span className="lane-model-chip">
+            {[lane.provider, lane.model].filter(Boolean).join('/')}
+          </span>
+        )}
         <div className="lane-status-area">
           {statusDot}
           {!isWaiting && (
@@ -116,6 +124,12 @@ export default function AgentLane({ lane }: AgentLaneProps) {
 
       {displayText && (
         <div className="lane-output-section">
+          {(lane.title || lane.channel) && (
+            <div className="lane-output-meta">
+              {lane.title || lane.phase}
+              {lane.channel ? ` · ${lane.channel}` : ''}
+            </div>
+          )}
           {isDone && displayText.length > 160 && (
             <button
               className="lane-collapse-btn"

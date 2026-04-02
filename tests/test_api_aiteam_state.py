@@ -11,6 +11,7 @@ from uuid import uuid4
 import api.main as api_main
 from fastapi.testclient import TestClient
 from aiteam.context_curator import ContextCuratorStore
+from aiteam.sqlite_store import SqliteStore
 
 
 class APIAIStateNotebookLMTests(unittest.TestCase):
@@ -56,6 +57,14 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
     def tearDown(self) -> None:
         tempfile.tempdir = self._previous_tempdir
         tempfile.TemporaryDirectory = self._previous_temporary_directory
+
+    @staticmethod
+    def _write_runtime_tasks_sqlite(runtime_dir: Path, tasks: list[dict]) -> None:
+        SqliteStore(runtime_dir / "aiteam.db").save_all_tasks(tasks)
+
+    @staticmethod
+    def _write_runtime_workflow_sqlite(runtime_dir: Path, workflow_state: dict) -> None:
+        SqliteStore(runtime_dir / "aiteam.db").save_workflow_state(workflow_state)
 
     def test_notebooklm_status_reports_manual_export_when_no_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
@@ -221,21 +230,18 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            tasks_path = runtime_dir / "tasks.json"
-            tasks_path.write_text(
-                json.dumps(
-                    [
-                        {
-                            "task_id": "T-100",
-                            "role": "engineer",
-                            "state": "completed",
-                            "metadata": {
-                                "result": "Implemented and validated",
-                            },
-                        }
-                    ]
-                ),
-                encoding="utf-8",
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "T-100",
+                        "role": "engineer",
+                        "state": "completed",
+                        "metadata": {
+                            "result": "Implemented and validated",
+                        },
+                    }
+                ],
             )
 
             previous_workspace = api_main.get_current_workspace()
@@ -344,24 +350,22 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
             runtime_dir = workspace / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
 
-            (runtime_dir / "tasks.json").write_text(
-                json.dumps(
-                    [
-                        {
-                            "task_id": "CHAT-demo::lead_intake",
-                            "title": "Lead intake and project framing",
-                            "description": "Eres Team Lead senior.\nSolicitud original:\ncrea un videojuego 2D\nEntrega: objetivos",
-                            "role": "team_lead",
-                            "complexity": "medium",
-                            "criticality": "medium",
-                            "dependencies": [],
-                            "state": "completed",
-                            "assignee": "lead-1",
-                            "metadata": {"phase": "lead_intake"},
-                        }
-                    ]
-                ),
-                encoding="utf-8",
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-demo::lead_intake",
+                        "title": "Lead intake and project framing",
+                        "description": "Eres Team Lead senior.\nSolicitud original:\ncrea un videojuego 2D\nEntrega: objetivos",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"phase": "lead_intake"},
+                    }
+                ],
             )
             (runtime_dir / "events.jsonl").write_text(
                 json.dumps(
@@ -404,36 +408,34 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
             workspace = Path(tmp)
             runtime_dir = workspace / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
-            (runtime_dir / "tasks.json").write_text(
-                json.dumps(
-                    [
-                        {
-                            "task_id": "CHAT-ctx001::lead_intake",
-                            "title": "Lead intake and project framing",
-                            "description": "Solicitud original:\ncrear prototipo 2D\nEntrega: objetivos",
-                            "role": "team_lead",
-                            "complexity": "medium",
-                            "criticality": "medium",
-                            "dependencies": [],
-                            "state": "completed",
-                            "assignee": "lead-1",
-                            "metadata": {"phase": "lead_intake"},
-                        },
-                        {
-                            "task_id": "CHAT-ctx001::lead_close",
-                            "title": "Lead synthesis and response",
-                            "description": "close",
-                            "role": "team_lead",
-                            "complexity": "medium",
-                            "criticality": "medium",
-                            "dependencies": ["CHAT-ctx001::lead_intake"],
-                            "state": "completed",
-                            "assignee": "lead-1",
-                            "metadata": {"result": "Se definio plan de prototipo"},
-                        },
-                    ]
-                ),
-                encoding="utf-8",
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-ctx001::lead_intake",
+                        "title": "Lead intake and project framing",
+                        "description": "Solicitud original:\ncrear prototipo 2D\nEntrega: objetivos",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"phase": "lead_intake"},
+                    },
+                    {
+                        "task_id": "CHAT-ctx001::lead_close",
+                        "title": "Lead synthesis and response",
+                        "description": "close",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": ["CHAT-ctx001::lead_intake"],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"result": "Se definio plan de prototipo"},
+                    },
+                ],
             )
             previous_workspace = api_main.get_current_workspace()
             try:
@@ -445,6 +447,54 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                 continuity = str(payload.get("project_continuity", ""))
                 self.assertIn("CHAT-ctx001", continuity)
                 self.assertIn("crear prototipo 2D", continuity)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_aiteam_state_includes_project_continuity_summary_from_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-ctxsql::lead_intake",
+                        "title": "Lead intake and project framing",
+                        "description": "Solicitud original:\ncrear prototipo sqlite\nEntrega: objetivos",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"phase": "lead_intake"},
+                    },
+                    {
+                        "task_id": "CHAT-ctxsql::lead_close",
+                        "title": "Lead synthesis and response",
+                        "description": "close",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": ["CHAT-ctxsql::lead_intake"],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"result": "Se definio plan persistido en sqlite"},
+                    },
+                ],
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.get("/api/aiteam/state?environment=dev")
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                continuity = str(payload.get("project_continuity", ""))
+                self.assertIn("CHAT-ctxsql", continuity)
+                self.assertIn("crear prototipo sqlite", continuity)
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -471,65 +521,62 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            (runtime_dir / "workflow_state.json").write_text(
-                json.dumps(
-                    {
-                        "CHAT-econ01": {
-                            "phase_outputs": {
-                                "build": "resultado extenso de build con evidencia detallada y varias lineas de contexto crudo" * 8,
-                                "review": "resultado de review con findings y contexto repetido" * 6,
-                            },
-                            "phase_evidence_plan": {
-                                "build": {
-                                    "delegate_intents": ["delegate_test_run"],
-                                    "wait_policy": "quorum",
-                                    "delegate_budget": 4,
-                                }
-                            },
-                            "delegate_batches": [
-                                {
-                                    "intent": "delegate_browser_repro",
-                                    "wait_policy": "quorum",
-                                    "economics": {
-                                        "economics_version": "delegate_economics_v1",
-                                        "estimated": True,
-                                        "specialist_tasks": 3,
-                                        "estimated_lead_tokens_avoided": 2600,
-                                        "estimated_operator_tokens_used": 820,
-                                        "estimated_net_tokens_saved": 1780,
-                                        "estimated_cost_units_saved": 18,
-                                        "specialist_breakdown": {
-                                            "browser_operator": {"count": 1, "completed": 1, "failed": 0}
-                                        },
+            self._write_runtime_workflow_sqlite(
+                runtime_dir,
+                {
+                    "CHAT-econ01": {
+                        "phase_outputs": {
+                            "build": "resultado extenso de build con evidencia detallada y varias lineas de contexto crudo" * 8,
+                            "review": "resultado de review con findings y contexto repetido" * 6,
+                        },
+                        "phase_evidence_plan": {
+                            "build": {
+                                "delegate_intents": ["delegate_test_run"],
+                                "wait_policy": "quorum",
+                                "delegate_budget": 4,
+                            }
+                        },
+                        "delegate_batches": [
+                            {
+                                "intent": "delegate_browser_repro",
+                                "wait_policy": "quorum",
+                                "economics": {
+                                    "economics_version": "delegate_economics_v1",
+                                    "estimated": True,
+                                    "specialist_tasks": 3,
+                                    "estimated_lead_tokens_avoided": 2600,
+                                    "estimated_operator_tokens_used": 820,
+                                    "estimated_net_tokens_saved": 1780,
+                                    "estimated_cost_units_saved": 18,
+                                    "specialist_breakdown": {
+                                        "browser_operator": {"count": 1, "completed": 1, "failed": 0}
                                     },
-                                }
+                                },
+                            }
+                        ],
+                        "delegate_economics_summary": {
+                            "economics_version": "delegate_economics_v1",
+                            "estimated": True,
+                            "batch_count": 1,
+                            "specialist_task_count": 3,
+                            "quorum_met_ratio": 1.0,
+                            "estimated_net_tokens_saved": 1780,
+                        },
+                        "context_pressure": {
+                            "score": 5,
+                            "level": "medium",
+                            "signals": [
+                                "continuation_requested",
+                                "delegate_batches_accumulated",
+                                "phase_context_accumulated",
                             ],
-                            "delegate_economics_summary": {
-                                "economics_version": "delegate_economics_v1",
-                                "estimated": True,
-                                "batch_count": 1,
-                                "specialist_task_count": 3,
-                                "quorum_met_ratio": 1.0,
-                                "estimated_net_tokens_saved": 1780,
-                            },
-                            "context_pressure": {
-                                "score": 5,
-                                "level": "medium",
-                                "signals": [
-                                    "continuation_requested",
-                                    "delegate_batches_accumulated",
-                                    "phase_context_accumulated",
-                                ],
-                                "recommend_context_curator": True,
-                            },
-                            "context_curator_recommended": True,
-                            "project_context_summary": "decisions: login flow auditado",
-                            "chat_context_summary": "working_set: build: revisar auth selector",
-                        }
-                    },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
+                            "recommend_context_curator": True,
+                        },
+                        "context_curator_recommended": True,
+                        "project_context_summary": "decisions: login flow auditado",
+                        "chat_context_summary": "working_set: build: revisar auth selector",
+                    }
+                },
             )
             curator_store = ContextCuratorStore(runtime_dir)
             project_ctx = curator_store.load_project_context(str(workspace.resolve()))
@@ -547,34 +594,34 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
             chat_ctx["source_task_ids"] = ["CHAT-econ01::lead_intake"]
             chat_ctx["updated_at"] = now_iso
             curator_store._write_chat_context("CHAT-econ01", chat_ctx)
-            (runtime_dir / "tasks.json").write_text(
-                json.dumps(
-                    [
-                        {
-                            "task_id": "CHAT-econ01::build",
-                            "state": "completed",
-                            "metadata": {
-                                "tool_rewiring_active": True,
-                                "tool_rewiring_preferred_specialist": "skill_worker",
-                                "tool_rewiring_replacement_for": ["semgrep_mcp"],
-                                "specialist_reports": [
-                                    {
-                                        "specialist": "browser_operator",
-                                        "summary": "Se reprodujo el flujo UI con evidencia compacta.",
-                                        "recommendation": "revisar selector principal",
-                                        "provider": "openai",
-                                        "model": "gpt-4o-mini",
-                                        "validation_status": "valid",
-                                        "validation_errors": [],
-                                        "report_version": "specialist_report_v1",
-                                    }
-                                ]
-                            },
-                        }
-                    ],
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-econ01::build",
+                        "state": "completed",
+                        "metadata": {
+                            "tool_rewiring_active": True,
+                            "tool_rewiring_preferred_specialist": "skill_worker",
+                            "tool_rewiring_replacement_for": ["semgrep_mcp"],
+                            "consulted_roles": ["scout", "reviewer"],
+                            "consulted_providers": ["anthropic", "openai"],
+                            "peer_diversity_observed": True,
+                            "specialist_reports": [
+                                {
+                                    "specialist": "browser_operator",
+                                    "summary": "Se reprodujo el flujo UI con evidencia compacta.",
+                                    "recommendation": "revisar selector principal",
+                                    "provider": "openai",
+                                    "model": "gpt-4o-mini",
+                                    "validation_status": "valid",
+                                    "validation_errors": [],
+                                    "report_version": "specialist_report_v1",
+                                }
+                            ]
+                        },
+                    }
+                ],
             )
 
             previous_workspace = api_main.get_current_workspace()
@@ -609,6 +656,16 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                     str((last_chat.get("context_pressure", {}) or {}).get("level", "")),
                     "medium",
                 )
+                peer_summary = last_chat.get("peer_consultation_summary", {}) or {}
+                self.assertEqual(
+                    list(peer_summary.get("consulted_roles", [])),
+                    ["scout", "reviewer"],
+                )
+                self.assertEqual(
+                    list(peer_summary.get("consulted_providers", [])),
+                    ["anthropic", "openai"],
+                )
+                self.assertTrue(bool(peer_summary.get("diversity_observed", False)))
                 curator_summary = last_chat.get("context_curator_summary", {}) or {}
                 self.assertEqual(str(curator_summary.get("freshness_status", "")), "fresh")
                 self.assertEqual(int(curator_summary.get("invalidation_count", 0)), 1)
@@ -650,6 +707,402 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                     str((conv_last.get("context_pressure", {}) or {}).get("level", "")),
                     "medium",
                 )
+                conv_peer_summary = conv_last.get("peer_consultation_summary", {}) or {}
+                self.assertEqual(int(conv_peer_summary.get("provider_count", 0)), 2)
+                self.assertTrue(bool(conv_peer_summary.get("diversity_observed", False)))
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_specialist_insight_summary_keeps_total_count_when_reports_are_truncated(self) -> None:
+        from api.utils import _specialist_insight_fields
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+
+            reports = [
+                {
+                    "specialist": f"browser_operator_{idx}",
+                    "summary": f"Resumen {idx}",
+                    "validation_status": "valid" if idx < 8 else "invalid",
+                }
+                for idx in range(10)
+            ]
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-COUNT::build",
+                        "title": "Build",
+                        "description": "desc",
+                        "role": "engineer",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "eng-1",
+                        "metadata": {"specialist_reports": reports},
+                    }
+                ],
+            )
+
+            payload = _specialist_insight_fields(runtime_dir, "CHAT-COUNT")
+            summary = dict(payload.get("specialist_report_summary", {}) or {})
+
+            self.assertEqual(len(payload.get("specialist_reports", []) or []), 8)
+            self.assertEqual(int(summary.get("count", 0)), 10)
+            self.assertEqual(int(summary.get("displayed_count", 0)), 8)
+            self.assertTrue(bool(summary.get("truncated", False)))
+            self.assertEqual(int(summary.get("valid_count", 0)), 8)
+            self.assertEqual(int(summary.get("invalid_count", 0)), 2)
+
+    def test_chat_endpoints_prefer_sqlite_runtime_over_legacy_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-A1B2C3D4::lead_intake",
+                        "title": "Lead intake and project framing",
+                        "description": "Solicitud original:\nleer desde sqlite\nEntrega: objetivos",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"phase": "lead_intake", "execution_round": 1},
+                    },
+                    {
+                        "task_id": "CHAT-A1B2C3D4::build",
+                        "title": "Build highest-impact slice",
+                        "description": "Implementar lectura sqlite",
+                        "role": "engineer",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": ["CHAT-A1B2C3D4::lead_intake"],
+                        "state": "completed",
+                        "assignee": "eng-1",
+                        "metadata": {
+                            "phase": "build",
+                            "execution_round": 2,
+                            "last_provider": "anthropic",
+                            "last_model": "claude-sonnet-4-5",
+                            "last_channel": "subscription",
+                            "result": "Lectura SQLite completada y validada.",
+                        },
+                    },
+                    {
+                        "task_id": "CHAT-A1B2C3D4::delegate_build_repo_scout_0",
+                        "title": "Scout repository before build",
+                        "description": "Inspeccionar el repo antes de la implementacion",
+                        "role": "scout",
+                        "complexity": "low",
+                        "criticality": "low",
+                        "dependencies": ["CHAT-A1B2C3D4::build"],
+                        "state": "pending",
+                        "assignee": "scout-1",
+                        "metadata": {"phase": "build"},
+                    },
+                    {
+                        "task_id": "CHAT-A1B2C3D4::lead_close",
+                        "title": "Lead synthesis and response",
+                        "description": "close",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": ["CHAT-A1B2C3D4::build"],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"result": "Respuesta desde sqlite", "execution_round": 3},
+                    },
+                ],
+            )
+            self._write_runtime_workflow_sqlite(
+                runtime_dir,
+                {
+                    "CHAT-A1B2C3D4": {
+                        "phase_outputs": {"build": "resultado sqlite"},
+                        "phase_evidence_plan": {
+                            "build": {
+                                "delegate_intents": ["delegate_test_run"],
+                                "wait_policy": "quorum",
+                                "delegate_budget": 2,
+                            }
+                        },
+                        "delegate_economics_summary": {
+                            "economics_version": "delegate_economics_v1",
+                            "estimated": True,
+                            "batch_count": 1,
+                            "specialist_task_count": 2,
+                            "estimated_net_tokens_saved": 900,
+                        },
+                    }
+                },
+            )
+
+            (runtime_dir / "tasks.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "task_id": "CHAT-0BADF00D::lead_intake",
+                            "title": "Legacy root",
+                            "description": "Solicitud original:\nlegacy json",
+                            "role": "team_lead",
+                            "state": "completed",
+                            "metadata": {"phase": "lead_intake"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (runtime_dir / "workflow_state.json").write_text(
+                json.dumps(
+                    {
+                        "CHAT-0BADF00D": {
+                            "phase_evidence_plan": {
+                                "build": {"delegate_budget": 99}
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-03-31T10:00:00+00:00",
+                        "event_type": "task_started",
+                        "payload": {
+                            "task_id": "CHAT-A1B2C3D4::lead_intake",
+                            "role": "team_lead",
+                            "assignee": "lead-1",
+                        },
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "ts": "2026-03-31T10:00:02+00:00",
+                        "event_type": "decision_recorded",
+                        "payload": {
+                            "task_id": "CHAT-econ01::build",
+                            "role": "team_lead",
+                            "assignee": "lead-1",
+                            "decision_rank": 5,
+                            "consulted_roles": ["scout", "reviewer"],
+                            "consulted_providers": ["anthropic", "openai"],
+                            "peer_diversity_observed": True,
+                            "provider": "openai",
+                            "model": "gpt-5.4",
+                            "channel": "subscription",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+
+                state_payload = client.get("/api/aiteam/state?environment=dev").json()
+                continuity = str(state_payload.get("project_continuity", ""))
+                self.assertIn("CHAT-A1B2C3D4", continuity)
+                self.assertNotIn("CHAT-0BADF00D", continuity)
+
+                load_payload = client.get("/api/aiteam/chat/load/CHAT-A1B2C3D4").json()
+                messages = list(load_payload.get("messages", []) or [])
+                self.assertEqual(messages[0].get("sender"), "user")
+                self.assertIn("leer desde sqlite", str(messages[0].get("text", "")))
+                self.assertEqual(messages[-1].get("sender"), "team")
+                self.assertIn("Respuesta desde sqlite", str(messages[-1].get("text", "")))
+
+                progress_payload = client.get("/api/aiteam/chat/progress/CHAT-A1B2C3D4").json()
+                progress_build_plan = (
+                    ((progress_payload.get("phase_evidence_plan", {}) or {}).get("build", {}) or {})
+                )
+                self.assertTrue(bool(progress_payload.get("exists")))
+                self.assertEqual(
+                    str(((progress_payload.get("phase_states", {}) or {}).get("build", ""))),
+                    "completed",
+                )
+                self.assertEqual(
+                    int(progress_build_plan.get("delegate_budget", 0)),
+                    2,
+                )
+                task_summaries = list(progress_payload.get("task_summaries", []) or [])
+                self.assertTrue(task_summaries)
+                build_summary = next(
+                    item for item in task_summaries if item.get("task_id") == "CHAT-A1B2C3D4::build"
+                )
+                self.assertEqual(str(build_summary.get("category", "")), "phase")
+                self.assertEqual(str(build_summary.get("provider", "")), "anthropic")
+                self.assertEqual(str(build_summary.get("model", "")), "claude-sonnet-4-5")
+                self.assertIn("SQLite", str(build_summary.get("preview", "")))
+                delegate_summary = next(
+                    item
+                    for item in task_summaries
+                    if item.get("task_id") == "CHAT-A1B2C3D4::delegate_build_repo_scout_0"
+                )
+                self.assertEqual(str(delegate_summary.get("category", "")), "delegate")
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_conversations_logs_and_workflow_state_prefer_sqlite_over_legacy_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": "CHAT-SQLITE1::lead_intake",
+                        "title": "Lead intake and project framing",
+                        "description": "Solicitud original:\ncontinuar desde sqlite\nEntrega: objetivos",
+                        "role": "team_lead",
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"phase": "lead_intake"},
+                    },
+                    {
+                        "task_id": "TASK-SQLITE-1",
+                        "role": "engineer",
+                        "state": "completed",
+                        "metadata": {"result": "Salida principal desde sqlite"},
+                    },
+                ],
+            )
+            self._write_runtime_workflow_sqlite(
+                runtime_dir,
+                {
+                    "CHAT-SQLITE1": {
+                        "phase_evidence_plan": {
+                            "build": {"delegate_budget": 3}
+                        },
+                        "delegate_economics_summary": {
+                            "estimated_net_tokens_saved": 420
+                        },
+                    }
+                },
+            )
+
+            (runtime_dir / "tasks.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "task_id": "CHAT-LEGACY99::lead_intake",
+                            "title": "Legacy root",
+                            "description": "Solicitud original:\nlegacy json",
+                            "role": "team_lead",
+                            "state": "completed",
+                            "metadata": {"phase": "lead_intake"},
+                        },
+                        {
+                            "task_id": "TASK-LEGACY-1",
+                            "role": "engineer",
+                            "state": "completed",
+                            "metadata": {"result": "Salida legacy"},
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (runtime_dir / "workflow_state.json").write_text(
+                json.dumps(
+                    {
+                        "CHAT-LEGACY99": {
+                            "phase_evidence_plan": {
+                                "build": {"delegate_budget": 99}
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-03-31T10:00:00+00:00",
+                        "event_type": "chat_plan_created",
+                        "payload": {
+                            "task_id": "CHAT-SQLITE1",
+                            "chat_mode": "multi_phase",
+                            "round_budget": 4,
+                            "phase_count": 3,
+                            "delegated_count": 0,
+                        },
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "ts": "2026-03-31T10:01:00+00:00",
+                        "event_type": "task_started",
+                        "payload": {
+                            "task_id": "CHAT-SQLITE1::lead_intake",
+                            "role": "team_lead",
+                            "assignee": "lead-1",
+                        },
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "ts": "2026-03-31T10:02:00+00:00",
+                        "event_type": "task_execution",
+                        "payload": {
+                            "task_id": "TASK-SQLITE-1",
+                            "role": "engineer",
+                            "assignee": "eng-1",
+                            "success": True,
+                            "latency_ms": 90,
+                        },
+                    }
+                )
+                + "\n"
+                ,
+                encoding="utf-8",
+            )
+            (runtime_dir / "mailbox.jsonl").write_text("", encoding="utf-8")
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+
+                conv_payload = client.get("/api/aiteam/conversations?limit=20").json()
+                user_rows = [item for item in conv_payload.get("items", []) if item.get("sender") == "user"]
+                self.assertTrue(user_rows)
+                self.assertIn("continuar desde sqlite", str(user_rows[0].get("body", "")))
+                self.assertNotIn("legacy json", str(user_rows[0].get("body", "")))
+                self.assertEqual(
+                    int(
+                        (((conv_payload.get("last_chat_run", {}) or {}).get("phase_evidence_plan", {}) or {}).get("build", {}) or {}).get("delegate_budget", 0)
+                    ),
+                    3,
+                )
+
+                logs_payload = client.get("/api/aiteam/logs?limit=20").json()
+                task_output_ids = {
+                    str(item.get("task_id", ""))
+                    for item in list(logs_payload.get("task_outputs", []) or [])
+                }
+                self.assertIn("TASK-SQLITE-1", task_output_ids)
+                self.assertNotIn("TASK-LEGACY-1", task_output_ids)
+
+                workflow_payload = client.get("/api/aiteam/workflow-state").json()
+                workflows = workflow_payload.get("workflows", {}) or {}
+                self.assertIn("CHAT-SQLITE1", workflows)
+                self.assertNotIn("CHAT-LEGACY99", workflows)
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -862,6 +1315,55 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                 }
                 self.assertIn("memory", server_names)
                 self.assertIn("puppeteer", server_names)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_routing_catalog_endpoint_exposes_roles_adapters_and_effective_fallbacks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=False):
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.get("/api/aiteam/routing/catalog")
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertIn("team_lead", list(payload.get("roles", []) or []))
+                self.assertIn("engineer", list(payload.get("roles", []) or []))
+                self.assertGreaterEqual(int((payload.get("summary", {}) or {}).get("adapter_count", 0)), 1)
+                adapter_rows = {
+                    str(item.get("adapter_name", "") or ""): item
+                    for item in list(payload.get("adapters", []) or [])
+                    if isinstance(item, dict)
+                }
+                self.assertIn("claude_pro", adapter_rows)
+                self.assertEqual(
+                    list((adapter_rows.get("claude_pro", {}) or {}).get("role_targets", []) or []),
+                    ["team_lead"],
+                )
+                matrix_rows = {
+                    str(item.get("role", "") or ""): item
+                    for item in list(payload.get("role_matrix", []) or [])
+                    if isinstance(item, dict)
+                }
+                engineer = dict(matrix_rows.get("engineer", {}) or {})
+                self.assertEqual(
+                    list(engineer.get("configured_provider_order", []) or []),
+                    ["openai", "google", "groq"],
+                )
+                engineer_adapters = {
+                    str(item.get("adapter_name", "") or ""): item
+                    for item in list(engineer.get("adapters", []) or [])
+                    if isinstance(item, dict)
+                }
+                self.assertIn("claude_pro", engineer_adapters)
+                self.assertIn(
+                    "role_targets",
+                    list((engineer_adapters.get("claude_pro", {}) or {}).get("blockers", []) or []),
+                )
             finally:
                 api_main.set_current_workspace(previous_workspace)
 

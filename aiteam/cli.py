@@ -91,6 +91,7 @@ def build_default_orchestrator(
             model="claude-sonnet-4-5",  # Sonnet 4.5 — mejor coding y razonamiento
             capabilities={"reasoning", "coding", "analysis", "review"},
             routing_priority=30,
+            role_targets={"team_lead"},
         ),
         SubscriptionAdapter(
             name="claude_haiku",
@@ -99,6 +100,7 @@ def build_default_orchestrator(
             capabilities={"reasoning", "coding", "analysis"},
             routing_priority=40,
             cost_tier=0,
+            role_targets={"team_lead"},
         ),
         # ── Canal API (fallback presupuestado) ─────────────────────────────
         # Activado cuando subscription falla o se agota. Consume cuota de presupuesto.
@@ -1008,8 +1010,10 @@ def _upsert_adapter(items: list, entry: dict) -> list:
 
 
 def cmd_init(runtime_dir: Path) -> None:
+    from aiteam.sqlite_store import SqliteStore
+
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    (runtime_dir / "tasks.json").write_text("[]\n", encoding="utf-8")
+    SqliteStore(runtime_dir / "aiteam.db")
     (runtime_dir / "mailbox.jsonl").write_text("", encoding="utf-8")
     (runtime_dir / "events.jsonl").write_text("", encoding="utf-8")
     (runtime_dir / "cost_ledger.jsonl").write_text("", encoding="utf-8")

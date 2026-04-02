@@ -79,6 +79,10 @@ _SELECTIVE_LCP_PATTERNS: dict[str, str] = {
     "DELEGATE_BUDGET": r"\[DELEGATE_BUDGET:\s*\+?\d+\s*\]",
 }
 
+_VALID_RUN_MODES: frozenset[str] = frozenset(
+    {"planning_only", "team_decision", "architecture_review", "roadmap"}
+)
+
 
 def extract_lcp_directives(text: str) -> dict:
     """Parsea las directivas LCP emitidas por el Team Lead."""
@@ -151,13 +155,11 @@ def extract_lcp_directives(text: str) -> dict:
     if m:
         result["retry_route"] = m.group(1).strip()
 
-    m = re.search(
-        r"\[RUN_MODE:\s*(planning_only|team_decision)\s*\]",
-        t,
-        re.IGNORECASE,
-    )
+    m = re.search(r"\[RUN_MODE:\s*([a-z_]+)\s*\]", t, re.IGNORECASE)
     if m:
-        result["run_mode"] = m.group(1).lower()
+        run_mode = m.group(1).lower()
+        if run_mode in _VALID_RUN_MODES:
+            result["run_mode"] = run_mode
 
     return result
 
@@ -282,6 +284,66 @@ def _preset_phases_for_run_mode(run_mode: str) -> list[PhaseSpec]:
                     "para una decision responsable del equipo."
                 ),
                 depends_on=["review_options"],
+            ),
+        ]
+    if run_mode == "architecture_review":
+        return [
+            PhaseSpec(
+                phase_id="discovery",
+                role="RESEARCHER",
+                objective=(
+                    "Recopila requisitos, restricciones, tradeoffs y contexto tecnico "
+                    "del sistema para sustentar una revision de arquitectura."
+                ),
+                depends_on=[],
+            ),
+            PhaseSpec(
+                phase_id="architecture_options",
+                role="REVIEWER",
+                objective=(
+                    "Analiza opciones de arquitectura, compara tradeoffs y recomienda "
+                    "la direccion tecnica mas defendible."
+                ),
+                depends_on=["discovery"],
+            ),
+            PhaseSpec(
+                phase_id="adr_document",
+                role="REVIEWER",
+                objective=(
+                    "Produce un ADR en Markdown con decision, contexto, opciones "
+                    "consideradas, tradeoffs y consecuencias."
+                ),
+                depends_on=["architecture_options"],
+            ),
+        ]
+    if run_mode == "roadmap":
+        return [
+            PhaseSpec(
+                phase_id="discovery",
+                role="RESEARCHER",
+                objective=(
+                    "Recopila objetivos, dependencias, restricciones y contexto "
+                    "necesario para proponer un roadmap viable."
+                ),
+                depends_on=[],
+            ),
+            PhaseSpec(
+                phase_id="roadmap_prioritization",
+                role="REVIEWER",
+                objective=(
+                    "Prioriza features, estima complejidad y define una secuencia "
+                    "recomendada de entrega con tradeoffs claros."
+                ),
+                depends_on=["discovery"],
+            ),
+            PhaseSpec(
+                phase_id="roadmap_document",
+                role="REVIEWER",
+                objective=(
+                    "Produce un documento Markdown con roadmap priorizado, complejidad, "
+                    "dependencias y secuencia recomendada."
+                ),
+                depends_on=["roadmap_prioritization"],
             ),
         ]
     return []

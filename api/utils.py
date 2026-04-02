@@ -44,6 +44,34 @@ def _read_json_payload(path: Path, fallback: object) -> object:
     return data
 
 
+def _read_runtime_tasks_payload(runtime_dir: Path) -> list[dict]:
+    db_path = runtime_dir / "aiteam.db"
+    if db_path.exists():
+        try:
+            from aiteam.sqlite_store import SqliteStore
+
+            payload = SqliteStore(db_path).load_all_tasks()
+            if isinstance(payload, list):
+                return [item for item in payload if isinstance(item, dict)]
+        except Exception:
+            pass
+    return []
+
+
+def _read_runtime_workflow_state(runtime_dir: Path) -> dict[str, object]:
+    db_path = runtime_dir / "aiteam.db"
+    if db_path.exists():
+        try:
+            from aiteam.sqlite_store import SqliteStore
+
+            payload = SqliteStore(db_path).load_workflow_state()
+            if isinstance(payload, dict):
+                return payload
+        except Exception:
+            pass
+    return {}
+
+
 def _read_jsonl_records(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -102,13 +130,15 @@ def _load_chat_specialist_insights(
             "specialist_reports": [],
             "specialist_report_summary": {
                 "count": 0,
+                "displayed_count": 0,
                 "valid_count": 0,
                 "invalid_count": 0,
+                "truncated": False,
                 "by_specialist": {},
             },
         }
 
-    tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
+    tasks_payload = _read_runtime_tasks_payload(runtime_dir)
     reports: list[dict[str, object]] = []
     seen: set[tuple[str, str, str, str]] = set()
     by_specialist: dict[str, dict[str, int]] = {}
@@ -163,15 +193,92 @@ def _load_chat_specialist_insights(
                         invalid_count += 1
                         bucket["invalid"] += 1
 
+    total_count = len(reports)
     reports = reports[: max(1, int(limit or 8))]
     return {
         "specialist_reports": reports,
         "specialist_report_summary": {
-            "count": len(reports),
+            "count": total_count,
+            "displayed_count": len(reports),
             "valid_count": valid_count,
             "invalid_count": invalid_count,
+            "truncated": total_count > len(reports),
             "by_specialist": by_specialist,
         },
+    }
+
+
+def _specialist_insight_fields(
+    runtime_dir: Path,
+    task_root: str,
+    *,
+    limit: int = 8,
+) -> dict[str, object]:
+    insights = _load_chat_specialist_insights(runtime_dir, task_root, limit=limit)
+    return {
+        "specialist_reports": list(insights.get("specialist_reports", []) or []),
+        "specialist_report_summary": dict(
+            insights.get("specialist_report_summary", {}) or {}
+        ),
+    }
+
+
+def _peer_consultation_summary_fields(
+    runtime_dir: Path,
+    task_root: str,
+) -> dict[str, object]:
+    normalized_root = str(task_root or "").strip().upper()
+    if not normalized_root:
+        return {
+            "peer_consultation_summary": {
+                "consulted_roles": [],
+                "consulted_providers": [],
+                "unavailable_roles": [],
+                "provider_count": 0,
+                "diversity_observed": False,
+            }
+        }
+
+    tasks_payload = _read_runtime_tasks_payload(runtime_dir)
+    consulted_roles: list[str] = []
+    consulted_providers: list[str] = []
+    unavailable_roles: list[str] = []
+    diversity_observed = False
+
+    def _extend_unique(target: list[str], values: object) -> None:
+        for raw in list(values or []):
+            item = str(raw or "").strip().lower()
+            if item and item not in target:
+                target.append(item)
+
+    if isinstance(tasks_payload, list):
+        for item in tasks_payload:
+            if not isinstance(item, dict):
+                continue
+            task_id = str(item.get("task_id", "") or "")
+            if not task_id.upper().startswith(f"{normalized_root}::"):
+                continue
+            metadata = item.get("metadata", {})
+            if not isinstance(metadata, dict):
+                continue
+            _extend_unique(consulted_roles, metadata.get("consulted_roles", []))
+            _extend_unique(consulted_providers, metadata.get("consulted_providers", []))
+            _extend_unique(
+                unavailable_roles,
+                metadata.get("unavailable_consultations", []),
+            )
+            diversity_observed = diversity_observed or bool(
+                metadata.get("peer_diversity_observed", False)
+            )
+
+    return {
+        "peer_consultation_summary": {
+            "consulted_roles": consulted_roles,
+            "consulted_providers": consulted_providers,
+            "unavailable_roles": unavailable_roles,
+            "provider_count": len(consulted_providers),
+            "diversity_observed": diversity_observed or len(consulted_providers) >= 2,
+        }
     }
 
 
@@ -189,7 +296,7 @@ def _load_chat_rewiring_insights(
             }
         }
 
-    tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
+    tasks_payload = _read_runtime_tasks_payload(runtime_dir)
     count = 0
     by_specialist: dict[str, int] = {}
     replacements: dict[str, int] = {}
@@ -280,7 +387,7 @@ def _load_chat_context_curator_insights(
             "context_curator_summary": {},
         }
 
-    workflow_state = _read_json_payload(runtime_dir / "workflow_state.json", fallback={})
+    workflow_state = _read_runtime_workflow_state(runtime_dir)
     workflow_entry = {}
     if isinstance(workflow_state, dict):
         candidate = workflow_state.get(raw_root, {})
@@ -521,7 +628,7 @@ def _group_chat_roots(tasks_payload: object) -> dict[str, dict[str, object]]:
 
 
 def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> str:
-    tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
+    tasks_payload = _read_runtime_tasks_payload(runtime_dir)
     events = _read_jsonl_records(runtime_dir / "events.jsonl")
     roots = _group_chat_roots(tasks_payload)
     curator_store = ContextCuratorStore(runtime_dir)
@@ -596,6 +703,8 @@ def _build_scout_project_state_context(workspace: Path) -> str:
             cwd=str(workspace),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=8,
         )
         git_status = result.stdout.strip()
@@ -610,6 +719,8 @@ def _build_scout_project_state_context(workspace: Path) -> str:
             cwd=str(workspace),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=8,
         )
         git_log = result.stdout.strip()
@@ -640,7 +751,7 @@ def _build_scout_session_history_context(runtime_dir: Path, max_chats: int = 3) 
     Extrae las últimas N sesiones con mensaje del usuario y síntesis del lead_close.
     No llama a ningún LLM. El scout LLM resume lo relevante.
     """
-    tasks_payload = _read_json_payload(runtime_dir / "tasks.json", fallback=[])
+    tasks_payload = _read_runtime_tasks_payload(runtime_dir)
     events = _read_jsonl_records(runtime_dir / "events.jsonl")
     roots = _group_chat_roots(tasks_payload)
     if not roots:

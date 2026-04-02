@@ -21,6 +21,7 @@ from aiteam.types import (
     Role,
     RoutingDecision,
     RoutingRequest,
+    StreamChunk,
 )
 
 
@@ -550,7 +551,7 @@ class HybridRouter:
         task_id: str = "",
         messages: list[dict[str, str]] | None = None,
         tools=None,
-        on_chunk: "Callable[[str], None] | None" = None,
+        on_chunk: "Callable[[str | StreamChunk], None] | None" = None,
     ) -> RoutingDecision:
         attempts: list[str] = []
         attempted_channels: dict[ChannelType, int] = {
@@ -637,15 +638,22 @@ class HybridRouter:
             if on_chunk is not None:
                 import time as _time
                 started = _time.time()
-                chunks: list[str] = []
+                output_chunks: list[str] = []
+                received_chunk = False
                 try:
                     for chunk in adapter.invoke_stream(prompt, messages=messages):
+                        received_chunk = True
                         on_chunk(chunk)
-                        chunks.append(chunk)
+                        if isinstance(chunk, StreamChunk):
+                            if chunk.chunk_type == "output" and chunk.text:
+                                output_chunks.append(chunk.text)
+                        elif chunk:
+                            output_chunks.append(chunk)
                 except Exception:
-                    chunks = []
-                if chunks:
-                    content = "".join(chunks)
+                    output_chunks = []
+                    received_chunk = False
+                if output_chunks:
+                    content = "".join(output_chunks)
                     from aiteam.types import AdapterResponse
                     response = AdapterResponse(
                         success=True,
@@ -654,8 +662,16 @@ class HybridRouter:
                         input_tokens=max(1, len(prompt) // 4),
                         output_tokens=max(1, len(content) // 4),
                     )
-                else:
+                elif not received_chunk:
                     # Fallback a invoke normal si streaming no produjo chunks
+                    invoke_params = inspect.signature(adapter.invoke).parameters
+                    kwargs = {}
+                    if "messages" in invoke_params:
+                        kwargs["messages"] = messages
+                    if "tools" in invoke_params and tools is not None:
+                        kwargs["tools"] = tools
+                    response = adapter.invoke(prompt, **kwargs)
+                else:
                     invoke_params = inspect.signature(adapter.invoke).parameters
                     kwargs = {}
                     if "messages" in invoke_params:

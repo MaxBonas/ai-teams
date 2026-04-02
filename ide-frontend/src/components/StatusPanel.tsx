@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Activity, FolderTree, PanelRightClose, PanelRightOpen, RefreshCw, TerminalSquare } from 'lucide-react';
+import { Activity, FolderTree, GitBranch, PanelRightClose, PanelRightOpen, RefreshCw, TerminalSquare } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import FileExplorer from './FileExplorer';
 import FileViewer from './FileViewer';
+import RoutingCatalogPanel from './RoutingCatalogPanel';
 import TerminalPanel from './TerminalPanel';
 
 interface StatusPanelProps {
@@ -27,12 +28,30 @@ interface RecentRun {
   ts: string;
 }
 
-type WorkbenchTab = 'status' | 'files' | 'terminal';
+interface LeadDecisions {
+  advisory_mode: boolean;
+  advisory_reason: string;
+  auto_extended_rounds: number;
+  lead_budget_extended: boolean;
+  lead_budget_extension: number;
+}
+
+interface PeerConsultationSummary {
+  consulted_roles: string[];
+  consulted_providers: string[];
+  unavailable_roles: string[];
+  provider_count: number;
+  diversity_observed: boolean;
+}
+
+type WorkbenchTab = 'status' | 'routing' | 'files' | 'terminal';
 
 export default function StatusPanel({ workspacePath, minimized, onToggleMinimize, onLoadChat }: StatusPanelProps) {
   const [budget, setBudget] = useState<BudgetInfo | null>(null);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
   const [taskCounts, setTaskCounts] = useState({ total: 0, completed: 0, failed: 0 });
+  const [leadDecisions, setLeadDecisions] = useState<LeadDecisions | null>(null);
+  const [peerConsultation, setPeerConsultation] = useState<PeerConsultationSummary | null>(null);
   const [activeTab, setActiveTab] = useState<WorkbenchTab>('status');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileRefreshToken, setFileRefreshToken] = useState(0);
@@ -80,6 +99,43 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
             if (existing) return prev;
             return [entry, ...prev].slice(0, 5);
           });
+          const hasDecision =
+            Boolean(r.advisory_mode) ||
+            Number(r.auto_extended_rounds ?? 0) > 0 ||
+            Boolean(r.lead_budget_extended);
+          if (hasDecision) {
+            setLeadDecisions({
+              advisory_mode: Boolean(r.advisory_mode),
+              advisory_reason: String(r.advisory_reason ?? ''),
+              auto_extended_rounds: Number(r.auto_extended_rounds ?? 0),
+              lead_budget_extended: Boolean(r.lead_budget_extended),
+              lead_budget_extension: Number(r.lead_budget_extension ?? 0),
+            });
+          } else {
+            setLeadDecisions(null);
+          }
+          const peerRaw = r.peer_consultation_summary;
+          if (peerRaw && typeof peerRaw === 'object') {
+            const peer = peerRaw as Record<string, unknown>;
+            setPeerConsultation({
+              consulted_roles: Array.isArray(peer.consulted_roles)
+                ? (peer.consulted_roles as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0)
+                : [],
+              consulted_providers: Array.isArray(peer.consulted_providers)
+                ? (peer.consulted_providers as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0)
+                : [],
+              unavailable_roles: Array.isArray(peer.unavailable_roles)
+                ? (peer.unavailable_roles as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0)
+                : [],
+              provider_count: Number.isFinite(Number(peer.provider_count)) ? Number(peer.provider_count) : 0,
+              diversity_observed: Boolean(peer.diversity_observed),
+            });
+          } else {
+            setPeerConsultation(null);
+          }
+        } else {
+          setLeadDecisions(null);
+          setPeerConsultation(null);
         }
       } catch { /* ignore */ }
     };
@@ -122,6 +178,13 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
             type="button"
           >
             <Activity size={13} /> Estado
+          </button>
+          <button
+            className={`workbench-tab ${activeTab === 'routing' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('routing')}
+            type="button"
+          >
+            <GitBranch size={13} /> Routing
           </button>
           <button
             className={`workbench-tab ${activeTab === 'files' ? 'is-active' : ''}`}
@@ -196,12 +259,68 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
                 </section>
               )}
 
+              {leadDecisions && (
+                <section className="status-section">
+                  <div className="status-section-label">Lead — decisiones autónomas</div>
+                  <div className="status-lead-decisions">
+                    {leadDecisions.advisory_mode && (
+                      <div className="status-lead-decision status-lead-decision--warn">
+                        <span className="status-lead-decision-icon">⚠</span>
+                        <span>
+                          Advisory mode
+                          {leadDecisions.advisory_reason ? `: ${leadDecisions.advisory_reason}` : ''}
+                        </span>
+                      </div>
+                    )}
+                    {leadDecisions.auto_extended_rounds > 0 && (
+                      <div className="status-lead-decision status-lead-decision--info">
+                        <span className="status-lead-decision-icon">+</span>
+                        <span>Rounds extendidos automáticamente: +{leadDecisions.auto_extended_rounds}</span>
+                      </div>
+                    )}
+                    {leadDecisions.lead_budget_extended && (
+                      <div className="status-lead-decision status-lead-decision--info">
+                        <span className="status-lead-decision-icon">+</span>
+                        <span>Lead extendió presupuesto: +{leadDecisions.lead_budget_extension} rounds</span>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {peerConsultation && (peerConsultation.consulted_roles.length > 0 || peerConsultation.consulted_providers.length > 0) && (
+                <section className="status-section">
+                  <div className="status-section-label">Lead — consulta a pares</div>
+                  <div className="status-lead-decisions">
+                    <div className="status-lead-decision status-lead-decision--info">
+                      <span className="status-lead-decision-icon">↔</span>
+                      <span>Peers: {peerConsultation.consulted_roles.join(', ') || 'ninguno'}</span>
+                    </div>
+                    <div className="status-lead-decision status-lead-decision--info">
+                      <span className="status-lead-decision-icon">◌</span>
+                      <span>Providers: {peerConsultation.consulted_providers.join(', ') || 'ninguno'}</span>
+                    </div>
+                    <div className={`status-lead-decision ${peerConsultation.diversity_observed ? 'status-lead-decision--info' : 'status-lead-decision--warn'}`}>
+                      <span className="status-lead-decision-icon">{peerConsultation.diversity_observed ? '✓' : '!'}</span>
+                      <span>
+                        Diversidad observada: {peerConsultation.diversity_observed ? 'sí' : 'no'}
+                        {peerConsultation.provider_count > 0 ? ` (${peerConsultation.provider_count} provider${peerConsultation.provider_count === 1 ? '' : 's'})` : ''}
+                      </span>
+                    </div>
+                  </div>
+                </section>
+              )}
+
               {!budget && recentRuns.length === 0 && (
                 <div className="status-empty-hint">
                   Conecta el backend real para ver estado operativo.
                 </div>
               )}
             </>
+          )}
+
+          {activeTab === 'routing' && (
+            <RoutingCatalogPanel workspacePath={workspacePath} />
           )}
 
           {activeTab === 'files' && (

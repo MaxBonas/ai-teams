@@ -13,6 +13,7 @@ from aiteam.adapters.base import ModelAdapter
 from aiteam.config import build_default_router_policy
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.router import HybridRouter
+from aiteam.sqlite_store import SqliteStore
 from aiteam.types import (
     AdapterResponse,
     ChannelType,
@@ -692,7 +693,10 @@ class MultiagentE2ETests(unittest.TestCase):
             payload = _parse_sse_result(response)
             runtime_dir = workspace / "runtime"
             events_text = (runtime_dir / "events.jsonl").read_text(encoding="utf-8")
-            tasks_text = (runtime_dir / "tasks.json").read_text(encoding="utf-8")
+            tasks_text = json.dumps(
+                SqliteStore(runtime_dir / "aiteam.db").load_all_tasks(),
+                ensure_ascii=False,
+            )
             return payload, events_text, tasks_text
         finally:
             api_main.set_current_workspace(previous_workspace)
@@ -892,7 +896,6 @@ class MultiagentE2ETests(unittest.TestCase):
         finally:
             shutil.rmtree(workspace_root, ignore_errors=True)
 
-    @unittest.skip("E10-W3: REPLAN parcial mid-run no implementado — phase_task_ids vacío hasta que apply_replan preserve fases completadas")
     def test_replan_after_discovery_preserves_discovery(self) -> None:
         payload, events_text, tasks_text = self._run_chat_case(
             ReplanAfterDiscoveryIntegrationAdapter(),

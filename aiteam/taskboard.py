@@ -9,15 +9,38 @@ from aiteam.types import TaskState, WorkTask
 
 
 class TaskBoard:
-    def __init__(self, storage_path: Path) -> None:
-        self.storage_path = storage_path
+    def __init__(
+        self,
+        storage_path: Path,
+        *,
+        legacy_snapshot_path: Path | None = None,
+    ) -> None:
+        from aiteam.sqlite_store import SqliteStore
+        storage_path = Path(storage_path)
+        if storage_path.name.lower() == "aiteam.db":
+            self.db_path = storage_path
+            self.legacy_snapshot_path = legacy_snapshot_path or storage_path.with_name("tasks.json")
+        else:
+            self.legacy_snapshot_path = legacy_snapshot_path or storage_path
+            self.db_path = storage_path.with_name("aiteam.db")
+        self.storage_path = self.legacy_snapshot_path
         self._lock = threading.RLock()
         self._tasks: dict[str, WorkTask] = {}
-        self._file_locks = FileLockRegistry(storage_path.parent / "file_locks.json")
+        self._file_locks = FileLockRegistry(self.db_path.parent / "file_locks.json")
+        self._store = SqliteStore(self.db_path)
         self._load()
+
+    @classmethod
+    def from_runtime_dir(cls, runtime_dir: Path) -> "TaskBoard":
+        runtime_dir = Path(runtime_dir)
+        return cls(
+            runtime_dir / "aiteam.db",
+            legacy_snapshot_path=runtime_dir / "tasks.json",
+        )
 
     def add_task(self, task: WorkTask) -> None:
         with self._lock:
+            before = self._snapshot_tasks()
             if task.task_id in self._tasks:
                 raise ValueError(f"Task already exists: {task.task_id}")
             if task.dependencies:
@@ -25,7 +48,7 @@ class TaskBoard:
             else:
                 task.state = TaskState.READY
             self._tasks[task.task_id] = task
-            self._save()
+            self._persist_task_changes(before)
 
     def get_task(self, task_id: str) -> WorkTask | None:
         with self._lock:
@@ -42,10 +65,20 @@ class TaskBoard:
 
     def checkpoint(self) -> None:
         with self._lock:
-            self._save()
+            return
+
+    def persist_tasks(self, task_ids: list[str]) -> None:
+        with self._lock:
+            payload = [
+                self._task_to_dict(self._tasks[task_id])
+                for task_id in task_ids
+                if task_id in self._tasks
+            ]
+            self._store.upsert_tasks(payload)
 
     def claim_task(self, task_id: str, assignee: str) -> bool:
         with self._lock:
+            before = self._snapshot_tasks()
             self._refresh_readiness()
             task = self._tasks.get(task_id)
             if not task or task.state != TaskState.READY:
@@ -62,7 +95,7 @@ class TaskBoard:
                         dep
                         for dep in unmet
                         if dep in self._tasks
-                        and self._tasks[dep].state == TaskState.FAILED
+                        and self._tasks[dep].state in (TaskState.FAILED, TaskState.BLOCKED)
                     ]
                     if failed_deps:
                         task.state = TaskState.BLOCKED
@@ -70,7 +103,7 @@ class TaskBoard:
                         task.metadata["blocked_dependencies"] = failed_deps
                     else:
                         task.state = TaskState.PENDING
-                    self._save()
+                    self._persist_task_changes(before)
                     return False
             owned_files = self._owned_files(task)
             if owned_files:
@@ -81,38 +114,41 @@ class TaskBoard:
                     task.state = TaskState.BLOCKED
                     task.metadata["blocked_by_files"] = conflicts
                     task.metadata["owned_files"] = owned_files
-                    self._save()
+                    self._persist_task_changes(before)
                     return False
             task.state = TaskState.CLAIMED
             task.assignee = assignee
-            self._save()
+            self._persist_task_changes(before)
             return True
 
     def mark_completed(self, task_id: str, details: str = "") -> None:
         with self._lock:
+            before = self._snapshot_tasks()
             task = self._require(task_id)
             task.state = TaskState.COMPLETED
             self._file_locks.release_for_task(task_id)
             if details:
                 task.metadata["result"] = details
             self._refresh_readiness()
-            self._save()
+            self._persist_task_changes(before)
 
     def mark_failed(self, task_id: str, error: str) -> None:
         with self._lock:
+            before = self._snapshot_tasks()
             task = self._require(task_id)
             task.state = TaskState.FAILED
             self._file_locks.release_for_task(task_id)
             task.metadata["error"] = error
             self._refresh_readiness()
-            self._save()
+            self._persist_task_changes(before)
 
     def mark_blocked(self, task_id: str, reason: str) -> None:
         with self._lock:
+            before = self._snapshot_tasks()
             task = self._require(task_id)
             task.state = TaskState.BLOCKED
             task.metadata["blocked_reason"] = reason
-            self._save()
+            self._persist_task_changes(before)
 
     def mark_waiting_user(self, task_id: str, question: str) -> None:
         """E7-D4: Pausa una tarea mid-run esperando respuesta del usuario.
@@ -122,33 +158,37 @@ class TaskBoard:
         por lo que las tareas downstream permanecen PENDING hasta que se reanude.
         """
         with self._lock:
+            before = self._snapshot_tasks()
             task = self._require(task_id)
             self._file_locks.release_for_task(task_id)
             task.state = TaskState.WAITING_USER
             task.metadata["clarify_question"] = question
             import datetime as _dt
             task.metadata["waiting_since"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
-            self._save()
+            self._persist_task_changes(before)
 
     def update_metadata(self, task_id: str, patch: dict) -> None:
         with self._lock:
+            before = self._snapshot_tasks()
             task = self._require(task_id)
             task.metadata.update(patch)
-            self._save()
+            self._persist_task_changes(before)
 
     def remove_tasks(self, task_ids: list[str]) -> None:
         """Elimina tareas del taskboard (usado para limpiar gates antes de re-iteracion)."""
         with self._lock:
+            before = self._snapshot_tasks()
             for task_id in task_ids:
                 if task_id in self._tasks:
                     self._file_locks.release_for_task(task_id)
                     del self._tasks[task_id]
-            self._save()
+            self._persist_task_changes(before, deleted_ids=task_ids)
 
     def retry_task(
         self, task_id: str, reason: str, assignee: str | None = None
     ) -> None:
         with self._lock:
+            before = self._snapshot_tasks()
             task = self._require(task_id)
             self._file_locks.release_for_task(task_id)
             task.state = TaskState.READY
@@ -159,7 +199,7 @@ class TaskBoard:
             task.metadata["retry_reason"] = reason
             task.metadata["retry_count"] = int(task.metadata.get("retry_count", 0)) + 1
             self._refresh_readiness()
-            self._save()
+            self._persist_task_changes(before)
 
     def _refresh_readiness(self) -> None:
         for task in self._tasks.values():
@@ -182,7 +222,7 @@ class TaskBoard:
             failed_dependencies = [
                 dep
                 for dep in task.dependencies
-                if dep in self._tasks and self._tasks[dep].state == TaskState.FAILED
+                if dep in self._tasks and self._tasks[dep].state in (TaskState.FAILED, TaskState.BLOCKED)
             ]
             if failed_dependencies:
                 task.state = TaskState.BLOCKED
@@ -216,60 +256,50 @@ class TaskBoard:
         return task
 
     def _save(self) -> None:
-        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         payload = [self._task_to_dict(task) for task in self._tasks.values()]
-        import tempfile
+        self._store.upsert_tasks(payload)
 
-        content = json.dumps(payload, indent=2)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            dir=self.storage_path.parent,
-            suffix=".tmp",
-            delete=False,
-            encoding="utf-8",
-        ) as tmp:
-            tmp_path = Path(tmp.name)
-            try:
-                tmp.write(content)
-                tmp.flush()
-            except Exception:
-                tmp_path.unlink(missing_ok=True)
-                raise
-        import time
+    def _snapshot_tasks(self) -> dict[str, str]:
+        return {
+            task_id: json.dumps(
+                self._task_to_dict(task),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            for task_id, task in self._tasks.items()
+        }
 
-        last_err: Exception | None = None
-        for attempt in range(5):
-            try:
-                tmp_path.replace(self.storage_path)
-                last_err = None
-                break
-            except PermissionError as exc:
-                last_err = exc
-                time.sleep(0.05 * (attempt + 1))
-        if last_err is not None:
-            # Fallback: write directly (non-atomic but safe enough under the lock)
-            try:
-                self.storage_path.write_text(content, encoding="utf-8")
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                tmp_path.unlink(missing_ok=True)
-                raise last_err
+    def _persist_task_changes(
+        self,
+        before: dict[str, str],
+        *,
+        deleted_ids: list[str] | None = None,
+    ) -> None:
+        after = self._snapshot_tasks()
+        changed_payload = [
+            self._task_to_dict(self._tasks[task_id])
+            for task_id, serialized in after.items()
+            if before.get(task_id) != serialized and task_id in self._tasks
+        ]
+        if changed_payload:
+            self._store.upsert_tasks(changed_payload)
+        removed = [
+            task_id
+            for task_id in list(deleted_ids or [])
+            if task_id in before and task_id not in after
+        ]
+        if removed:
+            self._store.delete_tasks(removed)
 
     def _load(self) -> None:
-        if not self.storage_path.exists():
-            return
+        import sqlite3
         try:
-            raw = self.storage_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            raw = self.storage_path.read_text(encoding="utf-8", errors="replace")
-        if not raw.strip():
-            return
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            return
-        if not isinstance(payload, list):
-            return
+            payload = self._store.load_all_tasks()
+        except sqlite3.OperationalError:
+            payload = []
+        except Exception:
+            payload = []
+            
         for item in payload:
             if not isinstance(item, dict):
                 continue

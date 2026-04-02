@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass as _dataclass
 from typing import Iterator
 
-from aiteam.types import AdapterResponse, ChannelType
+from aiteam.types import AdapterResponse, ChannelType, StreamChunk
 
 
 @_dataclass
@@ -81,7 +81,7 @@ class ModelAdapter(ABC):
 
     def invoke_stream(
         self, prompt: str, messages: list[dict[str, str]] | None = None
-    ) -> Iterator[str]:
+    ) -> Iterator[str | StreamChunk]:
         """Streaming invoke — yields text chunks. Default: single chunk from invoke()."""
         response = self.invoke(prompt, messages=messages)
         if response.success and response.content:

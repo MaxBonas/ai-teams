@@ -17,6 +17,10 @@ class PolicyDefaultsTests(unittest.TestCase):
             self.assertEqual(policy.max_subscription_attempts, 3)
             self.assertEqual(policy.preferred_subscription_providers[:3], ["openai", "google", "anthropic"])
             self.assertEqual(policy.preferred_api_providers, ["openai", "groq"])
+            self.assertEqual(policy.role_provider_preferences["team_lead"], ["openai", "google", "anthropic"])
+            self.assertEqual(policy.role_provider_preferences["engineer"], ["openai", "google", "groq"])
+            self.assertEqual(policy.role_provider_preferences["reviewer"], ["openai", "google", "groq"])
+            self.assertEqual(policy.role_provider_preferences["qa"], ["openai", "google", "groq"])
 
     def test_default_adapter_pool_includes_openai_and_groq_api_models(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -36,6 +40,19 @@ class PolicyDefaultsTests(unittest.TestCase):
             self.assertIn("gpt-4.1-mini", api_models)
             self.assertIn("gpt-4o-mini", api_models)
             self.assertIn("llama-3.3-70b-versatile", api_models)
+
+    def test_default_anthropic_subscription_adapters_are_team_lead_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            orchestrator = build_default_orchestrator(Path(tmp))
+            adapters = orchestrator.router.adapters
+            anthropic_subscriptions = [
+                adapter
+                for adapter in adapters
+                if adapter.channel == ChannelType.SUBSCRIPTION and adapter.provider == "anthropic"
+            ]
+            self.assertTrue(anthropic_subscriptions)
+            for adapter in anthropic_subscriptions:
+                self.assertEqual(adapter.role_targets, {"team_lead"})
 
     def test_policy_reads_strict_role_env_toggles(self) -> None:
         with patch.dict(

@@ -35,12 +35,13 @@ export default function AgentPanel({ lanes, visible }: AgentPanelProps) {
   const activeCount = sorted.filter(l => l.status === 'active').length;
   const doneCount = sorted.filter(l => l.status === 'completed').length;
   const failedCount = sorted.filter(l => l.status === 'failed').length;
+  const panelTitle = activeCount > 0 ? 'Equipo en ejecución' : 'Historial de agentes';
 
   return (
     <div className="agent-panel">
       <div className="agent-panel-header" onClick={() => setCollapsed(v => !v)}>
         <span className="agent-panel-title">
-          {collapsed ? '▸' : '▾'} Equipo en ejecución
+          {collapsed ? '▸' : '▾'} {panelTitle}
         </span>
         <span className="agent-panel-summary">
           {activeCount > 0 && <span className="apanel-badge apanel-active">{activeCount} activo{activeCount > 1 ? 's' : ''}</span>}

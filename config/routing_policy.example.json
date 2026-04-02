@@ -7,7 +7,7 @@
   "monthly_api_budget_usd": 200.0,
   "complexity_threshold_for_api": "high",
   "criticality_threshold_for_api": "high",
-  "preferred_subscription_providers": ["openai", "anthropic", "google"],
+  "preferred_subscription_providers": ["openai", "google", "anthropic"],
   "preferred_api_providers": ["openai", "groq"],
   "enforce_role_model_preferences": false,
   "strict_role_policy_environments": ["prod"]
