@@ -3079,7 +3079,7 @@ class AITeamOrchestrator:
         re.IGNORECASE,
     )
 
-    _MAX_TOOL_CALLS_PER_TASK = 3
+    _MAX_TOOL_CALLS_PER_TASK = 8  # suficiente para scaffold completo de un proyecto (5-8 archivos)
 
     def _build_native_tools_for_task(self, task: WorkTask) -> list:
         """Convierte herramientas disponibles del task a NativeToolDefinition para function calling."""

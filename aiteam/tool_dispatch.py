@@ -280,13 +280,25 @@ class ToolDispatcher:
         if role in _FILE_ROLES and not _fs_active:
             lines.append(
                 "AVISO: filesystem_mcp no está disponible. Para crear o modificar archivos,\n"
-                "inclúyelos directamente en tu respuesta usando bloques de código con anotación path:\n"
-                "  ```python path=src/modulo/archivo.py\n"
-                "  ... contenido completo del archivo ...\n"
+                "inclúyelos directamente en tu respuesta usando bloques de código con anotación path.\n"
+                "Formato — el lenguaje es opcional, el path es OBLIGATORIO:\n"
+                "  ```python path=src/modulo/cli.py\n"
+                "  ... contenido completo del archivo Python ...\n"
                 "  ```\n"
-                "El sistema extraerá y escribirá los archivos automáticamente.\n"
-                "Usa paths relativos al workspace del proyecto. Máximo 10 archivos por tarea.\n"
-                "IMPORTANTE: incluye el contenido COMPLETO y FUNCIONAL de cada archivo."
+                "  ```toml path=pyproject.toml\n"
+                "  ... contenido completo del TOML ...\n"
+                "  ```\n"
+                "  ```markdown path=README.md\n"
+                "  ... contenido del README ...\n"
+                "  ```\n"
+                "  ```text path=.gitignore\n"
+                "  ... contenido de texto plano ...\n"
+                "  ```\n"
+                "Reglas:\n"
+                "- El sistema extraerá y escribirá los archivos automáticamente.\n"
+                "- Usa paths relativos al workspace. Máximo 10 archivos por tarea.\n"
+                "- Incluye el contenido COMPLETO y FUNCIONAL — no fragmentos ni pseudocódigo.\n"
+                "- Un archivo por bloque de código."
             )
 
         if lines:
