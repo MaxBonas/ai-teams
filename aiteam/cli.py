@@ -155,7 +155,7 @@ def build_default_orchestrator(
     return AITeamOrchestrator(
         router=router,
         runtime_dir=runtime_dir,
-        project_root=Path.cwd(),
+        project_root=runtime_dir.parent,
         additional_workspace_roots=additional_roots,
         browser_mode=browser_mode,
         environment=environment,
