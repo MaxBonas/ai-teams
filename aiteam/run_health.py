@@ -183,6 +183,8 @@ class RunHealthReport:
     rounds_used: int = 0
     round_budget: int = 0
     auto_extensions: int = 0
+    execution_steps_total: int = 0
+    execution_steps_success: int = 0
 
     def to_prompt_block(self) -> str:
         lines = ["== RUN HEALTH REPORT =="]
@@ -242,6 +244,14 @@ class RunHealthReport:
         if int(self.auto_extensions or 0) > 0:
             lines.append(f"  - Extensiones automaticas: {int(self.auto_extensions)}")
 
+        if self.execution_steps_total > 0 or self.execution_steps_success > 0:
+            lines.append("")
+            lines.append("EJECUCION DE PASOS:")
+            lines.append(f"  - Pasos totales: {self.execution_steps_total}")
+            lines.append(f"  - Pasos exitosos: {self.execution_steps_success}")
+            delivery = "code_block_extraction (archivos escritos)" if self.execution_steps_success > 0 else "sin pasos exitosos"
+            lines.append(f"  - Tipo: {delivery}")
+
         lines.append("== FIN REPORT ==")
         return "\n".join(lines)
 
@@ -256,6 +266,8 @@ def build_run_health_report(
     rounds_used: int = 0,
     round_budget: int = 0,
     auto_extensions: int = 0,
+    execution_steps_total: int = 0,
+    execution_steps_success: int = 0,
 ) -> RunHealthReport:
     gate_lookup = dict(gate_tasks or {})
     routing_lookup: dict[str, list[dict[str, str]]] = {}
@@ -314,4 +326,6 @@ def build_run_health_report(
         rounds_used=max(0, int(rounds_used or 0)),
         round_budget=max(0, int(round_budget or 0)),
         auto_extensions=max(0, int(auto_extensions or 0)),
+        execution_steps_total=max(0, int(execution_steps_total or 0)),
+        execution_steps_success=max(0, int(execution_steps_success or 0)),
     )

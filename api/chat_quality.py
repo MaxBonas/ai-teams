@@ -149,6 +149,12 @@ def _classify_check_from_command(command: str) -> str:
         return "lint"
     if any(token in text for token in build_tokens):
         return "build"
+    if text.startswith("write:"):
+        return "file_delivery"
+    if "pip install" in text:
+        return "build"
+    if "python setup.py" in text:
+        return "build"
     return ""
 
 
@@ -243,7 +249,7 @@ def _evaluate_phase_evidence_gate(
     if execution_steps_success > 0 and not successful_checks:
         failures.append("build:no_successful_post_build_checks")
     if require_test_or_build_check and execution_steps_success > 0:
-        if not any(check in {"test", "build"} for check in successful_checks):
+        if not any(check in {"test", "build", "file_delivery"} for check in successful_checks):
             failures.append("build:missing_test_or_build_check")
     return failures
 

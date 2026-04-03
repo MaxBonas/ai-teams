@@ -1622,6 +1622,19 @@ class AITeamOrchestrator:
             except (TypeError, ValueError):
                 continue
         round_budget, auto_extensions = self._run_health_budget_summary(task_root)
+        exec_steps_total = 0
+        exec_steps_success = 0
+        for event in self.event_logger.recent_events(hours=72):
+            payload = event.get("payload", {}) or {}
+            if not isinstance(payload, dict):
+                continue
+            ev_task_id = str(payload.get("task_id", "") or "").strip()
+            if not ev_task_id.startswith(task_root):
+                continue
+            if event.get("event_type") == "execution_step":
+                exec_steps_total += 1
+                if bool(payload.get("success", False)):
+                    exec_steps_success += 1
         return build_run_health_report(
             phase_tasks=phase_tasks,
             gate_tasks=gate_tasks,
@@ -1631,6 +1644,8 @@ class AITeamOrchestrator:
             rounds_used=rounds_used,
             round_budget=round_budget,
             auto_extensions=auto_extensions,
+            execution_steps_total=exec_steps_total,
+            execution_steps_success=exec_steps_success,
         )
 
     def _build_run_health_prompt_block(self, task: WorkTask) -> str:
