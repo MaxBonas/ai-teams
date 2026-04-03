@@ -307,7 +307,7 @@ class ToolDispatcher:
                 "Para invocar una herramienta, incluye en tu respuesta:\n"
                 '  [USE_TOOL server=<server> tool=<tool_name> args={"key": "value"}]\n'
                 "  Para CLI sin server: [USE_TOOL tool=<tool_name> args={\"command\": \"...\"}]\n"
-                "Maximo 3 invocaciones por tarea. Los resultados se anexaran a tu output."
+                "Maximo 8 invocaciones por tarea. Los resultados se anexaran a tu output."
             )
 
         return "\n".join(lines) if lines else ""

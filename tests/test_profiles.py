@@ -40,6 +40,45 @@ class ProfileGovernanceTests(unittest.TestCase):
         self.assertIn("[EVIDENCE_PLAN]", prompt)
         self.assertIn("WAIT_POLICY", prompt)
 
+    # ── Fix D: Engineer prompt delivery rules ────────────────────
+
+    def test_engineer_build_prompt_requires_implementation_not_plan(self) -> None:
+        """Engineer's item 5 must say IMPLEMENTACION and forbid bash commands."""
+        prompt = build_prompt(Role.ENGINEER, "Build CLI", "Create pyproject.toml")
+        self.assertIn("IMPLEMENTACION", prompt)
+        # Must NOT have the generic plan wording for engineer
+        self.assertNotIn("Plan ejecutable inmediato", prompt)
+
+    def test_non_engineer_build_prompt_keeps_plan_format(self) -> None:
+        """Other roles still get 'Plan ejecutable inmediato' in item 5."""
+        for role in (Role.TEAM_LEAD, Role.REVIEWER, Role.QA):
+            prompt = build_prompt(role, "Task", "Description")
+            self.assertIn("Plan ejecutable inmediato", prompt, f"Role {role} should still have plan format")
+
+    def test_engineer_build_prompt_mentions_use_tool(self) -> None:
+        """Engineer prompt must reference USE_TOOL write_file so Engineer knows the mechanism."""
+        prompt = build_prompt(Role.ENGINEER, "Build CLI", "Create src/md_report/cli.py")
+        self.assertIn("USE_TOOL", prompt)
+        self.assertIn("write_file", prompt)
+
+    def test_engineer_build_prompt_mentions_path_annotation(self) -> None:
+        """Engineer prompt must reference path= annotation as fallback."""
+        prompt = build_prompt(Role.ENGINEER, "Build CLI", "Create files")
+        self.assertIn("path=", prompt)
+
+    def test_engineer_system_prompt_forbids_bash_plans(self) -> None:
+        """Engineer system prompt must forbid bash commands and plans."""
+        prompt = build_system_prompt(Role.ENGINEER)
+        self.assertIn("NUNCA", prompt)
+        self.assertIn("bash", prompt)
+
+    def test_researcher_system_prompt_constrains_peer_blocking(self) -> None:
+        """Researcher system prompt must not tell engineer to investigate instead of building."""
+        from aiteam.profiles import DEFAULT_PROFILES
+        system = DEFAULT_PROFILES[Role.RESEARCHER].system_prompt
+        self.assertIn("NO bloquear", system)
+        self.assertIn("PEER INPUT", system)
+
 
 if __name__ == "__main__":
     unittest.main()

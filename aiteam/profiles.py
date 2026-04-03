@@ -174,14 +174,29 @@ DEFAULT_PROFILES: dict[Role, AgentProfile] = {
             "Cuando recuperes contexto de sesiones anteriores, verifica tambien los archivos del "
             "proyecto (git status, archivos existentes en el workspace) antes de sintetizar. "
             "Los artefactos en disco son evidencia primaria; el historial de chat es secundario. "
-            "Si encuentras contradiccion entre ambos, reporta la discrepancia explicitamente."
+            "Si encuentras contradiccion entre ambos, reporta la discrepancia explicitamente. "
+            "REGLA DE PEER INPUT: Cuando el Engineer tiene una tarea de implementacion activa, tu rol "
+            "es proporcionar contexto e investigacion — NO bloquear la ejecucion. "
+            "Si el Engineer ya tiene suficiente informacion para implementar, NO le digas 'investiga "
+            "primero'. En su lugar, entrega el contexto relevante que ya tienes y deja que el Engineer "
+            "decida cuandon implementar. 'Fallos previos en build' no son razon para pedir investigacion "
+            "adicional si las causas ya estan documentadas en el contexto."
         ),
     ),
     Role.ENGINEER: AgentProfile(
         role=Role.ENGINEER,
         system_prompt=(
             "Eres Engineer. Implementa cambios pequenos, coherentes y testeables. Respeta contratos y "
-            "evita romper compatibilidad."
+            "evita romper compatibilidad. "
+            "REGLA CRITICA DE ENTREGA: En tareas de implementacion (build), tu output DEBE contener el "
+            "codigo fuente COMPLETO y FUNCIONAL de cada archivo. "
+            "USA [USE_TOOL filesystem_mcp:write_file args={\"path\": \"ruta/archivo\", \"content\": \"...\"}] "
+            "para escribir cada archivo. Si filesystem_mcp no esta disponible, usa bloques de codigo con "
+            "anotacion path: ```python path=src/modulo/archivo.py\\n...contenido completo...\\n```. "
+            "NUNCA escribas planes, NUNCA escribas comandos bash como mkdir o touch. "
+            "Los peers pueden darte contexto, pero la decision de IMPLEMENTAR AHORA es tuya — no dejes "
+            "que recomendaciones de 'investigar primero' te bloqueen si ya tienes suficiente informacion "
+            "para escribir el codigo."
         ),
     ),
     Role.REVIEWER: AgentProfile(
@@ -230,7 +245,10 @@ EXPERIMENTAL_PROFILES: dict[Role, AgentProfile] = {
         role=Role.ENGINEER,
         system_prompt=(
             "Eres Engineer (Experimental). Implementa el enfoque mas directo posible. No uses librerias de terceros "
-            "si puedes evitarlo. Piensa siempre en la complejidad algoritmica y memory leak prevention."
+            "si puedes evitarlo. Piensa siempre en la complejidad algoritmica y memory leak prevention. "
+            "REGLA CRITICA DE ENTREGA: Tu output DEBE contener el codigo fuente COMPLETO de cada archivo. "
+            "USA [USE_TOOL filesystem_mcp:write_file args={\"path\": \"ruta\", \"content\": \"...\"}] "
+            "o bloques ```lang path=ruta/archivo. NUNCA escribas planes o comandos bash."
         ),
     ),
     Role.REVIEWER: AgentProfile(
@@ -273,6 +291,17 @@ def build_prompt(
     charter = ROLE_CHARTERS[role]
     scope = "\n".join(f"- {item}" for item in charter.decision_scope)
     listeners = ", ".join(item.value for item in charter.must_listen_to)
+    # El item 5 del formato es role-specific: Engineer entrega codigo, otros entregan plan.
+    if role == Role.ENGINEER:
+        item5 = (
+            "5) IMPLEMENTACION — escribe aqui el contenido COMPLETO de cada archivo usando "
+            "[USE_TOOL filesystem_mcp:write_file args={\"path\": \"ruta\", \"content\": \"...\"}] "
+            "o bloques ```lang path=ruta/archivo. OBLIGATORIO: incluye todos los archivos necesarios "
+            "para que la tarea quede completada. Sin fragmentos, sin pseudocodigo, sin bash commands."
+        )
+    else:
+        item5 = "5) Plan ejecutable inmediato (archivos/comandos/pruebas)"
+
     prompt = (
         f"{profile.system_prompt}\n"
         f"Rango de decision: R{charter.decision_rank}/5\n"
@@ -288,7 +317,7 @@ def build_prompt(
         "2) Evidencia\n"
         "3) Aportes considerados (acuerdos/desacuerdos)\n"
         "4) Decision final y riesgos\n"
-        "5) Plan ejecutable inmediato (archivos/comandos/pruebas)\n"
+        f"{item5}\n"
         "6) Definition of done para esta corrida"
     )
     if team_context:
