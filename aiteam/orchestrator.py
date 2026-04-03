@@ -760,6 +760,99 @@ class AITeamOrchestrator:
                 "filesystem_mcp_workspace_inject_error", {"error": str(exc)}
             )
 
+    # ── Fix B: extraccion de bloques de codigo con path anotado ────
+
+    _CODE_BLOCK_RE = re.compile(
+        r"```(?:\w+)?\s+path=[\"']?([^\"'\n\s`]+)[\"']?\n(.*?)```",
+        re.DOTALL,
+    )
+    _MAX_CODE_FILES_PER_TASK = 10
+    _MAX_CODE_FILE_BYTES = 512 * 1024  # 512 KB por archivo
+
+    def _extract_and_write_code_blocks(self, task: "WorkTask", content: str) -> int:
+        """Extrae bloques ```lang path=archivo y los escribe al workspace.
+
+        Fallback de escritura cuando filesystem_mcp no esta disponible.
+        El Engineer incluye el contenido completo de cada archivo usando
+        la anotacion path= en el fence del bloque de codigo.
+
+        Devuelve el numero de archivos escritos correctamente.
+        """
+        matches = list(self._CODE_BLOCK_RE.finditer(content))
+        if not matches:
+            return 0
+
+        workspace = self.execution.executor.workspace_root
+        written = 0
+
+        for match in matches[: self._MAX_CODE_FILES_PER_TASK]:
+            raw_path = match.group(1).strip()
+            file_content = match.group(2)
+
+            # Seguridad: solo paths relativos sin traversal
+            try:
+                rel = Path(raw_path)
+                if rel.is_absolute() or ".." in rel.parts:
+                    self.event_logger.emit(
+                        "code_block_write_skipped",
+                        {"task_id": task.task_id, "path": raw_path, "reason": "unsafe_path"},
+                    )
+                    continue
+                target = (workspace / rel).resolve()
+                # Asegurar que el target esta dentro del workspace
+                target.relative_to(workspace.resolve())
+            except (ValueError, TypeError):
+                continue
+
+            if len(file_content.encode("utf-8")) > self._MAX_CODE_FILE_BYTES:
+                self.event_logger.emit(
+                    "code_block_write_skipped",
+                    {"task_id": task.task_id, "path": raw_path, "reason": "file_too_large"},
+                )
+                continue
+
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                existed = target.exists()
+                target.write_text(file_content, encoding="utf-8")
+
+                event_name = "artifact_modified" if existed else "artifact_created"
+                self.event_logger.emit(
+                    event_name,
+                    {
+                        "task_id": task.task_id,
+                        "path": str(rel),
+                        "bytes": len(file_content.encode("utf-8")),
+                        "created": 0 if existed else 1,
+                        "modified": 1 if existed else 0,
+                    },
+                )
+                self.event_logger.emit(
+                    "execution_step",
+                    {
+                        "task_id": task.task_id,
+                        "success": True,
+                        "step_type": "write_file",
+                        "command": f"write:{rel}",
+                        "exit_code": 0,
+                        "reason": "code_block_extraction",
+                    },
+                )
+                written += 1
+            except Exception as exc:
+                self.event_logger.emit(
+                    "code_block_write_error",
+                    {"task_id": task.task_id, "path": raw_path, "error": str(exc)},
+                )
+
+        if written > 0:
+            self.event_logger.emit(
+                "code_blocks_written",
+                {"task_id": task.task_id, "files_written": written, "workspace": str(workspace)},
+            )
+
+        return written
+
     # ── Workflow State (shared blackboard) ──────────────────────────
 
     def _load_workflow_state(self) -> None:
@@ -2632,6 +2725,13 @@ class AITeamOrchestrator:
                     session,
                 )
                 safe_content = self.compliance.redact_text(safe_content)
+
+            # ── Fix B: extraccion de bloques de codigo con path anotado ──
+            # Fallback cuando filesystem_mcp no esta disponible: el Engineer
+            # incluye codigo con ```lang path=archivo.py en su output y el
+            # orchestrator lo escribe directamente al workspace del proyecto.
+            if task.role == Role.ENGINEER:
+                self._extract_and_write_code_blocks(task, safe_content)
 
             found_placeholders = [
                 label

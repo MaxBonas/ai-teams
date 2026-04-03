@@ -272,6 +272,23 @@ class ToolDispatcher:
                     tool_names = ", ".join(t.name for t in server_tools[:10])
                     lines.append(f"- {server}: {tool_names}")
 
+        # Fallback de escritura cuando filesystem_mcp no está disponible.
+        # Si el rol es de implementacion y no hay MCP de filesystem activo,
+        # indicar al Engineer cómo escribir archivos directamente en el output.
+        _fs_active = role_tools and any(mt.server_name == "filesystem_mcp" for mt in role_tools)
+        _FILE_ROLES = {"engineer", "reviewer", "qa"}
+        if role in _FILE_ROLES and not _fs_active:
+            lines.append(
+                "AVISO: filesystem_mcp no está disponible. Para crear o modificar archivos,\n"
+                "inclúyelos directamente en tu respuesta usando bloques de código con anotación path:\n"
+                "  ```python path=src/modulo/archivo.py\n"
+                "  ... contenido completo del archivo ...\n"
+                "  ```\n"
+                "El sistema extraerá y escribirá los archivos automáticamente.\n"
+                "Usa paths relativos al workspace del proyecto. Máximo 10 archivos por tarea.\n"
+                "IMPORTANTE: incluye el contenido COMPLETO y FUNCIONAL de cada archivo."
+            )
+
         if lines:
             lines.append("")
             lines.append(

@@ -4696,6 +4696,182 @@ class MinimalOutputSpecTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class CodeBlockExtractionTests(unittest.TestCase):
+    """Tests para _extract_and_write_code_blocks (Fix B)."""
+
+    def _build_orchestrator(self, runtime_dir: Path) -> AITeamOrchestrator:
+        from aiteam.adapters import FakeSuccessAdapter
+        from aiteam.config import build_default_router_policy
+        from aiteam.router import HybridRouter
+        from aiteam.observability import EventLogger
+
+        policy = build_default_router_policy()
+        router = HybridRouter(
+            adapters=[FakeSuccessAdapter()],
+            policy=policy,
+            budget_manager=None,
+            event_logger=EventLogger(runtime_dir),
+        )
+        return AITeamOrchestrator(
+            router=router,
+            runtime_dir=runtime_dir,
+            project_root=runtime_dir.parent,
+        )
+
+    def _make_task(self, task_id: str = "TEST::build") -> WorkTask:
+        return WorkTask(
+            task_id=task_id,
+            title="build",
+            description="build test",
+            role=Role.ENGINEER,
+        )
+
+    def test_writes_single_file_from_code_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = (
+                '```python path=src/hello.py\n'
+                'def hello():\n'
+                '    return "world"\n'
+                '```'
+            )
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 1)
+            target = workspace / "src" / "hello.py"
+            self.assertTrue(target.exists(), "el archivo debe haberse creado")
+            self.assertIn('def hello', target.read_text(encoding="utf-8"))
+
+    def test_writes_multiple_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = (
+                '```python path=src/a.py\nA = 1\n```\n\n'
+                '```python path=src/b.py\nB = 2\n```'
+            )
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 2)
+            self.assertTrue((workspace / "src" / "a.py").exists())
+            self.assertTrue((workspace / "src" / "b.py").exists())
+
+    def test_rejects_path_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = '```python path=../../etc/passwd\nmalicious\n```'
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 0)
+
+    def test_rejects_absolute_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = '```python path=/etc/passwd\nmalicious\n```'
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 0)
+
+    def test_no_match_returns_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = "Aqui hay un plan pero sin bloques de codigo con path."
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+            self.assertEqual(written, 0)
+
+    def test_emits_artifact_created_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = '```python path=src/new.py\nX = 42\n```'
+            orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            events_file = runtime_dir / "events.jsonl"
+            events = [json.loads(l) for l in events_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+            event_types = [e.get("event_type") for e in events]
+            self.assertIn("artifact_created", event_types)
+            self.assertIn("execution_step", event_types)
+
+    def test_emits_artifact_modified_for_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+
+            # Pre-create the file
+            (workspace / "src").mkdir()
+            (workspace / "src" / "existing.py").write_text("OLD = 0", encoding="utf-8")
+
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = '```python path=src/existing.py\nNEW = 1\n```'
+            orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            events_file = runtime_dir / "events.jsonl"
+            events = [json.loads(l) for l in events_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+            event_types = [e.get("event_type") for e in events]
+            self.assertIn("artifact_modified", event_types)
+
+    def test_path_with_quotes(self) -> None:
+        """Soporta path="archivo.py" con comillas."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = '```python path="src/quoted.py"\nQ = True\n```'
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 1)
+            self.assertTrue((workspace / "src" / "quoted.py").exists())
+
+
 class FilesystemMcpWorkspaceInjectionTests(unittest.TestCase):
     """Tests para _inject_filesystem_mcp_workspace y el sharing de mcp_manager."""
 
