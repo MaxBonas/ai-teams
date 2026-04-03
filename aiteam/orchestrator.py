@@ -706,8 +706,64 @@ class AITeamOrchestrator:
                     "mcp_opencode_bootstrapped",
                     {"new_servers": bootstrapped},
                 )
+            self._inject_filesystem_mcp_workspace()
         except Exception:
             self.mcp_manager = None
+
+        # Compartir la misma instancia MCPServerManager con tool_dispatcher para
+        # que build_tool_context_for_agent vea los mismos servidores arrancados
+        # (filesystem_mcp incluido) sin crear un segundo proceso independiente.
+        if self.tool_dispatcher is not None and self.mcp_manager is not None:
+            self.tool_dispatcher._mcp_manager = self.mcp_manager
+
+    def _inject_filesystem_mcp_workspace(self) -> None:
+        """Inyecta el workspace del proyecto en filesystem_mcp y lo arranca.
+
+        @modelcontextprotocol/server-filesystem requiere rutas permitidas como
+        args adicionales al comando:
+          npx -y @modelcontextprotocol/server-filesystem /ruta/workspace
+
+        Sin este argumento el servidor arranca sin acceso a ningun directorio
+        y el Engineer nunca recibe instrucciones USE_TOOL para escribir archivos.
+        """
+        if self.mcp_manager is None:
+            return
+        config = self.mcp_manager._configs.get("filesystem_mcp")
+        if config is None or not config.enabled:
+            return
+
+        workspace = str(self.runtime_dir.parent.resolve())
+
+        def _norm(p: str) -> str:
+            return str(p).replace("\\", "/").rstrip("/").lower()
+
+        existing = [_norm(a) for a in config.args]
+        if _norm(workspace) not in existing:
+            config.args = list(config.args) + [workspace]
+            try:
+                self.mcp_manager._save_configs()
+                self.event_logger.emit(
+                    "filesystem_mcp_workspace_injected",
+                    {"workspace": workspace, "args": config.args},
+                )
+            except Exception as exc:
+                self.event_logger.emit(
+                    "filesystem_mcp_workspace_inject_error", {"error": str(exc)}
+                )
+                return
+
+        # Arrancar el servidor para que sus herramientas aparezcan en el
+        # contexto USE_TOOL del Engineer antes de que empiece la fase build.
+        try:
+            ok, reason = self.mcp_manager.start_server("filesystem_mcp", timeout=20)
+            self.event_logger.emit(
+                "filesystem_mcp_startup",
+                {"ok": ok, "reason": reason, "workspace": workspace},
+            )
+        except Exception as exc:
+            self.event_logger.emit(
+                "filesystem_mcp_startup_error", {"error": str(exc)}
+            )
 
     # ── Workflow State (shared blackboard) ──────────────────────────
 

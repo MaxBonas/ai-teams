@@ -4696,5 +4696,174 @@ class MinimalOutputSpecTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class FilesystemMcpWorkspaceInjectionTests(unittest.TestCase):
+    """Tests para _inject_filesystem_mcp_workspace y el sharing de mcp_manager."""
+
+    def _build_orchestrator(self, runtime_dir: Path) -> AITeamOrchestrator:
+        from aiteam.adapters import FakeSuccessAdapter
+        from aiteam.config import build_default_router_policy
+        from aiteam.router import HybridRouter
+        from aiteam.observability import EventLogger
+
+        policy = build_default_router_policy()
+        router = HybridRouter(
+            adapters=[FakeSuccessAdapter()],
+            policy=policy,
+            budget_manager=None,
+            event_logger=EventLogger(runtime_dir),
+        )
+        return AITeamOrchestrator(
+            router=router,
+            runtime_dir=runtime_dir,
+            project_root=runtime_dir.parent,
+        )
+
+    def _runtime_with_filesystem_mcp(self, tmp: Path) -> Path:
+        """Crea un runtime_dir con filesystem_mcp habilitado en mcp_servers.json."""
+        runtime_dir = tmp / ".aiteam"
+        runtime_dir.mkdir(parents=True)
+        mcp_cfg = {
+            "servers": [
+                {
+                    "name": "filesystem_mcp",
+                    "command": "npx.cmd",
+                    "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                    "env": {},
+                    "transport": "stdio",
+                    "enabled": True,
+                    "requires_approval": False,
+                    "source_type": "npm",
+                    "source": "@modelcontextprotocol/server-filesystem",
+                    "capabilities": ["file_read", "file_write"],
+                    "role_targets": ["engineer", "reviewer", "qa"],
+                    "health_status": "unknown",
+                    "health_reason": "",
+                    "last_checked": "",
+                    "bootstrap_source": "",
+                }
+            ]
+        }
+        (runtime_dir / "mcp_servers.json").write_text(
+            json.dumps(mcp_cfg, indent=2), encoding="utf-8"
+        )
+        return runtime_dir
+
+    def test_workspace_path_injected_into_filesystem_mcp_args(self) -> None:
+        """El workspace del proyecto se inyecta en los args de filesystem_mcp."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "my_project"
+            workspace.mkdir()
+            runtime_dir = self._runtime_with_filesystem_mcp(workspace)
+
+            orch = self._build_orchestrator(runtime_dir)
+
+            if orch.mcp_manager is None:
+                self.skipTest("mcp_manager no disponible en este entorno")
+
+            config = orch.mcp_manager._configs.get("filesystem_mcp")
+            self.assertIsNotNone(config, "filesystem_mcp debe estar en configs")
+
+            workspace_str = str(workspace.resolve())
+
+            def _norm(p: str) -> str:
+                return str(p).replace("\\", "/").rstrip("/").lower()
+
+            injected = [_norm(a) for a in config.args]
+            self.assertIn(
+                _norm(workspace_str),
+                injected,
+                f"workspace '{workspace_str}' debe estar en args: {config.args}",
+            )
+
+    def test_workspace_path_not_duplicated_on_second_init(self) -> None:
+        """Si el workspace ya está en args, no se añade dos veces."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "my_project"
+            workspace.mkdir()
+            runtime_dir = self._runtime_with_filesystem_mcp(workspace)
+
+            # Primera init
+            orch1 = self._build_orchestrator(runtime_dir)
+            if orch1.mcp_manager is None:
+                self.skipTest("mcp_manager no disponible")
+
+            # Segunda init — simula un nuevo orchestrator sobre el mismo runtime
+            orch2 = self._build_orchestrator(runtime_dir)
+            if orch2.mcp_manager is None:
+                self.skipTest("mcp_manager no disponible")
+
+            config = orch2.mcp_manager._configs.get("filesystem_mcp")
+            workspace_str = str(workspace.resolve())
+
+            def _norm(p: str) -> str:
+                return str(p).replace("\\", "/").rstrip("/").lower()
+
+            count = sum(1 for a in config.args if _norm(a) == _norm(workspace_str))
+            self.assertEqual(count, 1, f"workspace no debe aparecer duplicado: {config.args}")
+
+    def test_tool_dispatcher_shares_mcp_manager_instance(self) -> None:
+        """tool_dispatcher._mcp_manager debe ser la misma instancia que orchestrator.mcp_manager."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "my_project"
+            workspace.mkdir()
+            runtime_dir = self._runtime_with_filesystem_mcp(workspace)
+
+            orch = self._build_orchestrator(runtime_dir)
+
+            if orch.mcp_manager is None or orch.tool_dispatcher is None:
+                self.skipTest("mcp_manager o tool_dispatcher no disponibles")
+
+            self.assertIs(
+                orch.tool_dispatcher._mcp_manager,
+                orch.mcp_manager,
+                "tool_dispatcher debe compartir la misma instancia de mcp_manager",
+            )
+
+    def test_inject_skipped_when_filesystem_mcp_disabled(self) -> None:
+        """No se inyecta ni se arranca si filesystem_mcp está deshabilitado."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "my_project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+            mcp_cfg = {
+                "servers": [
+                    {
+                        "name": "filesystem_mcp",
+                        "command": "npx.cmd",
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                        "env": {},
+                        "transport": "stdio",
+                        "enabled": False,  # deshabilitado
+                        "requires_approval": False,
+                        "source_type": "npm",
+                        "source": "@modelcontextprotocol/server-filesystem",
+                        "capabilities": [],
+                        "role_targets": [],
+                        "health_status": "unknown",
+                        "health_reason": "",
+                        "last_checked": "",
+                        "bootstrap_source": "",
+                    }
+                ]
+            }
+            (runtime_dir / "mcp_servers.json").write_text(
+                json.dumps(mcp_cfg, indent=2), encoding="utf-8"
+            )
+
+            orch = self._build_orchestrator(runtime_dir)
+
+            if orch.mcp_manager is None:
+                self.skipTest("mcp_manager no disponible")
+
+            config = orch.mcp_manager._configs.get("filesystem_mcp")
+            # Args no deben haber cambiado
+            self.assertEqual(
+                config.args,
+                ["-y", "@modelcontextprotocol/server-filesystem"],
+                "args no deben modificarse si filesystem_mcp está deshabilitado",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
