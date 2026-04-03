@@ -151,7 +151,12 @@ def default_phases(mode: str) -> list[PhaseSpec]:
             PhaseSpec(
                 phase_id="plan_risks",
                 role="REVIEWER",
-                objective="Define quality gates, pruebas minimas y riesgos de release.",
+                objective=(
+                    "Documenta riesgos tecnicos, quality gates y pruebas minimas que el build debe satisfacer. "
+                    "IMPORTANTE: Esta fase es de evaluacion de riesgos, NO una decision go/no-go. "
+                    "Nunca emitas 'RECHAZADO' ni bloquees el build — el Reviewer aqui actua como auditor de riesgos, "
+                    "no como gate. Lista los criterios de aceptacion y los riesgos a mitigar en el build."
+                ),
                 depends_on=["plan_research"],
             ),
             PhaseSpec(

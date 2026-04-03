@@ -850,6 +850,24 @@ def _build_scout_session_history_context(runtime_dir: Path, max_chats: int = 3) 
         reverse=True,
     )[:max_chats]
 
+    # Load authoritative outcomes from lead_memory.md (resultado field is ground truth)
+    lead_memory_outcomes: dict[str, str] = {}
+    lead_memory_path = runtime_dir / "lead_memory.md"
+    if lead_memory_path.exists():
+        try:
+            memory_text = lead_memory_path.read_text(encoding="utf-8", errors="replace")
+            for line in memory_text.splitlines():
+                line = line.strip()
+                if not line.startswith("- Run "):
+                    continue
+                # Parse: "- Run ... | chat=CHAT-XXXXXXXX | ... | resultado=X | ..."
+                chat_match = re.search(r"chat=(CHAT-[A-Z0-9]+)", line)
+                result_match = re.search(r"resultado=(\w+)", line)
+                if chat_match and result_match:
+                    lead_memory_outcomes[chat_match.group(1)] = result_match.group(1)
+        except Exception:
+            pass
+
     lines = ["=== HISTORIAL DE SESIONES ==="]
     for row in ordered:
         root_id = str(row.get("root_id", ""))
@@ -858,6 +876,10 @@ def _build_scout_session_history_context(runtime_dir: Path, max_chats: int = 3) 
         phase_states = row.get("phase_states", {})
         failed = [k for k, v in (phase_states.items() if isinstance(phase_states, dict) else []) if v == "failed"]
         lines.append(f"\n[{root_id}]")
+        # Authoritative outcome from lead_memory (overrides DB phase states)
+        authoritative = lead_memory_outcomes.get(root_id)
+        if authoritative:
+            lines.append(f"  resultado_oficial: {authoritative}")
         if message:
             lines.append(f"  pedido: {message}")
         if lead_close:
