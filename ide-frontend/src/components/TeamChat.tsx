@@ -5,11 +5,20 @@ import AgentPanel from './AgentPanel';
 import type { AgentLaneState } from './AgentLane';
 import Modal from './Modal';
 
+interface StreamBlock {
+  task_id: string;
+  title: string;
+  role: string;
+  text: string;
+  complete: boolean;
+}
+
 interface ChatMessage {
   id: string;
   sender: 'user' | 'team';
   text: string;
   meta?: string;
+  blocks?: StreamBlock[];
 }
 
 type ChatMode = 'sprint5' | 'classic';
@@ -604,6 +613,67 @@ function RunDetailsPanel({ progress }: { progress: TeamChatProgress | null }) {
   );
 }
 
+function StreamBlockCard({
+  block,
+  expanded,
+  onToggle,
+  live = false,
+}: {
+  block: StreamBlock;
+  expanded: boolean;
+  onToggle: () => void;
+  live?: boolean;
+}) {
+  const preview = block.text.slice(0, 300);
+  const hasMore = block.text.length > 300;
+  return (
+    <div className={`stream-block ${block.complete ? 'stream-block--complete' : 'stream-block--live'}`}>
+      <button className="stream-block-header" onClick={onToggle} type="button">
+        <span className={`stream-block-role stream-block-role--${block.role || 'agent'}`}>{block.role || 'agent'}</span>
+        <span className="stream-block-title">{block.title}</span>
+        {!block.complete && live && <span className="team-chat-cursor-blink" style={{ marginLeft: 4 }}>▍</span>}
+        <ChevronRight size={11} className={`run-meta-chevron ${expanded ? 'is-expanded' : ''}`} style={{ marginLeft: 'auto', flexShrink: 0 }} />
+      </button>
+      {expanded ? (
+        <div className="stream-block-body">
+          <span style={{ whiteSpace: 'pre-wrap' }}>{block.text || '…'}</span>
+          {!block.complete && live && <span className="team-chat-cursor-blink">▍</span>}
+        </div>
+      ) : (
+        block.text.length > 0 && (
+          <div className="stream-block-preview">
+            {preview}{hasMore ? '…' : ''}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+function MessageBlocks({
+  blocks,
+  expanded,
+  onToggle,
+}: {
+  blocks: StreamBlock[];
+  expanded: Record<string, boolean>;
+  onToggle: (id: string) => void;
+}) {
+  if (blocks.length === 0) return null;
+  return (
+    <div className="msg-blocks">
+      {blocks.map((block) => (
+        <StreamBlockCard
+          key={block.task_id}
+          block={{ ...block, complete: true }}
+          expanded={!!expanded[block.task_id]}
+          onToggle={() => onToggle(block.task_id)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function TeamChat({ workspacePath, minimized = false, onToggleMinimize, chatToLoad, onChatLoaded }: TeamChatProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -623,6 +693,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const [roundsInput, setRoundsInput] = useState<string>(String(TEAM_CHAT_DEFAULTS.rounds));
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingTaskId, setStreamingTaskId] = useState<string>('');
+  const [streamingBlocks, setStreamingBlocks] = useState<StreamBlock[]>([]);
+  const [blockExpanded, setBlockExpanded] = useState<Record<string, boolean>>({});
   const [agentLanes, setAgentLanes] = useState<Map<string, AgentLaneState>>(new Map());
   const [expandedMessage, setExpandedMessage] = useState<ChatMessage | null>(null);
   const [pendingClarification, setPendingClarification] = useState<{ chatId: string; question: string } | null>(null);
@@ -917,6 +989,9 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     }
     setLoading(true);
     const clientTaskId = createClientTaskId();
+    let localBlocks: StreamBlock[] = [];
+    setStreamingBlocks([]);
+    setBlockExpanded({});
     let progressIntervalId: ReturnType<typeof window.setInterval> | null = null;
     const pollProgress = async () => {
       try {
@@ -1068,6 +1143,15 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       });
                       return next;
                     });
+                    const newBlock: StreamBlock = {
+                      task_id: tid,
+                      title: ev.title || ev.phase || ev.role || tid,
+                      role: ev.role ?? '',
+                      text: '',
+                      complete: false,
+                    };
+                    localBlocks = [...localBlocks, newBlock];
+                    setStreamingBlocks([...localBlocks]);
                   }
                 } catch { /* ignore */ }
                 currentEventType = '';
@@ -1113,6 +1197,12 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       }
                       return next;
                     });
+                    if (chunkType !== 'thinking') {
+                      localBlocks = localBlocks.map(b =>
+                        b.task_id === tid ? { ...b, text: b.text + chunk } : b
+                      );
+                      setStreamingBlocks([...localBlocks]);
+                    }
                   }
                 } catch { /* ignore */ }
                 currentEventType = '';
@@ -1139,6 +1229,10 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       });
                       return next;
                     });
+                    localBlocks = localBlocks.map(b =>
+                      b.task_id === tid ? { ...b, complete: true } : b
+                    );
+                    setStreamingBlocks([...localBlocks]);
                   }
                 } catch { /* ignore */ }
                 currentEventType = '';
@@ -1216,6 +1310,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       : (String(json.error || '') || 'No response content returned by AI Team.');
                   }
                   // ── Pausa conversacional ─────────────────────────────────
+                  const finalBlocks = localBlocks.filter(b => b.text.length > 0);
                   if (json.waiting_user === true && typeof json.clarification_question === 'string') {
                     setPendingClarification({
                       chatId: String(json.task_id ?? ''),
@@ -1228,6 +1323,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                         sender: 'team',
                         text: `El agente necesita tu respuesta: "${json.clarification_question}"`,
                         meta: 'waiting_user',
+                        blocks: finalBlocks.length > 0 ? finalBlocks : undefined,
                       },
                     ]);
                   } else {
@@ -1236,9 +1332,11 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       sender: 'team',
                       text: answer,
                       meta: statusMeta,
+                      blocks: finalBlocks.length > 0 ? finalBlocks : undefined,
                     };
                     setMessages((prev) => [...prev, teamMessage]);
                   }
+                  setStreamingBlocks([]);
 
                   const latestRun = typeof json.task_id === 'string' && json.task_id
                     ? {
@@ -1396,6 +1494,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   };
 
   const MSG_TRUNCATE = 600;
+  const toggleBlock = (id: string) =>
+    setBlockExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
   return (
     <section className="team-card">
@@ -1438,7 +1538,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
             messages.map((message) => {
               const isError = message.meta === 'error';
               const isJustification = message.meta === 'justification';
-              const isLong = !isError && message.text.length > MSG_TRUNCATE;
+              const hasBlocks = !isError && !isJustification && message.blocks && message.blocks.length > 0;
+              const isLong = !isError && !hasBlocks && message.text.length > MSG_TRUNCATE;
               const displayText = isLong ? message.text.slice(0, MSG_TRUNCATE) + '…' : message.text;
               return (
                 <article key={message.id} className={`team-msg team-msg-${message.sender} ${isError ? 'msg-error' : ''} ${isJustification ? 'msg-justification' : ''}`}>
@@ -1448,6 +1549,12 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                   <div className="team-msg-body">
                     {isJustification ? (
                       <InspectorTrace text={message.text} onExpand={() => setExpandedMessage(message)} />
+                    ) : hasBlocks ? (
+                      <MessageBlocks
+                        blocks={message.blocks!}
+                        expanded={blockExpanded}
+                        onToggle={toggleBlock}
+                      />
                     ) : (
                       <>
                         <p style={{ whiteSpace: 'pre-wrap' }}>{displayText}</p>
@@ -1474,8 +1581,22 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
           <AgentPanel lanes={agentLanes} visible={loading || agentLanes.size > 0} />
           <RunDetailsPanel progress={chatProgress} />
 
-          {streamingText !== null && (() => {
-            // Mientras el buffer está vacío, mostrar la fase activa del agente
+          {/* Streaming blocks — one collapsible card per agent, collapsed by default */}
+          {streamingBlocks.length > 0 && (
+            <div className="streaming-blocks-wrap">
+              {streamingBlocks.map((block) => (
+                <StreamBlockCard
+                  key={block.task_id}
+                  block={block}
+                  expanded={!!blockExpanded[block.task_id]}
+                  onToggle={() => toggleBlock(block.task_id)}
+                  live={!block.complete}
+                />
+              ))}
+            </div>
+          )}
+          {/* Fallback single bubble when no agent_chunk blocks exist */}
+          {streamingText !== null && streamingBlocks.length === 0 && (() => {
             const activePhase = streamingText === ''
               ? [...agentLanes.values()].find(l => l.status === 'active')
               : null;
