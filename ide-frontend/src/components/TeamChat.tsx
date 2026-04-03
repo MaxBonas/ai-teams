@@ -152,6 +152,7 @@ interface TeamChatProgress {
   live_mode_rejected: boolean;
   evidence_gate_rejected: boolean;
   evidence_gate_failures: string[];
+  is_sim_mode?: boolean;
   last_event: string;
   last_event_ts: string;
   dynamic_phases_ready: boolean;
@@ -260,6 +261,7 @@ const parseChatProgress = (payload: unknown, fallbackTaskId: string): TeamChatPr
     live_mode_rejected: Boolean(row.live_mode_rejected),
     evidence_gate_rejected: Boolean(row.evidence_gate_rejected),
     evidence_gate_failures: evidenceFailures,
+    is_sim_mode: row.is_sim_mode === true,
     last_event: typeof row.last_event === 'string' ? row.last_event : '',
     last_event_ts: typeof row.last_event_ts === 'string' ? row.last_event_ts : '',
     dynamic_phases_ready: Boolean(row.dynamic_phases_ready),
@@ -625,6 +627,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const [expandedMessage, setExpandedMessage] = useState<ChatMessage | null>(null);
   const [pendingClarification, setPendingClarification] = useState<{ chatId: string; question: string } | null>(null);
   const [clarificationInput, setClarificationInput] = useState('');
+  const [simMode, setSimMode] = useState<boolean>(false);
 
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -731,6 +734,17 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     return () => {
       cancelled = true;
     };
+  }, [workspacePath]);
+
+  useEffect(() => {
+    apiFetch('/api/aiteam/system/mode')
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        if (data && typeof data === 'object' && 'is_sim_mode' in (data as Record<string, unknown>)) {
+          setSimMode(Boolean((data as Record<string, unknown>).is_sim_mode));
+        }
+      })
+      .catch(() => {});
   }, [workspacePath]);
 
   useEffect(() => {
@@ -916,6 +930,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
         const parsed = parseChatProgress(progressPayload, clientTaskId);
         if (parsed) {
           setChatProgress(parsed);
+          setSimMode(parsed.is_sim_mode ?? false);
         }
       } catch {
         // ignore transient polling errors
@@ -1404,6 +1419,15 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
       </header>
 
       <div className="team-chat-body">
+        {simMode && (
+          <div className="sim-mode-banner">
+            <span className="sim-mode-banner-icon">⚠</span>
+            <span className="sim-mode-banner-text">
+              <strong>Modo simulación activo</strong> — los agentes no producen output real.
+              Para resultados reales, configura <code>AITEAM_ENABLE_LIVE_API=1</code> y al menos una API key en <code>.env</code>.
+            </span>
+          </div>
+        )}
         {/* ── Conversation log ─────────────────────── */}
         <div className="team-chat-log" ref={logRef}>
           {messages.length === 0 ? (

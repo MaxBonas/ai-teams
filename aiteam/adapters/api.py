@@ -93,30 +93,87 @@ class ApiAdapter(ModelAdapter):
         first_line = (
             prompt_text.splitlines()[0][:80] if prompt_text.strip() else "tarea"
         )
+        prompt_lower = prompt_text[:400].lower()
+
+        # Detect role from prompt context
+        if any(w in prompt_lower for w in ("reviewer", "revisor", "review")):
+            role_label = "Reviewer"
+            role_output = (
+                "Revisión del código entregado:\n"
+                "- La estructura general es correcta\n"
+                "- Revisar manejo de errores en los casos límite\n"
+                "- Añadir docstrings a las funciones públicas\n"
+                "- Tests unitarios insuficientes — aumentar cobertura\n"
+                "Veredicto: aprobado con observaciones menores."
+            )
+        elif any(w in prompt_lower for w in ("qa", "quality", "test", "prueba")):
+            role_label = "QA"
+            role_output = (
+                "Resultados de QA:\n"
+                "- Suite de tests ejecutada\n"
+                "- Casos de prueba cubiertos: funcionalidad base, edge cases\n"
+                "- Sin regresiones detectadas\n"
+                "- Cobertura estimada: aceptable para la fase actual\n"
+                "Estado: PASSED"
+            )
+        elif any(w in prompt_lower for w in ("researcher", "investigador", "research", "scout")):
+            role_label = "Researcher"
+            role_output = (
+                "Investigación completada:\n"
+                "- Contexto del dominio analizado\n"
+                "- Alternativas técnicas evaluadas\n"
+                "- Recomendación: proceder con el enfoque estándar\n"
+                "- Referencias relevantes identificadas"
+            )
+        elif any(w in prompt_lower for w in ("engineer", "ingeniero", "build", "implement", "develop", "code")):
+            role_label = "Engineer"
+            role_output = (
+                f"Implementación planificada para: {first_line!r}\n\n"
+                "Pasos:\n"
+                "1. Crear la estructura base del módulo\n"
+                "2. Implementar la lógica principal\n"
+                "3. Añadir manejo de errores\n"
+                "4. Escribir tests unitarios\n"
+                "5. Actualizar documentación\n\n"
+                "Archivos que se crearían/modificarían:\n"
+                "- src/ (implementación principal)\n"
+                "- tests/ (cobertura de tests)\n"
+                "- README.md (actualización)"
+            )
+        elif any(w in prompt_lower for w in ("lead", "plan", "orchestrat", "coordinat")):
+            role_label = "Team Lead"
+            role_output = (
+                f"Plan generado para: {first_line!r}\n\n"
+                "Fases propuestas:\n"
+                "1. [build] Engineer implementa la funcionalidad\n"
+                "2. [review] Reviewer valida el código\n"
+                "3. [qa] QA verifica la calidad\n\n"
+                "Criterio de éxito: entrega funcional con tests pasando."
+            )
+        else:
+            role_label = "Agente"
+            role_output = (
+                f"Tarea procesada: {first_line!r}\n"
+                "Análisis completado. Output disponible al activar un provider real."
+            )
+
         if sim_mode_enabled():
             content = (
-                f"[DEMO] Avance preparado para: {first_line!r}. "
-                f"Se mantiene el flujo operativo en modo demostracion."
+                f"[SIMULADO | {self.provider}:{self.model}:api] {role_label}\n\n"
+                f"{role_output}\n\n"
+                f"— Modo simulación. Para output real: AITEAM_ENABLE_LIVE_API=1 + {self.provider.upper()}_API_KEY en .env"
             )
-            return AdapterResponse(
-                success=True,
-                content=content,
-                latency_ms=int((time.time() - start) * 1000),
-                input_tokens=input_tokens,
-                output_tokens=max(1, len(content) // 4),
-                error=None,
+        else:
+            fallback_note = ""
+            if live_error.strip():
+                compact_error = " ".join(str(live_error).split())[:140]
+                fallback_note = f"\nFallback simulado tras fallo live: {compact_error}"
+            content = (
+                f"[SIMULADO | {self.provider}:{self.model}:api] {role_label}\n\n"
+                f"{role_output}"
+                f"{fallback_note}\n\n"
+                f"— Para resultados reales: AITEAM_ENABLE_LIVE_API=1 + {self.provider.upper()}_API_KEY en .env"
             )
-        fallback_note = ""
-        if live_error.strip():
-            compact_error = " ".join(str(live_error).split())[:140]
-            fallback_note = f" Fallback simulado tras fallo live: {compact_error}."
-        content = (
-            f"[SIMULADO | {self.provider}:{self.model}:api] "
-            f"Respuesta mock para: {first_line!r}. "
-            f"{fallback_note}"
-            f"Para llamadas reales, configura AITEAM_ENABLE_LIVE_API=1 "
-            f"y {self.provider.upper()}_API_KEY en .env."
-        )
         return AdapterResponse(
             success=True,
             content=content,

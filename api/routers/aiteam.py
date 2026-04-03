@@ -1692,6 +1692,17 @@ async def invoke_mcp_tool(request: Request):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/api/aiteam/system/mode")
+def get_system_mode():
+    from aiteam.sim_mode import sim_mode_enabled
+    import os
+    live_api = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower() in {"1", "true", "yes", "on"}
+    return {
+        "is_sim_mode": sim_mode_enabled(),
+        "live_api_enabled": live_api,
+    }
+
+
 @router.get("/api/aiteam/mcp/events")
 async def mcp_event_history(request: Request, server: str | None = None, limit: int = 50):
     """Historial de eventos MCP."""

@@ -94,6 +94,7 @@ class TeamChatResponse(BaseModel):
     peer_consultation_summary: dict[str, object] = {}
     waiting_user: bool = False
     clarification_question: str = ""
+    is_sim_mode: bool = False
 
 
 class TeamChatProgressResponse(BaseModel):
@@ -117,6 +118,7 @@ class TeamChatProgressResponse(BaseModel):
     live_mode_rejected: bool = False
     evidence_gate_rejected: bool = False
     evidence_gate_failures: list[str] = []
+    is_sim_mode: bool = False
     last_event: str = ""
     last_event_ts: str = ""
     dynamic_phases_ready: bool = False

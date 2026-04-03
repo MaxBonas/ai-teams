@@ -484,7 +484,12 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
                     {(operationalSummary.counts.blocked_by_no_eligible_adapter ?? 0) > 0 && (
                       <div className="status-lead-decision status-lead-decision--warn">
                         <span className="status-lead-decision-icon">!</span>
-                        <span>Bloqueadas sin adapter elegible: {operationalSummary.counts.blocked_by_no_eligible_adapter}</span>
+                        <div>
+                          <div>Sin adapter elegible: {operationalSummary.counts.blocked_by_no_eligible_adapter} tarea(s)</div>
+                          <div style={{fontSize: '11px', opacity: 0.8, marginTop: 2}}>
+                            Configura un provider: <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code> o <code>GOOGLE_API_KEY</code> en <code>.env</code> y activa <code>AITEAM_ENABLE_LIVE_API=1</code>
+                          </div>
+                        </div>
                       </div>
                     )}
                     {(operationalSummary.counts.carried_over_from_previous_run ?? 0) > 0 && (

@@ -40,7 +40,7 @@ class ApiAdapterLiveTests(unittest.TestCase):
         ):
             response = adapter._simulated_response("build", start=1.0)
         self.assertTrue(response.success)
-        self.assertIn("[DEMO]", response.content)
+        self.assertIn("[SIMULADO | openai:gpt-4.1-mini:api]", response.content)
 
     def test_api_adapter_canonical_sim_mode_overrides_legacy_demo_env(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
@@ -143,7 +143,7 @@ class ApiAdapterLiveTests(unittest.TestCase):
         ):
             response = adapter._simulated_response("lead", start=1.0)
         self.assertTrue(response.success)
-        self.assertIn("[DEMO]", response.content)
+        self.assertIn("[SIMULADO | openai:gpt-4.1]", response.content)
 
     def test_api_adapter_retries_transient_http_error(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")

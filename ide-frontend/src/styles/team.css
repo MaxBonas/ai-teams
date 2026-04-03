@@ -2378,3 +2378,26 @@
     grid-template-rows: minmax(180px, 38%) minmax(0, 1fr);
   }
 }
+
+.sim-mode-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #7c4a00;
+  border-bottom: 1px solid #a86200;
+  font-size: 12px;
+  color: #ffd080;
+  flex-shrink: 0;
+}
+.sim-mode-banner-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.sim-mode-banner-text code {
+  background: rgba(255,255,255,0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+}

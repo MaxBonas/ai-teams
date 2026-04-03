@@ -166,6 +166,7 @@ from aiteam.quorum import (
     should_apply_planning_quorum,
 )
 from aiteam.run_health import build_capabilities_briefing
+from aiteam.sim_mode import sim_mode_enabled
 from aiteam.tool_specialists import (
     build_tool_specialist_metadata,
     replacement_specialists_from_metadata,
@@ -1037,6 +1038,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 probe_mode=probe_mode,
                 waiting_user=True,
                 clarification_question=_clarify_question,
+                is_sim_mode=sim_mode_enabled(),
             )
         # ── LCP: Lead Control Protocol ───────────────────────────────────────
         # Parsear directivas del Lead e intervenir antes de crear fases.
@@ -1181,6 +1183,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 specialist_report_summary={},
                 probe_mode=probe_mode,
                 lead_run_mode=_lead_run_mode,
+                is_sim_mode=sim_mode_enabled(),
             )
 
         for _event in _lcp_resolution.events:
@@ -1279,6 +1282,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 artifact_created=artifact_created,
                 artifact_modified=artifact_modified,
                 artifact_files=artifact_files,
+                is_sim_mode=sim_mode_enabled(),
             )
         _chat_run_state = ChatRunState(
             chat_root=task_root,
@@ -2571,6 +2575,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 lead_run_mode=_lead_run_mode,
                 waiting_user=True,
                 clarification_question=_mwq,
+                is_sim_mode=sim_mode_enabled(),
             )
 
         artifact_after = _workspace_artifact_snapshot(workspace)
@@ -3382,6 +3387,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             probe_mode=probe_mode,
             lead_run_mode=_lead_run_mode,
             planned_phases=_planned_phases,
+            is_sim_mode=sim_mode_enabled(),
         )
         _memory_phases = [
             phase_name
@@ -3627,6 +3633,7 @@ def _build_resume_stream(
                 delegate_economics={},
                 specialist_reports=[],
                 specialist_report_summary={},
+                is_sim_mode=sim_mode_enabled(),
             )
 
         # Inyectar respuesta del usuario en la descripción de la tarea pausada
@@ -3713,6 +3720,7 @@ def _build_resume_stream(
             ),
             **_resume_specialist_insights,
             **_resume_peer_consultation,
+            is_sim_mode=sim_mode_enabled(),
         )
 
     async def _resume_event_stream():

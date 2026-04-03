@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from aiteam.sim_mode import sim_mode_enabled
 from api.chat_logic import _normalize_task_root, _recent_chat_roots, _safe_int_value
 from api.chat_models import (
     OperatorTimelineItem,
@@ -540,6 +541,7 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
         return TeamChatProgressResponse(
             exists=False,
             state="queued",
+            is_sim_mode=sim_mode_enabled(),
             **response_kwargs,
         )
 
@@ -574,6 +576,7 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
         phase_task_ids=progress_phase_task_ids,
         waiting_user=waiting_user,
         clarification_question=waiting_question,
+        is_sim_mode=sim_mode_enabled(),
         **response_kwargs,
     )
 
