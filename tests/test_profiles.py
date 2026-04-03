@@ -55,11 +55,14 @@ class ProfileGovernanceTests(unittest.TestCase):
             prompt = build_prompt(role, "Task", "Description")
             self.assertIn("Plan ejecutable inmediato", prompt, f"Role {role} should still have plan format")
 
-    def test_engineer_build_prompt_mentions_use_tool(self) -> None:
-        """Engineer prompt must reference USE_TOOL write_file so Engineer knows the mechanism."""
+    def test_engineer_build_prompt_does_not_use_broken_write_file_format(self) -> None:
+        """Engineer prompt must NOT use filesystem_mcp:write_file (wrong format + {} content bug).
+        Primary file-writing mechanism is path= annotation, not USE_TOOL write_file."""
         prompt = build_prompt(Role.ENGINEER, "Build CLI", "Create src/md_report/cli.py")
-        self.assertIn("USE_TOOL", prompt)
-        self.assertIn("write_file", prompt)
+        # Should NOT have the broken colon-syntax shorthand (breaks args regex for {} content)
+        self.assertNotIn("filesystem_mcp:write_file", prompt)
+        # Should NOT have write_file at all in build_prompt (that comes from tool_dispatch)
+        self.assertNotIn("write_file", prompt)
 
     def test_engineer_build_prompt_mentions_path_annotation(self) -> None:
         """Engineer prompt must reference path= annotation as fallback."""

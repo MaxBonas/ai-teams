@@ -272,16 +272,29 @@ class ToolDispatcher:
                     tool_names = ", ".join(t.name for t in server_tools[:10])
                     lines.append(f"- {server}: {tool_names}")
 
-        # Fallback de escritura cuando filesystem_mcp no está disponible.
-        # Si el rol es de implementacion y no hay MCP de filesystem activo,
-        # indicar al Engineer cómo escribir archivos directamente en el output.
         _fs_active = role_tools and any(mt.server_name == "filesystem_mcp" for mt in role_tools)
         _FILE_ROLES = {"engineer", "reviewer", "qa"}
-        if role in _FILE_ROLES and not _fs_active:
+
+        # Instrucciones de escritura de archivos — SIEMPRE visibles para Engineer.
+        # El sistema extrae y escribe los bloques path= automáticamente, tanto si
+        # filesystem_mcp está activo como si no.  USE_TOOL write_file también funciona
+        # cuando el servidor está activo, pero path= es el mecanismo principal porque:
+        # - No requiere escape de JSON (no hay problemas con {} en el contenido)
+        # - El LLM lo produce de forma más natural
+        # - El orchestrator extrae y escribe SIEMPRE (fix_b: role == ENGINEER)
+        if role == "engineer":
+            if _fs_active:
+                header = (
+                    "ESCRITURA DE ARCHIVOS — filesystem_mcp activo. "
+                    "Usa bloques path= (preferido) o [USE_TOOL server=filesystem_mcp tool=write_file ...]:"
+                )
+            else:
+                header = (
+                    "ESCRITURA DE ARCHIVOS — escribe el contenido directamente con bloques path=. "
+                    "El sistema los extrae y guarda automáticamente:"
+                )
             lines.append(
-                "AVISO: filesystem_mcp no está disponible. Para crear o modificar archivos,\n"
-                "inclúyelos directamente en tu respuesta usando bloques de código con anotación path.\n"
-                "Formato — el lenguaje es opcional, el path es OBLIGATORIO:\n"
+                f"{header}\n"
                 "  ```python path=src/modulo/cli.py\n"
                 "  ... contenido completo del archivo Python ...\n"
                 "  ```\n"
@@ -294,19 +307,24 @@ class ToolDispatcher:
                 "  ```text path=.gitignore\n"
                 "  ... contenido de texto plano ...\n"
                 "  ```\n"
-                "Reglas:\n"
-                "- El sistema extraerá y escribirá los archivos automáticamente.\n"
-                "- Usa paths relativos al workspace. Máximo 10 archivos por tarea.\n"
-                "- Incluye el contenido COMPLETO y FUNCIONAL — no fragmentos ni pseudocódigo.\n"
-                "- Un archivo por bloque de código."
+                "Reglas de escritura:\n"
+                "- Path RELATIVO al workspace. Un archivo por bloque. Máximo 10 archivos.\n"
+                "- Contenido COMPLETO y FUNCIONAL — sin fragmentos ni pseudocódigo.\n"
+                "- El sistema escribe los archivos automáticamente al parsear tu output."
+            )
+        elif role in _FILE_ROLES and not _fs_active:
+            # Para Reviewer/QA cuando filesystem_mcp no está disponible
+            lines.append(
+                "filesystem_mcp no disponible. Para modificar archivos usa bloques path=:\n"
+                "  ```lang path=ruta/relativa/archivo.py\n  ... contenido ...\n  ```"
             )
 
         if lines:
             lines.append("")
             lines.append(
-                "Para invocar una herramienta, incluye en tu respuesta:\n"
+                "Para invocar herramientas (comandos, tests, git):\n"
                 '  [USE_TOOL server=<server> tool=<tool_name> args={"key": "value"}]\n'
-                "  Para CLI sin server: [USE_TOOL tool=<tool_name> args={\"command\": \"...\"}]\n"
+                "  Sin server (CLI): [USE_TOOL tool=<tool_name> args={\"command\": \"cmd args\"}]\n"
                 "Maximo 8 invocaciones por tarea. Los resultados se anexaran a tu output."
             )
 

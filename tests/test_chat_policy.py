@@ -159,6 +159,51 @@ class ChatPolicyTests(unittest.TestCase):
         self.assertTrue(outcome.policy_review_required)
         self.assertIn("low_productivity_below_threshold", outcome.policy_signals)
 
+    # ── Fix C: continuation_requested no anula override en runs sin artefactos ──
+
+    def test_continuation_override_allowed_when_some_work_done(self) -> None:
+        """continuation_requested should override low productivity when artifacts exist."""
+        policy_input = self._base_input(
+            productivity_score=20,
+            continuation_requested=True,
+            artifact_created=2,   # some files written
+            execution_steps=3,
+        )
+        outcome = evaluate_chat_policy(
+            policy_input,
+            resolve_run_type_policy(policy_input.run_type, policy_input.reasoning_score),
+        )
+        self.assertTrue(outcome.low_productivity_override)
+
+    def test_continuation_override_blocked_when_zero_output(self) -> None:
+        """continuation_requested must NOT override when run produced 0 artifacts and 0 steps."""
+        policy_input = self._base_input(
+            productivity_score=20,
+            continuation_requested=True,
+            artifact_created=0,
+            artifact_modified=0,
+            execution_steps=0,
+        )
+        outcome = evaluate_chat_policy(
+            policy_input,
+            resolve_run_type_policy(policy_input.run_type, policy_input.reasoning_score),
+        )
+        self.assertFalse(outcome.low_productivity_override)
+
+    def test_allow_low_productivity_override_flag_still_works_for_zero_output(self) -> None:
+        """Explicit allow_low_productivity_override flag always works (manual user decision)."""
+        policy_input = self._base_input(
+            productivity_score=20,
+            allow_low_productivity_override=True,
+            artifact_created=0,
+            execution_steps=0,
+        )
+        outcome = evaluate_chat_policy(
+            policy_input,
+            resolve_run_type_policy(policy_input.run_type, policy_input.reasoning_score),
+        )
+        self.assertTrue(outcome.low_productivity_override)
+
 
 if __name__ == "__main__":
     unittest.main()

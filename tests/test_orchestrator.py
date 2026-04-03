@@ -4871,6 +4871,63 @@ class CodeBlockExtractionTests(unittest.TestCase):
             self.assertEqual(written, 1)
             self.assertTrue((workspace / "src" / "quoted.py").exists())
 
+    # ── Fix E4: _CODE_BLOCK_RE regex robustez ───────────────────────────────
+
+    def test_no_language_tag_with_space(self) -> None:
+        """``` path=foo sin lenguaje pero con espacio funciona."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = "``` path=nolang.txt\nhello\n```"
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 1)
+            self.assertTrue((workspace / "nolang.txt").exists())
+
+    def test_no_language_tag_no_space(self) -> None:
+        """```path=foo sin lenguaje y sin espacio funciona con regex mejorado."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = "```path=nospace.txt\ncontent\n```"
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 1)
+            self.assertTrue((workspace / "nospace.txt").exists())
+
+    def test_file_content_with_braces_written_correctly(self) -> None:
+        """Archivos con {} en el contenido (dicts Python) se escriben sin truncar."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = (
+                "```python path=src/main.py\n"
+                "def f():\n"
+                "    d = {'key': 'value', 'nested': {'a': 1}}\n"
+                "    return d\n"
+                "```"
+            )
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 1)
+            written_content = (workspace / "src" / "main.py").read_text()
+            self.assertIn("{'key': 'value'", written_content)
+
 
 class FilesystemMcpWorkspaceInjectionTests(unittest.TestCase):
     """Tests para _inject_filesystem_mcp_workspace y el sharing de mcp_manager."""

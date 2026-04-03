@@ -189,10 +189,12 @@ DEFAULT_PROFILES: dict[Role, AgentProfile] = {
             "Eres Engineer. Implementa cambios pequenos, coherentes y testeables. Respeta contratos y "
             "evita romper compatibilidad. "
             "REGLA CRITICA DE ENTREGA: En tareas de implementacion (build), tu output DEBE contener el "
-            "codigo fuente COMPLETO y FUNCIONAL de cada archivo. "
-            "USA [USE_TOOL filesystem_mcp:write_file args={\"path\": \"ruta/archivo\", \"content\": \"...\"}] "
-            "para escribir cada archivo. Si filesystem_mcp no esta disponible, usa bloques de codigo con "
-            "anotacion path: ```python path=src/modulo/archivo.py\\n...contenido completo...\\n```. "
+            "codigo fuente COMPLETO y FUNCIONAL de cada archivo usando bloques de codigo con anotacion "
+            "path. El sistema los extrae y escribe al workspace automaticamente. Formato obligatorio:\n"
+            "  ```python path=src/modulo/archivo.py\n"
+            "  ... contenido completo del archivo ...\n"
+            "  ```\n"
+            "Un archivo por bloque. Path RELATIVO. Sin fragmentos. Sin pseudocodigo. "
             "NUNCA escribas planes, NUNCA escribas comandos bash como mkdir o touch. "
             "Los peers pueden darte contexto, pero la decision de IMPLEMENTAR AHORA es tuya — no dejes "
             "que recomendaciones de 'investigar primero' te bloqueen si ya tienes suficiente informacion "
@@ -246,9 +248,9 @@ EXPERIMENTAL_PROFILES: dict[Role, AgentProfile] = {
         system_prompt=(
             "Eres Engineer (Experimental). Implementa el enfoque mas directo posible. No uses librerias de terceros "
             "si puedes evitarlo. Piensa siempre en la complejidad algoritmica y memory leak prevention. "
-            "REGLA CRITICA DE ENTREGA: Tu output DEBE contener el codigo fuente COMPLETO de cada archivo. "
-            "USA [USE_TOOL filesystem_mcp:write_file args={\"path\": \"ruta\", \"content\": \"...\"}] "
-            "o bloques ```lang path=ruta/archivo. NUNCA escribas planes o comandos bash."
+            "REGLA CRITICA DE ENTREGA: Tu output DEBE contener el codigo fuente COMPLETO de cada "
+            "archivo usando bloques path=: ```python path=src/foo.py\\n...contenido...\\n```. "
+            "NUNCA escribas planes ni comandos bash. Path relativo. Un archivo por bloque."
         ),
     ),
     Role.REVIEWER: AgentProfile(
@@ -294,10 +296,10 @@ def build_prompt(
     # El item 5 del formato es role-specific: Engineer entrega codigo, otros entregan plan.
     if role == Role.ENGINEER:
         item5 = (
-            "5) IMPLEMENTACION — escribe aqui el contenido COMPLETO de cada archivo usando "
-            "[USE_TOOL filesystem_mcp:write_file args={\"path\": \"ruta\", \"content\": \"...\"}] "
-            "o bloques ```lang path=ruta/archivo. OBLIGATORIO: incluye todos los archivos necesarios "
-            "para que la tarea quede completada. Sin fragmentos, sin pseudocodigo, sin bash commands."
+            "5) IMPLEMENTACION — escribe el contenido COMPLETO de cada archivo usando bloques "
+            "path=. Ejemplo: ```python path=src/modulo/cli.py\\n...codigo completo...\\n```. "
+            "OBLIGATORIO: incluye TODOS los archivos necesarios, sin fragmentos ni pseudocodigo. "
+            "Sin planes, sin bash commands. El sistema los guarda automaticamente."
         )
     else:
         item5 = "5) Plan ejecutable inmediato (archivos/comandos/pruebas)"

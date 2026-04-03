@@ -294,9 +294,17 @@ def evaluate_chat_policy(
                     )
                 )
 
+    # continuation_requested permite override de productividad baja, SALVO cuando
+    # la run no produjo absolutamente ningún artefacto ni execution_step: en ese
+    # caso el override silenciaría un fallo total y confundiría al usuario.
+    _zero_output_run = (
+        policy.execution_steps == 0
+        and policy.artifact_created == 0
+        and policy.artifact_modified == 0
+    )
     low_productivity_override = (
         policy.allow_low_productivity_override
-        or policy.continuation_requested
+        or (policy.continuation_requested and not _zero_output_run)
         or (
             run_type_policy.is_context_query
             and run_type_policy.passes_by_reasoning

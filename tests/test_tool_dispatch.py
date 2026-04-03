@@ -169,5 +169,97 @@ class EnsureFilesystemMcpRunningTests(unittest.TestCase):
             self.assertEqual(len(started), 0, "team_lead no debe arrancar filesystem_mcp")
 
 
+class EngineerPathAnnotationInstructionsTests(unittest.TestCase):
+    """Tests para verificar que las instrucciones path= siempre aparecen para engineer."""
+
+    def setUp(self) -> None:
+        self._previous_tempdir = tempfile.tempdir
+        self._local_temp_root = Path.cwd() / ".tmp_test_tool_dispatch_path"
+        self._local_temp_root.mkdir(parents=True, exist_ok=True)
+        tempfile.tempdir = str(self._local_temp_root)
+
+    def tearDown(self) -> None:
+        tempfile.tempdir = self._previous_tempdir
+        shutil.rmtree(self._local_temp_root, ignore_errors=True)
+
+    def _make_dispatcher(self, runtime_dir: Path):
+        from aiteam.tool_dispatch import ToolDispatcher
+        cat = runtime_dir / "tool_sources.catalog.json"
+        return ToolDispatcher(catalog_path=cat, runtime_dir=runtime_dir, environment="dev")
+
+    def test_engineer_always_sees_path_annotation_instructions(self) -> None:
+        """Engineer debe ver instrucciones path= incluso cuando filesystem_mcp está activo."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / ".aiteam"
+            runtime_dir.mkdir()
+            disp = self._make_dispatcher(runtime_dir)
+
+            fake_mgr = MagicMock()
+            # Simular filesystem_mcp activo con 14 herramientas
+            mock_tool = MagicMock()
+            mock_tool.server_name = "filesystem_mcp"
+            mock_tool.name = "write_file"
+            fake_mgr.list_tools.return_value = [mock_tool]
+            fake_mgr._configs = {}
+            disp._mcp_manager = fake_mgr
+            disp._ensure_filesystem_mcp_running = lambda mgr: None
+
+            context = disp.build_tool_context_for_agent(role="engineer")
+
+            self.assertIn("path=", context)
+            self.assertIn("ESCRITURA DE ARCHIVOS", context)
+
+    def test_engineer_sees_path_annotation_when_mcp_inactive(self) -> None:
+        """Engineer ve instrucciones path= también cuando MCP no está activo."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / ".aiteam"
+            runtime_dir.mkdir()
+            disp = self._make_dispatcher(runtime_dir)
+
+            fake_mgr = MagicMock()
+            fake_mgr.list_tools.return_value = []  # sin herramientas activas
+            fake_mgr._configs = {}
+            disp._mcp_manager = fake_mgr
+            disp._ensure_filesystem_mcp_running = lambda mgr: None
+
+            context = disp.build_tool_context_for_agent(role="engineer")
+
+            self.assertIn("path=", context)
+            self.assertIn("ESCRITURA DE ARCHIVOS", context)
+
+    def test_team_lead_does_not_see_path_annotation_instructions(self) -> None:
+        """team_lead no recibe instrucciones de escritura de archivos."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / ".aiteam"
+            runtime_dir.mkdir()
+            disp = self._make_dispatcher(runtime_dir)
+
+            fake_mgr = MagicMock()
+            fake_mgr.list_tools.return_value = []
+            fake_mgr._configs = {}
+            disp._mcp_manager = fake_mgr
+
+            context = disp.build_tool_context_for_agent(role="team_lead")
+
+            self.assertNotIn("ESCRITURA DE ARCHIVOS", context)
+
+    def test_use_tool_write_file_not_shown_as_example(self) -> None:
+        """filesystem_mcp:write_file (formato roto) no debe aparecer en instrucciones."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / ".aiteam"
+            runtime_dir.mkdir()
+            disp = self._make_dispatcher(runtime_dir)
+
+            fake_mgr = MagicMock()
+            fake_mgr.list_tools.return_value = []
+            fake_mgr._configs = {}
+            disp._mcp_manager = fake_mgr
+            disp._ensure_filesystem_mcp_running = lambda mgr: None
+
+            context = disp.build_tool_context_for_agent(role="engineer")
+
+            self.assertNotIn("filesystem_mcp:write_file", context)
+
+
 if __name__ == "__main__":
     unittest.main()

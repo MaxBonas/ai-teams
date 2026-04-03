@@ -763,7 +763,10 @@ class AITeamOrchestrator:
     # ── Fix B: extraccion de bloques de codigo con path anotado ────
 
     _CODE_BLOCK_RE = re.compile(
-        r"```(?:\w+)?\s+path=[\"']?([^\"'\n\s`]+)[\"']?\n(.*?)```",
+        # Acepta:  ```python path=foo   ```lang path=foo   ``` path=foo   ```path=foo
+        # (?:\w+\s+|\s*) = (language + space) OR (optional space, no language)
+        # Esto evita que (?:\w+)? consuma "path" como si fuera el lenguaje.
+        r"```(?:\w+\s+|\s*)path=[\"']?([^\"'\n\s`]+)[\"']?[^\n]*\n(.*?)```",
         re.DOTALL,
     )
     _MAX_CODE_FILES_PER_TASK = 10
