@@ -1229,8 +1229,13 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       });
                       return next;
                     });
+                    // If block has no streamed text yet, seed it with the preview from agent_completed
+                    // (sub-tasks like scout/evidence often complete without streaming individual chunks)
+                    const preview = ev.preview ?? '';
                     localBlocks = localBlocks.map(b =>
-                      b.task_id === tid ? { ...b, complete: true } : b
+                      b.task_id === tid
+                        ? { ...b, complete: true, text: b.text || preview }
+                        : b
                     );
                     setStreamingBlocks([...localBlocks]);
                   }
