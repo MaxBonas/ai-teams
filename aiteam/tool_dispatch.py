@@ -249,6 +249,12 @@ class ToolDispatcher:
         # Active MCP server tools
         mgr = self._get_mcp_manager()
         if mgr is not None:
+            # Arranque lazy de filesystem_mcp para roles que escriben archivos.
+            # Se hace aqui (no en orchestrator init) para no bloquear el arranque
+            # del orchestrator ni crear procesos duplicados entre requests.
+            _FILE_ROLES = {"engineer", "reviewer", "qa"}
+            if role in _FILE_ROLES:
+                self._ensure_filesystem_mcp_running(mgr)
             mcp_tools = mgr.list_tools()
             # Filter by role if possible
             role_tools = []
@@ -278,6 +284,43 @@ class ToolDispatcher:
         return "\n".join(lines) if lines else ""
 
     # ── MCP Integration ──────────────────────────────────────────
+
+    _FILESYSTEM_MCP_START_TIMEOUT = 20  # segundos
+
+    def _ensure_filesystem_mcp_running(self, mgr) -> None:
+        """Arranca filesystem_mcp si está habilitado y configurado con workspace.
+
+        Se llama de forma lazy desde build_tool_context_for_agent, evitando:
+        - Bloquear el init del orchestrator (20s de timeout)
+        - Spawnear procesos duplicados: si ya está en _servers y corriendo, no-op
+
+        Requisito: el workspace ya debe estar inyectado en config.args por
+        AITeamOrchestrator._inject_filesystem_mcp_workspace().
+        """
+        try:
+            config = mgr._configs.get("filesystem_mcp")
+            if config is None or not config.enabled:
+                return
+
+            # Solo arrancar si hay al menos un path de workspace en los args
+            # (más allá de los flags de npx como -y y el nombre del paquete)
+            npm_flags = {"-y", "--yes", "-g", "--global"}
+            has_workspace_path = any(
+                not a.startswith("-") and "@" not in a
+                for a in config.args
+                if a not in npm_flags
+            )
+            if not has_workspace_path:
+                return  # workspace no inyectado aún — no tiene sentido arrancar
+
+            # Si ya está corriendo en esta instancia, no-op
+            proc = mgr._servers.get("filesystem_mcp")
+            if proc is not None and proc.is_running:
+                return
+
+            mgr.start_server("filesystem_mcp", timeout=self._FILESYSTEM_MCP_START_TIMEOUT)
+        except Exception:
+            pass  # fallo no-fatal: el Engineer simplemente no verá las herramientas
 
     def _get_mcp_manager(self):
         """Lazy-init del MCPServerManager."""

@@ -706,25 +706,32 @@ class AITeamOrchestrator:
                     "mcp_opencode_bootstrapped",
                     {"new_servers": bootstrapped},
                 )
-            self._inject_filesystem_mcp_workspace()
         except Exception:
             self.mcp_manager = None
 
         # Compartir la misma instancia MCPServerManager con tool_dispatcher para
         # que build_tool_context_for_agent vea los mismos servidores arrancados
-        # (filesystem_mcp incluido) sin crear un segundo proceso independiente.
+        # sin crear un segundo proceso independiente.
         if self.tool_dispatcher is not None and self.mcp_manager is not None:
             self.tool_dispatcher._mcp_manager = self.mcp_manager
 
+        # Inyectar workspace en filesystem_mcp fuera del try exterior para que
+        # un fallo aqui no anule mcp_manager. El arranque del servidor se
+        # difiere al momento en que el Engineer construye su contexto de herramientas.
+        self._inject_filesystem_mcp_workspace()
+
     def _inject_filesystem_mcp_workspace(self) -> None:
-        """Inyecta el workspace del proyecto en filesystem_mcp y lo arranca.
+        """Inyecta el workspace del proyecto en los args de filesystem_mcp.
 
         @modelcontextprotocol/server-filesystem requiere rutas permitidas como
-        args adicionales al comando:
+        args adicionales:
           npx -y @modelcontextprotocol/server-filesystem /ruta/workspace
 
-        Sin este argumento el servidor arranca sin acceso a ningun directorio
-        y el Engineer nunca recibe instrucciones USE_TOOL para escribir archivos.
+        Sin este argumento el servidor arranca sin acceso a ningun directorio.
+        El arranque real del servidor se hace de forma lazy en
+        build_tool_context_for_agent (justo antes de que el Engineer necesite
+        las herramientas), evitando bloquear el init del orchestrator y
+        spawning de procesos multiples por request.
         """
         if self.mcp_manager is None:
             return
@@ -738,31 +745,19 @@ class AITeamOrchestrator:
             return str(p).replace("\\", "/").rstrip("/").lower()
 
         existing = [_norm(a) for a in config.args]
-        if _norm(workspace) not in existing:
-            config.args = list(config.args) + [workspace]
-            try:
-                self.mcp_manager._save_configs()
-                self.event_logger.emit(
-                    "filesystem_mcp_workspace_injected",
-                    {"workspace": workspace, "args": config.args},
-                )
-            except Exception as exc:
-                self.event_logger.emit(
-                    "filesystem_mcp_workspace_inject_error", {"error": str(exc)}
-                )
-                return
+        if _norm(workspace) in existing:
+            return  # ya configurado, nada que hacer
 
-        # Arrancar el servidor para que sus herramientas aparezcan en el
-        # contexto USE_TOOL del Engineer antes de que empiece la fase build.
+        config.args = list(config.args) + [workspace]
         try:
-            ok, reason = self.mcp_manager.start_server("filesystem_mcp", timeout=20)
+            self.mcp_manager._save_configs()
             self.event_logger.emit(
-                "filesystem_mcp_startup",
-                {"ok": ok, "reason": reason, "workspace": workspace},
+                "filesystem_mcp_workspace_injected",
+                {"workspace": workspace, "args": config.args},
             )
         except Exception as exc:
             self.event_logger.emit(
-                "filesystem_mcp_startup_error", {"error": str(exc)}
+                "filesystem_mcp_workspace_inject_error", {"error": str(exc)}
             )
 
     # ── Workflow State (shared blackboard) ──────────────────────────
