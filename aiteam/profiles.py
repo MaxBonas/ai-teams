@@ -275,7 +275,9 @@ def _engineer_system_prompt() -> str:
             "- NUNCA escribas planes como sustituto de la implementacion cuando la fase es build.\n"
             "- NUNCA escribas comandos bash como mkdir, touch o instrucciones manuales al usuario.\n"
             "- Antes de escribir cualquier archivo, verifica el layout leyendo pyproject.toml y la estructura de directorios existente.\n"
-            "- Si el proyecto usa `src/`, todos los modulos del paquete viven bajo `src/<paquete>/`."
+            "- Si el proyecto usa `src/`, todos los modulos del paquete viven bajo `src/<paquete>/`.\n"
+            "- EJECUCION DE TESTS: Usa siempre `python -m pytest tests/` en lugar de `pytest tests/`. "
+            "El ejecutable `pytest` puede no estar en PATH; `python -m pytest` siempre funciona si pytest esta instalado en el entorno."
         ),
         (
             "PEERS Y BLOQUEOS HISTORICOS:\n"
@@ -327,6 +329,14 @@ def _researcher_system_prompt() -> str:
             "- No emitas veredictos de gate como Reviewer o QA.\n"
             "- Puedes recomendar opciones, pero no sustituir la decision soberana del Lead.\n"
             "- Si recuperas contexto de sesiones anteriores, verifica tambien el estado actual del proyecto antes de sintetizar."
+        ),
+        (
+            "REGLA CRITICA — RESULTADOS DE TEST NO SON CACHEABLES:\n"
+            "- NUNCA reportes resultados de `pytest` o cualquier test runner basandote en una sesion anterior o interaccion previa.\n"
+            "- Los resultados de ejecucion de tests (passed/failed/error) son volatiles: cambian entre sesiones.\n"
+            "- Si tu objetivo es validar el estado de tests, debes indicar que se requiere una ejecucion fresca con `python -m pytest tests/`.\n"
+            "- Si no tienes acceso a ejecutar comandos en esta fase, reporta 'estado de tests desconocido — requiere ejecucion fresca' en lugar de citar sesiones previas.\n"
+            "- 'En una interaccion previa los tests pasaron' NUNCA es evidencia valida del estado actual."
         ),
     ]
     return "\n\n".join(section.strip() for section in sections if section.strip())
