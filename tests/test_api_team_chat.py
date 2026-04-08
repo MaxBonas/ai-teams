@@ -2470,7 +2470,7 @@ class APITeamChatTests(unittest.TestCase):
             )
             self.assertIn(
                 str(payload.get("execution_mode", "")),
-                {"simulated", "hybrid", "live"},
+                {"text_only", "hybrid", "live"},
             )
             self.assertGreaterEqual(int(payload.get("placeholder_outputs", 0)), 0)
             self.assertTrue(isinstance(payload.get("evidence_gate_applied"), bool))
@@ -4000,7 +4000,7 @@ class APITeamChatTests(unittest.TestCase):
                 last_chat = state_payload.get("last_chat_run", {})
                 self.assertIn(
                     str(last_chat.get("execution_mode", "")),
-                    {"unknown", "simulated", "hybrid", "live"},
+                    {"unknown", "text_only", "hybrid", "live"},
                 )
                 self.assertGreaterEqual(int(last_chat.get("placeholder_outputs", 0)), 0)
                 self.assertTrue(
@@ -4020,7 +4020,7 @@ class APITeamChatTests(unittest.TestCase):
                 conv_last = conv_payload.get("last_chat_run", {})
                 self.assertIn(
                     str(conv_last.get("execution_mode", "")),
-                    {"unknown", "simulated", "hybrid", "live"},
+                    {"unknown", "text_only", "hybrid", "live"},
                 )
                 self.assertGreaterEqual(int(conv_last.get("placeholder_outputs", 0)), 0)
                 self.assertTrue(

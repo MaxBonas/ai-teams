@@ -23,7 +23,7 @@ class ChatPolicyTests(unittest.TestCase):
             "allow_low_productivity_override": False,
             "lead_advisory_mode": False,
             "live_mode_required": False,
-            "execution_mode": "simulated",
+            "execution_mode": "text_only",
             "execution_steps": 0,
             "artifact_created": 0,
             "artifact_modified": 0,
@@ -161,7 +161,7 @@ class ChatPolicyTests(unittest.TestCase):
     def test_strict_mode_blocks_close_without_advisory(self) -> None:
         policy_input = self._base_input(
             strict_mode=True,
-            execution_mode="simulated",
+            execution_mode="text_only",
             productivity_score=60,
         )
         outcome = evaluate_chat_policy(
@@ -179,7 +179,7 @@ class ChatPolicyTests(unittest.TestCase):
             productivity_score=0,
             reasoning_score=60,
             final_state="completed",
-            execution_mode="simulated",
+            execution_mode="text_only",
         )
         outcome = evaluate_chat_policy(
             policy_input,

@@ -191,7 +191,7 @@ def _assess_execution_mode(
         mode = (
             "live"
             if (execution_steps > 0 or (artifact_created + artifact_modified) > 0)
-            else "simulated"
+            else "text_only"
         )
         return mode, 0, 0.0, 0
 
@@ -200,10 +200,10 @@ def _assess_execution_mode(
     has_execution_evidence = execution_steps > 0 or (artifact_created + artifact_modified) > 0
 
     if not has_execution_evidence:
-        return "simulated", placeholder_count, placeholder_ratio, len(result_texts)
+        return "text_only", placeholder_count, placeholder_ratio, len(result_texts)
 
     if placeholder_count == len(result_texts) and execution_steps == 0:
-        return "simulated", placeholder_count, placeholder_ratio, len(result_texts)
+        return "text_only", placeholder_count, placeholder_ratio, len(result_texts)
     if placeholder_count > 0:
         return "hybrid", placeholder_count, placeholder_ratio, len(result_texts)
     return "live", placeholder_count, placeholder_ratio, len(result_texts)
@@ -309,8 +309,8 @@ def _compose_user_facing_run_summary(
     placeholder_label = "salidas placeholder"
     decision_text = _presentable_decision_text(str(decision_compact or "").strip())
     if not decision_text:
-        if execution_mode == "simulated":
-            decision_text = "Sin output del Team Lead; modo simulado (sin pasos de ejecucion verificables)."
+        if execution_mode == "text_only":
+            decision_text = "Sin output del Team Lead; sin pasos de ejecucion verificables (text_only)."
         elif execution_mode == "hybrid" and placeholder_outputs > 0:
             decision_text = "Coordinacion parcial completada; parte del output fue placeholder."
         else:

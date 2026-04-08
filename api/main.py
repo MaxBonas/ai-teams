@@ -1845,10 +1845,14 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             task_id=scout_state_id,
             title="Scout: estado del proyecto",
             description=(
-                "Resume el siguiente contexto en maximo 6 lineas de hechos concretos "
-                f"relevantes para la solicitud: '{payload.message[:120]}'\n\n"
+                "Procesa el siguiente contexto del workspace y devuelve:\n"
+                "1. La seccion 'workspace snapshot autoritativo' COMPLETA y VERBATIM "
+                "(cada linea '- ...' debe aparecer en tu respuesta sin modificar).\n"
+                "2. Maximo 2 lineas de contexto git relevante para: "
+                f"'{payload.message[:120]}'\n\n"
                 f"{_scout_state_raw}\n\n"
-                "Formato: hechos breves. Sin teoria, sin recomendaciones."
+                "CRITICO: no comprimas ni omitas ninguna entrada del snapshot de archivos. "
+                "El Lead necesita la lista completa para planificar correctamente."
             ),
             role=Role.SCOUT,
             complexity=Complexity.LOW,

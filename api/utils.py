@@ -1243,52 +1243,39 @@ def _build_scout_project_state_context(workspace: Path) -> str:
     else:
         lines.append("git status: no disponible (workspace sin repositorio git)")
 
-    # Archivos de primer nivel relevantes
+    # Snapshot autoritativo de rutas reales para evitar invenciones del scout.
+    # Incluye TODOS los directorios no excluidos (no solo un set hardcodeado),
+    # mostrando subdirectorios y archivos hasta 2 niveles o hasta el cap.
     try:
-        entries = sorted(workspace.iterdir(), key=lambda p: p.name)
-        visible = [
-            e.name + ("/" if e.is_dir() else "")
-            for e in entries
-            if not e.name.startswith(".")
-            and e.name not in {"venv", "node_modules", "__pycache__", ".git"}
-        ]
-        lines.append(f"estructura: {', '.join(visible[:30])}")
-    except Exception:
-        pass
-
-    # Snapshot autoritativo de rutas reales para evitar invenciones del scout
-    try:
-        allowed_dirs = {"src", "tests", "docs", "scripts", ".aiteam"}
-        top_level_files = {
-            "README.md",
-            "PROJECT_PLAN.md",
-            "pyproject.toml",
-            "package.json",
-            "requirements.txt",
-            "AITEAM_TEST_LOG.md",
-        }
+        _excluded = {"venv", "node_modules", "__pycache__", ".git", ".pytest_cache", ".mypy_cache", ".aiteam_snapshots"}
+        _top_files = {"README.md", "PROJECT_PLAN.md", "pyproject.toml", "package.json", "requirements.txt", "AITEAM_TEST_LOG.md", "setup.py", "setup.cfg", "Makefile"}
         actual_paths: list[str] = []
-        for child in sorted(workspace.iterdir(), key=lambda p: p.name):
-            if child.is_file() and child.name in top_level_files:
-                actual_paths.append(child.name)
+        for child in sorted(workspace.iterdir(), key=lambda p: (p.is_dir(), p.name)):
+            if child.name.startswith(".") and child.name != ".aiteam":
                 continue
-            if not child.is_dir() or child.name not in allowed_dirs:
+            if child.name in _excluded:
                 continue
-            actual_paths.append(f"{child.name}/")
-            for nested in sorted(child.rglob("*"), key=lambda p: str(p.relative_to(workspace)).lower()):
-                rel = str(nested.relative_to(workspace)).replace("\\", "/")
-                if any(part in {"__pycache__", "node_modules", "venv", ".pytest_cache"} for part in nested.parts):
-                    continue
-                if nested.is_dir():
-                    continue
-                actual_paths.append(rel)
-                if len(actual_paths) >= 60:
+            if child.is_file():
+                if child.name in _top_files:
+                    actual_paths.append(child.name)
+            elif child.is_dir():
+                actual_paths.append(f"{child.name}/")
+                for nested in sorted(child.rglob("*"), key=lambda p: str(p.relative_to(workspace)).lower()):
+                    if any(part in _excluded for part in nested.parts):
+                        continue
+                    rel = str(nested.relative_to(workspace)).replace("\\", "/")
+                    if nested.is_dir():
+                        actual_paths.append(f"{rel}/")
+                    else:
+                        actual_paths.append(rel)
+                    if len(actual_paths) >= 120:
+                        break
+                if len(actual_paths) >= 120:
+                    actual_paths.append("... (truncado)")
                     break
-            if len(actual_paths) >= 60:
-                break
         if actual_paths:
             lines.append("workspace snapshot autoritativo:")
-            lines.extend(f"- {item}" for item in actual_paths[:60])
+            lines.extend(f"- {item}" for item in actual_paths)
     except Exception:
         pass
 

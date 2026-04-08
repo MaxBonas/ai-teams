@@ -2278,6 +2278,18 @@ class AITeamOrchestrator:
         return True
 
     @staticmethod
+    def _sanitize_planning_phase_output(content: str) -> tuple[str, bool]:
+        """Elimina code fences (``` ... ```) del output de una fase plan_*.
+
+        Devuelve (contenido_sanitizado, fue_modificado).
+        Los agentes de planning no deben emitir código; si lo hacen, lo stripemos
+        programáticamente en lugar de depender solo de prompts o de fallar la fase.
+        """
+        sanitized = re.sub(r"```[^\n]*\n.*?```", "", content, flags=re.DOTALL)
+        sanitized = re.sub(r"```[^\n]*```", "", sanitized)  # inline fences
+        return sanitized, sanitized != content
+
+    @staticmethod
     def _planning_section_kind(line: str) -> str:
         normalized = re.sub(r"[^a-z_ ]+", " ", str(line or "").strip().lower()).strip(" :")
         normalized = normalized.replace("ó", "o").replace("í", "i").replace("á", "a")
@@ -4134,6 +4146,18 @@ class AITeamOrchestrator:
                 session=session,
             ):
                 return
+
+            # Sanitización programática de fases plan_*: strip code fences antes
+            # del drift check. El agente no puede emitir código — si lo hace,
+            # se elimina automáticamente en lugar de fallar toda la fase.
+            _plan_phase_name = self._phase_name_for_task(task).lower()
+            if _plan_phase_name.startswith("plan_"):
+                safe_content, _code_stripped = self._sanitize_planning_phase_output(safe_content)
+                if _code_stripped:
+                    self.event_logger.emit(
+                        "planning_phase_code_stripped",
+                        {"task_id": task.task_id, "phase": _plan_phase_name, "assignee": assignee},
+                    )
 
             if self._fail_task_for_planning_phase_implementation_drift(
                 task=task,
