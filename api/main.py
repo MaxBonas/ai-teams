@@ -828,7 +828,10 @@ def _phase_contract_prompt_block(
         if str(item).strip()
     ]
     if forbidden_path_hints:
-        lines.append(f"forbidden_paths: [{', '.join(forbidden_path_hints[:6])}]")
+        lines.append(
+            f"forbidden_write_paths: [{', '.join(forbidden_path_hints[:6])}]"
+            "  # prohibe CREAR o MODIFICAR estos paths — leer/inspeccionar está siempre permitido"
+        )
     if role_upper == "ENGINEER" and allowed_module_path_hints:
         lines.append(
             f"allowed_module_scope: [{', '.join(allowed_module_path_hints[:6])}, __init__.py]"
