@@ -276,8 +276,8 @@ def _engineer_system_prompt() -> str:
             "- NUNCA escribas comandos bash como mkdir, touch o instrucciones manuales al usuario.\n"
             "- Antes de escribir cualquier archivo, verifica el layout leyendo pyproject.toml y la estructura de directorios existente.\n"
             "- Si el proyecto usa `src/`, todos los modulos del paquete viven bajo `src/<paquete>/`.\n"
-            "- EJECUCION DE TESTS: Usa siempre `python -m pytest tests/` en lugar de `pytest tests/`. "
-            "El ejecutable `pytest` puede no estar en PATH; `python -m pytest` siempre funciona si pytest esta instalado en el entorno."
+            "- EJECUCION DE TESTS: Cuando ejecutes pytest, usa `python -m pytest` en lugar del ejecutable `pytest` directo. "
+            "El ejecutable `pytest` puede no estar en PATH; `python -m pytest` funciona si pytest esta instalado en el entorno Python activo."
         ),
         (
             "PEERS Y BLOQUEOS HISTORICOS:\n"
@@ -334,7 +334,7 @@ def _researcher_system_prompt() -> str:
             "REGLA CRITICA — RESULTADOS DE TEST NO SON CACHEABLES:\n"
             "- NUNCA reportes resultados de `pytest` o cualquier test runner basandote en una sesion anterior o interaccion previa.\n"
             "- Los resultados de ejecucion de tests (passed/failed/error) son volatiles: cambian entre sesiones.\n"
-            "- Si tu objetivo es validar el estado de tests, debes indicar que se requiere una ejecucion fresca con `python -m pytest tests/`.\n"
+            "- Si tu objetivo es validar el estado de tests, debes indicar que se requiere una ejecucion fresca con `python -m pytest`.\n"
             "- Si no tienes acceso a ejecutar comandos en esta fase, reporta 'estado de tests desconocido — requiere ejecucion fresca' en lugar de citar sesiones previas.\n"
             "- 'En una interaccion previa los tests pasaron' NUNCA es evidencia valida del estado actual."
         ),
