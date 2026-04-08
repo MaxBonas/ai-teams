@@ -1523,10 +1523,25 @@ async def get_aiteam_state_lite(request: Request, environment: str = "dev"):
         workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
         runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
         if not runtime_dir.exists():
-            raise HTTPException(
-                status_code=404,
-                detail="No AI Team runtime directory found in workspace (.aiteam/ or runtime/).",
-            )
+            # Workspace nuevo sin runtime inicializado — estado vacío válido, no un error.
+            return {
+                "workspace": str(workspace),
+                "runtime_dir": str(runtime_dir),
+                "runtime_exists": False,
+                "db_exists": False,
+                "events_exists": False,
+                "mailbox_exists": False,
+                "last_chat_run": {
+                    "task_id": "", "status": "", "workflow_run_status": "", "state": "", "ts": "",
+                },
+                "startup_diagnostics": {
+                    "workspace": str(workspace),
+                    "timings_ms": {"total_ms": 0},
+                    "slow_steps": {},
+                    "cache": {},
+                    "lite": True,
+                },
+            }
 
         started = monotonic()
         db_path = runtime_dir / "aiteam.db"
