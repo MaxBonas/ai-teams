@@ -3,6 +3,7 @@ import re
 import uuid
 from pathlib import Path
 
+from aiteam.phase_verdicts import derive_run_verdict_from_phase_verdicts
 from aiteam.types import Complexity, Criticality
 
 from api.utils import (
@@ -10,6 +11,7 @@ from api.utils import (
     _group_chat_roots,
     _read_jsonl_records,
     _read_runtime_tasks_payload,
+    _read_runtime_workflow_state,
 )
 
 
@@ -40,6 +42,30 @@ def _recent_chat_roots(
     roots = _group_chat_roots(tasks_payload)
     if not roots:
         return []
+    workflow_state = _read_runtime_workflow_state(runtime_dir)
+    if isinstance(workflow_state, dict):
+        for root_id, item in roots.items():
+            workflow_entry = workflow_state.get(root_id, {})
+            if isinstance(workflow_entry, dict):
+                run_verdict = workflow_entry.get("run_verdict", {})
+                if isinstance(run_verdict, dict):
+                    if run_verdict:
+                        item["run_verdict"] = dict(run_verdict)
+                    else:
+                        reconstructed = derive_run_verdict_from_phase_verdicts(
+                            workflow_entry.get("phase_verdicts", {})
+                        )
+                        if reconstructed:
+                            item["run_verdict"] = reconstructed
+                else:
+                    reconstructed = derive_run_verdict_from_phase_verdicts(
+                        workflow_entry.get("phase_verdicts", {})
+                    )
+                    if reconstructed:
+                        item["run_verdict"] = reconstructed
+                phase_verdicts = workflow_entry.get("phase_verdicts", {})
+                if isinstance(phase_verdicts, dict) and phase_verdicts:
+                    item["phase_verdicts"] = dict(phase_verdicts)
 
     events = _read_jsonl_records(runtime_dir / "events.jsonl")
     task_started_ts: dict[str, str] = {}
@@ -102,7 +128,7 @@ def _is_continuation_message(message: str) -> bool:
 
 def _extract_chat_root_from_message(message: str) -> str:
     text = str(message or "")
-    match = re.search(r"\bCHAT-([0-9a-fA-F]{8})\b", text)
+    match = re.search(r"\bCHAT-([0-9A-Za-z]{8})\b", text)
     if not match:
         return ""
     return f"CHAT-{match.group(1).upper()}"

@@ -9,11 +9,14 @@ from aiteam.context_curator import (
     estimate_context_pressure,
 )
 from api.utils import (
+    _build_continuation_target_context,
     _build_project_continuity_context,
+    _build_scout_session_history_context,
     _load_chat_context_curator_insights,
     PROJECT_ROOT,
     resolve_runtime_dir,
 )
+from aiteam.sqlite_store import SqliteStore
 
 
 class ContextCuratorTests(unittest.TestCase):
@@ -25,6 +28,12 @@ class ContextCuratorTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self.workspace, ignore_errors=True)
+
+    def _write_runtime_tasks(self, tasks: list[dict]) -> None:
+        SqliteStore(self.runtime_dir / "aiteam.db").save_all_tasks(tasks)
+
+    def _write_runtime_workflow(self, workflow_state: dict) -> None:
+        SqliteStore(self.runtime_dir / "aiteam.db").save_workflow_state(workflow_state)
 
     def test_remember_preplan_persists_project_and_chat_context(self) -> None:
         store = ContextCuratorStore(self.runtime_dir)
@@ -163,6 +172,80 @@ class ContextCuratorTests(unittest.TestCase):
         )
         self.assertGreater(first_fact_count, 0)
 
+    def test_remember_preplan_supersedes_old_continuation_request_in_working_set(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        project_key = str(self.workspace.resolve())
+
+        store.remember_preplan(
+            project_key=project_key,
+            chat_root="CHAT-old",
+            user_message="Continue from CHAT-AAAA1111. Start the next highest-impact slice.",
+            surface_hints={"surfaces": ["general"]},
+            curator_summary="- slice pendiente",
+            lead_summary="Decidir siguiente slice",
+            source_task_ids=["CHAT-old::lead_intake"],
+        )
+        store.remember_preplan(
+            project_key=project_key,
+            chat_root="CHAT-new",
+            user_message="Continue from CHAT-7908C4BA. Close pending phases first.",
+            surface_hints={"surfaces": ["general"]},
+            curator_summary="- cierre pendiente",
+            lead_summary="Cerrar pendientes antes de nuevo slice",
+            source_task_ids=["CHAT-new::lead_intake"],
+        )
+
+        project_ctx = store.load_project_context(project_key)
+        summary = store.build_summary(project_ctx)
+        working_set_entries = [item.get("text", "") for item in project_ctx.get("working_set", [])]
+
+        self.assertEqual(len(working_set_entries), 1)
+        self.assertIn("target=CHAT-7908C4BA", str(working_set_entries[0]))
+        self.assertNotIn("CHAT-AAAA1111", str(working_set_entries[0]))
+        self.assertTrue(summary.splitlines()[0].startswith("decisions:"))
+        self.assertNotIn("Continue from CHAT-AAAA1111", summary)
+
+    def test_remember_preplan_prunes_legacy_request_entries_before_summarizing(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        project_key = str(self.workspace.resolve())
+        project_ctx = store.load_project_context(project_key)
+        project_ctx["working_set"] = [
+            {
+                "text": "Solicitud: Continue from CHAT-34CA3EB3. Start the next highest-impact slice.",
+                "confidence": 0.6,
+                "source_task_ids": ["CHAT-34CA3EB3::lead_intake"],
+                "updated_at": "2026-04-06T10:00:00+00:00",
+                "supersedes": "",
+            },
+            {
+                "text": "Solicitud: Continue from CHAT-AAAA1111. Start the next highest-impact slice.",
+                "confidence": 0.6,
+                "source_task_ids": ["CHAT-AAAA1111::lead_intake"],
+                "updated_at": "2026-04-06T11:00:00+00:00",
+                "supersedes": "",
+            },
+        ]
+        store._write_project_context(project_key, project_ctx)
+
+        store.remember_preplan(
+            project_key=project_key,
+            chat_root="CHAT-newest",
+            user_message="Continue from CHAT-7908C4BA. Close pending phases first.",
+            surface_hints={"surfaces": ["general"]},
+            curator_summary="- cierre minimo",
+            lead_summary="Cerrar pendientes antes de otro slice",
+            source_task_ids=["CHAT-newest::lead_intake"],
+        )
+
+        updated_project_ctx = store.load_project_context(project_key)
+        summary = store.build_summary(updated_project_ctx)
+        working_set_entries = [item.get("text", "") for item in updated_project_ctx.get("working_set", [])]
+
+        self.assertEqual(len(working_set_entries), 1)
+        self.assertIn("target=CHAT-7908C4BA", str(working_set_entries[0]))
+        self.assertNotIn("CHAT-34CA3EB3", summary)
+        self.assertNotIn("CHAT-AAAA1111", summary)
+
     def test_remember_phase_summary_accumulates_long_run_correctly(self) -> None:
         """Una run larga con 4 fases debe producir un project_context_v1 con working_set no vacío
         y un build_summary() legible."""
@@ -199,7 +282,10 @@ class ContextCuratorTests(unittest.TestCase):
         # build_summary debe producir texto legible (no vacío)
         summary = store.build_summary(final_ctx)
         self.assertTrue(summary, "build_summary no debe ser vacío tras una run de 4 fases")
-        self.assertIn("discovery", summary.lower())
+        self.assertTrue(
+            any(label in summary.lower() for label in ("build:", "review:", "qa:")),
+            "build_summary debe incluir al menos una fase resumida",
+        )
 
     def test_curated_context_preferred_over_raw_in_continuity_output(self) -> None:
         """_build_project_continuity_context debe anteponer el bloque curator sobre historia cruda."""
@@ -226,6 +312,269 @@ class ContextCuratorTests(unittest.TestCase):
 
         # Verificar que el contenido semántico real está presente
         self.assertIn("N+1", continuity_text)
+
+    def test_project_continuity_collapses_old_infra_only_runs(self) -> None:
+        tasks = [
+            {
+                "task_id": "CHAT-RECENT::lead_intake",
+                "title": "Lead intake",
+                "description": "Solicitud original:\nContinua con P0 actual\nEntrega: plan",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {},
+            },
+            {
+                "task_id": "CHAT-RECENT::lead_close",
+                "title": "Lead close",
+                "description": "",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {"result": "Run rechazada por slice_drift y review_rejected."},
+            },
+            {
+                "task_id": "CHAT-INFRA-A::lead_intake",
+                "title": "Lead intake",
+                "description": "Solicitud original:\nRun vieja A\nEntrega: plan",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {},
+            },
+            {
+                "task_id": "CHAT-INFRA-A::lead_close",
+                "title": "Lead close",
+                "description": "",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {"result": "Bloqueada por HTTP 429 y routing failure."},
+            },
+            {
+                "task_id": "CHAT-INFRA-B::lead_intake",
+                "title": "Lead intake",
+                "description": "Solicitud original:\nRun vieja B\nEntrega: plan",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {},
+            },
+            {
+                "task_id": "CHAT-INFRA-B::lead_close",
+                "title": "Lead close",
+                "description": "",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {"result": "Bloqueada por agotamiento de recursos de routing."},
+            },
+        ]
+        self._write_runtime_tasks(tasks)
+        self._write_runtime_workflow(
+            {
+                "CHAT-RECENT": {
+                    "phase_verdicts": {
+                        "build": {
+                            "phase_id": "build",
+                            "status": "completed",
+                            "contract_status": "drift",
+                            "reason_codes": ["slice_drift"],
+                        },
+                        "review": {
+                            "phase_id": "review",
+                            "status": "rejected",
+                            "reason_codes": ["review_rejected"],
+                        },
+                    }
+                },
+                "CHAT-INFRA-A": {
+                    "phase_verdicts": {
+                        "build": {
+                            "phase_id": "build",
+                            "status": "blocked",
+                            "reason_codes": ["no_eligible_adapter"],
+                        }
+                    }
+                },
+                "CHAT-INFRA-B": {
+                    "phase_verdicts": {
+                        "build": {
+                            "phase_id": "build",
+                            "status": "blocked",
+                            "reason_codes": ["routing:http_error:429"],
+                        }
+                    }
+                },
+            }
+        )
+
+        continuity_text = _build_project_continuity_context(self.runtime_dir)
+
+        self.assertIn("Prioridad de contexto:", continuity_text)
+        self.assertIn("Bloqueos historicos de infraestructura", continuity_text)
+        self.assertIn("CHAT-INFRA-A, CHAT-INFRA-B", continuity_text)
+        self.assertIn("- CHAT-RECENT msg=Continua con P0 actual", continuity_text)
+        self.assertIn("relevance=semantica_del_run", continuity_text)
+        self.assertNotIn("- CHAT-INFRA-A msg=Run vieja A", continuity_text)
+        self.assertNotIn("- CHAT-INFRA-B msg=Run vieja B", continuity_text)
+
+    def test_scout_session_history_collapses_old_infra_only_runs(self) -> None:
+        tasks = [
+            {
+                "task_id": "CHAT-RECENT::lead_intake",
+                "title": "Lead intake",
+                "description": "Solicitud original:\nContinua con P0 actual\nEntrega: plan",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {},
+            },
+            {
+                "task_id": "CHAT-RECENT::lead_close",
+                "title": "Lead close",
+                "description": "",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {"result": "Run rechazada por slice_drift y review_rejected."},
+            },
+            {
+                "task_id": "CHAT-INFRA-A::lead_intake",
+                "title": "Lead intake",
+                "description": "Solicitud original:\nRun vieja A\nEntrega: plan",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {},
+            },
+            {
+                "task_id": "CHAT-INFRA-A::lead_close",
+                "title": "Lead close",
+                "description": "",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {"result": "Bloqueada por HTTP 429 y routing failure."},
+            },
+        ]
+        self._write_runtime_tasks(tasks)
+        self._write_runtime_workflow(
+            {
+                "CHAT-RECENT": {
+                    "phase_verdicts": {
+                        "build": {
+                            "phase_id": "build",
+                            "status": "completed",
+                            "contract_status": "drift",
+                            "reason_codes": ["slice_drift"],
+                        },
+                    }
+                },
+                "CHAT-INFRA-A": {
+                    "phase_verdicts": {
+                        "build": {
+                            "phase_id": "build",
+                            "status": "blocked",
+                            "reason_codes": ["no_eligible_adapter"],
+                        }
+                    }
+                },
+            }
+        )
+
+        history_text = _build_scout_session_history_context(self.runtime_dir)
+
+        self.assertIn("bloqueos_historicos_infraestructura: CHAT-INFRA-A", history_text)
+        self.assertIn("[CHAT-RECENT]", history_text)
+        self.assertIn("relevancia: semantica", history_text)
+        self.assertNotIn("[CHAT-INFRA-A]", history_text)
+
+    def test_continuation_target_context_prioritizes_pending_phases_of_explicit_root(self) -> None:
+        tasks = [
+            {
+                "task_id": "CHAT-AAAA1111::lead_intake",
+                "title": "Lead intake",
+                "description": "Solicitud original:\nContinue from CHAT-AAAA1111. Start the next highest-impact slice.\nEntrega: plan",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {"phase": "lead_intake"},
+            },
+            {
+                "task_id": "CHAT-7908C4BA::lead_intake",
+                "title": "Lead intake",
+                "description": "Solicitud original:\nContinue from CHAT-AAAA1111. Start the next highest-impact slice.\nEntrega: plan",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {"phase": "lead_intake"},
+            },
+            {
+                "task_id": "CHAT-7908C4BA::engineer_tests_p0",
+                "title": "Engineer tests p0",
+                "description": "",
+                "state": "failed",
+                "role": "engineer",
+                "metadata": {"phase": "engineer_tests_p0"},
+            },
+            {
+                "task_id": "CHAT-7908C4BA::engineer_readme",
+                "title": "Engineer readme",
+                "description": "",
+                "state": "failed",
+                "role": "engineer",
+                "metadata": {"phase": "engineer_readme"},
+            },
+            {
+                "task_id": "CHAT-7908C4BA::review_quality_and_coherence",
+                "title": "Review quality and coherence",
+                "description": "",
+                "state": "blocked",
+                "role": "reviewer",
+                "metadata": {"phase": "review_quality_and_coherence"},
+            },
+        ]
+        self._write_runtime_tasks(tasks)
+        self._write_runtime_workflow(
+            {
+                "CHAT-7908C4BA": {
+                    "run_verdict": {
+                        "state": "not_completed",
+                        "reason_codes": ["run_failed", "evidence_gate_failed"],
+                    },
+                    "workflow_phase_keys": [
+                        "engineer_tests_p0",
+                        "engineer_readme",
+                        "review_quality_and_coherence",
+                        "qa_final_validation",
+                        "lead_close",
+                    ],
+                    "phase_contracts": {
+                        "engineer_tests_p0": {
+                            "objective": "Implementar tests P0 para CLI, CSS y sintaxis con cobertura >=80%",
+                            "depends_on": ["research_test_coverage"],
+                        },
+                        "engineer_readme": {
+                            "objective": "Actualizar README para reflejar slices 1+2 y uso real del CLI",
+                            "depends_on": ["research_test_coverage"],
+                        },
+                        "review_quality_and_coherence": {
+                            "objective": "Revisar calidad y coherencia del output del engineer",
+                            "depends_on": ["engineer_tests_p0", "engineer_readme"],
+                        },
+                    },
+                    "phase_verdicts": {
+                        "review_quality_and_coherence": {
+                            "phase_id": "review_quality_and_coherence",
+                            "status": "blocked",
+                            "reason_codes": ["missing_upstream_artifacts"],
+                        }
+                    },
+                }
+            }
+        )
+
+        context = _build_continuation_target_context(
+            self.runtime_dir,
+            "CHAT-7908C4BA",
+            current_message="Continue from CHAT-7908C4BA. Close pending phases first, then provide a compact final synthesis.",
+        )
+
+        self.assertIn("CONTINUATION TARGET PRIORITARIO", context)
+        self.assertIn("continuation_of=CHAT-7908C4BA", context)
+        self.assertIn("pedido_actual=Continue from CHAT-7908C4BA. Close pending phases first", context)
+        self.assertIn("engineer_tests_p0 [failed]", context)
+        self.assertIn("Implementar tests P0 para CLI, CSS y sintaxis", context)
+        self.assertIn("review_quality_and_coherence [blocked]", context)
 
     def test_context_curator_isolates_by_project_root(self) -> None:
         store = ContextCuratorStore(self.runtime_dir)

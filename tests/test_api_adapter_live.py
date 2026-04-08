@@ -4,8 +4,11 @@ import urllib.error
 import unittest
 from unittest.mock import patch
 
+import pytest
 from aiteam.adapters import ApiAdapter
 from aiteam.types import StreamChunk
+
+pytestmark = pytest.mark.slow
 
 
 class _MockHttpResponse:

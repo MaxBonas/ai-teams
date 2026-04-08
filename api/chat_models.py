@@ -23,6 +23,7 @@ class TeamChatRequest(BaseModel):
     strict_mode: bool = False
     auto_extend_weak_runs: bool = True
     allow_low_productivity_override: bool = False
+    continuation_target: str = ""
     # C2: explicit continuation policy between runs
     # "auto"           — current behavior (no archiving)
     # "clean_retry"    — archive incomplete tasks from prior runs, start fresh
@@ -86,12 +87,20 @@ class TeamChatResponse(BaseModel):
     policy_review_required: bool = False
     validation_owner: str = ""
     policy_signals: list[str] = []
+    run_verdict: dict[str, object] = {}
+    lead_close_policy: dict[str, object] = {}
+    phase_verdicts: dict[str, dict[str, object]] = {}
+    phase_contracts: dict[str, dict[str, object]] = {}
     phase_evidence_plan: dict[str, dict[str, object]] = {}
     delegate_batches: list[dict[str, object]] = []
     delegate_economics: dict[str, object] = {}
     specialist_reports: list[dict[str, object]] = []
     specialist_report_summary: dict[str, object] = {}
     peer_consultation_summary: dict[str, object] = {}
+    phase_states: dict[str, str] = {}
+    failed_tasks: int = 0
+    task_summaries: list[dict[str, object]] = []
+    thread_summary: dict[str, object] = {}
     waiting_user: bool = False
     clarification_question: str = ""
     is_sim_mode: bool = False
@@ -101,6 +110,12 @@ class TeamChatProgressResponse(BaseModel):
     task_id: str
     exists: bool = False
     state: str = "queued"
+    workflow_run_status: str = ""
+    continuation_requested: bool = False
+    continuation_effective: bool = False
+    continuation_block_reason: str = ""
+    run_verdict_reconstructed: bool = False
+    health_signals: list[str] = []
     round_budget: int = 0
     rounds_used: int = 0
     phase_states: dict[str, str] = {}
@@ -116,8 +131,14 @@ class TeamChatProgressResponse(BaseModel):
     successful_check_count: int = 0
     live_mode_required: bool = False
     live_mode_rejected: bool = False
+    semantic_gate_applied: bool = False
+    semantic_gate_failures: list[str] = []
     evidence_gate_rejected: bool = False
     evidence_gate_failures: list[str] = []
+    run_verdict: dict[str, object] = {}
+    lead_close_policy: dict[str, object] = {}
+    phase_verdicts: dict[str, dict[str, object]] = {}
+    phase_contracts: dict[str, dict[str, object]] = {}
     is_sim_mode: bool = False
     last_event: str = ""
     last_event_ts: str = ""
@@ -130,6 +151,7 @@ class TeamChatProgressResponse(BaseModel):
     specialist_report_summary: dict[str, object] = {}
     peer_consultation_summary: dict[str, object] = {}
     task_summaries: list[dict[str, object]] = []
+    thread_summary: dict[str, object] = {}
     task_operational_summary: dict[str, object] = {}
     waiting_user: bool = False
     clarification_question: str = ""
@@ -149,6 +171,10 @@ class OperatorTimelineItem(BaseModel):
     handoff_from: str = ""
     handoff_to: str = ""
     conversation_thread_id: str = ""
+    thread_provider: str = ""
+    thread_channel: str = ""
+    thread_model_family: str = ""
+    thread_generation: int = 0
     meeting_kind: str = ""
     artifact_created: int = 0
     artifact_modified: int = 0

@@ -20,7 +20,10 @@ export function getWorkspacePath(): string {
 }
 
 /**
- * Persist the workspace path into sessionStorage (clears localStorage copy).
+ * Persist the workspace path into sessionStorage AND localStorage.
+ * Both are written so the workspace survives closing and re-opening the browser.
+ * Previously only sessionStorage was written, which caused the IDE to always
+ * revert to the AITeams project default on every new session.
  */
 export function setWorkspacePath(path: string): void {
   try {
@@ -30,7 +33,7 @@ export function setWorkspacePath(path: string): void {
       return;
     }
     window.sessionStorage.setItem(WORKSPACE_PATH_KEY, path);
-    window.localStorage.removeItem(WORKSPACE_PATH_KEY);
+    window.localStorage.setItem(WORKSPACE_PATH_KEY, path);
   } catch {
     // ignore storage errors
   }

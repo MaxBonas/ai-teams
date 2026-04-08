@@ -145,7 +145,7 @@ interface TeamViewerProps {
   refreshMs?: number;
 }
 
-export default function TeamViewer({ workspacePath, refreshMs = 3000 }: TeamViewerProps) {
+export default function TeamViewer({ workspacePath, refreshMs = 8000 }: TeamViewerProps) {
   const [state, setState] = useState<ViewerState>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -186,7 +186,7 @@ export default function TeamViewer({ workspacePath, refreshMs = 3000 }: TeamView
     void loadState(true);
     const timer = window.setInterval(() => {
       void loadState(true);
-    }, Math.max(1200, refreshMs));
+    }, Math.max(5000, refreshMs));
     return () => window.clearInterval(timer);
   }, [workspacePath, refreshMs]);
 

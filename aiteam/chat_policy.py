@@ -66,6 +66,7 @@ class ChatPolicyInput:
     productivity_score: int
     reasoning_score: int
     evidence_gate_failures: list[str] = field(default_factory=list)
+    semantic_gate_failures: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -74,6 +75,7 @@ class ChatPolicyOutcome:
     productivity_status: str
     next_action_hint: str
     live_mode_rejected: bool
+    semantic_gate_applied: bool
     evidence_gate_applied: bool
     strict_mode_applied: bool
     low_productivity_rejected: bool
@@ -142,10 +144,55 @@ def evaluate_chat_policy(
     events: list[ChatPolicyEvent] = []
 
     live_mode_rejected = False
+    semantic_gate_applied = False
     evidence_gate_applied = False
     strict_mode_applied = False
     low_productivity_rejected = False
     policy_review_required = False
+
+    if policy.semantic_gate_failures:
+        semantic_gate_applied = True
+        if policy.lead_advisory_mode:
+            policy_signals.append("semantic_gate_failed")
+            productivity_status = "weak"
+            next_action_hint = (
+                "Advisory mode activo: review/qa detectaron una contradiccion "
+                "semantica, pero el Lead decidio cerrar sin bloquear."
+            )
+            events.append(
+                ChatPolicyEvent(
+                    event_type="chat_policy_signal",
+                    payload={
+                        "task_id": policy.task_id,
+                        "signal": "semantic_gate_failed",
+                        "failures": list(policy.semantic_gate_failures),
+                        "advisory_mode": True,
+                    },
+                )
+            )
+        else:
+            final_state = "rejected"
+            policy_signals.append("semantic_gate_failed")
+            policy_review_required = True
+            productivity_status = "weak"
+            next_action_hint = (
+                "Señal de policy: review/qa detectaron un bloqueo semantico "
+                "real. La corrida no puede cerrarse como exitosa hasta resolverlo "
+                "o degradarla explicitamente en advisory."
+            )
+            events.append(
+                ChatPolicyEvent(
+                    event_type="chat_policy_signal",
+                    payload={
+                        "task_id": policy.task_id,
+                        "signal": "semantic_gate_failed",
+                        "failures": list(policy.semantic_gate_failures),
+                        "advisory_mode": False,
+                        "review_required": True,
+                        "final_state": final_state,
+                    },
+                )
+            )
 
     if policy.live_mode_required and policy.execution_mode != "live":
         if policy.lead_advisory_mode:
@@ -313,7 +360,7 @@ def evaluate_chat_policy(
     if (
         policy.productivity_score < run_type_policy.productivity_threshold
         and not low_productivity_override
-        and final_state != "failed"
+        and final_state not in {"failed", "rejected"}
     ):
         if policy.lead_advisory_mode:
             policy_signals.append("low_productivity_below_threshold")
@@ -379,6 +426,7 @@ def evaluate_chat_policy(
         productivity_status=productivity_status,
         next_action_hint=next_action_hint,
         live_mode_rejected=live_mode_rejected,
+        semantic_gate_applied=semantic_gate_applied,
         evidence_gate_applied=evidence_gate_applied,
         strict_mode_applied=strict_mode_applied,
         low_productivity_rejected=low_productivity_rejected,

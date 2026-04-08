@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
 from pathlib import Path
+
+from aiteam.time_utils import local_now, local_now_iso
 
 
 @dataclass
@@ -42,9 +43,9 @@ class Mailbox:
     ) -> None:
         with self._lock:
             self._msg_counter += 1
-            msg_id = f"msg-{self._msg_counter}-{datetime.now(timezone.utc).strftime('%H%M%S%f')}"
+            msg_id = f"msg-{self._msg_counter}-{local_now().strftime('%H%M%S%f')}"
         msg = MailMessage(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=local_now_iso(),
             sender=sender,
             recipient=recipient,
             subject=subject,

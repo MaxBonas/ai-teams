@@ -1,11 +1,16 @@
 import asyncio
+import copy
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event, Lock
+from time import monotonic
 from fastapi import APIRouter, HTTPException, Request
 from api.utils import (
     _require_api_auth_request,
     _workspace_from_request,
     _build_project_continuity_context,
+    _display_ts_local,
     _detect_notebooklm_status,
     _load_chat_context_curator_insights,
     _peer_consultation_summary_fields,
@@ -26,8 +31,10 @@ from aiteam.dashboard import build_dashboard_payload
 from aiteam.cli import build_default_orchestrator
 from aiteam.config import build_default_router_policy
 from aiteam.pilot import compute_pilot_metrics
+from aiteam.phase_verdicts import derive_run_verdict_from_phase_verdicts
 from aiteam.provider_ops import provider_ops_status
 from aiteam.autotools import AutoToolIntegrator
+from aiteam.lead_close_policy import derive_lead_close_policy
 from aiteam.routing_overrides import (
     RoutingOverrides,
     apply_overrides_to_policy,
@@ -37,12 +44,26 @@ from aiteam.routing_overrides import (
     validate_overrides,
 )
 from aiteam.types import Complexity, Criticality, Role, RoutingRequest
-from api.chat_observability import _build_task_operational_summary
+from api.chat_observability import (
+    _build_task_operational_summary,
+    _coerce_lead_close_policy,
+    _coerce_phase_contracts,
+    _coerce_phase_verdicts,
+    _coerce_run_verdict,
+)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 _ROUTING_PAYLOAD_VERSION = 1
+_ROUTING_CATALOG_CACHE_TTL_SECONDS = 60.0
+_ROUTING_CATALOG_CACHE: dict[str, dict[str, object]] = {}
+_ROUTING_CATALOG_CACHE_LOCK = Lock()
+_STATE_PAYLOAD_CACHE_TTL_SECONDS = 20.0
+_STATE_PAYLOAD_CACHE: dict[str, dict[str, object]] = {}
+_STATE_PAYLOAD_CACHE_LOCK = Lock()
+_STATE_PAYLOAD_INFLIGHT: dict[str, Event] = {}
 
 _ROUTING_BLOCKER_META: dict[str, dict[str, str]] = {
     "role_targets": {
@@ -83,6 +104,245 @@ _ROUTING_BLOCKER_META: dict[str, dict[str, str]] = {
 }
 
 
+def _timed_call(
+    timings: dict[str, int],
+    key: str,
+    fn,
+):
+    started = monotonic()
+    result = fn()
+    timings[key] = max(0, int((monotonic() - started) * 1000))
+    return result
+
+
+def _routing_cache_key(runtime_dir: Path) -> str:
+    try:
+        return str(runtime_dir.resolve()).lower()
+    except Exception:
+        return str(runtime_dir).lower()
+
+
+def _state_cache_key(runtime_dir: Path, environment: str) -> str:
+    return f"{_routing_cache_key(runtime_dir)}::{str(environment or 'dev').strip().lower()}"
+
+
+def _routing_cache_snapshot(
+    payload: dict[str, object],
+    *,
+    status: str,
+    age_seconds: float,
+) -> dict[str, object]:
+    snapshot = copy.deepcopy(payload)
+    snapshot["cache"] = {
+        "status": status,
+        "age_ms": max(0, int(age_seconds * 1000)),
+        "ttl_ms": int(_ROUTING_CATALOG_CACHE_TTL_SECONDS * 1000),
+    }
+    return snapshot
+
+
+def _state_cache_snapshot(
+    payload: dict[str, object],
+    *,
+    status: str,
+    age_seconds: float,
+) -> dict[str, object]:
+    snapshot = copy.deepcopy(payload)
+    startup = dict(snapshot.get("startup_diagnostics", {}) or {})
+    startup["cache"] = {
+        "status": status,
+        "age_ms": max(0, int(age_seconds * 1000)),
+        "ttl_ms": int(_STATE_PAYLOAD_CACHE_TTL_SECONDS * 1000),
+    }
+    snapshot["startup_diagnostics"] = startup
+    return snapshot
+
+
+def _get_cached_routing_catalog(
+    runtime_dir: Path,
+    *,
+    allow_stale: bool,
+) -> dict[str, object] | None:
+    cache_key = _routing_cache_key(runtime_dir)
+    with _ROUTING_CATALOG_CACHE_LOCK:
+        cached = dict(_ROUTING_CATALOG_CACHE.get(cache_key, {}) or {})
+    payload = cached.get("payload")
+    built_at = cached.get("built_at")
+    if not isinstance(payload, dict) or not isinstance(built_at, (int, float)):
+        return None
+    age_seconds = max(0.0, float(monotonic() - float(built_at)))
+    if age_seconds <= _ROUTING_CATALOG_CACHE_TTL_SECONDS:
+        return _routing_cache_snapshot(payload, status="hit", age_seconds=age_seconds)
+    if allow_stale:
+        return _routing_cache_snapshot(payload, status="stale_fallback", age_seconds=age_seconds)
+    return None
+
+
+def _peek_cached_state_payload(
+    runtime_dir: Path,
+    *,
+    environment: str,
+    allow_stale: bool,
+) -> dict[str, object] | None:
+    cache_key = _state_cache_key(runtime_dir, environment)
+    with _STATE_PAYLOAD_CACHE_LOCK:
+        cached = dict(_STATE_PAYLOAD_CACHE.get(cache_key, {}) or {})
+    payload = cached.get("payload")
+    built_at = cached.get("built_at")
+    if not isinstance(payload, dict) or not isinstance(built_at, (int, float)):
+        return None
+    age_seconds = max(0.0, float(monotonic() - float(built_at)))
+    if age_seconds <= _STATE_PAYLOAD_CACHE_TTL_SECONDS:
+        return _state_cache_snapshot(payload, status="hit", age_seconds=age_seconds)
+    if allow_stale:
+        return _state_cache_snapshot(payload, status="stale_fallback", age_seconds=age_seconds)
+    return None
+
+
+def _store_cached_routing_catalog(runtime_dir: Path, payload: dict[str, object]) -> None:
+    cache_key = _routing_cache_key(runtime_dir)
+    with _ROUTING_CATALOG_CACHE_LOCK:
+        _ROUTING_CATALOG_CACHE[cache_key] = {
+            "payload": copy.deepcopy(payload),
+            "built_at": monotonic(),
+        }
+
+
+def _store_cached_state_payload(
+    runtime_dir: Path,
+    *,
+    environment: str,
+    payload: dict[str, object],
+) -> None:
+    cache_key = _state_cache_key(runtime_dir, environment)
+    with _STATE_PAYLOAD_CACHE_LOCK:
+        _STATE_PAYLOAD_CACHE[cache_key] = {
+            "payload": copy.deepcopy(payload),
+            "built_at": monotonic(),
+        }
+
+
+def _invalidate_routing_catalog_cache(runtime_dir: Path | None = None) -> None:
+    with _ROUTING_CATALOG_CACHE_LOCK:
+        if runtime_dir is None:
+            _ROUTING_CATALOG_CACHE.clear()
+            return
+        _ROUTING_CATALOG_CACHE.pop(_routing_cache_key(runtime_dir), None)
+
+
+def _acquire_state_compute_slot(
+    runtime_dir: Path,
+    *,
+    environment: str,
+) -> tuple[bool, Event | None]:
+    cache_key = _state_cache_key(runtime_dir, environment)
+    with _STATE_PAYLOAD_CACHE_LOCK:
+        inflight = _STATE_PAYLOAD_INFLIGHT.get(cache_key)
+        if inflight is not None:
+            return False, inflight
+        event = Event()
+        _STATE_PAYLOAD_INFLIGHT[cache_key] = event
+        return True, event
+
+
+def _release_state_compute_slot(
+    runtime_dir: Path,
+    *,
+    environment: str,
+    event: Event | None,
+) -> None:
+    cache_key = _state_cache_key(runtime_dir, environment)
+    with _STATE_PAYLOAD_CACHE_LOCK:
+        current = _STATE_PAYLOAD_INFLIGHT.get(cache_key)
+        if current is event:
+            _STATE_PAYLOAD_INFLIGHT.pop(cache_key, None)
+    if event is not None:
+        event.set()
+
+
+def _truncate_phase_delivery_text(value: object, limit: int = 220) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _is_primary_workflow_phase(phase_id: str) -> bool:
+    normalized = str(phase_id or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith(("scout_", "delegate_", "delegated_", "checkpoint_")):
+        return False
+    return normalized not in {"lead_intake", "lead_close"}
+
+
+def _build_phase_delivery_summary(entry: object) -> list[dict[str, object]]:
+    if not isinstance(entry, dict):
+        return []
+
+    phase_contracts = _coerce_phase_contracts(entry.get("phase_contracts", {}))
+    phase_verdicts = _coerce_phase_verdicts(entry.get("phase_verdicts", {}))
+    phase_outputs = dict(entry.get("phase_outputs", {}) or {})
+    phase_context_summaries = dict(entry.get("phase_context_summaries", {}) or {})
+
+    ordered_phase_ids: list[str] = []
+    for source in (
+        phase_contracts.keys(),
+        phase_verdicts.keys(),
+        phase_context_summaries.keys(),
+        phase_outputs.keys(),
+    ):
+        for raw_phase_id in source:
+            phase_id = str(raw_phase_id or "").strip()
+            if (
+                phase_id
+                and phase_id not in ordered_phase_ids
+                and _is_primary_workflow_phase(phase_id)
+            ):
+                ordered_phase_ids.append(phase_id)
+
+    items: list[dict[str, object]] = []
+    for phase_id in ordered_phase_ids:
+        contract = dict(phase_contracts.get(phase_id, {}) or {})
+        verdict = dict(phase_verdicts.get(phase_id, {}) or {})
+        objective = str(contract.get("objective", "") or "").strip()
+        delivery_summary = str(phase_context_summaries.get(phase_id, "") or "").strip()
+        delivery_source = "phase_context_summary"
+        raw_output = str(phase_outputs.get(phase_id, "") or "").strip()
+        if not delivery_summary and raw_output:
+            delivery_summary = _truncate_phase_delivery_text(raw_output, limit=220)
+            delivery_source = "phase_output"
+        verdict_summary = str(verdict.get("summary", "") or "").strip()
+        reason_codes = [
+            str(item).strip()
+            for item in list(verdict.get("reason_codes", []) or [])
+            if str(item).strip()
+        ][:6]
+        depends_on = [
+            str(item).strip()
+            for item in list(contract.get("depends_on", []) or [])
+            if str(item).strip()
+        ][:6]
+        items.append(
+            {
+                "phase_id": phase_id,
+                "role": str(contract.get("role", "") or "").strip(),
+                "objective": objective,
+                "objective_missing": objective in {"", "|"},
+                "depends_on": depends_on,
+                "verdict_status": str(verdict.get("status", "") or "").strip(),
+                "contract_status": str(verdict.get("contract_status", "") or "").strip(),
+                "reason_codes": reason_codes,
+                "verdict_summary": verdict_summary,
+                "delivery_summary": delivery_summary,
+                "delivery_source": delivery_source if delivery_summary else "",
+                "has_delivery": bool(delivery_summary),
+                "has_output": bool(raw_output),
+            }
+        )
+    return items
+
+
 def _load_chat_workflow_insights(
     runtime_dir: Path,
     task_id: str,
@@ -96,10 +356,31 @@ def _load_chat_workflow_insights(
     entry = workflow_state.get(normalized_task_id, {})
     if not isinstance(entry, dict):
         return {}
+    phase_verdicts = _coerce_phase_verdicts(entry.get("phase_verdicts", {}))
+    run_verdict = _coerce_run_verdict(entry.get("run_verdict", {}))
+    if not run_verdict and phase_verdicts:
+        run_verdict = _coerce_run_verdict(
+            derive_run_verdict_from_phase_verdicts(phase_verdicts)
+        )
+    lead_close_policy = _coerce_lead_close_policy(
+        derive_lead_close_policy(
+            phase_verdicts=phase_verdicts,
+            run_verdict=run_verdict,
+        )
+    )
     return {
+        "workflow_run_status": str(entry.get("run_status", "") or "").strip().lower(),
+        "phase_contracts": _coerce_phase_contracts(entry.get("phase_contracts", {})),
+        "phase_verdicts": phase_verdicts,
+        "phase_delivery_summary": _build_phase_delivery_summary(entry),
         "phase_evidence_plan": dict(entry.get("phase_evidence_plan", {}) or {}),
         "delegate_batches": list(entry.get("delegate_batches", []) or []),
         "delegate_economics": dict(entry.get("delegate_economics_summary", {}) or {}),
+        "run_verdict": run_verdict,
+        "lead_close_policy": lead_close_policy,
+        "continuation_requested": bool(entry.get("continuation_requested", False)),
+        "continuation_effective": bool(entry.get("continuation_effective", False)),
+        "continuation_block_reason": str(entry.get("continuation_block_reason", "") or ""),
         "lead_run_mode": str(entry.get("lead_run_mode", "") or ""),
         **_load_chat_context_curator_insights(runtime_dir, normalized_task_id),
         **_peer_consultation_summary_fields(runtime_dir, normalized_task_id),
@@ -569,7 +850,10 @@ def _load_mcp_overview(request: Request) -> dict[str, object]:
         return {"error": str(exc), "servers": []}
 
 
-def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
+def _latest_chat_run_summary(
+    recent_events: list[dict],
+    workflow_state: dict[str, object] | None = None,
+) -> dict[str, object]:
     def _safe_int(value: object, default: int = 0) -> int:
         if isinstance(value, bool):
             return 1 if value else 0
@@ -789,6 +1073,12 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
     artifact_file_count = 0
     artifact_files_truncated = False
     artifact_files: list[str] = []
+    authoritative_state = ""
+    workflow_run_status = ""
+    failed_phases: list[str] = []
+    pending_phases: list[str] = []
+    next_action_hint = ""
+    policy_review_required = False
     for record in reversed(recent_events):
         event_type = str(record.get("event_type", "") or "")
         if event_type not in {"chat_artifacts_detected", "chat_probe_completed"}:
@@ -825,7 +1115,46 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
         ) or artifact_file_count > len(artifact_files)
         break
 
-    status = "window_exhausted" if exhausted else "completed_or_closed"
+    for record in reversed(recent_events):
+        if str(record.get("event_type", "")) != "chat_run_verdict_persisted":
+            continue
+        payload = record.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("task_id", "") or "") != task_id:
+            continue
+        authoritative_state = str(payload.get("state", "") or "").strip().lower()
+        failed_phases = [
+            str(item or "").strip()
+            for item in list(payload.get("failed_phases", []) or [])
+            if str(item or "").strip()
+        ][:12]
+        pending_phases = [
+            str(item or "").strip()
+            for item in list(payload.get("pending_phases", []) or [])
+            if str(item or "").strip()
+        ][:12]
+        next_action_hint = str(payload.get("next_action_hint", "") or "").strip()
+        policy_review_required = bool(payload.get("policy_review_required", False))
+        break
+
+    workflow_entry = {}
+    if isinstance(workflow_state, dict):
+        maybe_entry = workflow_state.get(task_id, {})
+        if isinstance(maybe_entry, dict):
+            workflow_entry = maybe_entry
+    workflow_run_status = str(
+        workflow_entry.get("run_status", "") if isinstance(workflow_entry, dict) else ""
+    ).strip().lower()
+
+    status = workflow_run_status
+    if not status:
+        if authoritative_state in {"completed", "failed", "rejected", "waiting_user"}:
+            status = authoritative_state
+        elif exhausted:
+            status = "window_exhausted"
+        else:
+            status = "running"
     has_product_artifacts = artifact_file_count > 0 or bool(artifact_files)
     if has_product_artifacts:
         artifact_message = (
@@ -843,6 +1172,12 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
         "continuation_requested": continuation_requested,
         "continuation_of": continuation_of,
         "status": status,
+        "workflow_run_status": workflow_run_status,
+        "authoritative_state": authoritative_state,
+        "failed_phases": failed_phases,
+        "pending_phases": pending_phases,
+        "next_action_hint": next_action_hint,
+        "policy_review_required": policy_review_required,
         "execution_mode": execution_mode,
         "placeholder_outputs": placeholder_outputs,
         "successful_checks": successful_checks,
@@ -882,7 +1217,7 @@ def _latest_chat_run_summary(recent_events: list[dict]) -> dict[str, object]:
             "message": artifact_message,
             "internal_runtime_excluded": True,
         },
-        "ts": str(latest_plan.get("ts", "") or ""),
+        "ts": _display_ts_local(latest_plan.get("ts", "")),
     }
 
 
@@ -906,7 +1241,7 @@ def _latest_lead_user_summary(runtime_dir: Path, task_id: str) -> dict[str, obje
             "task_id": normalized_task_id,
             "subject": str(record.get("subject", "") or ""),
             "body": body,
-            "timestamp": str(record.get("timestamp", "") or ""),
+            "timestamp": _display_ts_local(record.get("timestamp", "")),
         }
     return {}
 
@@ -977,50 +1312,163 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
                 detail="No AI Team runtime directory found in workspace (.aiteam/ or runtime/).",
             )
 
+        cached_payload = _peek_cached_state_payload(
+            runtime_dir,
+            environment=environment,
+            allow_stale=False,
+        )
+        if cached_payload is not None:
+            return cached_payload
+
+        is_owner, inflight_event = _acquire_state_compute_slot(
+            runtime_dir,
+            environment=environment,
+        )
+        if not is_owner:
+            stale_payload = _peek_cached_state_payload(
+                runtime_dir,
+                environment=environment,
+                allow_stale=True,
+            )
+            if stale_payload is not None:
+                startup = dict(stale_payload.get("startup_diagnostics", {}) or {})
+                startup["coalesced"] = True
+                stale_payload["startup_diagnostics"] = startup
+                return stale_payload
+            if inflight_event is not None:
+                inflight_event.wait(timeout=20.0)
+            waited_payload = _peek_cached_state_payload(
+                runtime_dir,
+                environment=environment,
+                allow_stale=True,
+            )
+            if waited_payload is not None:
+                startup = dict(waited_payload.get("startup_diagnostics", {}) or {})
+                startup["coalesced"] = True
+                waited_payload["startup_diagnostics"] = startup
+                return waited_payload
+
         def _load_state():
-            orch = build_default_orchestrator(
-                runtime_dir=runtime_dir,
-                browser_mode="basic",
-                environment=environment,
+            timings: dict[str, int] = {}
+            total_started = monotonic()
+            orch = _timed_call(
+                timings,
+                "orchestrator_init_ms",
+                lambda: build_default_orchestrator(
+                    runtime_dir=runtime_dir,
+                    browser_mode="basic",
+                    environment=environment,
+                ),
             )
-            tasks = orch.taskboard.list_tasks()
-            summary = orch.event_logger.summary()
-            pilot_metrics = compute_pilot_metrics(tasks, summary)
+            tasks = _timed_call(timings, "taskboard_list_ms", lambda: orch.taskboard.list_tasks())
+            summary = _timed_call(timings, "event_summary_ms", lambda: orch.event_logger.summary())
+            pilot_metrics = _timed_call(
+                timings,
+                "pilot_metrics_ms",
+                lambda: compute_pilot_metrics(tasks, summary),
+            )
             budget = orch.router.budget_manager
-            budget_snapshot = budget.snapshot() if budget is not None else {}
-            memory_counts = {
-                agent: orch.memory.count(agent)
-                for agent in orch.memory.list_agents()
-            }
-            payload = build_dashboard_payload(
-                runtime_dir=runtime_dir,
-                tasks=tasks,
-                summary=summary,
-                pilot_metrics=pilot_metrics,
-                budget_snapshot=budget_snapshot,
-                memory_counts=memory_counts,
-                environment=environment,
+            budget_snapshot = _timed_call(
+                timings,
+                "budget_snapshot_ms",
+                lambda: budget.snapshot() if budget is not None else {},
             )
-            continuity = _build_project_continuity_context(runtime_dir)
+            memory_counts = _timed_call(
+                timings,
+                "memory_counts_ms",
+                lambda: {
+                    agent: orch.memory.count(agent)
+                    for agent in orch.memory.list_agents()
+                },
+            )
+            payload = _timed_call(
+                timings,
+                "dashboard_payload_ms",
+                lambda: build_dashboard_payload(
+                    runtime_dir=runtime_dir,
+                    tasks=tasks,
+                    summary=summary,
+                    pilot_metrics=pilot_metrics,
+                    budget_snapshot=budget_snapshot,
+                    memory_counts=memory_counts,
+                    environment=environment,
+                ),
+            )
+            continuity = _timed_call(
+                timings,
+                "project_continuity_ms",
+                lambda: _build_project_continuity_context(runtime_dir),
+            )
             recent = payload.get("recent_events", [])
-            # Use all events (not just the recent 120 in payload) so that
-            # chat_plan_created events are found even in long sessions with many events.
-            all_events = _read_jsonl_records(runtime_dir / "events.jsonl")
-            latest_chat_run = _latest_chat_run_summary(all_events if isinstance(all_events, list) else [])
+            all_events = _timed_call(
+                timings,
+                "events_read_ms",
+                lambda: _read_jsonl_records(runtime_dir / "events.jsonl", tail=500),
+            )
+            workflow_state_payload = _timed_call(
+                timings,
+                "workflow_insights_ms",
+                lambda: _read_runtime_workflow_state(runtime_dir),
+            )
+            latest_chat_run = _timed_call(
+                timings,
+                "latest_chat_run_ms",
+                lambda: _latest_chat_run_summary(
+                    all_events if isinstance(all_events, list) else [],
+                    workflow_state_payload if isinstance(workflow_state_payload, dict) else None,
+                ),
+            )
             latest_task_root = str(latest_chat_run.get("task_id", "") or "")
-            tasks_payload = _read_runtime_tasks_payload(runtime_dir)
-            latest_chat_run = {
-                **latest_chat_run,
-                "task_operational_summary": _build_task_operational_summary(
+            tasks_payload = _timed_call(
+                timings,
+                "runtime_tasks_read_ms",
+                lambda: _read_runtime_tasks_payload(runtime_dir),
+            )
+            workflow_insights = _load_chat_workflow_insights(runtime_dir, latest_task_root)
+            task_operational_summary = _timed_call(
+                timings,
+                "task_operational_summary_ms",
+                lambda: _build_task_operational_summary(
                     tasks_payload,
                     task_root=latest_task_root,
+                    phase_verdicts=workflow_insights.get("phase_verdicts", {}),
+                    run_verdict=workflow_insights.get("run_verdict", {}),
                 ),
-                **_load_chat_workflow_insights(
-                    runtime_dir,
-                    latest_task_root,
-                ),
+            )
+            latest_chat_run = {
+                **latest_chat_run,
+                "task_operational_summary": task_operational_summary,
+                **workflow_insights,
             }
-            latest_lead_summary = _latest_lead_user_summary(runtime_dir, latest_task_root)
+            latest_lead_summary = _timed_call(
+                timings,
+                "latest_lead_summary_ms",
+                lambda: _latest_lead_user_summary(runtime_dir, latest_task_root),
+            )
+            mcp_overview = _timed_call(
+                timings,
+                "mcp_overview_ms",
+                lambda: _load_mcp_overview(request),
+            )
+            total_elapsed_ms = max(0, int((monotonic() - total_started) * 1000))
+            timings["total_ms"] = total_elapsed_ms
+            logger.info(
+                "aiteam_state_timing workspace=%s total_ms=%s timings=%s",
+                str(workspace),
+                total_elapsed_ms,
+                timings,
+            )
+            slow_steps = {
+                key: value for key, value in timings.items()
+                if key != "total_ms" and int(value) >= 750
+            }
+            if slow_steps:
+                logger.warning(
+                    "aiteam_state_slow workspace=%s total_ms=%s slow_steps=%s",
+                    str(workspace),
+                    total_elapsed_ms,
+                    slow_steps,
+                )
             return {
                 "task_total": payload.get("task_total", 0),
                 "task_state_counts": payload.get("task_state_counts", {}),
@@ -1034,15 +1482,94 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
                 "last_lead_user_summary": latest_lead_summary,
                 "notebooklm_status": _detect_notebooklm_status(runtime_dir, PROJECT_ROOT),
                 "project_continuity": continuity,
-                "mcp_overview": _load_mcp_overview(request),
+                "mcp_overview": mcp_overview,
+                "startup_diagnostics": {
+                    "workspace": str(workspace),
+                    "timings_ms": timings,
+                    "slow_steps": slow_steps,
+                },
             }
 
-        return await asyncio.to_thread(_load_state)
+        payload = await asyncio.to_thread(_load_state)
+        _store_cached_state_payload(
+            runtime_dir,
+            environment=environment,
+            payload=payload,
+        )
+        return _peek_cached_state_payload(
+            runtime_dir,
+            environment=environment,
+            allow_stale=True,
+        ) or payload
     except HTTPException:
         raise
     except Exception as e:
         import logging
         logging.getLogger(__name__).exception("Unhandled error in aiteam router")
+        return {"error": str(e)}
+    finally:
+        if 'runtime_dir' in locals() and locals().get("is_owner"):
+            _release_state_compute_slot(
+                runtime_dir,
+                environment=environment,
+                event=locals().get("inflight_event"),
+            )
+
+
+@router.get("/api/aiteam/state-lite")
+async def get_aiteam_state_lite(request: Request, environment: str = "dev"):
+    _require_api_auth_request(request)
+    try:
+        workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+        if not runtime_dir.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="No AI Team runtime directory found in workspace (.aiteam/ or runtime/).",
+            )
+
+        started = monotonic()
+        db_path = runtime_dir / "aiteam.db"
+        has_events = (runtime_dir / "events.jsonl").exists()
+        has_mailbox = (runtime_dir / "mailbox.jsonl").exists()
+        cached = _peek_cached_state_payload(
+            runtime_dir,
+            environment=environment,
+            allow_stale=True,
+        )
+        cached_last_run = {}
+        cached_startup = {}
+        if isinstance(cached, dict):
+            cached_last_run = dict(cached.get("last_chat_run", {}) or {})
+            cached_startup = dict(cached.get("startup_diagnostics", {}) or {})
+
+        total_ms = max(0, int((monotonic() - started) * 1000))
+        return {
+            "workspace": str(workspace),
+            "runtime_dir": str(runtime_dir),
+            "runtime_exists": True,
+            "db_exists": db_path.exists(),
+            "events_exists": has_events,
+            "mailbox_exists": has_mailbox,
+            "last_chat_run": {
+                "task_id": str(cached_last_run.get("task_id", "") or ""),
+                "status": str(cached_last_run.get("status", "") or ""),
+                "workflow_run_status": str(cached_last_run.get("workflow_run_status", "") or ""),
+                "state": str(cached_last_run.get("state", "") or ""),
+                "ts": str(cached_last_run.get("ts", "") or ""),
+            },
+            "startup_diagnostics": {
+                "workspace": str(workspace),
+                "timings_ms": {"total_ms": total_ms},
+                "slow_steps": {},
+                "cache": dict(cached_startup.get("cache", {}) or {}),
+                "lite": True,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Unhandled error in aiteam state-lite")
         return {"error": str(e)}
 
 
@@ -1060,7 +1587,7 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
             ts = str(record.get("timestamp", ""))
             items.append(
                 {
-                    "timestamp": ts,
+                    "timestamp": _display_ts_local(ts),
                     "sender": str(record.get("sender", "")),
                     "recipient": str(record.get("recipient", "")),
                     "subject": str(record.get("subject", "")),
@@ -1104,7 +1631,7 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
                     continue
                 items.append(
                     {
-                        "timestamp": started_ts.get(task_id, ""),
+                        "timestamp": _display_ts_local(started_ts.get(task_id, "")),
                         "sender": "user",
                         "recipient": "team_lead",
                         "subject": f"User input: {root_id}",
@@ -1115,18 +1642,25 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
 
         sorted_items = sorted(items, key=lambda item: str(item.get("timestamp", "")), reverse=True)
         top = sorted_items[: max(1, min(limit, 300))]
-        latest_chat_run = _latest_chat_run_summary(events if isinstance(events, list) else [])
+        workflow_state_payload = _read_runtime_workflow_state(runtime_dir)
+        latest_chat_run = _latest_chat_run_summary(
+            events if isinstance(events, list) else [],
+            workflow_state_payload if isinstance(workflow_state_payload, dict) else None,
+        )
         latest_task_root = str(latest_chat_run.get("task_id", "") or "")
+        workflow_insights = _load_chat_workflow_insights(
+            runtime_dir,
+            latest_task_root,
+        )
         latest_chat_run = {
             **latest_chat_run,
             "task_operational_summary": _build_task_operational_summary(
                 tasks_payload,
                 task_root=latest_task_root,
+                phase_verdicts=workflow_insights.get("phase_verdicts", {}),
+                run_verdict=workflow_insights.get("run_verdict", {}),
             ),
-            **_load_chat_workflow_insights(
-                runtime_dir,
-                latest_task_root,
-            ),
+            **workflow_insights,
         }
         return {
             "total": len(items),
@@ -1165,18 +1699,18 @@ async def get_aiteam_logs(request: Request, limit: int = 100):
             if event_type == "task_execution" and isinstance(payload, dict):
                 task_id = str(payload.get("task_id", "") or "")
                 if task_id:
-                    task_last_ts[task_id] = str(record.get("ts", ""))
+                    task_last_ts[task_id] = _display_ts_local(record.get("ts", ""))
             if event_type == "task_started" and isinstance(payload, dict):
                 task_id = str(payload.get("task_id", "") or "")
                 if task_id and task_id not in task_started_ts:
-                    task_started_ts[task_id] = str(record.get("ts", ""))
+                    task_started_ts[task_id] = _display_ts_local(record.get("ts", ""))
             if event_type == "user_input" and isinstance(payload, dict):
                 user_output_candidates.append(
                     {
                         "task_id": str(payload.get("task_id", "") or ""),
                         "role": "user",
                         "state": "submitted",
-                        "ts": str(record.get("ts", "")),
+                        "ts": _display_ts_local(record.get("ts", "")),
                         "output": str(payload.get("message", "") or ""),
                     }
                 )
@@ -1187,7 +1721,7 @@ async def get_aiteam_logs(request: Request, limit: int = 100):
             payload_dict = payload if isinstance(payload, dict) else {}
             event_logs.append(
                 {
-                    "ts": str(record.get("ts", "")),
+                    "ts": _display_ts_local(record.get("ts", "")),
                     "event_type": event_type,
                     "task_id": str(payload_dict.get("task_id", "") or ""),
                     "summary": _event_summary(event_type, payload_dict),
@@ -1395,14 +1929,33 @@ async def tool_access_log(
 async def get_routing_catalog(request: Request):
     """Vista consultable del routing: catálogo, roles, primarios y fallbacks efectivos."""
     _require_api_auth_request(request)
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    refresh_requested = str(request.query_params.get("refresh", "") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "force",
+    }
     try:
-        workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
-        runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        return await asyncio.to_thread(_build_routing_catalog, runtime_dir)
+        if not refresh_requested:
+            cached = _get_cached_routing_catalog(runtime_dir, allow_stale=False)
+            if cached is not None:
+                return cached
+        payload = await asyncio.to_thread(_build_routing_catalog, runtime_dir)
+        _store_cached_routing_catalog(runtime_dir, payload)
+        return _routing_cache_snapshot(payload, status="fresh", age_seconds=0.0)
     except HTTPException:
         raise
     except Exception as exc:
+        cached = _get_cached_routing_catalog(runtime_dir, allow_stale=True)
+        if cached is not None:
+            cached["cache"] = {
+                **dict(cached.get("cache", {}) or {}),
+                "error": str(exc),
+            }
+            return cached
         return {"error": str(exc), "roles": [], "providers": [], "adapters": [], "role_matrix": []}
 
 
@@ -1432,6 +1985,7 @@ async def update_routing_overrides(request: Request):
         save_overrides(runtime_dir, overrides)
     else:
         reset_overrides(runtime_dir)
+    _invalidate_routing_catalog_cache(runtime_dir)
     return _routing_overrides_response_payload(load_overrides(runtime_dir))
 
 
@@ -1443,6 +1997,7 @@ async def delete_routing_overrides(request: Request):
     runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     reset_overrides(runtime_dir)
+    _invalidate_routing_catalog_cache(runtime_dir)
     return {"ok": True, **_routing_overrides_response_payload(load_overrides(runtime_dir))}
 
 

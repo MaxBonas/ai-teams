@@ -131,6 +131,19 @@ class ObservabilityTests(unittest.TestCase):
             self.assertEqual(summary["tool_rewiring_by_specialist"].get("skill_worker"), 1)
             self.assertEqual(summary["tool_rewiring_by_specialist"].get("browser_operator"), 1)
 
+    def test_event_logger_emits_local_timestamp_with_offset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            logger = EventLogger(Path(tmp))
+            with patch(
+                "aiteam.observability.local_now_iso",
+                return_value="2026-04-03T22:15:00+02:00",
+            ):
+                logger.emit("task_execution", {"task_id": "T-LOCAL"})
+
+            records = logger.recent_events(hours=None)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(str(records[0].get("ts", "")), "2026-04-03T22:15:00+02:00")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,8 +51,19 @@ class PolicyDefaultsTests(unittest.TestCase):
                 if adapter.channel == ChannelType.SUBSCRIPTION and adapter.provider == "anthropic"
             ]
             self.assertTrue(anthropic_subscriptions)
+            # The pool has both TL-only adapters (claude_pro) and worker adapters (claude_haiku).
+            # Verify at least one is TL-exclusive and at least one is a worker (no role restriction).
+            tl_only = [a for a in anthropic_subscriptions if a.role_targets == {"team_lead"}]
+            worker = [a for a in anthropic_subscriptions if not a.role_targets]
+            self.assertTrue(tl_only, "Expected at least one Anthropic TL-only subscription adapter")
+            self.assertTrue(worker, "Expected at least one Anthropic worker subscription adapter")
+            # No anthropic subscription adapter should have mixed or other-role targets
             for adapter in anthropic_subscriptions:
-                self.assertEqual(adapter.role_targets, {"team_lead"})
+                self.assertIn(
+                    adapter.role_targets,
+                    ({"team_lead"}, set()),
+                    f"Adapter {adapter.name} has unexpected role_targets: {adapter.role_targets}",
+                )
 
     def test_policy_reads_strict_role_env_toggles(self) -> None:
         with patch.dict(

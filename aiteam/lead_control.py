@@ -92,8 +92,16 @@ def extract_lcp_directives(text: str) -> dict:
     result: dict = {}
     t = str(text or "")
 
-    if re.search(r"\[DIRECT_ANSWER\]", t, re.IGNORECASE):
+    direct_answer_match = re.search(
+        r'\[DIRECT_ANSWER(?:\s*:\s*"(.+?)")?\]',
+        t,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if direct_answer_match:
         result["direct_answer"] = True
+        direct_answer_text = str(direct_answer_match.group(1) or "").strip()
+        if direct_answer_text:
+            result["direct_answer_text"] = direct_answer_text
 
     if re.search(r"\[REPLAN\]", t, re.IGNORECASE):
         result["replan"] = True
@@ -525,6 +533,7 @@ def resolve_lead_intake(
     complexity: Complexity,
     criticality: Criticality,
     round_budget: int,
+    forbid_direct_answer: bool = False,
 ) -> LeadIntakeResolution:
     """Resuelve el control inicial del Lead antes de crear fases dinamicas."""
     directives = extract_lcp_directives(lead_output)
@@ -590,6 +599,15 @@ def resolve_lead_intake(
                 justification="Lead cerró en advisory mode sin lanzar fases.",
             ),
             events=events,
+        )
+
+    if directives.get("direct_answer") and forbid_direct_answer:
+        directives["direct_answer"] = False
+        events.append(
+            LeadDirectiveEvent(
+                directive="direct_answer_blocked",
+                payload="continuation_pending_phases",
+            )
         )
 
     if directives.get("direct_answer"):

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -267,6 +268,106 @@ class MemoryAndCommsTests(unittest.TestCase):
 
             loaded = store.get_thread("eng-1", "project-a")
             self.assertEqual(len(loaded.turns), 1)
+
+    def test_thread_store_separates_threads_by_provider_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ThreadStore(Path(tmp) / "runtime")
+            openai = store.get_thread(
+                "lead-1",
+                "project-a",
+                role="team_lead",
+                provider="openai",
+                channel="subscription",
+                model_family="gpt_pro",
+            )
+            anthropic = store.get_thread(
+                "lead-1",
+                "project-a",
+                role="team_lead",
+                provider="anthropic",
+                channel="subscription",
+                model_family="claude_sonnet",
+            )
+
+            self.assertNotEqual(openai.thread_id, anthropic.thread_id)
+            self.assertEqual(openai.provider, "openai")
+            self.assertEqual(anthropic.provider, "anthropic")
+
+    def test_thread_store_rotates_generation_and_reloads_latest_bound_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ThreadStore(Path(tmp) / "runtime")
+            thread = store.get_thread(
+                "eng-1",
+                "project-a",
+                role="engineer",
+                provider="anthropic",
+                channel="subscription",
+                model_family="claude_sonnet",
+            )
+            thread.turn_count_total = 24
+            thread.char_count_total = 40000
+            store.save_thread(thread)
+
+            rotated = store.get_thread(
+                "eng-1",
+                "project-a",
+                role="engineer",
+                provider="anthropic",
+                channel="subscription",
+                model_family="claude_sonnet",
+            )
+            self.assertEqual(rotated.generation, 2)
+            self.assertEqual(rotated.parent_thread_id, thread.thread_id)
+
+            loaded_again = store.get_thread(
+                "eng-1",
+                "project-a",
+                role="engineer",
+                provider="anthropic",
+                channel="subscription",
+                model_family="claude_sonnet",
+            )
+            self.assertEqual(loaded_again.thread_id, rotated.thread_id)
+            self.assertEqual(loaded_again.generation, 2)
+
+    def test_thread_store_upgrades_legacy_thread_to_v2_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ThreadStore(Path(tmp) / "runtime")
+            legacy_path = store._legacy_path_for("eng-1", "project-a")
+            legacy_payload = {
+                "thread_id": "legacy123",
+                "agent_id": "eng-1",
+                "project_key": "project-a",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "last_updated": "2026-01-01T00:00:00+00:00",
+                "turns": [],
+                "consumed_message_ids": [],
+            }
+            legacy_path.write_text(
+                json.dumps(legacy_payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            upgraded = store.get_thread(
+                "eng-1",
+                "project-a",
+                role="engineer",
+                provider="openai",
+                channel="subscription",
+                model_family="gpt_pro",
+            )
+
+            self.assertEqual(upgraded.thread_id, "legacy123")
+            self.assertEqual(upgraded.thread_version, "v2")
+            self.assertEqual(upgraded.role, "engineer")
+            self.assertEqual(upgraded.provider, "openai")
+            self.assertTrue(store.save_thread is not None)
+            self.assertTrue(
+                any(
+                    path.name.endswith("__engineer__openai__subscription__gpt_pro__g1.json")
+                    for path in store.threads_dir.glob("*.json")
+                )
+            )
 
     def test_mailbox_skips_invalid_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -6,7 +6,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from aiteam.phase_verdicts import derive_run_verdict_from_phase_verdicts
 from aiteam.context_curator import ContextCuratorStore, project_key_from_runtime_dir
+from aiteam.workflow_planner import PhaseSpec
+from aiteam.phase_verdicts import is_missing_contract_objective
 
 # Add PROJECT_ROOT here to avoid circular imports
 # Resolved dynamically from the location of this file (api/utils.py → project root)
@@ -14,6 +17,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Global state for the IDE's current workspace directory
 _CURRENT_WORKSPACE: Path = PROJECT_ROOT
+
+_CONTINUATION_CLOSE_PENDING_MARKERS = (
+    "close pending",
+    "close pending phases",
+    "cerrar pendientes",
+    "cierra pendientes",
+    "close remaining",
+)
 
 
 def get_current_workspace() -> Path:
@@ -141,13 +152,16 @@ def _read_runtime_workflow_state(runtime_dir: Path) -> dict[str, object]:
     return {}
 
 
-def _read_jsonl_records(path: Path) -> list[dict]:
+def _read_jsonl_records(path: Path, *, tail: int | None = None) -> list[dict]:
     if not path.exists():
         return []
     try:
         from aiteam.persistence import AtomicFileWriter
 
-        records = AtomicFileWriter.read_jsonl_with_dedup(path)
+        if tail is not None:
+            records = AtomicFileWriter.read_jsonl_tail(path, tail)
+        else:
+            records = AtomicFileWriter.read_jsonl_with_dedup(path)
     except Exception:
         return []
     return [item for item in records if isinstance(item, dict)]
@@ -409,6 +423,15 @@ def _parse_iso_ts(value: object) -> datetime | None:
         return None
 
 
+def _display_ts_local(value: object) -> str:
+    ts = _parse_iso_ts(value)
+    if ts is None:
+        return str(value or "").strip()
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone().isoformat()
+
+
 def _layer_counts(payload: object) -> dict[str, int]:
     if not isinstance(payload, dict):
         return {
@@ -433,9 +456,10 @@ def _freshness_status(updated_at: object) -> str:
     ts = _parse_iso_ts(updated_at)
     if ts is None:
         return "unknown"
-    now = datetime.now(timezone.utc)
+    now = datetime.now().astimezone()
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
+    ts = ts.astimezone()
     age_seconds = max(0, int((now - ts).total_seconds()))
     if age_seconds <= 3600:
         return "fresh"
@@ -527,6 +551,17 @@ def _event_summary(event_type: str, payload: dict) -> str:
         task_id = payload.get("task_id", "-")
         message = _truncate_text(payload.get("message", ""), limit=180)
         return f"user_input task_id={task_id} message={message}"
+    if event_type == "chat_continuation_blocked":
+        return (
+            f"continuation_blocked root={payload.get('continuation_of', '-')} "
+            f"reason={payload.get('reason', '-')} source={payload.get('source', '-')}"
+        )
+    if event_type == "chat_continuation_source_reconstructed":
+        reason_codes = _truncate_text(payload.get("reason_codes", []), limit=120)
+        return (
+            f"continuation_source_reconstructed root={payload.get('continuation_of', '-')} "
+            f"source={payload.get('source', '-')} reasons={reason_codes}"
+        )
     if event_type == "routing_decision":
         provider = payload.get("provider", "-")
         model = payload.get("model", "-")
@@ -643,17 +678,35 @@ def _safe_workspace_target(workspace: Path, relative_path: str) -> Path | None:
 
 
 def _extract_user_message_from_task_description(description: str) -> str:
-    marker = "Solicitud original:\n"
-    if marker not in description:
-        marker = "Solicitud: "
-        if marker not in description:
-            return ""
-        fragment = description.split(marker, 1)[1]
-        return fragment.split("\n", 1)[0].strip()
+    text = str(description or "")
+    markers = (
+        "Solicitud original:\n",
+        "Solicitud original: ",
+        "Solicitud del usuario: ",
+        "Solicitud: ",
+    )
+    fragment = ""
+    for marker in markers:
+        if marker not in text:
+            continue
+        fragment = text.split(marker, 1)[1]
+        break
+    if not fragment:
+        return ""
 
-    fragment = description.split(marker, 1)[1]
-    if "\nEntrega:" in fragment:
-        fragment = fragment.split("\nEntrega:", 1)[0]
+    boundaries = (
+        "\nEntrega:",
+        "\nEntrega en ",
+        "\n[PREPLAN_SIGNALS]",
+        "\nCONTINUATION TARGET PRIORITARIO:",
+        "\n== LEAD MEMORY ==",
+        "\nContinuidad de proyecto",
+        "\n[PHASE_CONTRACT]",
+        "\nGate iteration:",
+    )
+    for boundary in boundaries:
+        if boundary in fragment:
+            fragment = fragment.split(boundary, 1)[0]
     return fragment.strip()
 
 
@@ -696,10 +749,78 @@ def _group_chat_roots(tasks_payload: object) -> dict[str, dict[str, object]]:
     return roots
 
 
+_SEMANTIC_CONTINUITY_MARKERS = (
+    "slice_drift",
+    "review_rejected",
+    "review_failed",
+    "qa_blocked",
+    "qa_failed",
+    "missing_upstream",
+    "contract_violation",
+    "semantic_gate_failed",
+    "evidence_gate_failed",
+    "rejected_decision",
+    "blocked_status",
+    "drift",
+)
+
+_INFRA_CONTINUITY_MARKERS = (
+    "http 429",
+    "http_error:429",
+    "http 403",
+    "http_error:403",
+    "routing",
+    "rate_limit",
+    "quota",
+    "no_eligible_adapter",
+    "agotamiento de recursos",
+    "resource exhaustion",
+    "infraestructura transitoria",
+    "systemic_block",
+)
+
+
+def _continuity_run_profile(
+    *,
+    root_id: str,
+    workflow_entry: object,
+    authoritative_result: str = "",
+    lead_close_text: str = "",
+) -> dict[str, object]:
+    entry = workflow_entry if isinstance(workflow_entry, dict) else {}
+    reconstructed_verdict = (
+        derive_run_verdict_from_phase_verdicts(entry.get("phase_verdicts", {}))
+        if entry
+        else {}
+    )
+    reason_codes = [
+        str(item).strip().lower()
+        for item in list(reconstructed_verdict.get("reason_codes", []) or [])
+        if str(item).strip()
+    ]
+    haystack = " ".join(
+        [
+            str(root_id or "").strip().lower(),
+            str(authoritative_result or "").strip().lower(),
+            str(lead_close_text or "").strip().lower(),
+            " ".join(reason_codes),
+        ]
+    )
+    semantic = any(marker in haystack for marker in _SEMANTIC_CONTINUITY_MARKERS)
+    infra = any(marker in haystack for marker in _INFRA_CONTINUITY_MARKERS)
+    return {
+        "reconstructed_verdict": reconstructed_verdict,
+        "reason_codes": reason_codes,
+        "semantic": semantic,
+        "infra_only": bool(infra and not semantic),
+    }
+
+
 def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> str:
     tasks_payload = _read_runtime_tasks_payload(runtime_dir)
     events = _read_jsonl_records(runtime_dir / "events.jsonl")
     roots = _group_chat_roots(tasks_payload)
+    workflow_state = _read_runtime_workflow_state(runtime_dir)
     curator_store = ContextCuratorStore(runtime_dir)
     project_context_summary = curator_store.build_summary(
         curator_store.load_project_context(project_key_from_runtime_dir(runtime_dir)),
@@ -733,25 +854,323 @@ def _build_project_continuity_context(runtime_dir: Path, max_chats: int = 4) -> 
         reverse=True,
     )[: max(1, max_chats)]
 
-    lines = ["Continuidad de proyecto (sesiones previas):"]
+    lines = [
+        "Continuidad de proyecto (sesiones previas):",
+        "Prioridad de contexto: usa primero las instrucciones actuales del proyecto, el estado actual del repo y la run mas reciente.",
+        "Las runs antiguas bloqueadas solo por infraestructura/routing son historicas y no describen por si solas el estado actual del proyecto.",
+    ]
     if project_context_summary:
         lines.append("Context curator:")
         for line in project_context_summary.splitlines():
             lines.append(f"  {line}")
-    for row in ordered:
+    infra_history: list[str] = []
+    detailed_rows: list[tuple[dict[str, object], dict[str, object]]] = []
+    for index, row in enumerate(ordered):
         root_id = str(row.get("root_id", ""))
-        message = _truncate_text(row.get("user_message", ""), limit=220)
+        workflow_entry = (
+            workflow_state.get(root_id, {}) if isinstance(workflow_state, dict) else {}
+        )
+        profile = _continuity_run_profile(
+            root_id=root_id,
+            workflow_entry=workflow_entry,
+            lead_close_text=str(row.get("lead_close_result", "") or ""),
+        )
+        if index > 0 and bool(profile.get("infra_only", False)):
+            infra_history.append(root_id)
+            continue
+        detailed_rows.append((row, profile))
+
+    if infra_history:
+        lines.append(
+            "Bloqueos historicos de infraestructura (colapsados, no tratarlos como estado actual): "
+            + ", ".join(infra_history)
+        )
+
+    for row, profile in detailed_rows:
+        root_id = str(row.get("root_id", ""))
+        workflow_entry = (
+            workflow_state.get(root_id, {}) if isinstance(workflow_state, dict) else {}
+        )
+        workflow_entry = workflow_entry if isinstance(workflow_entry, dict) else {}
+        message = _truncate_text(
+            workflow_entry.get("user_message", "") or row.get("user_message", ""),
+            limit=220,
+        )
         lead_close = _truncate_text(row.get("lead_close_result", ""), limit=220)
         phase_states = row.get("phase_states", {})
+        reconstructed_verdict = dict(profile.get("reconstructed_verdict", {}) or {})
         state_view = ""
         if isinstance(phase_states, dict):
             state_view = ", ".join(f"{k}:{v}" for k, v in phase_states.items())
         lines.append(f"- {root_id} msg={message or '-'}")
+        if reconstructed_verdict:
+            lines.append(
+                "  health="
+                + str(reconstructed_verdict.get("state", "") or "unknown")
+                + " via phase_verdicts"
+            )
+        if bool(profile.get("semantic", False)):
+            lines.append("  relevance=semantica_del_run")
+        elif bool(profile.get("infra_only", False)):
+            lines.append("  relevance=infra_reciente_no_autoritativa")
         if state_view:
             lines.append(f"  states={state_view}")
         if lead_close:
             lines.append(f"  close={lead_close}")
 
+    return "\n".join(lines)
+
+
+def _effective_phase_state(task_state: str, verdict_status: str) -> str:
+    normalized_task = str(task_state or "").strip().lower()
+    normalized_verdict = str(verdict_status or "").strip().lower()
+    if normalized_verdict in {"blocked", "rejected", "failed", "partial", "archived"}:
+        return normalized_verdict
+    if normalized_task in {"blocked", "rejected", "failed", "partial", "archived"}:
+        return normalized_task
+    if normalized_verdict in {"approved", "completed"}:
+        return normalized_verdict
+    if normalized_task:
+        return normalized_task
+    return normalized_verdict
+
+
+def _message_requests_close_pending(message: str) -> bool:
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _CONTINUATION_CLOSE_PENDING_MARKERS)
+
+
+def _fallback_phase_role(phase_id: str) -> str:
+    normalized = str(phase_id or "").strip().lower()
+    if normalized.startswith("review"):
+        return "REVIEWER"
+    if normalized.startswith("qa"):
+        return "QA"
+    if normalized.startswith(
+        ("research", "discovery", "analysis", "investigate", "plan_research")
+    ):
+        return "RESEARCHER"
+    return "ENGINEER"
+
+
+def _collect_continuation_target_pending_details(
+    runtime_dir: Path,
+    continuation_of: str,
+) -> list[dict[str, object]]:
+    continuation_root = str(continuation_of or "").strip().upper()
+    if not continuation_root:
+        return []
+
+    tasks_payload = _read_runtime_tasks_payload(runtime_dir)
+    roots = _group_chat_roots(tasks_payload)
+    target_row = dict(roots.get(continuation_root, {}) or {})
+    workflow_state = _read_runtime_workflow_state(runtime_dir)
+    workflow_entry = (
+        workflow_state.get(continuation_root, {})
+        if isinstance(workflow_state, dict)
+        else {}
+    )
+    workflow_entry = workflow_entry if isinstance(workflow_entry, dict) else {}
+    if not target_row and not workflow_entry:
+        return []
+
+    phase_states = dict(target_row.get("phase_states", {}) or {})
+    phase_verdicts = dict(workflow_entry.get("phase_verdicts", {}) or {})
+    phase_contracts = dict(workflow_entry.get("phase_contracts", {}) or {})
+    workflow_phase_keys = [
+        str(item).strip()
+        for item in list(workflow_entry.get("workflow_phase_keys", []) or [])
+        if str(item).strip()
+    ]
+
+    ordered_phase_names: list[str] = []
+    for phase_name in workflow_phase_keys:
+        if phase_name not in ordered_phase_names:
+            ordered_phase_names.append(phase_name)
+    for source in (phase_states.keys(), phase_contracts.keys()):
+        for phase_name in source:
+            normalized = str(phase_name or "").strip()
+            if (
+                normalized
+                and normalized not in ordered_phase_names
+                and normalized not in {"lead_intake"}
+                and not normalized.startswith("scout_")
+                and not normalized.startswith("delegate_")
+                and not normalized.startswith("lead_preflight_")
+                and not normalized.startswith("lead_report_")
+            ):
+                ordered_phase_names.append(normalized)
+
+    pending_details: list[dict[str, object]] = []
+    for phase_name in ordered_phase_names:
+        task_state = str(phase_states.get(phase_name, "") or "").strip().lower()
+        verdict = (
+            phase_verdicts.get(phase_name, {})
+            if isinstance(phase_verdicts.get(phase_name, {}), dict)
+            else {}
+        )
+        verdict_status = str(verdict.get("status", "") or "").strip().lower()
+        effective_state = _effective_phase_state(task_state, verdict_status)
+        if effective_state in {"completed", "approved"}:
+            continue
+        contract = (
+            phase_contracts.get(phase_name, {})
+            if isinstance(phase_contracts.get(phase_name, {}), dict)
+            else {}
+        )
+        pending_details.append(
+            {
+                "phase_id": phase_name,
+                "state": effective_state,
+                "objective": str(contract.get("objective", "") or "").strip(),
+                "depends_on": [
+                    str(item).strip()
+                    for item in list(contract.get("depends_on", []) or [])
+                    if str(item).strip()
+                ],
+                "role": str(contract.get("role", "") or "").strip().upper()
+                or _fallback_phase_role(phase_name),
+            }
+        )
+    return pending_details
+
+
+def _phase_specs_from_pending_details(
+    pending_details: list[dict[str, object]],
+) -> list[PhaseSpec]:
+    pending_ids = {
+        str(item.get("phase_id", "")).strip()
+        for item in pending_details
+        if str(item.get("phase_id", "")).strip()
+        and str(item.get("phase_id", "")).strip() not in {"lead_close", "lead_intake"}
+    }
+    phases: list[PhaseSpec] = []
+    for item in pending_details:
+        phase_id = str(item.get("phase_id", "")).strip()
+        if not phase_id or phase_id in {"lead_close", "lead_intake"}:
+            continue
+        role = str(item.get("role", "")).strip().upper() or _fallback_phase_role(phase_id)
+        objective = str(item.get("objective", "") or "").strip()
+        if is_missing_contract_objective(objective):
+            objective = (
+                f"Cerrar o replanificar la fase pendiente '{phase_id}' del continuation target "
+                "con evidencia concreta y sin abrir un slice nuevo."
+            )
+        depends_on = [
+            dep
+            for dep in list(item.get("depends_on", []) or [])
+            if str(dep).strip() in pending_ids and str(dep).strip() != phase_id
+        ]
+        phases.append(
+            PhaseSpec(
+                phase_id=phase_id,
+                role=role,
+                objective=objective,
+                depends_on=depends_on,
+            )
+        )
+    return phases
+
+
+def _close_pending_plan_requires_repair(
+    proposed_phases: list[PhaseSpec],
+    pending_details: list[dict[str, object]],
+) -> bool:
+    if not pending_details:
+        return False
+    proposed_ids = {
+        str(spec.phase_id or "").strip()
+        for spec in proposed_phases
+        if str(spec.phase_id or "").strip()
+    }
+    pending_ids = {
+        str(item.get("phase_id", "")).strip()
+        for item in pending_details
+        if str(item.get("phase_id", "")).strip()
+        and str(item.get("phase_id", "")).strip() not in {"lead_close", "lead_intake"}
+    }
+    if not pending_ids:
+        return False
+    return not pending_ids.issubset(proposed_ids)
+
+
+def _build_continuation_target_context(
+    runtime_dir: Path,
+    continuation_of: str,
+    *,
+    current_message: str = "",
+) -> str:
+    continuation_root = str(continuation_of or "").strip().upper()
+    if not continuation_root:
+        return ""
+
+    tasks_payload = _read_runtime_tasks_payload(runtime_dir)
+    roots = _group_chat_roots(tasks_payload)
+    target_row = dict(roots.get(continuation_root, {}) or {})
+    workflow_state = _read_runtime_workflow_state(runtime_dir)
+    workflow_entry = (
+        workflow_state.get(continuation_root, {})
+        if isinstance(workflow_state, dict)
+        else {}
+    )
+    workflow_entry = workflow_entry if isinstance(workflow_entry, dict) else {}
+    if not target_row and not workflow_entry:
+        return ""
+
+    pending_rows: list[str] = []
+    for item in _collect_continuation_target_pending_details(runtime_dir, continuation_root):
+        phase_name = str(item.get("phase_id", "")).strip()
+        effective_state = str(item.get("state", "")).strip()
+        objective = _truncate_text(item.get("objective", "") or "", limit=140)
+        depends_on = [
+            str(dep).strip()
+            for dep in list(item.get("depends_on", []) or [])
+            if str(dep).strip()
+        ]
+        phase_line = f"- {phase_name}"
+        if effective_state:
+            phase_line += f" [{effective_state}]"
+        if objective:
+            phase_line += f" objective={objective}"
+        if depends_on:
+            phase_line += f" deps={', '.join(depends_on)}"
+        pending_rows.append(phase_line)
+
+    requested_message = _truncate_text(current_message, limit=220)
+    previous_message = _truncate_text(
+        workflow_entry.get("user_message", "") or target_row.get("user_message", "") or "",
+        limit=220,
+    )
+    run_verdict = (
+        workflow_entry.get("run_verdict", {})
+        if isinstance(workflow_entry.get("run_verdict", {}), dict)
+        else {}
+    )
+    run_state = str(run_verdict.get("state", "") or "").strip().lower()
+
+    lines = [
+        "CONTINUATION TARGET PRIORITARIO:",
+        f"- continuation_of={continuation_root}",
+    ]
+    if requested_message:
+        lines.append(f"- pedido_actual={requested_message}")
+    if previous_message:
+        lines.append(f"- pedido_run_objetivo={previous_message}")
+    if run_state:
+        lines.append(f"- estado_autoritativo_previo={run_state}")
+    lines.append(
+        "- regla: prioriza primero el pedido actual del usuario y las fases pendientes de esta run objetivo."
+    )
+    lines.append(
+        "- prohibido: sustituir este objetivo por un objetivo historico mas antiguo o abrir otro slice antes de cerrar lo pendiente."
+    )
+    if pending_rows:
+        lines.append("- fases_pendientes_objetivo:")
+        lines.extend(f"  {row}" for row in pending_rows[:8])
+    else:
+        lines.append("- fases_pendientes_objetivo: ninguna visible")
     return "\n".join(lines)
 
 
@@ -763,40 +1182,66 @@ def _build_scout_project_state_context(workspace: Path) -> str:
     """
     import subprocess
 
-    lines: list[str] = ["=== ESTADO DEL PROYECTO ==="]
+    lines: list[str] = [
+        "=== ESTADO DEL PROYECTO ===",
+        "REGLA AUTORITATIVA: solo considera confirmados los archivos y rutas listados abajo.",
+        "Si un archivo, clase o modulo no aparece en este snapshot del workspace, tratalo como NO CONFIRMADO y no lo presentes como hecho.",
+    ]
+
+    is_git_repo = False
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+        )
+        if result.returncode == 0:
+            repo_root = str(Path(result.stdout.strip()).resolve())
+            workspace_root = str(workspace.resolve())
+            is_git_repo = repo_root == workspace_root
+        lines.append(f"git repository: {'yes' if is_git_repo else 'no'}")
+    except Exception:
+        lines.append("git repository: unknown")
 
     # Git status
-    try:
-        result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=str(workspace),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=8,
-        )
-        git_status = result.stdout.strip()
-        lines.append(f"git status:\n{git_status[:600] if git_status else '(limpio)'}")
-    except Exception:
-        lines.append("git status: no disponible")
+    if is_git_repo:
+        try:
+            result = subprocess.run(
+                ["git", "status", "--short"],
+                cwd=str(workspace),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+            )
+            git_status = result.stdout.strip()
+            lines.append(f"git status:\n{git_status[:600] if git_status else '(limpio)'}")
+        except Exception:
+            lines.append("git status: no disponible")
 
-    # Últimos 3 commits
-    try:
-        result = subprocess.run(
-            ["git", "log", "--oneline", "-5"],
-            cwd=str(workspace),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=8,
-        )
-        git_log = result.stdout.strip()
-        if git_log:
-            lines.append(f"últimos commits:\n{git_log[:400]}")
-    except Exception:
-        pass
+        # Últimos 5 commits
+        try:
+            result = subprocess.run(
+                ["git", "log", "--oneline", "-5"],
+                cwd=str(workspace),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+            )
+            git_log = result.stdout.strip()
+            if git_log:
+                lines.append(f"últimos commits:\n{git_log[:400]}")
+        except Exception:
+            pass
+    else:
+        lines.append("git status: no disponible (workspace sin repositorio git)")
 
     # Archivos de primer nivel relevantes
     try:
@@ -811,10 +1256,52 @@ def _build_scout_project_state_context(workspace: Path) -> str:
     except Exception:
         pass
 
+    # Snapshot autoritativo de rutas reales para evitar invenciones del scout
+    try:
+        allowed_dirs = {"src", "tests", "docs", "scripts", ".aiteam"}
+        top_level_files = {
+            "README.md",
+            "PROJECT_PLAN.md",
+            "pyproject.toml",
+            "package.json",
+            "requirements.txt",
+            "AITEAM_TEST_LOG.md",
+        }
+        actual_paths: list[str] = []
+        for child in sorted(workspace.iterdir(), key=lambda p: p.name):
+            if child.is_file() and child.name in top_level_files:
+                actual_paths.append(child.name)
+                continue
+            if not child.is_dir() or child.name not in allowed_dirs:
+                continue
+            actual_paths.append(f"{child.name}/")
+            for nested in sorted(child.rglob("*"), key=lambda p: str(p.relative_to(workspace)).lower()):
+                rel = str(nested.relative_to(workspace)).replace("\\", "/")
+                if any(part in {"__pycache__", "node_modules", "venv", ".pytest_cache"} for part in nested.parts):
+                    continue
+                if nested.is_dir():
+                    continue
+                actual_paths.append(rel)
+                if len(actual_paths) >= 60:
+                    break
+            if len(actual_paths) >= 60:
+                break
+        if actual_paths:
+            lines.append("workspace snapshot autoritativo:")
+            lines.extend(f"- {item}" for item in actual_paths[:60])
+    except Exception:
+        pass
+
     return "\n".join(lines)
 
 
-def _build_scout_session_history_context(runtime_dir: Path, max_chats: int = 3) -> str:
+def _build_scout_session_history_context(
+    runtime_dir: Path,
+    max_chats: int = 3,
+    *,
+    continuation_of: str = "",
+    current_message: str = "",
+) -> str:
     """Construye contexto crudo del historial de sesiones para el scout de historial.
 
     Extrae las últimas N sesiones con mensaje del usuario y síntesis del lead_close.
@@ -849,6 +1336,7 @@ def _build_scout_session_history_context(runtime_dir: Path, max_chats: int = 3) 
         key=lambda row: str(row.get("latest_ts", "")),
         reverse=True,
     )[:max_chats]
+    workflow_state = _read_runtime_workflow_state(runtime_dir)
 
     # Load authoritative outcomes from lead_memory.md (resultado field is ground truth)
     lead_memory_outcomes: dict[str, str] = {}
@@ -868,22 +1356,75 @@ def _build_scout_session_history_context(runtime_dir: Path, max_chats: int = 3) 
         except Exception:
             pass
 
-    lines = ["=== HISTORIAL DE SESIONES ==="]
-    for row in ordered:
+    lines = [
+        "=== HISTORIAL DE SESIONES ===",
+        "Prioriza la run mas reciente y cualquier run con evidencia semantica del mismo objetivo.",
+        "Colapsa como historicos los bloqueos viejos debidos solo a infraestructura/routing.",
+    ]
+    continuation_target_context = _build_continuation_target_context(
+        runtime_dir,
+        continuation_of,
+        current_message=current_message,
+    )
+    if continuation_target_context:
+        lines.append(continuation_target_context)
+    infra_history: list[str] = []
+    detailed_rows: list[tuple[dict[str, object], dict[str, object], str]] = []
+    for index, row in enumerate(ordered):
+        root_id = str(row.get("root_id", ""))
+        workflow_entry = (
+            workflow_state.get(root_id, {}) if isinstance(workflow_state, dict) else {}
+        )
+        authoritative = lead_memory_outcomes.get(root_id, "")
+        profile = _continuity_run_profile(
+            root_id=root_id,
+            workflow_entry=workflow_entry,
+            authoritative_result=authoritative,
+            lead_close_text=str(row.get("lead_close_result", "") or ""),
+        )
+        if index > 0 and bool(profile.get("infra_only", False)):
+            infra_history.append(root_id)
+            continue
+        detailed_rows.append((row, profile, authoritative))
+
+    if infra_history:
+        lines.append(
+            "bloqueos_historicos_infraestructura: "
+            + ", ".join(infra_history)
+        )
+
+    for row, profile, authoritative in detailed_rows:
         root_id = str(row.get("root_id", ""))
         message = _truncate_text(row.get("user_message", ""), limit=200)
         lead_close = _truncate_text(row.get("lead_close_result", ""), limit=300)
         phase_states = row.get("phase_states", {})
         failed = [k for k, v in (phase_states.items() if isinstance(phase_states, dict) else []) if v == "failed"]
+        reconstructed_verdict = dict(profile.get("reconstructed_verdict", {}) or {})
         lines.append(f"\n[{root_id}]")
         # Authoritative outcome from lead_memory (overrides DB phase states)
-        authoritative = lead_memory_outcomes.get(root_id)
         if authoritative:
             lines.append(f"  resultado_oficial: {authoritative}")
+        elif reconstructed_verdict:
+            lines.append(
+                "  resultado_reconstruido: "
+                + str(reconstructed_verdict.get("result", "") or "desconocido")
+            )
+        if bool(profile.get("semantic", False)):
+            lines.append("  relevancia: semantica")
+        elif bool(profile.get("infra_only", False)):
+            lines.append("  relevancia: infra_reciente_no_autoritativa")
         if message:
             lines.append(f"  pedido: {message}")
         if lead_close:
             lines.append(f"  resultado: {lead_close}")
+        if reconstructed_verdict:
+            reasons = [
+                str(item).strip()
+                for item in list(reconstructed_verdict.get("reason_codes", []) or [])
+                if str(item).strip()
+            ]
+            if reasons:
+                lines.append(f"  señales_reconstruidas: {', '.join(reasons)}")
         if failed:
             lines.append(f"  fases fallidas: {', '.join(failed)}")
 

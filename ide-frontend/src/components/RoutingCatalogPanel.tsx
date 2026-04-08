@@ -400,7 +400,13 @@ function roleMatchesFilters(
   return true;
 }
 
-export default function RoutingCatalogPanel({ workspacePath }: { workspacePath: string }) {
+export default function RoutingCatalogPanel({
+  workspacePath,
+  autoRefreshPaused = false,
+}: {
+  workspacePath: string;
+  autoRefreshPaused?: boolean;
+}) {
   const [payload, setPayload] = useState<RoutingCatalogPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -450,14 +456,14 @@ export default function RoutingCatalogPanel({ workspacePath }: { workspacePath: 
   }, [workspacePath]);
 
   useEffect(() => {
-    if (editMode) return undefined;
+    if (editMode || autoRefreshPaused) return undefined;
     const timer = window.setInterval(() => {
       void refreshCatalog();
-    }, 15000);
+    }, 45000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [workspacePath, editMode]);
+  }, [workspacePath, editMode, autoRefreshPaused]);
 
   const providerRows = useMemo(() => payload?.providers || [], [payload?.providers]);
   const roleRows = useMemo(() => payload?.role_matrix || [], [payload?.role_matrix]);
@@ -681,6 +687,7 @@ export default function RoutingCatalogPanel({ workspacePath }: { workspacePath: 
           versión {payload?.payload_version || 'desconocida'}
           {payload?.generated_at ? ` · actualizado ${new Date(payload.generated_at).toLocaleString()}` : ''}
           {refreshing ? ' · refrescando…' : ''}
+          {autoRefreshPaused && !editMode ? ' · auto-refresh pausado durante run activa' : ''}
         </div>
       </section>
 

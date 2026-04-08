@@ -285,6 +285,13 @@ def _append_unique_item(
     normalized_text = _compact_text(text, 300)
     if not normalized_text:
         return
+    if supersedes:
+        bucket[:] = [
+            entry
+            for entry in bucket
+            if str(entry.get("supersedes", "") or "").strip() != supersedes
+            or str(entry.get("text", "")).strip() == normalized_text
+        ]
     key = normalized_text.lower()
     for entry in bucket:
         if str(entry.get("text", "")).strip().lower() != key:
@@ -312,6 +319,97 @@ def _append_unique_item(
     )
     if len(bucket) > limit:
         del bucket[:-limit]
+
+
+_CONTINUATION_ROOT_RE = re.compile(r"\bCHAT-([0-9A-Za-z]{8})\b")
+_CONTINUATION_DIRECT_RE = re.compile(
+    r"^(continue|continua|continuad|continúe|continúen|proceed|go on|carry on|sigue|seguir)(\b|$)",
+    re.IGNORECASE,
+)
+
+
+def _is_continuation_request_text(message: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(message or "")).strip().strip(".!? ").lower()
+    if not normalized:
+        return False
+    direct = {
+        "continue",
+        "continue please",
+        "continua",
+        "continuad",
+        "continua por favor",
+        "continúe",
+        "continúen",
+        "proceed",
+        "go on",
+        "carry on",
+        "sigue",
+        "seguir",
+    }
+    if normalized in direct:
+        return True
+    return bool(_CONTINUATION_DIRECT_RE.match(normalized))
+
+
+def _extract_continuation_root(message: str) -> str:
+    match = _CONTINUATION_ROOT_RE.search(str(message or ""))
+    if not match:
+        return ""
+    return f"CHAT-{match.group(1).upper()}"
+
+
+def _is_legacy_request_working_set_text(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith("solicitud: continue from chat-"):
+        return True
+    if normalized.startswith("solicitud: continua"):
+        return True
+    if normalized.startswith("solicitud: continuad"):
+        return True
+    if normalized.startswith("solicitud: continue"):
+        return True
+    return False
+
+
+def _prune_request_working_set(bucket: list[dict[str, Any]]) -> None:
+    bucket[:] = [
+        entry
+        for entry in bucket
+        if str(entry.get("supersedes", "") or "").strip() != "latest_user_request"
+        and not _is_legacy_request_working_set_text(str(entry.get("text", "") or ""))
+    ]
+
+
+def _sorted_newest_first(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        list(entries or []),
+        key=lambda item: str(item.get("updated_at", "") or ""),
+        reverse=True,
+    )
+
+
+def _derive_working_set_text(user_message: str, surfaces: list[str]) -> str:
+    message = str(user_message or "").strip()
+    surface_suffix = f" | surfaces={', '.join(surfaces)}" if surfaces else ""
+    lowered = message.lower()
+    if _is_continuation_request_text(message):
+        target = _extract_continuation_root(message)
+        intents: list[str] = []
+        if any(marker in lowered for marker in ("close pending", "close pending phases", "cerrar pendientes", "cierra pendientes")):
+            intents.append("close_pending")
+        if any(marker in lowered for marker in ("next highest-impact slice", "next slice", "siguiente slice", "highest-impact")):
+            intents.append("next_slice")
+        if any(marker in lowered for marker in ("done", "pending", "risks", "next step", "sintesis final", "síntesis final")):
+            intents.append("final_synthesis")
+        if not intents:
+            intents.append("generic")
+        intent_text = ",".join(dict.fromkeys(intents))
+        if target:
+            return f"Continuacion activa: target={target} | intent={intent_text}{surface_suffix}"
+        return f"Continuacion solicitada sin target explicito | intent={intent_text}{surface_suffix}"
+    return f"Solicitud activa: {_compact_text(message, 180)}{surface_suffix}"
 
 
 class ContextCuratorStore:
@@ -353,15 +451,17 @@ class ContextCuratorStore:
             if str(item).strip()
         ]
 
-        working_set_text = (
-            f"Solicitud: {_compact_text(user_message, 240)}"
-            + (f" | surfaces={', '.join(surfaces)}" if surfaces else "")
-        )
+        if _is_continuation_request_text(user_message):
+            _prune_request_working_set(project_ctx["working_set"])
+            _prune_request_working_set(chat_ctx["working_set"])
+
+        working_set_text = _derive_working_set_text(user_message, surfaces)
         _append_unique_item(
             project_ctx["working_set"],
             text=working_set_text,
             confidence=0.7,
             source_task_ids=source_ids,
+            supersedes="latest_user_request",
             limit=10,
         )
         _append_unique_item(
@@ -369,6 +469,7 @@ class ContextCuratorStore:
             text=working_set_text,
             confidence=0.8,
             source_task_ids=source_ids,
+            supersedes="latest_user_request",
             limit=12,
         )
 
@@ -614,15 +715,34 @@ class ContextCuratorStore:
             return ""
         lines: list[str] = []
         for section_name, label in (
-            ("working_set", "working_set"),
-            ("durable_facts", "durable_facts"),
             ("decisions", "decisions"),
+            ("durable_facts", "durable_facts"),
+            ("working_set", "working_set"),
             ("next_actions", "next_actions"),
             ("open_questions", "open_questions"),
         ):
-            entries = _coerce_item_list(payload.get(section_name, []))
+            entries = _sorted_newest_first(_coerce_item_list(payload.get(section_name, [])))
             if not entries:
                 continue
+            if section_name == "working_set":
+                latest_request = [
+                    item
+                    for item in entries
+                    if str(item.get("supersedes", "") or "").strip() == "latest_user_request"
+                ]
+                if latest_request:
+                    selected = latest_request[:1]
+                    if max_items_per_section > 1:
+                        selected.extend(
+                            item
+                            for item in entries
+                            if item not in selected
+                        )
+                    entries = selected[:max_items_per_section]
+                else:
+                    entries = entries[:max_items_per_section]
+            else:
+                entries = entries[:max_items_per_section]
             texts = [str(item.get("text", "")).strip() for item in entries[:max_items_per_section] if str(item.get("text", "")).strip()]
             if texts:
                 lines.append(f"{label}: " + " | ".join(texts))

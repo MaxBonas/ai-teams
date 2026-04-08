@@ -30,6 +30,7 @@ class ChatPolicyTests(unittest.TestCase):
             "productivity_score": 10,
             "reasoning_score": 20,
             "evidence_gate_failures": [],
+            "semantic_gate_failures": [],
         }
         payload.update(overrides)
         return ChatPolicyInput(**payload)
@@ -113,6 +114,49 @@ class ChatPolicyTests(unittest.TestCase):
                 for event in outcome.events
             )
         )
+
+    def test_semantic_gate_rejects_completed_run_without_advisory(self) -> None:
+        policy_input = self._base_input(
+            semantic_gate_failures=["review:rejected_decision", "qa:blocked_status"],
+            productivity_score=90,
+            execution_mode="live",
+            execution_steps=3,
+            artifact_modified=1,
+        )
+        outcome = evaluate_chat_policy(
+            policy_input,
+            resolve_run_type_policy(policy_input.run_type, policy_input.reasoning_score),
+        )
+        self.assertTrue(outcome.semantic_gate_applied)
+        self.assertEqual(outcome.final_state, "rejected")
+        self.assertEqual(outcome.productivity_status, "weak")
+        self.assertTrue(outcome.policy_review_required)
+        self.assertIn("semantic_gate_failed", outcome.policy_signals)
+        self.assertTrue(
+            any(
+                event.event_type == "chat_policy_signal"
+                and event.payload.get("signal") == "semantic_gate_failed"
+                for event in outcome.events
+            )
+        )
+
+    def test_semantic_gate_stays_advisory_when_lead_explicitly_closes_in_advisory(self) -> None:
+        policy_input = self._base_input(
+            lead_advisory_mode=True,
+            semantic_gate_failures=["review:rejected_decision"],
+            productivity_score=90,
+            execution_mode="live",
+            execution_steps=3,
+            artifact_modified=1,
+        )
+        outcome = evaluate_chat_policy(
+            policy_input,
+            resolve_run_type_policy(policy_input.run_type, policy_input.reasoning_score),
+        )
+        self.assertTrue(outcome.semantic_gate_applied)
+        self.assertEqual(outcome.final_state, "completed")
+        self.assertEqual(outcome.productivity_status, "weak")
+        self.assertIn("semantic_gate_failed", outcome.policy_signals)
 
     def test_strict_mode_blocks_close_without_advisory(self) -> None:
         policy_input = self._base_input(

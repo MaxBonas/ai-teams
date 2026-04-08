@@ -7,6 +7,7 @@ from aiteam.context_curator import (
     estimate_context_pressure,
     project_key_from_runtime_dir,
 )
+from aiteam.phase_verdicts import is_missing_contract_objective
 from aiteam.workflow_planner import PhaseSpec
 
 from api.chat_delegate import _extract_evidence_plan, _summarize_delegate_economics
@@ -248,6 +249,7 @@ def _build_context_curator_prompt(
     surface_hints: dict[str, object],
     project_state_raw: str,
     session_history_raw: str,
+    continuation_target_context: str = "",
 ) -> str:
     surfaces = ", ".join(
         [
@@ -256,12 +258,21 @@ def _build_context_curator_prompt(
             if str(item).strip()
         ]
     ) or "general"
+    continuation_block = (
+        "[CONTINUATION_TARGET]\n"
+        f"{continuation_target_context}\n"
+        "[/CONTINUATION_TARGET]\n\n"
+        if continuation_target_context
+        else ""
+    )
     return (
         "Compacta el contexto del proyecto para el Team Lead en maximo 8 lineas utiles.\n"
         f"Solicitud del usuario: {message[:180]}\n"
         f"Superficies detectadas: {surfaces}\n\n"
         "Prioriza solo lo relevante para decidir el plan inicial: hechos, archivos/areas "
-        "probables, riesgos y senales utiles. Sin teoria y sin transcripts crudos.\n\n"
+        "probables, riesgos y senales utiles. Sin teoria y sin transcripts crudos.\n"
+        "Si existe CONTINUATION TARGET PRIORITARIO, ese target manda sobre objetivos historicos mas antiguos.\n\n"
+        f"{continuation_block}"
         "[PROJECT_STATE]\n"
         f"{project_state_raw}\n"
         "[/PROJECT_STATE]\n\n"
@@ -306,6 +317,17 @@ def _build_curated_context_block(
 ) -> str:
     store = ContextCuratorStore(runtime_dir)
     parts: list[str] = []
+    def _filter_summary(summary: str, *, drop_working_set: bool) -> str:
+        lines = []
+        for line in str(summary or "").splitlines():
+            normalized = str(line).strip()
+            if not normalized:
+                continue
+            if drop_working_set and normalized.startswith("working_set:"):
+                continue
+            lines.append(line)
+        return "\n".join(lines).strip()
+
     project_summary = store.build_summary(
         store.load_project_context(_context_project_key(workspace))
     )
@@ -318,6 +340,9 @@ def _build_curated_context_block(
                 project_key=_context_project_key(workspace),
             )
         )
+    if continuation_root:
+        project_summary = _filter_summary(project_summary, drop_working_set=True)
+        chat_summary = _filter_summary(chat_summary, drop_working_set=True)
     if not project_summary and chat_summary:
         filtered_lines = [
             line
@@ -359,6 +384,7 @@ def _synthesize_default_phase_evidence_plan(
     *,
     message: str,
     run_mode: str,
+    close_pending_mode: bool = False,
 ) -> dict[str, dict[str, object]]:
     """Fallback conservador cuando el Lead no define EVIDENCE_PLAN.
 
@@ -380,6 +406,41 @@ def _synthesize_default_phase_evidence_plan(
         intents: list[str] = []
         wait_policy = "best_effort"
         delegate_budget = 2
+        phase_is_planning = phase_id.lower().startswith("plan_")
+
+        if close_pending_mode:
+            if spec.role == "RESEARCHER" or phase_id in {
+                "discovery",
+                "research",
+                "analysis",
+                "investigate",
+            }:
+                intents.append("delegate_repo_scan")
+            elif spec.role == "ENGINEER" or phase_id == "build":
+                intents.append("delegate_test_run")
+                delegate_budget = 1
+            elif spec.role == "REVIEWER" or phase_id == "review":
+                intents.append("delegate_repo_scan")
+                delegate_budget = 1
+            elif spec.role == "QA" or phase_id == "qa":
+                intents.append("delegate_test_run")
+                delegate_budget = 1
+            if intents:
+                plan[phase_id] = {
+                    "delegate_intents": list(dict.fromkeys(intents)),
+                    "wait_policy": wait_policy,
+                    "delegate_budget": delegate_budget,
+                }
+            continue
+
+        if phase_is_planning:
+            intents.append("delegate_repo_scan")
+            plan[phase_id] = {
+                "delegate_intents": list(dict.fromkeys(intents)),
+                "wait_policy": wait_policy,
+                "delegate_budget": 1,
+            }
+            continue
 
         if spec.role == "RESEARCHER" or phase_id in {
             "discovery",
@@ -399,7 +460,7 @@ def _synthesize_default_phase_evidence_plan(
             if security_surface:
                 intents.append("delegate_mcp_probe")
         elif spec.role == "REVIEWER" or phase_id == "review":
-            intents.append("delegate_repo_scan")
+            intents.append("delegate_lsp_impact")
             if security_surface or research_surface:
                 intents.append("delegate_mcp_probe")
         elif spec.role == "QA" or phase_id == "qa":
@@ -426,6 +487,7 @@ def _resolve_phase_evidence_plan(
     phases: list[PhaseSpec],
     message: str,
     run_mode: str,
+    close_pending_mode: bool = False,
 ) -> tuple[dict[str, dict[str, object]], str]:
     explicit_plan = _coerce_phase_evidence_plan(_extract_evidence_plan(lead_output))
     if explicit_plan:
@@ -434,6 +496,7 @@ def _resolve_phase_evidence_plan(
         phases,
         message=message,
         run_mode=run_mode,
+        close_pending_mode=close_pending_mode,
     ), "default"
 
 
@@ -447,6 +510,7 @@ def _sync_chat_runtime_state(
     evidence_plan_source: str = "",
 ) -> None:
     ws = orch._get_workflow_state(task_root)
+    ws["phase_contracts"] = _build_phase_contracts(chat_run_state.phases)
     ws["phase_evidence_plan"] = _coerce_phase_evidence_plan(
         chat_run_state.phase_evidence_plan
     )
@@ -462,3 +526,23 @@ def _sync_chat_runtime_state(
     if evidence_plan_source:
         ws["evidence_plan_source"] = evidence_plan_source
     orch._save_workflow_state()
+
+
+def _build_phase_contracts(phases: list[PhaseSpec]) -> dict[str, dict[str, object]]:
+    contracts: dict[str, dict[str, object]] = {}
+    for spec in phases:
+        phase_id = str(spec.phase_id or "").strip()
+        if not phase_id:
+            continue
+        objective = str(spec.objective or "").strip()
+        contracts[phase_id] = {
+            "phase_id": phase_id,
+            "role": str(spec.role or "").strip(),
+            "objective": "" if is_missing_contract_objective(objective) else objective,
+            "depends_on": [
+                str(dep).strip()
+                for dep in list(spec.depends_on or [])
+                if str(dep).strip()
+            ],
+        }
+    return contracts

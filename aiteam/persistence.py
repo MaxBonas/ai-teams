@@ -163,3 +163,59 @@ class AtomicFileWriter:
                 clean = {k: v for k, v in record.items() if k != "_checksum"}
                 items.append(clean)
             return items
+
+    @staticmethod
+    def read_jsonl_tail(path: Path, tail: int) -> list[dict[str, Any]]:
+        """Read the last *tail* records from a JSONL file without loading the
+        entire file.  Uses a backwards seek so only a small chunk of bytes is
+        read from disk.  Dedup within the returned window is preserved.
+        """
+        if tail <= 0:
+            return []
+        lock = AtomicFileWriter._lock_for(path)
+        with lock:
+            if not path.exists():
+                return []
+            # Conservative estimate: 2 KB per line.  We read enough bytes from
+            # the end to contain at least `tail` records, then discard the
+            # (possibly partial) first line if we did not start at offset 0.
+            bytes_to_read = tail * 2048
+            with open(path, "rb") as fh:
+                fh.seek(0, 2)
+                file_size = fh.tell()
+                offset = max(0, file_size - bytes_to_read)
+                fh.seek(offset)
+                raw_bytes = fh.read()
+
+            raw = raw_bytes.decode("utf-8", errors="replace")
+
+            # If we started mid-file, drop the first (potentially partial) line.
+            if offset > 0:
+                newline_pos = raw.find("\n")
+                if newline_pos >= 0:
+                    raw = raw[newline_pos + 1 :]
+                else:
+                    # No newline found — we're inside a single huge line; bail.
+                    return []
+
+            items: list[dict[str, Any]] = []
+            seen_checksums: set[str] = set()
+            for line in raw.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                checksum = record.get("_checksum", None)
+                if checksum and checksum in seen_checksums:
+                    continue
+                if checksum:
+                    seen_checksums.add(checksum)
+                clean = {k: v for k, v in record.items() if k != "_checksum"}
+                items.append(clean)
+
+            # Return only the last `tail` records from the window we read.
+            return items[-tail:]

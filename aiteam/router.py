@@ -626,6 +626,7 @@ class HybridRouter:
         prompt: str,
         task_id: str = "",
         messages: list[dict[str, str]] | None = None,
+        messages_resolver=None,
         tools=None,
         on_chunk: "Callable[[str | StreamChunk], None] | None" = None,
     ) -> RoutingDecision:
@@ -678,6 +679,12 @@ class HybridRouter:
         )
 
         for adapter in eligible:
+            attempt_messages = messages
+            if callable(messages_resolver):
+                try:
+                    attempt_messages = messages_resolver(adapter)
+                except Exception:
+                    attempt_messages = messages
             if adapter.channel == ChannelType.SUBSCRIPTION:
                 # Sin límite artificial de intentos para subscription: se prueba cada
                 # adapter disponible hasta encontrar uno que funcione.
@@ -724,7 +731,7 @@ class HybridRouter:
                 output_chunks: list[str] = []
                 received_chunk = False
                 try:
-                    for chunk in adapter.invoke_stream(prompt, messages=messages):
+                    for chunk in adapter.invoke_stream(prompt, messages=attempt_messages):
                         received_chunk = True
                         on_chunk(chunk)
                         if isinstance(chunk, StreamChunk):
@@ -758,7 +765,7 @@ class HybridRouter:
                     invoke_params = inspect.signature(adapter.invoke).parameters
                     kwargs = {}
                     if "messages" in invoke_params:
-                        kwargs["messages"] = messages
+                        kwargs["messages"] = attempt_messages
                     if "tools" in invoke_params and tools is not None:
                         kwargs["tools"] = tools
                     response = adapter.invoke(prompt, **kwargs)
@@ -766,7 +773,7 @@ class HybridRouter:
                 invoke_params = inspect.signature(adapter.invoke).parameters
                 kwargs = {}
                 if "messages" in invoke_params:
-                    kwargs["messages"] = messages
+                    kwargs["messages"] = attempt_messages
                 if "tools" in invoke_params and tools is not None:
                     kwargs["tools"] = tools
                 response = adapter.invoke(prompt, **kwargs)

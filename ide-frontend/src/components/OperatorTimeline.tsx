@@ -28,6 +28,10 @@ interface OperatorTimelineItem {
   handoff_from?: string;
   handoff_to?: string;
   conversation_thread_id?: string;
+  thread_provider?: string;
+  thread_channel?: string;
+  thread_model_family?: string;
+  thread_generation?: number;
   meeting_kind?: string;
   artifact_created: number;
   artifact_modified: number;
@@ -174,7 +178,7 @@ export default function OperatorTimeline({ workspacePath }: OperatorTimelineProp
     void loadTimeline(true);
     const timer = window.setInterval(() => {
       void loadTimeline(true);
-    }, 2500);
+    }, 8000);
     return () => window.clearInterval(timer);
   }, [workspacePath, selectedTaskId, keyOnly]);
 
@@ -274,6 +278,7 @@ export default function OperatorTimeline({ workspacePath }: OperatorTimelineProp
                   {item.handoff_from || item.handoff_to ? ` · ${item.handoff_from || '-'} -> ${item.handoff_to || '-'}` : ''}
                   {item.meeting_kind ? ` · meeting=${item.meeting_kind}` : ''}
                   {item.conversation_thread_id ? ` · thread=${item.conversation_thread_id}` : ''}
+                  {(item.thread_provider || item.thread_generation) ? ` · ${[item.thread_provider, item.thread_channel, item.thread_model_family].filter(Boolean).join('/')} ${item.thread_generation ? `g${item.thread_generation}` : ''}` : ''}
                 </div>
                 <pre className="team-stream-body-text" style={isHandoff ? { color: 'var(--accent-warning)', fontWeight: 500 } : {}}>
                   {item.summary || '-'}

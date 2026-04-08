@@ -26,6 +26,20 @@ class ToolSpecialistsTests(unittest.TestCase):
         )
         self.assertEqual(specialist, "browser_operator")
 
+    def test_infer_reviewer_prefers_lsp_navigator_for_review_scope(self) -> None:
+        specialist = infer_tool_specialist(
+            role=Role.REVIEWER,
+            required_capabilities=["review", "repo_read", "reasoning"],
+        )
+        self.assertEqual(specialist, "lsp_navigator")
+
+    def test_infer_qa_prefers_test_runner_when_test_and_browser_capabilities_coexist(self) -> None:
+        specialist = infer_tool_specialist(
+            role=Role.QA,
+            required_capabilities=["browser_testing", "test_execute"],
+        )
+        self.assertEqual(specialist, "test_runner")
+
     def test_build_metadata_marks_operate_tools_only_scope(self) -> None:
         metadata = build_tool_specialist_metadata(
             specialist="browser_operator",

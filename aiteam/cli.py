@@ -69,63 +69,99 @@ def build_default_orchestrator(
     event_logger = EventLogger(runtime_dir)
 
     adapters = [
-        # ── Canal Subscription (Pro-first) ─────────────────────────────────
-        # Prioridad maxima: usan la suscripcion del usuario sin coste extra por token.
-        # Requieren AITEAM_ENABLE_LIVE_API=1 + clave de cada provider en .env.
+        # ════════════════════════════════════════════════════════════════════
+        # POOL: TEAM LEAD — Frontier, multi-provider, maximo razonamiento
+        # Un modelo senior de cada provider. El router selecciona en orden
+        # de routing_priority (10 → 20 → 30 → 40 → 50) si el anterior falla.
+        # Todos excluidos de roles worker via role_targets.
+        # ════════════════════════════════════════════════════════════════════
         SubscriptionAdapter(
             name="openai_pro",
             provider="openai",
-            model="gpt-4.1",  # gpt-4.1 (2025) — mejor relacion calidad/coste
+            model="gpt-4.1",            # OpenAI frontier 2025 — mejor coding y razonamiento
             capabilities={"reasoning", "coding", "review", "analysis"},
             routing_priority=10,
-        ),
-        SubscriptionAdapter(
-            name="gemini_pro",
-            provider="google",
-            model="gemini-2.5-flash",  # 2.5 Flash — más rápido y con mayor contexto que 2.0
-            capabilities={"analysis", "summarization", "reasoning", "coding"},
-            routing_priority=20,
+            role_targets={"team_lead"},
         ),
         SubscriptionAdapter(
             name="claude_pro",
             provider="anthropic",
-            model="claude-sonnet-4-5",  # Sonnet 4.5 — mejor coding y razonamiento
+            model="claude-sonnet-4-5",  # Anthropic frontier — solido en razonamiento largo
             capabilities={"reasoning", "coding", "analysis", "review"},
+            routing_priority=20,
+            role_targets={"team_lead"},
+        ),
+        SubscriptionAdapter(
+            name="gemini_pro",
+            provider="google",
+            model="gemini-2.5-flash",   # Google frontier — rapido, alto contexto
+            capabilities={"reasoning", "analysis", "summarization", "coding"},
             routing_priority=30,
             role_targets={"team_lead"},
+        ),
+        ApiAdapter(
+            name="groq_gpt120b",
+            provider="groq",
+            model="openai/gpt-oss-120b",          # Groq GRATIS — GPT OSS 120B, TL fallback
+            capabilities={"reasoning", "coding", "analysis", "review"},
+            cost_tier=0,
+            require_key=True,
+            role_targets={"team_lead"},
+        ),
+        ApiAdapter(
+            name="groq_kimi_k2",
+            provider="groq",
+            model="moonshotai/kimi-k2-instruct",  # Groq GRATIS — Kimi K2 131K ctx, frontier
+            capabilities={"reasoning", "coding", "analysis", "review"},
+            cost_tier=0,
+            require_key=True,
+            role_targets={"team_lead"},
+        ),
+
+        # ════════════════════════════════════════════════════════════════════
+        # POOL: WORKERS — Advanced-to-budget, multi-provider
+        # engineer · reviewer · qa · researcher · scout
+        # Sin role_targets: cualquier rol worker puede usarlos.
+        # Filtrados de team_lead automaticamente por _team_lead_allowed (catalog).
+        # El router ordena: advanced_api > budget_api > local (segun presion).
+        # Scout siempre selecciona budget_api primero (ver _tier_rank).
+        # ════════════════════════════════════════════════════════════════════
+        SubscriptionAdapter(
+            name="gemini_worker",
+            provider="google",
+            model="gemini-2.5-flash",   # Google avanzado — rapido para coding/QA/research
+            capabilities={"analysis", "summarization", "reasoning", "coding"},
+            routing_priority=10,
+        ),
+        ApiAdapter(
+            name="openai_api_mini",
+            provider="openai",
+            model="gpt-4.1-mini",       # OpenAI avanzado — buen coding, bajo coste
+            capabilities={"reasoning", "coding", "analysis", "review"},
+            cost_tier=1,
         ),
         SubscriptionAdapter(
             name="claude_haiku",
             provider="anthropic",
-            model="claude-haiku-4-5",  # Haiku 4.5 — rápido para tasks ligeras
+            model="claude-haiku-4-5",   # Anthropic rapido — ideal para engineer/reviewer
             capabilities={"reasoning", "coding", "analysis"},
-            routing_priority=40,
+            routing_priority=20,
             cost_tier=0,
-            role_targets={"team_lead"},
-        ),
-        # ── Canal API (fallback presupuestado) ─────────────────────────────
-        # Activado cuando subscription falla o se agota. Consume cuota de presupuesto.
-        ApiAdapter(
-            name="openai_api_mini",
-            provider="openai",
-            model="gpt-4.1-mini",
-            capabilities={"reasoning", "coding", "analysis", "review"},
-            cost_tier=1,
-        ),
-        ApiAdapter(
-            name="openai_api_fast",
-            provider="openai",
-            model="gpt-4o-mini",
-            capabilities={"reasoning", "analysis", "multimodal", "tool_calling"},
-            cost_tier=1,
         ),
         ApiAdapter(
             name="groq_api_fast",
             provider="groq",
-            model="llama-3.3-70b-versatile",  # Llama 3.3 70B — fallback gratuito ultra-rapido
+            model="llama-3.3-70b-versatile",  # Groq GRATIS — fallback capaz para todos los workers
             capabilities={"reasoning", "coding", "analysis", "review"},
             cost_tier=0,
             require_key=True,
+        ),
+        ApiAdapter(
+            name="openai_api_fast",
+            provider="openai",
+            model="gpt-4o-mini",        # OpenAI budget — scout y QA ligera
+            capabilities={"reasoning", "analysis", "multimodal", "tool_calling"},
+            cost_tier=1,
         ),
     ]
 

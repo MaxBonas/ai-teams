@@ -162,7 +162,11 @@ def default_phases(mode: str) -> list[PhaseSpec]:
             PhaseSpec(
                 phase_id="build",
                 role="ENGINEER",
-                objective="Ejecuta el slice de mayor impacto definido en planning.",
+                objective=(
+                    "Ejecuta exactamente el slice aprobado en planning. "
+                    "No cambies de slice ni sustituyas el objetivo por otro distinto "
+                    "sin nueva directiva del Lead."
+                ),
                 depends_on=["plan_engineering", "plan_risks"],
             ),
             PhaseSpec(
@@ -252,10 +256,38 @@ def _parse_phase_blocks(block: str) -> list[PhaseSpec]:
     """
     phases: list[PhaseSpec] = []
     current: dict = {}
+    lines = block.splitlines()
+    idx = 0
+    multiline_key: str | None = None
+    multiline_indent = 0
+    multiline_buffer: list[str] = []
 
-    for raw_line in block.splitlines():
+    def _flush_multiline() -> None:
+        nonlocal multiline_key, multiline_indent, multiline_buffer
+        if multiline_key and current:
+            current[multiline_key] = "\n".join(multiline_buffer).strip()
+        multiline_key = None
+        multiline_indent = 0
+        multiline_buffer = []
+
+    while idx < len(lines):
+        raw_line = lines[idx]
         line = raw_line.strip()
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+
+        if multiline_key is not None:
+            if line and indent > multiline_indent and not _is_phase_start(line):
+                multiline_buffer.append(raw_line[indent:].rstrip())
+                idx += 1
+                continue
+            if not line:
+                multiline_buffer.append("")
+                idx += 1
+                continue
+            _flush_multiline()
+
         if not line or line.startswith("#"):
+            idx += 1
             continue
 
         if _is_phase_start(line):
@@ -265,21 +297,32 @@ def _parse_phase_blocks(block: str) -> list[PhaseSpec]:
                     phases.append(spec)
             val = _extract_value(line)
             current = {"phase_id": val} if val else {}
+            idx += 1
             continue
 
         if not current:
+            idx += 1
             continue
 
         key, val = _split_kv(line)
         if key is None:
+            idx += 1
             continue
 
         if key == "role":
             current["role"] = val.upper()
         elif key == "objective":
-            current["objective"] = val
+            if val in {"|", ">"}:
+                multiline_key = "objective"
+                multiline_indent = indent
+                multiline_buffer = []
+            else:
+                current["objective"] = val
         elif key == "depends_on":
             current["depends_on"] = _parse_list(val)
+        idx += 1
+
+    _flush_multiline()
 
     # No olvidar la ultima fase
     if current:

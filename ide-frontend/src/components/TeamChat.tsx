@@ -116,12 +116,35 @@ interface LastChatRun {
   continuation_requested?: boolean;
   continuation_of?: string;
   status?: string;
+  workflow_run_status?: string;
+  authoritative_state?: string;
+  failed_phases?: string[];
+  pending_phases?: string[];
+  next_action_hint?: string;
+  policy_review_required?: boolean;
   execution_mode?: string;
   placeholder_outputs?: number;
   successful_check_count?: number;
   live_mode_required?: boolean;
   live_mode_rejected?: boolean;
   ts?: string;
+}
+
+type ContinuationPolicy = 'auto' | 'clean_retry' | 'force_continue';
+type ContinueIntent = 'close_pending' | 'next_slice';
+
+interface ContinueDraft {
+  message: string;
+  continuationPolicy: ContinuationPolicy;
+  continuationTarget: string;
+  intent: ContinueIntent;
+  requiresDecision: boolean;
+}
+
+interface ContinueDialogState {
+  target: string;
+  forceContinue: ContinueDraft;
+  cleanRetry: ContinueDraft;
 }
 
 interface TaskSummary {
@@ -136,14 +159,33 @@ interface TaskSummary {
   provider: string;
   model: string;
   channel: string;
+  thread_id: string;
+  thread_provider: string;
+  thread_channel: string;
+  thread_model_family: string;
+  thread_generation: number;
   preview: string;
+  full_text: string;
   error: string;
+}
+
+interface ThreadSummary {
+  thread_id: string;
+  provider: string;
+  channel: string;
+  model_family: string;
+  generation: number;
+  rebound_count: number;
+  candidate_count: number;
+  distinct_thread_count: number;
+  providers: string[];
 }
 
 interface TeamChatProgress {
   task_id: string;
   exists: boolean;
   state: string;
+  workflow_run_status: string;
   round_budget: number;
   rounds_used: number;
   phase_states: Record<string, string>;
@@ -174,6 +216,7 @@ interface TeamChatProgress {
     diversity_observed: boolean;
   };
   task_summaries: TaskSummary[];
+  thread_summary: ThreadSummary;
 }
 
 const parseNumber = (value: unknown, fallback = 0): number => {
@@ -245,14 +288,43 @@ const parseChatProgress = (payload: unknown, fallbackTaskId: string): TeamChatPr
           provider: String(item.provider ?? ''),
           model: String(item.model ?? ''),
           channel: String(item.channel ?? ''),
+          thread_id: String(item.thread_id ?? ''),
+          thread_provider: String(item.thread_provider ?? ''),
+          thread_channel: String(item.thread_channel ?? ''),
+          thread_model_family: String(item.thread_model_family ?? ''),
+          thread_generation: parseNumber(item.thread_generation, 0),
           preview: String(item.preview ?? ''),
+          full_text: String(item.full_text ?? ''),
           error: String(item.error ?? ''),
         }))
     : [];
+  const rawThreadSummary = row.thread_summary;
+  const threadSummary: ThreadSummary = {
+    thread_id: typeof (rawThreadSummary as Record<string, unknown> | undefined)?.thread_id === 'string'
+      ? String((rawThreadSummary as Record<string, unknown>).thread_id ?? '')
+      : '',
+    provider: typeof (rawThreadSummary as Record<string, unknown> | undefined)?.provider === 'string'
+      ? String((rawThreadSummary as Record<string, unknown>).provider ?? '')
+      : '',
+    channel: typeof (rawThreadSummary as Record<string, unknown> | undefined)?.channel === 'string'
+      ? String((rawThreadSummary as Record<string, unknown>).channel ?? '')
+      : '',
+    model_family: typeof (rawThreadSummary as Record<string, unknown> | undefined)?.model_family === 'string'
+      ? String((rawThreadSummary as Record<string, unknown>).model_family ?? '')
+      : '',
+    generation: parseNumber((rawThreadSummary as Record<string, unknown> | undefined)?.generation, 0),
+    rebound_count: parseNumber((rawThreadSummary as Record<string, unknown> | undefined)?.rebound_count, 0),
+    candidate_count: parseNumber((rawThreadSummary as Record<string, unknown> | undefined)?.candidate_count, 0),
+    distinct_thread_count: parseNumber((rawThreadSummary as Record<string, unknown> | undefined)?.distinct_thread_count, 0),
+    providers: Array.isArray((rawThreadSummary as Record<string, unknown> | undefined)?.providers)
+      ? (((rawThreadSummary as Record<string, unknown>).providers as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0))
+      : [],
+  };
   return {
     task_id: taskId,
     exists: Boolean(row.exists),
     state: typeof row.state === 'string' ? row.state : 'queued',
+    workflow_run_status: typeof row.workflow_run_status === 'string' ? row.workflow_run_status : '',
     round_budget: parseNumber(row.round_budget, 0),
     rounds_used: parseNumber(row.rounds_used, 0),
     phase_states: phaseStates,
@@ -276,6 +348,7 @@ const parseChatProgress = (payload: unknown, fallbackTaskId: string): TeamChatPr
     dynamic_phases_ready: Boolean(row.dynamic_phases_ready),
     peer_consultation_summary: peerConsultationSummary,
     task_summaries: taskSummaries,
+    thread_summary: threadSummary,
     phase_task_ids: (() => {
       const raw = row.phase_task_ids;
       if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -295,6 +368,68 @@ const laneStatusFromTaskState = (state: string): AgentLaneState['status'] => {
   if (state === 'failed') return 'failed';
   if (state === 'claimed' || state === 'running') return 'active';
   return 'waiting';
+};
+
+const isTerminalChatRunState = (state: string): boolean => {
+  const normalized = String(state || '').trim().toLowerCase();
+  return ['completed', 'failed', 'rejected', 'cancelled', 'aborted', 'not_completed'].includes(normalized);
+};
+
+const normalizeVisualRunState = (
+  state: unknown,
+  options?: {
+    pendingTasks?: unknown;
+    failedTasks?: unknown;
+  },
+): string => {
+  const normalized = String(state ?? '').trim().toLowerCase();
+  const pendingTasks = parseNumber(options?.pendingTasks, 0);
+  const failedTasks = parseNumber(options?.failedTasks, 0);
+  if (normalized === 'completed' && pendingTasks > 0) {
+    return 'running';
+  }
+  if (normalized === 'completed' && failedTasks > 0) {
+    return 'failed';
+  }
+  return normalized || 'running';
+};
+
+const resolveChatRunState = (
+  candidate?: {
+    workflow_run_status?: unknown;
+    authoritative_state?: unknown;
+    status?: unknown;
+    state?: unknown;
+    pending_tasks?: unknown;
+    failed_tasks?: unknown;
+  } | null,
+): string => {
+  const workflowRunStatus = String(candidate?.workflow_run_status ?? '').trim().toLowerCase();
+  if (workflowRunStatus) return workflowRunStatus;
+  const authoritativeState = String(candidate?.authoritative_state ?? '').trim().toLowerCase();
+  if (authoritativeState) return authoritativeState;
+  return normalizeVisualRunState(candidate?.status ?? candidate?.state, {
+    pendingTasks: candidate?.pending_tasks,
+    failedTasks: candidate?.failed_tasks,
+  });
+};
+
+const runStateLabel = (state: string): string => {
+  const normalized = String(state || '').trim().toLowerCase();
+  if (normalized === 'completed') return 'Completed';
+  if (normalized === 'failed') return 'Failed';
+  if (normalized === 'rejected') return 'Rejected';
+  if (normalized === 'not_completed') return 'Not completed';
+  if (normalized === 'waiting_user') return 'Waiting';
+  if (normalized === 'queued') return 'Queued';
+  return 'Running';
+};
+
+const nextChatProgressPollDelay = (failureCount: number): number => {
+  if (failureCount <= 0) {
+    return 1500;
+  }
+  return Math.min(1500 * Math.pow(2, Math.min(failureCount - 1, 3)), 10000);
 };
 
 const buildTaskHistoryLanes = (tasks: TaskSummary[]): Map<string, AgentLaneState> => {
@@ -367,15 +502,71 @@ const createClientTaskId = (): string => {
   return `CHAT-${fallback.toUpperCase()}`;
 };
 
-const buildContinuePrompt = (lastRun: LastChatRun): string => {
+const buildContinueDraft = (
+  lastRun: LastChatRun,
+  options?: {
+    policy?: ContinuationPolicy;
+    intent?: ContinueIntent;
+  },
+): ContinueDraft => {
   const target = (lastRun.task_id || '').trim();
+  const policy = options?.policy ?? 'auto';
+  const authoritativeState = resolveChatRunState(lastRun);
+  const failedOrRejected = authoritativeState === 'failed' || authoritativeState === 'rejected' || authoritativeState === 'not_completed';
+  const pendingPhases = Array.isArray(lastRun.pending_phases) ? lastRun.pending_phases.filter((item) => String(item || '').trim().length > 0) : [];
+  const failedPhases = Array.isArray(lastRun.failed_phases) ? lastRun.failed_phases.filter((item) => String(item || '').trim().length > 0) : [];
+  const hasCarryover = pendingPhases.length > 0 || failedPhases.length > 0 || resolveChatRunState(lastRun) === 'window_exhausted';
+  const intent = options?.intent ?? (hasCarryover ? 'close_pending' : 'next_slice');
+
   if (!target) {
-    return 'Continue.';
+    return {
+      message: 'Continue.',
+      continuationPolicy: policy,
+      continuationTarget: '',
+      intent,
+      requiresDecision: false,
+    };
   }
-  if (lastRun.status === 'window_exhausted') {
-    return `Continue from ${target}. Close pending phases first, then provide a compact final synthesis with done, pending, risks, and next step.`;
+
+  if (policy === 'clean_retry') {
+    return {
+      message:
+        'Start the next highest-impact slice for the same project objective. Treat this as a clean retry from the current validated project state, preserve project constraints, and report done, pending, risks, and next step.',
+      continuationPolicy: 'clean_retry',
+      continuationTarget: '',
+      intent: 'next_slice',
+      requiresDecision: false,
+    };
   }
-  return `Continue from ${target}. Start the next highest-impact slice for the same project objective, and report done, pending, risks, and next step.`;
+
+  if (failedOrRejected && policy !== 'force_continue') {
+    return {
+      message:
+        'Continue from the selected run. Close pending phases first, replan minimally from the earliest failed or blocked phase, and do not open a new slice until carryover is resolved. Then provide a compact final synthesis with done, pending, risks, and next step.',
+      continuationPolicy: 'auto',
+      continuationTarget: target,
+      intent: 'close_pending',
+      requiresDecision: true,
+    };
+  }
+
+  if (intent === 'close_pending') {
+    return {
+      message: `Continue from ${target}. Close pending phases first. Replan minimally from the earliest failed or blocked phase if needed, keep the same project objective, and do not start a new slice until the carryover is resolved. Then provide a compact final synthesis with done, pending, risks, and next step.`,
+      continuationPolicy: policy,
+      continuationTarget: target,
+      intent,
+      requiresDecision: false,
+    };
+  }
+
+  return {
+    message: `Continue from ${target}. Start the next highest-impact slice for the same project objective. Preserve the current project constraints and report done, pending, risks, and next step.`,
+    continuationPolicy: policy,
+    continuationTarget: target,
+    intent,
+    requiresDecision: false,
+  };
 };
 
 const TEAM_CHAT_SHOW_CONFIG_KEY = 'aiteam.team_chat.show_config';
@@ -487,6 +678,8 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
   const [expanded, setExpanded] = useState(false);
   const total = progress.completed_tasks + progress.pending_tasks + progress.failed_tasks;
   const pct = total > 0 ? Math.round((progress.completed_tasks / total) * 100) : 0;
+  const visualState = resolveChatRunState(progress);
+  const headerLabel = runStateLabel(visualState);
 
   return (
     <div
@@ -497,7 +690,7 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}
     >
       <div className="progress-header">
-        <strong>{loading ? 'Running' : 'Completed'}</strong>
+        <strong>{headerLabel}</strong>
         <span className="progress-task-id">{progress.task_id}</span>
         <ChevronRight size={12} className={`team-msg-meta-chevron ${expanded ? 'is-expanded' : ''}`} />
       </div>
@@ -515,7 +708,7 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
       </div>
       {expanded && (
         <div className="progress-detail">
-          <div className="team-chat-progress-line">state {progress.state} · execution attempts {progress.execution_attempts} · steps {progress.execution_steps} (ok {progress.execution_steps_success})</div>
+          <div className="team-chat-progress-line">state {visualState} · workflow {progress.workflow_run_status || '-'} · execution attempts {progress.execution_attempts} · steps {progress.execution_steps} (ok {progress.execution_steps_success})</div>
           <div className="team-chat-progress-line">checks passed {progress.successful_check_count} · {progress.successful_checks.join(', ') || 'none'}</div>
           <div className="team-chat-progress-line">live mode gate {progress.live_mode_rejected ? 'rejected' : (progress.live_mode_required ? 'required' : 'off')}</div>
           {progress.evidence_gate_rejected && (
@@ -530,7 +723,20 @@ function ChatProgressBar({ progress, loading }: { progress: TeamChatProgress; lo
               diversity {progress.peer_consultation_summary.diversity_observed ? 'yes' : 'no'}
             </div>
           )}
-          {!progress.dynamic_phases_ready && progress.state !== 'completed' && loading && (
+          {(progress.thread_summary.thread_id || progress.thread_summary.provider || progress.thread_summary.rebound_count > 0) && (
+            <div className="team-chat-progress-line">
+              thread {[
+                progress.thread_summary.provider,
+                progress.thread_summary.channel,
+                progress.thread_summary.model_family,
+              ].filter(Boolean).join('/') || '-'}
+              {progress.thread_summary.generation > 0 ? ` · g${progress.thread_summary.generation}` : ''}
+              {progress.thread_summary.thread_id ? ` · ${progress.thread_summary.thread_id}` : ''}
+              {progress.thread_summary.rebound_count > 0 ? ` · rebounds ${progress.thread_summary.rebound_count}` : ''}
+              {progress.thread_summary.distinct_thread_count > 0 ? ` · threads ${progress.thread_summary.distinct_thread_count}` : ''}
+            </div>
+          )}
+          {!progress.dynamic_phases_ready && !isTerminalChatRunState(progress.state) && loading && (
             <div className="team-chat-progress-line planning-indicator">
               Team Lead planificando workflow...
             </div>
@@ -575,6 +781,16 @@ function RunTaskSection({
                 {task.assignee && <span>{task.assignee}</span>}
                 {(task.provider || task.model) && (
                   <span>{[task.provider, task.model].filter(Boolean).join('/')}</span>
+                )}
+                {(task.thread_provider || task.thread_generation > 0) && (
+                  <span>
+                    thread {[
+                      task.thread_provider,
+                      task.thread_channel,
+                      task.thread_model_family,
+                    ].filter(Boolean).join('/') || '-'}
+                    {task.thread_generation > 0 ? `/g${task.thread_generation}` : ''}
+                  </span>
                 )}
               </div>
             </div>
@@ -624,8 +840,8 @@ function StreamBlockCard({
   onToggle: () => void;
   live?: boolean;
 }) {
-  const preview = block.text.slice(0, 300);
-  const hasMore = block.text.length > 300;
+  const preview = block.text.slice(0, 600);
+  const hasMore = block.text.length > 600;
   return (
     <div className={`stream-block ${block.complete ? 'stream-block--complete' : 'stream-block--live'}`}>
       <button className="stream-block-header" onClick={onToggle} type="button">
@@ -688,6 +904,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   );
   const [rememberConfig, setRememberConfig] = useState<boolean>(readRememberConfig);
   const [lastChatRun, setLastChatRun] = useState<LastChatRun | null>(null);
+  const [continueDialog, setContinueDialog] = useState<ContinueDialogState | null>(null);
   const [chatProgress, setChatProgress] = useState<TeamChatProgress | null>(null);
   const [showConfig, setShowConfig] = useState<boolean>(readShowConfig);
   const [roundsInput, setRoundsInput] = useState<string>(String(TEAM_CHAT_DEFAULTS.rounds));
@@ -702,6 +919,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
   const [simMode, setSimMode] = useState<boolean>(false);
 
   const logRef = useRef<HTMLDivElement>(null);
+  const activeRunTaskIdRef = useRef<string>('');
 
   // Cargar chat histórico cuando se selecciona desde el panel de estado
   useEffect(() => {
@@ -792,7 +1010,11 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
         }
         const candidate = payload?.last_chat_run;
         if (candidate && typeof candidate === 'object') {
-          setLastChatRun(candidate as LastChatRun);
+          const candidateRun = candidate as LastChatRun;
+          setLastChatRun({
+            ...candidateRun,
+            status: resolveChatRunState(candidateRun),
+          });
           return;
         }
         setLastChatRun(null);
@@ -900,6 +1122,8 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     if (!pendingClarification || !clarificationInput.trim() || loading) return;
     const { chatId } = pendingClarification;
     const answerText = clarificationInput.trim();
+    let resumedTaskId = chatId;
+    activeRunTaskIdRef.current = chatId;
     setMessages((prev) => [
       ...prev,
       { id: `user-clarify-${Date.now()}`, sender: 'user', text: answerText, meta: 'clarification' },
@@ -921,12 +1145,20 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
       const json = contentType.includes('text/event-stream')
         ? parseClarifyResult(await res.text())
         : await res.json() as Record<string, unknown>;
+      const visualState = normalizeVisualRunState(json.state, {
+        pendingTasks: json.pending_tasks,
+        failedTasks: json.failed_tasks,
+      });
+      resumedTaskId = typeof json.task_id === 'string' && json.task_id.trim()
+        ? String(json.task_id)
+        : chatId;
+      activeRunTaskIdRef.current = resumedTaskId;
       const answer = typeof json.response === 'string' && json.response.trim()
         ? json.response
         : 'Respuesta del equipo recibida.';
       if (json.waiting_user === true && typeof json.clarification_question === 'string') {
         setPendingClarification({
-          chatId: String(json.task_id ?? chatId),
+          chatId: resumedTaskId,
           question: json.clarification_question,
         });
         setMessages((prev) => [
@@ -943,6 +1175,37 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
           ...prev,
           { id: `team-${Date.now()}`, sender: 'team', text: answer, meta: `state ${String(json.state ?? '-')}` },
         ]);
+        setLastChatRun({
+          task_id: resumedTaskId,
+          mode: typeof json.chat_mode === 'string' ? json.chat_mode : chatMode,
+          round_budget: Number.isFinite(Number(json.round_budget)) ? Number(json.round_budget) : maxRounds,
+          rounds_used: Number.isFinite(Number(json.rounds_used)) ? Number(json.rounds_used) : 0,
+          phase_count: Object.keys(typeof json.phase_task_ids === 'object' && json.phase_task_ids ? json.phase_task_ids as object : {}).length,
+          delegated_count: Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids.length : 0,
+          continuation_requested: Boolean(json.continuation_requested),
+          continuation_of: typeof json.continuation_of === 'string' ? json.continuation_of : '',
+          authoritative_state: visualState,
+          workflow_run_status: typeof json.workflow_run_status === 'string' ? json.workflow_run_status : visualState,
+          failed_phases: Array.isArray((json.run_verdict as Record<string, unknown> | undefined)?.failed_phases)
+            ? (((json.run_verdict as Record<string, unknown>).failed_phases as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0))
+            : [],
+          pending_phases: Array.isArray((json.run_verdict as Record<string, unknown> | undefined)?.pending_phases)
+            ? (((json.run_verdict as Record<string, unknown>).pending_phases as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0))
+            : [],
+          next_action_hint: typeof json.next_action_hint === 'string' ? json.next_action_hint : '',
+          policy_review_required: Boolean(json.policy_review_required),
+          status: resolveChatRunState({
+            workflow_run_status: typeof json.workflow_run_status === 'string' ? json.workflow_run_status : visualState,
+            authoritative_state: visualState,
+            state: visualState,
+          }),
+          execution_mode: typeof json.execution_mode === 'string' ? json.execution_mode : 'unknown',
+          placeholder_outputs: Number.isFinite(Number(json.placeholder_outputs)) ? Number(json.placeholder_outputs) : 0,
+          successful_check_count: Number.isFinite(Number(json.successful_check_count)) ? Number(json.successful_check_count) : 0,
+          live_mode_required: Boolean(json.live_mode_required),
+          live_mode_rejected: Boolean(json.live_mode_rejected),
+          ts: new Date().toISOString(),
+        });
       }
     } catch (err) {
       setMessages((prev) => [
@@ -951,14 +1214,15 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
       ]);
     } finally {
       try {
-        const finalProgressResponse = await apiFetch(`/api/aiteam/chat/progress/${encodeURIComponent(chatId)}`, {
+        const finalProgressTaskId = activeRunTaskIdRef.current || resumedTaskId;
+        const finalProgressResponse = await apiFetch(`/api/aiteam/chat/progress/${encodeURIComponent(finalProgressTaskId)}`, {
           headers: {
             'x-workspace-path': workspacePath,
           },
         });
         if (finalProgressResponse.ok) {
           const finalProgressPayload = await finalProgressResponse.json();
-          const parsed = parseChatProgress(finalProgressPayload, chatId);
+          const parsed = parseChatProgress(finalProgressPayload, finalProgressTaskId);
           if (parsed) {
             setChatProgress(parsed);
             setAgentLanes((prev) => mergeAgentLaneMaps(prev, buildTaskHistoryLanes(parsed.task_summaries)));
@@ -971,7 +1235,52 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     }
   };
 
-  const sendMessage = async (overrideMessage?: string) => {
+  const sendContinue = async (draft: ContinueDraft) => {
+    setContinueDialog(null);
+    await sendMessage({
+      message: draft.message,
+      continuationPolicy: draft.continuationPolicy,
+      continuationTarget: draft.continuationTarget,
+    });
+  };
+
+  const handleContinueClick = () => {
+    if (!lastChatRun) return;
+    const autoDraft = buildContinueDraft(lastChatRun);
+    if (autoDraft.requiresDecision) {
+      const target = (lastChatRun.task_id || '').trim();
+      setContinueDialog({
+        target,
+        forceContinue: buildContinueDraft(lastChatRun, {
+          policy: 'force_continue',
+          intent: 'close_pending',
+        }),
+        cleanRetry: buildContinueDraft(lastChatRun, {
+          policy: 'clean_retry',
+          intent: 'next_slice',
+        }),
+      });
+      return;
+    }
+    void sendContinue(autoDraft);
+  };
+
+  const sendMessage = async (
+    override?:
+      | string
+      | {
+          message?: string;
+          continuationPolicy?: ContinuationPolicy;
+          continuationTarget?: string;
+        },
+  ) => {
+    const overrideMessage = typeof override === 'string' ? override : override?.message;
+    const continuationPolicy = typeof override === 'object' && override
+      ? (override.continuationPolicy ?? 'auto')
+      : 'auto';
+    const continuationTarget = typeof override === 'object' && override
+      ? (override.continuationTarget ?? '')
+      : '';
     const trimmed = typeof overrideMessage === 'string' ? overrideMessage.trim() : input.trim();
     if (!trimmed || loading) {
       return;
@@ -992,23 +1301,87 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
     let localBlocks: StreamBlock[] = [];
     setStreamingBlocks([]);
     setBlockExpanded({});
-    let progressIntervalId: ReturnType<typeof window.setInterval> | null = null;
+    let progressTimerId: ReturnType<typeof window.setTimeout> | null = null;
+    let progressPollingStopped = false;
+    let progressPollingInFlight = false;
+    let progressFailureCount = 0;
+    let acceptedByBackend = false;
+    let keepPollingAfterStreamDrop = false;
+    let keepPollingUntilTerminal = false;
+    let reconnectNoticeShown = false;
+    activeRunTaskIdRef.current = clientTaskId;
+
+    const stopProgressPolling = () => {
+      progressPollingStopped = true;
+      if (progressTimerId !== null) {
+        window.clearTimeout(progressTimerId);
+        progressTimerId = null;
+      }
+    };
+
+    const scheduleProgressPoll = (delayMs: number) => {
+      if (progressPollingStopped) {
+        return;
+      }
+      if (progressTimerId !== null) {
+        window.clearTimeout(progressTimerId);
+      }
+      progressTimerId = window.setTimeout(() => {
+        progressTimerId = null;
+        void pollProgress();
+      }, delayMs);
+    };
+
     const pollProgress = async () => {
+      if (progressPollingStopped || progressPollingInFlight) {
+        return;
+      }
+      if (activeRunTaskIdRef.current && activeRunTaskIdRef.current !== clientTaskId) {
+        stopProgressPolling();
+        return;
+      }
+      progressPollingInFlight = true;
       try {
         const progressResponse = await apiFetch(`/api/aiteam/chat/progress/${encodeURIComponent(clientTaskId)}`, {
           headers: {
             'x-workspace-path': workspacePath,
           },
         });
-        if (!progressResponse.ok) return;
+        if (!progressResponse.ok) {
+          throw new Error(`HTTP ${progressResponse.status}`);
+        }
         const progressPayload = await progressResponse.json();
         const parsed = parseChatProgress(progressPayload, clientTaskId);
         if (parsed) {
           setChatProgress(parsed);
           setSimMode(parsed.is_sim_mode ?? false);
+          progressFailureCount = 0;
+          if (isTerminalChatRunState(parsed.state)) {
+            stopProgressPolling();
+            setLoading(false);
+            return;
+          }
         }
       } catch {
-        // ignore transient polling errors
+        progressFailureCount += 1;
+        if (acceptedByBackend) {
+          const reconnectStamp = new Date().toISOString();
+          setChatProgress((prev) => {
+            if (!prev) {
+              return prev;
+            }
+            return {
+              ...prev,
+              last_event: `Backend temporalmente inaccesible. Reintentando en ${Math.round(nextChatProgressPollDelay(progressFailureCount) / 1000)}s...`,
+              last_event_ts: reconnectStamp,
+            };
+          });
+        }
+      } finally {
+        progressPollingInFlight = false;
+        if (!progressPollingStopped) {
+          scheduleProgressPoll(nextChatProgressPollDelay(progressFailureCount));
+        }
       }
     };
 
@@ -1016,6 +1389,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
       task_id: clientTaskId,
       exists: false,
       state: 'queued',
+      workflow_run_status: '',
       round_budget: maxRounds,
       rounds_used: 0,
       phase_states: {},
@@ -1045,11 +1419,19 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
         diversity_observed: false,
       },
       task_summaries: [],
+      thread_summary: {
+        thread_id: '',
+        provider: '',
+        channel: '',
+        model_family: '',
+        generation: 0,
+        rebound_count: 0,
+        candidate_count: 0,
+        distinct_thread_count: 0,
+        providers: [],
+      },
     });
-    void pollProgress();
-    progressIntervalId = window.setInterval(() => {
-      void pollProgress();
-    }, 900);
+    scheduleProgressPoll(0);
 
     try {
       const response = await apiFetch('/api/aiteam/chat', {
@@ -1068,12 +1450,28 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
           client_task_id: clientTaskId,
           strict_mode: strictMode,
           allow_low_productivity_override: allowLowProductivityOverride,
+          continuation_policy: continuationPolicy,
+          continuation_target: continuationTarget,
         }),
       });
       if (!response.ok) {
-        const errorText = await response.text().catch(() => `HTTP ${response.status}`);
-        throw new Error(errorText);
+        let backendMessage = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json() as { detail?: string | { message?: string } };
+          if (typeof payload.detail === 'string' && payload.detail.trim()) {
+            backendMessage = payload.detail;
+          } else if (payload.detail && typeof payload.detail === 'object' && typeof payload.detail.message === 'string' && payload.detail.message.trim()) {
+            backendMessage = payload.detail.message;
+          }
+        } catch {
+          const errorText = await response.text().catch(() => `HTTP ${response.status}`);
+          if (errorText.trim()) {
+            backendMessage = errorText;
+          }
+        }
+        throw new Error(backendMessage);
       }
+      acceptedByBackend = true;
 
       // ── Streaming SSE reader ──────────────────────────────────────
       const reader = response.body?.getReader();
@@ -1209,7 +1607,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
               } else if (currentEventType === 'agent_completed') {
                 try {
                   const ev = JSON.parse(rawData) as {
-                    task_id?: string; preview?: string; duration_ms?: number;
+                    task_id?: string; preview?: string; full_text?: string; duration_ms?: number;
                     provider?: string; model?: string; channel?: string;
                   };
                   const tid = ev.task_id ?? '';
@@ -1232,9 +1630,43 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                     // If block has no streamed text yet, seed it with the preview from agent_completed
                     // (sub-tasks like scout/evidence often complete without streaming individual chunks)
                     const preview = ev.preview ?? '';
+                    const fullText = ev.full_text ?? preview;
                     localBlocks = localBlocks.map(b =>
                       b.task_id === tid
-                        ? { ...b, complete: true, text: b.text || preview }
+                        ? { ...b, complete: true, text: b.text || fullText }
+                        : b
+                    );
+                    setStreamingBlocks([...localBlocks]);
+                  }
+                } catch { /* ignore */ }
+                currentEventType = '';
+              } else if (currentEventType === 'agent_blocked') {
+                try {
+                  const ev = JSON.parse(rawData) as {
+                    task_id?: string; preview?: string; full_text?: string; duration_ms?: number;
+                    provider?: string; model?: string; channel?: string;
+                  };
+                  const tid = ev.task_id ?? '';
+                  if (tid) {
+                    setAgentLanes(prev => {
+                      const lane = prev.get(tid);
+                      if (!lane) return prev;
+                      const next = new Map(prev);
+                      next.set(tid, {
+                        ...lane,
+                        status: 'failed',
+                        preview: ev.preview ?? lane.preview,
+                        durationMs: ev.duration_ms ?? 0,
+                        provider: ev.provider ?? lane.provider,
+                        model: ev.model ?? lane.model,
+                        channel: ev.channel ?? lane.channel,
+                      });
+                      return next;
+                    });
+                    const fullText = ev.full_text ?? ev.preview ?? '';
+                    localBlocks = localBlocks.map(b =>
+                      b.task_id === tid
+                        ? { ...b, complete: true, text: b.text || fullText }
                         : b
                     );
                     setStreamingBlocks([...localBlocks]);
@@ -1244,7 +1676,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
               } else if (currentEventType === 'agent_failed') {
                 try {
                   const ev = JSON.parse(rawData) as {
-                    task_id?: string; error?: string;
+                    task_id?: string; error?: string; full_text?: string;
                     provider?: string; model?: string; channel?: string;
                   };
                   const tid = ev.task_id ?? '';
@@ -1263,6 +1695,13 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       });
                       return next;
                     });
+                    const fullText = ev.full_text ?? ev.error ?? '';
+                    localBlocks = localBlocks.map(b =>
+                      b.task_id === tid
+                        ? { ...b, complete: true, text: b.text || fullText }
+                        : b
+                    );
+                    setStreamingBlocks([...localBlocks]);
                   }
                 } catch { /* ignore */ }
                 currentEventType = '';
@@ -1276,6 +1715,11 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                   const roundsUsed = Number.isFinite(Number(json.rounds_used)) ? Number(json.rounds_used) : 0;
                   const completedTasks = Number.isFinite(Number(json.completed_tasks)) ? Number(json.completed_tasks) : 0;
                   const pendingTasks = Number.isFinite(Number(json.pending_tasks)) ? Number(json.pending_tasks) : 0;
+                  const failedTasks = Number.isFinite(Number(json.failed_tasks)) ? Number(json.failed_tasks) : 0;
+                  const visualState = normalizeVisualRunState(json.state, {
+                    pendingTasks: json.pending_tasks,
+                    failedTasks: json.failed_tasks,
+                  });
                   const artifactCreated = Number.isFinite(Number(json.artifact_created)) ? Number(json.artifact_created) : 0;
                   const artifactModified = Number.isFinite(Number(json.artifact_modified)) ? Number(json.artifact_modified) : 0;
                   const productivityScore = Number.isFinite(Number(json.productivity_score)) ? Number(json.productivity_score) : 0;
@@ -1297,7 +1741,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                     ? (json.successful_checks as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0)
                     : [];
                   const evidenceMeta = evidenceRejected ? `rejected(${evidenceFailures.slice(0, 2).join('|') || 'fail'})` : 'ok';
-                  const statusMeta = `mode ${modeUsed} · exec ${executionMode} · live-gate ${liveModeRejected ? 'rejected' : (liveModeRequired ? 'required' : 'off')} · checks ${checkList.join(',') || 'none'} · evidence ${evidenceMeta} · rounds ${roundsUsed}/${roundBudget} (+${autoExtendedRounds}) · done ${completedTasks} · pending ${pendingTasks} · delegated ${(Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids : []).length} · artifacts +${artifactCreated}/~${artifactModified} · quality P${productivityScore}/R${reasoningScore} (${productivityStatus}) · strict ${strictModeApplied ? 'blocked_close' : (strictMode ? 'on' : 'off')} · low-gate ${lowGateRejected ? `rejected(<${productivityThreshold})` : (allowLowProductivityOverride ? 'override' : 'active')} · state ${String(json.state || '-')} · ${Number(json.elapsed_ms) || 0}ms`;
+                  const statusMeta = `mode ${modeUsed} · exec ${executionMode} · live-gate ${liveModeRejected ? 'rejected' : (liveModeRequired ? 'required' : 'off')} · checks ${checkList.join(',') || 'none'} · evidence ${evidenceMeta} · rounds ${roundsUsed}/${roundBudget} (+${autoExtendedRounds}) · done ${completedTasks} · pending ${pendingTasks} · delegated ${(Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids : []).length} · artifacts +${artifactCreated}/~${artifactModified} · quality P${productivityScore}/R${reasoningScore} (${productivityStatus}) · strict ${strictModeApplied ? 'blocked_close' : (strictMode ? 'on' : 'off')} · low-gate ${lowGateRejected ? `rejected(<${productivityThreshold})` : (allowLowProductivityOverride ? 'override' : 'active')} · state ${visualState || '-'} · ${Number(json.elapsed_ms) || 0}ms`;
                   // Preferir el contenido streameado real (accumulated) sobre el summary estructurado.
                   // accumulated contiene el output completo de todas las fases (lead_intake, research, etc.)
                   // json.response es un resumen compacto que puede ser plantilla si lead_close fue bloqueado.
@@ -1351,9 +1795,23 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                       rounds_used: Number(json.rounds_used ?? 0),
                       phase_count: Object.keys(typeof json.phase_task_ids === 'object' && json.phase_task_ids ? json.phase_task_ids as object : {}).length,
                       delegated_count: Array.isArray(json.delegated_task_ids) ? json.delegated_task_ids.length : 0,
-                      continuation_requested: /\bcontinue\b|\bcontinua\b|\bproceed\b|\bgo on\b/i.test(trimmed),
+                      continuation_requested: Boolean(json.continuation_requested),
                       continuation_of: typeof json.continuation_of === 'string' ? json.continuation_of : '',
-                      status: typeof json.state === 'string' && json.state === 'in_progress' ? 'window_exhausted' : 'completed_or_closed',
+                      authoritative_state: visualState,
+                      workflow_run_status: typeof json.workflow_run_status === 'string' ? json.workflow_run_status : visualState,
+                      failed_phases: Array.isArray((json.run_verdict as Record<string, unknown> | undefined)?.failed_phases)
+                        ? (((json.run_verdict as Record<string, unknown>).failed_phases as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0))
+                        : [],
+                      pending_phases: Array.isArray((json.run_verdict as Record<string, unknown> | undefined)?.pending_phases)
+                        ? (((json.run_verdict as Record<string, unknown>).pending_phases as unknown[]).map((item) => String(item ?? '')).filter((item) => item.trim().length > 0))
+                        : [],
+                      next_action_hint: typeof json.next_action_hint === 'string' ? json.next_action_hint : '',
+                      policy_review_required: Boolean(json.policy_review_required),
+                      status: resolveChatRunState({
+                        workflow_run_status: typeof json.workflow_run_status === 'string' ? json.workflow_run_status : visualState,
+                        authoritative_state: visualState,
+                        state: visualState,
+                      }),
                       execution_mode: executionMode,
                       placeholder_outputs: placeholderOutputs,
                       successful_check_count: Number.isFinite(Number(json.successful_check_count)) ? Number(json.successful_check_count) : 0,
@@ -1363,17 +1821,29 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                     }
                     : null;
                   if (latestRun) setLastChatRun(latestRun);
+                  const resultTaskId = typeof json.task_id === 'string' && json.task_id.trim().length > 0
+                    ? json.task_id
+                    : clientTaskId;
+                  activeRunTaskIdRef.current = resultTaskId;
+                  keepPollingUntilTerminal = !isTerminalChatRunState(visualState);
 
                   setChatProgress((prev) => ({
-                    task_id: typeof json.task_id === 'string' && json.task_id.trim().length > 0 ? json.task_id : clientTaskId,
+                    task_id: resultTaskId,
                     exists: true,
-                    state: typeof json.state === 'string' ? json.state : (prev?.state ?? 'completed'),
+                    state: visualState || (prev?.state ?? 'running'),
+                    workflow_run_status: typeof json.workflow_run_status === 'string'
+                      ? json.workflow_run_status
+                      : (prev?.workflow_run_status ?? ''),
                     round_budget: roundBudget,
                     rounds_used: roundsUsed,
-                    phase_states: prev?.phase_states ?? {},
+                    phase_states: json.phase_states != null && typeof json.phase_states === 'object'
+                      ? Object.fromEntries(
+                          Object.entries(json.phase_states as Record<string, unknown>).map(([key, value]) => [String(key), String(value ?? '')]),
+                        )
+                      : (prev?.phase_states ?? {}),
                     completed_tasks: completedTasks,
                     pending_tasks: pendingTasks,
-                    failed_tasks: prev?.failed_tasks ?? 0,
+                    failed_tasks: failedTasks,
                     execution_attempts: Number.isFinite(Number(json.execution_attempts)) ? Number(json.execution_attempts) : (prev?.execution_attempts ?? 0),
                     execution_steps: Number.isFinite(Number(json.execution_steps)) ? Number(json.execution_steps) : (prev?.execution_steps ?? 0),
                     execution_steps_success: Number.isFinite(Number(json.execution_steps_success)) ? Number(json.execution_steps_success) : (prev?.execution_steps_success ?? 0),
@@ -1416,7 +1886,56 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                           diversity_observed: false,
                         }),
                     phase_task_ids: json.phase_task_ids != null && typeof json.phase_task_ids === 'object' ? (json.phase_task_ids as Record<string, string>) : (prev?.phase_task_ids ?? {}),
-                    task_summaries: prev?.task_summaries ?? [],
+                    task_summaries: Array.isArray(json.task_summaries)
+                      ? ((json.task_summaries as unknown[])
+                          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+                          .map((item) => ({
+                            task_id: String(item.task_id ?? ''),
+                            short_id: String(item.short_id ?? ''),
+                            title: String(item.title ?? ''),
+                            role: String(item.role ?? ''),
+                            state: String(item.state ?? ''),
+                            assignee: String(item.assignee ?? ''),
+                            category: String(item.category ?? ''),
+                            phase: String(item.phase ?? ''),
+                            provider: String(item.provider ?? ''),
+                            model: String(item.model ?? ''),
+                            channel: String(item.channel ?? ''),
+                            thread_id: String(item.thread_id ?? ''),
+                            thread_provider: String(item.thread_provider ?? ''),
+                            thread_channel: String(item.thread_channel ?? ''),
+                            thread_model_family: String(item.thread_model_family ?? ''),
+                            thread_generation: parseNumber(item.thread_generation, 0),
+                            preview: String(item.preview ?? ''),
+                            full_text: String(item.full_text ?? ''),
+                            error: String(item.error ?? ''),
+                          })))
+                      : (prev?.task_summaries ?? []),
+                    thread_summary: json.thread_summary != null && typeof json.thread_summary === 'object'
+                      ? {
+                          thread_id: String((json.thread_summary as Record<string, unknown>).thread_id ?? ''),
+                          provider: String((json.thread_summary as Record<string, unknown>).provider ?? ''),
+                          channel: String((json.thread_summary as Record<string, unknown>).channel ?? ''),
+                          model_family: String((json.thread_summary as Record<string, unknown>).model_family ?? ''),
+                          generation: parseNumber((json.thread_summary as Record<string, unknown>).generation, 0),
+                          rebound_count: parseNumber((json.thread_summary as Record<string, unknown>).rebound_count, 0),
+                          candidate_count: parseNumber((json.thread_summary as Record<string, unknown>).candidate_count, 0),
+                          distinct_thread_count: parseNumber((json.thread_summary as Record<string, unknown>).distinct_thread_count, 0),
+                          providers: Array.isArray((json.thread_summary as Record<string, unknown>).providers)
+                            ? (((json.thread_summary as Record<string, unknown>).providers as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0))
+                            : (prev?.thread_summary.providers ?? []),
+                        }
+                      : (prev?.thread_summary ?? {
+                          thread_id: '',
+                          provider: '',
+                          channel: '',
+                          model_family: '',
+                          generation: 0,
+                          rebound_count: 0,
+                          candidate_count: 0,
+                          distinct_thread_count: 0,
+                          providers: [],
+                        }),
                   }));
 
                   if (json.decision_justification) {
@@ -1452,53 +1971,89 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
       setStreamingText(null);
       setStreamingTaskId('');
       const err = error instanceof Error ? error.message : 'Unknown network error';
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `team-error-${Date.now()}`,
-          sender: 'team',
-          text: `Failed to reach AI Team backend: ${err}`,
-          meta: 'error',
-        },
-      ]);
-      setChatProgress((prev) => {
-        if (!prev) {
-          return null;
+      if (acceptedByBackend) {
+        keepPollingAfterStreamDrop = true;
+        if (!reconnectNoticeShown) {
+          reconnectNoticeShown = true;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `team-reconnect-${Date.now()}`,
+              sender: 'team',
+              text: `Conexion temporal con AI Team perdida. Reintentando seguimiento del run: ${err}`,
+              meta: 'reconnecting',
+            },
+          ]);
         }
-        return {
+        setChatProgress((prev) => {
+          if (!prev) {
+            return null;
+          }
+          return {
+            ...prev,
+            last_event: `Stream interrumpido. Reintentando seguimiento del run...`,
+            last_event_ts: new Date().toISOString(),
+          };
+        });
+        scheduleProgressPoll(nextChatProgressPollDelay(Math.max(progressFailureCount, 1)));
+      } else {
+        stopProgressPolling();
+        setMessages((prev) => [
           ...prev,
-          state: 'failed',
-          last_event: `Request error: ${err}`,
-          last_event_ts: new Date().toISOString(),
-        };
-      });
+          {
+            id: `team-error-${Date.now()}`,
+            sender: 'team',
+            text: `Failed to reach AI Team backend: ${err}`,
+            meta: 'error',
+          },
+        ]);
+        setChatProgress((prev) => {
+          if (!prev) {
+            return null;
+          }
+          return {
+            ...prev,
+            state: 'failed',
+            last_event: `Request error: ${err}`,
+            last_event_ts: new Date().toISOString(),
+          };
+        });
+      }
     } finally {
       setStreamingText(null);
       setStreamingTaskId('');
-      if (progressIntervalId !== null) {
-        window.clearInterval(progressIntervalId);
+      if (!keepPollingAfterStreamDrop) {
+        stopProgressPolling();
       }
+      let finalParsed: TeamChatProgress | null = null;
       try {
-        const finalProgressResponse = await apiFetch(`/api/aiteam/chat/progress/${encodeURIComponent(clientTaskId)}`, {
+        const finalProgressTaskId = activeRunTaskIdRef.current || clientTaskId;
+        const finalProgressResponse = await apiFetch(`/api/aiteam/chat/progress/${encodeURIComponent(finalProgressTaskId)}`, {
           headers: {
             'x-workspace-path': workspacePath,
           },
         });
         if (!finalProgressResponse.ok) return;
         const finalProgressPayload = await finalProgressResponse.json();
-        const parsed = parseChatProgress(finalProgressPayload, clientTaskId);
+        const parsed = parseChatProgress(finalProgressPayload, finalProgressTaskId);
         if (parsed) {
+          finalParsed = parsed;
           setChatProgress(parsed);
           setAgentLanes((prev) => mergeAgentLaneMaps(prev, buildTaskHistoryLanes(parsed.task_summaries)));
         }
       } catch {
         // keep the latest in-memory progress snapshot
       }
+      if ((keepPollingAfterStreamDrop || keepPollingUntilTerminal) && (!finalParsed || !isTerminalChatRunState(finalParsed.state))) {
+        scheduleProgressPoll(nextChatProgressPollDelay(progressFailureCount));
+        return;
+      }
+      stopProgressPolling();
       setLoading(false);
     }
   };
 
-  const MSG_TRUNCATE = 600;
+  const MSG_TRUNCATE = 1600;
   const toggleBlock = (id: string) =>
     setBlockExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -1692,10 +2247,7 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
               <button
                 className="team-chat-continue"
                 disabled={loading || !lastChatRun?.task_id}
-                onClick={() => {
-                  if (!lastChatRun) return;
-                  void sendMessage(buildContinuePrompt(lastChatRun));
-                }}
+                onClick={handleContinueClick}
               >
                 Continue
               </button>
@@ -1778,6 +2330,38 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
           )}
         </footer>
       </div>
+
+      {continueDialog && (
+        <Modal title="Continue this run" onClose={() => setContinueDialog(null)}>
+          <div className="team-chat-continue-modal">
+            <p>
+              The selected run <strong>{continueDialog.target}</strong> ended in a non-clean state.
+              Choose whether to force continuation of that exact run or start a clean retry from the same project objective.
+            </p>
+            <div className="team-chat-continue-modal-actions">
+              <button
+                className="team-chat-send"
+                type="button"
+                onClick={() => { void sendContinue(continueDialog.forceContinue); }}
+              >
+                Force continue
+              </button>
+              <button
+                className="team-chat-continue"
+                type="button"
+                onClick={() => { void sendContinue(continueDialog.cleanRetry); }}
+              >
+                Clean retry
+              </button>
+            </div>
+            <div className="team-chat-continue-modal-note">
+              <strong>Force continue:</strong> close pending phases first on the same run.
+              <br />
+              <strong>Clean retry:</strong> start a fresh run from current validated project state.
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* ── Modal respuesta completa ──────────────── */}
       {expandedMessage && (

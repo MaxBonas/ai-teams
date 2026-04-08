@@ -256,16 +256,24 @@ try {
     $currentDependencyHash = Get-ProjectDependencyHash
     $needsRecreate = $ForceRecreate
     $venvLauncherFailure = ""
+
     if ($needsRecreate) {
         $basePython = $null
     } elseif (-not (Test-PythonProcess -PythonExe $venvPython -Arguments @("-c", "import sys"))) {
+        # Venv python is missing or broken — must recreate.
         $needsRecreate = $true
         $basePython = $null
         $venvLauncherFailure = Get-PythonProcessFailure -PythonExe $venvPython -Arguments @("-c", "import sys")
+    } elseif ((Read-StoredDependencyHash) -eq $currentDependencyHash) {
+        # Fast path: hash matches — venv python exists and deps are up-to-date.
+        # Skip the expensive import health check on every start_ide call.
+        $needsRecreate = $false
     } elseif (-not (Test-VenvHealthy)) {
+        # Hash changed AND venv is unhealthy — reinstall and check recovery.
         Install-ProjectDependencies
         $needsRecreate = -not (Test-VenvHealthy)
-    } elseif ((Read-StoredDependencyHash) -ne $currentDependencyHash) {
+    } else {
+        # Hash changed but venv is still healthy — reinstall deps.
         Install-ProjectDependencies
     }
 
@@ -293,11 +301,11 @@ try {
         Recreate-Venv -BasePython $basePython
     }
 
-    if (-not (Test-VenvHealthy)) {
-        throw "El venv local sigue sin estar sano despues de la reparacion."
-    }
-
-    if ((Read-StoredDependencyHash) -ne $currentDependencyHash) {
+    # After any recreate/reinstall, verify health and persist the hash.
+    if ($needsRecreate) {
+        if (-not (Test-VenvHealthy)) {
+            throw "El venv local sigue sin estar sano despues de la reparacion."
+        }
         Write-StoredDependencyHash -HashValue $currentDependencyHash
     }
 

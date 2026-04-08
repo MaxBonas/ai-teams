@@ -78,7 +78,7 @@ export default function OpsHub({ workspacePath, minimized = false, onToggleMinim
     void loadStatus(true);
     const timer = window.setInterval(() => {
       void loadStatus(true);
-    }, 2500);
+    }, 8000);
     return () => window.clearInterval(timer);
   }, [workspacePath]);
 
@@ -136,7 +136,7 @@ export default function OpsHub({ workspacePath, minimized = false, onToggleMinim
 
       <div className="ops-hub-body">
         {activeTab === 'overview' ? (
-          <TeamViewer workspacePath={workspacePath} refreshMs={2500} />
+          <TeamViewer workspacePath={workspacePath} refreshMs={8000} />
         ) : activeTab === 'timeline' ? (
           <OperatorTimeline workspacePath={workspacePath} />
         ) : activeTab === 'conversations' ? (

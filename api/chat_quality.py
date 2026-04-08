@@ -219,10 +219,29 @@ def _evaluate_phase_evidence_gate(
     artifact_modified: int,
     require_test_or_build_check: bool,
 ) -> list[str]:
+    def _select_gate_task(gate_kind: str) -> WorkTask | None:
+        normalized_gate = str(gate_kind or "").strip().lower()
+        explicit = task_rows_by_phase.get(normalized_gate)
+        if explicit is not None:
+            return explicit
+        for phase_id, candidate in task_rows_by_phase.items():
+            if candidate is None:
+                continue
+            normalized_phase = str(phase_id or "").strip().lower()
+            if normalized_phase.startswith(("lead_", "delegate_", "plan_")):
+                continue
+            if normalized_gate == "build" and candidate.role.value == "engineer":
+                return candidate
+            if normalized_gate == "review" and candidate.role.value == "reviewer":
+                return candidate
+            if normalized_gate == "qa" and candidate.role.value == "qa":
+                return candidate
+        return None
+
     failures: list[str] = []
     target_phases = ["build", "review", "qa"]
     for phase in target_phases:
-        task = task_rows_by_phase.get(phase)
+        task = _select_gate_task(phase)
         if task is None:
             failures.append(f"{phase}:missing_task")
             continue
@@ -236,7 +255,11 @@ def _evaluate_phase_evidence_gate(
         if _is_placeholder_output_text(result_text):
             failures.append(f"{phase}:placeholder_output")
 
-        if phase == "build" and bool(task.metadata.get("require_execution_plan", False)):
+        if (
+            phase == "build"
+            and bool(task.metadata.get("require_execution_plan", False))
+            and not bool(task.metadata.get("execution_plan_requirement_waived", False))
+        ):
             raw_plan = task.metadata.get("execution_plan", [])
             if not isinstance(raw_plan, list) or not raw_plan:
                 failures.append("build:missing_execution_plan")
@@ -277,6 +300,10 @@ def _compose_user_facing_run_summary(
     next_action_hint: str,
     execution_mode: str,
     placeholder_outputs: int,
+    final_state: str = "",
+    policy_review_required: bool = False,
+    semantic_gate_failures: list[str] | None = None,
+    evidence_gate_failures: list[str] | None = None,
 ) -> str:
     execution_label = execution_mode
     placeholder_label = "salidas placeholder"
@@ -288,6 +315,32 @@ def _compose_user_facing_run_summary(
             decision_text = "Coordinacion parcial completada; parte del output fue placeholder."
         else:
             decision_text = "Sin sintesis del Team Lead en esta ronda."
+    semantic_gate_failures = [
+        str(item).strip()
+        for item in list(semantic_gate_failures or [])
+        if str(item).strip()
+    ]
+    evidence_gate_failures = [
+        str(item).strip()
+        for item in list(evidence_gate_failures or [])
+        if str(item).strip()
+    ]
+    authoritative_state = str(final_state or "").strip().lower()
+    authoritative_banner = _compose_authoritative_close_banner(
+        final_state=authoritative_state,
+        policy_review_required=policy_review_required,
+        semantic_gate_failures=semantic_gate_failures,
+        evidence_gate_failures=evidence_gate_failures,
+        failed_line=failed_line,
+        next_action_hint=next_action_hint,
+    )
+    if authoritative_state in {"failed", "rejected"} and _decision_text_overstates_success(
+        decision_text
+    ):
+        decision_text = (
+            "La narrativa original del Team Lead indicaba cierre positivo, "
+            "pero fue invalidada por el veredicto autoritativo de la run."
+        )
 
     meta_parts = [f"fases: hecho={done_line} | pendiente={pending_line} | fallido={failed_line}"]
     if artifact_files:
@@ -301,19 +354,76 @@ def _compose_user_facing_run_summary(
 
     lines: list[str] = [
         "Resumen del Team Lead para ti:",
-        decision_text,
-        "",
-        f"Solicitud: {request_line}",
-        f"Continuity: {continuation_line}",
-        f"Modo: {mode} | rondas {rounds_used}/{round_budget}",
-        f"Participantes: {participants_line}",
-        f"Reasoning: {reasoning_score}/100 | productividad={productivity_status}",
-        f"Siguiente paso: {next_action_hint}",
-        "",
-        "---",
-        " | ".join(meta_parts),
     ]
+    if authoritative_banner:
+        lines.extend([authoritative_banner, ""])
+    lines.extend(
+        [
+            decision_text,
+            "",
+            f"Solicitud: {request_line}",
+            f"Continuity: {continuation_line}",
+            f"Modo: {mode} | rondas {rounds_used}/{round_budget}",
+            f"Participantes: {participants_line}",
+            f"Reasoning: {reasoning_score}/100 | productividad={productivity_status}",
+            f"Siguiente paso: {next_action_hint}",
+            "",
+            "---",
+            " | ".join(meta_parts),
+        ]
+    )
     return "\n".join(lines)
+
+
+def _compose_authoritative_close_banner(
+    *,
+    final_state: str,
+    policy_review_required: bool,
+    semantic_gate_failures: list[str],
+    evidence_gate_failures: list[str],
+    failed_line: str,
+    next_action_hint: str,
+) -> str:
+    if final_state not in {"failed", "rejected"}:
+        return ""
+
+    state_label = "RECHAZADA" if final_state == "rejected" else "NO COMPLETADA"
+    reason_codes = list(
+        dict.fromkeys(
+            [
+                *semantic_gate_failures,
+                *evidence_gate_failures,
+            ]
+        )
+    )
+    reason_text = ", ".join(reason_codes[:4]) if reason_codes else failed_line
+    if not reason_text or reason_text == "none":
+        reason_text = "bloqueos de policy o fases pendientes"
+    suffix = f" Motivo: {reason_text}."
+    if policy_review_required and next_action_hint:
+        suffix += f" Siguiente paso: {next_action_hint}."
+    elif next_action_hint:
+        suffix += f" Siguiente paso sugerido: {next_action_hint}."
+    return f"Estado autoritativo: run {state_label}.{suffix}"
+
+
+def _decision_text_overstates_success(value: str) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    positive_patterns = [
+        r"\bdone\b",
+        r"\bqa aprobada\b",
+        r"\bqa aprobado\b",
+        r"\bcompletad[oa]s?\b",
+        r"\bproyecto recuperado\b",
+        r"\bexitos[oa]\b",
+        r"\bcompleted\b",
+        r"\bapproved\b",
+        r"\baprobad[oa]s?\b",
+        r"\bcerrad[oa]s?\b",
+    ]
+    return any(re.search(pattern, text) for pattern in positive_patterns)
 
 
 def _presentable_decision_text(value: str) -> str:

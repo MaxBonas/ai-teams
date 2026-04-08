@@ -15,6 +15,7 @@
 | `HISTORY.md` | Registro condensado de hitos por bloque (0-6) |
 | `ARCHITECTURE_PLAN.md` | Mapa de fricciones arquitectónicas y plan de acción priorizado |
 | `MODEL_POLICY.md` | Catálogo de modelos, tiers, reglas de routing Pro-first + fallback |
+| `MULTIMODEL_ROUTING_REFERENCE.md` | Pools TL/worker, quorum deliberativo, env vars, fixes de robustez (2026-04-03) |
 | `NAMING_COLLISION_INVESTIGATION.md` | Taxonomía de capas y colisiones de nombres; norma `.aiteam/` |
 | `COMMUNICATION_GUIDE_FOR_DEVS.md` | Cómo hablar con agentes sin ambigüedad de capa |
 | `DECISION_LOG.md` | ADR — registro de decisiones arquitectónicas |
@@ -70,7 +71,7 @@ No usar como backlog activo ni como descripción del estado actual.
 → `../task.md` (candidatos) → doc de visión correspondiente → `ARCHITECTURE_PLAN.md`
 
 **Entender el routing multimodelo:**
-→ `MODEL_POLICY.md` → `ROUTING_CATALOG_VIEW.md` → `ROUTING_EDITOR_VISION.md`
+→ `MULTIMODEL_ROUTING_REFERENCE.md` → `MODEL_POLICY.md` → `ROUTING_CATALOG_VIEW.md`
 
 **Entender proyectos externos y `.aiteam/`:**
 → `NAMING_COLLISION_INVESTIGATION.md` → `EXTERNAL_PROJECT_RUNTIME_GAPS.md`

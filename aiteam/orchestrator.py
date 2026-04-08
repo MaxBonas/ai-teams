@@ -33,8 +33,19 @@ from aiteam.context_curator import (
 )
 from aiteam.mailbox import Mailbox
 from aiteam.lead_control import extract_lcp_directives
+from aiteam.lead_close_policy import (
+    build_lead_close_policy_prompt_block,
+    derive_lead_close_policy,
+)
 from aiteam.memory import AgentMemoryStore
 from aiteam.observability import EventLogger
+from aiteam.phase_verdicts import (
+    detect_contract_path_drift,
+    detect_continuation_drift,
+    extract_path_candidates,
+    extract_phase_verdict,
+    is_missing_contract_objective,
+)
 from aiteam.profiles import build_prompt, build_system_prompt, role_charter_for
 from aiteam.run_health import RunHealthReport, build_run_health_report
 from aiteam.router import HybridRouter
@@ -96,6 +107,37 @@ _PLACEHOLDER_OUTPUT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
 ]
+
+_PLANNING_ARTIFACT_BLOCK_RE = re.compile(
+    r"(?is)\[PLANNING_ARTIFACT\](.*?)\[/PLANNING_ARTIFACT\]"
+)
+_PLANNING_BULLET_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+(.+?)\s*$")
+_EXECUTION_INLINE_CODE_RE = re.compile(r"`([^`\n]{2,240})`")
+_EXECUTION_LINE_COMMAND_RE = re.compile(
+    r"(?im)^\s*(pytest|python|py|pip|npm|node|pnpm|yarn|uv|npx|tox|coverage|playwright|git|cargo|go|dotnet|mvn|gradle|make|pwsh|powershell|bash|sh|cmd)\b.+$"
+)
+_NON_COMMAND_INLINE_PREFIXES = (
+    "from ",
+    "import ",
+    "def ",
+    "class ",
+    "phase_id:",
+    "status:",
+    "objective:",
+    "summary:",
+)
+_POWERSHELL_COMMAND_STARTERS = {
+    "powershell",
+    "pwsh",
+    "get-childitem",
+    "get-content",
+    "write-output",
+    "set-location",
+    "copy-item",
+    "move-item",
+    "remove-item",
+    "new-item",
+}
 
 
 class AITeamOrchestrator:
@@ -353,6 +395,17 @@ class AITeamOrchestrator:
         assert last_decision is not None
         return last_decision, max_attempts
 
+    def _is_specialist_prefetch_delegate_task(self, task: WorkTask) -> bool:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        if "::prefetch::" in str(task.task_id or ""):
+            return True
+        if self._to_bool(metadata.get("structured_evidence_task", False)):
+            return True
+        phase = str(metadata.get("phase", "") or "").strip().lower()
+        if phase.startswith("delegate_") or phase.startswith("delegated_"):
+            return True
+        return False
+
     def _collect_specialist_prefetch_context(self, task: WorkTask) -> str:
         metadata = task.metadata if isinstance(task.metadata, dict) else {}
         if self._to_bool(metadata.get("skip_specialist_prefetch", False)):
@@ -360,12 +413,9 @@ class AITeamOrchestrator:
         if self._to_bool(metadata.get("_specialist_prefetch_done", False)):
             stored = metadata.get("specialist_prefetch_context", "")
             return str(stored or "")
-        task_specialist_name = str(metadata.get("tool_specialist", "") or "").strip().lower()
-        if task_specialist_name:
-            task_specialist_profile = specialist_profile(task_specialist_name)
-            if task_specialist_profile is not None and task_specialist_profile.owner_role == task.role:
-                metadata["_specialist_prefetch_done"] = True
-                return ""
+        if self._is_specialist_prefetch_delegate_task(task):
+            metadata["_specialist_prefetch_done"] = True
+            return ""
 
         required_caps = normalize_tool_capabilities(metadata.get("required_capabilities", []))
         skill_targets = normalize_skill_targets(metadata.get("skill_targets", []))
@@ -440,6 +490,13 @@ class AITeamOrchestrator:
                 skill_targets=skill_targets,
                 lsp_targets=lsp_targets,
             )
+            # Best-effort specialists (e.g. context_curator) must not be
+            # restricted to API-channel economy adapters: when all API adapters
+            # are down (429/unavailable), the prefetch silently degrades and the
+            # main task loses its context briefing.  For best-effort specialists
+            # we drop the economic routing preference so the router can fall
+            # through to subscription-channel adapters.
+            _prefetch_best_effort = self._is_best_effort_specialist(specialist_name)
             specialist_request = RoutingRequest(
                 role=profile.owner_role,
                 complexity=task.complexity,
@@ -449,8 +506,8 @@ class AITeamOrchestrator:
                 tool_rewiring_preferred_specialist=str(
                     metadata.get("tool_rewiring_preferred_specialist", "") or ""
                 ).strip(),
-                prefer_economic_routing=True,
-                preferred_tool_tier=profile.default_tier,
+                prefer_economic_routing=not _prefetch_best_effort,
+                preferred_tool_tier="" if _prefetch_best_effort else profile.default_tier,
                 skill_targets=set(skill_targets),
                 lsp_targets=set(lsp_targets),
                 approved_adapters=self.compliance.approved_adapters(metadata),
@@ -818,6 +875,23 @@ class AITeamOrchestrator:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 existed = target.exists()
                 target.write_text(file_content, encoding="utf-8")
+                artifact_paths = [
+                    str(item).strip()
+                    for item in list(task.metadata.get("artifact_paths", []) or [])
+                    if str(item).strip()
+                ]
+                rel_str = str(rel).replace("\\", "/")
+                if rel_str not in artifact_paths:
+                    artifact_paths.append(rel_str)
+                task.metadata["artifact_paths"] = artifact_paths
+                if existed:
+                    task.metadata["artifact_modified_count"] = int(
+                        task.metadata.get("artifact_modified_count", 0) or 0
+                    ) + 1
+                else:
+                    task.metadata["artifact_created_count"] = int(
+                        task.metadata.get("artifact_created_count", 0) or 0
+                    ) + 1
 
                 event_name = "artifact_modified" if existed else "artifact_created"
                 self.event_logger.emit(
@@ -884,6 +958,7 @@ class AITeamOrchestrator:
         if task_root not in self.workflow_state:
             self.workflow_state[task_root] = {
                 "phase_outputs": {},
+                "phase_verdicts": {},
                 "facts": [],
                 "ledger": [],
                 "review_feedback": [],
@@ -899,6 +974,13 @@ class AITeamOrchestrator:
     ) -> None:
         ws = self._get_workflow_state(task_root)
         ws["phase_outputs"][phase] = output[:2000]
+        phase_key = str(phase or "").strip().lower()
+        phase_verdicts = ws.setdefault("phase_verdicts", {})
+        verdict = extract_phase_verdict(output, phase_id=phase_key)
+        if verdict:
+            phase_verdicts[phase_key] = verdict
+        else:
+            phase_verdicts.pop(phase_key, None)
         if facts:
             ws["facts"].extend(facts[-5:])
             ws["facts"] = ws["facts"][-20:]
@@ -1320,6 +1402,37 @@ class AITeamOrchestrator:
         if not sensitive_reasons:
             return None
 
+        preflight_execution_plan, preflight_plan_diagnostics = (
+            self._derive_execution_plan_with_diagnostics(task)
+        )
+        preflight_plan_lines: list[str] = []
+        if preflight_execution_plan:
+            preflight_plan_lines.append("Preview del execution plan efectivo:")
+            for step in list(preflight_execution_plan)[:4]:
+                command = str((step or {}).get("command", "") or "").strip()
+                step_type = str((step or {}).get("type", "") or "").strip()
+                if command:
+                    preflight_plan_lines.append(f"- [{step_type or 'cmd'}] {command}")
+        elif "require_execution_plan" in sensitive_reasons:
+            checked_sources = list(
+                (preflight_plan_diagnostics.get("checked_sources", []) or [])
+            )[:4]
+            preview_sources = ", ".join(
+                str(item.get("source", "") or "").strip()
+                for item in checked_sources
+                if str(item.get("source", "") or "").strip()
+            )
+            if preview_sources:
+                preflight_plan_lines.append(
+                    "No se pudo derivar execution_plan automaticamente. "
+                    f"Fuentes revisadas: {preview_sources}."
+                )
+            else:
+                preflight_plan_lines.append(
+                    "No se pudo derivar execution_plan automaticamente a partir del contrato "
+                    "y dependencias completadas."
+                )
+
         checkpoint_id = f"{chat_parent}::lead_preflight_{phase_name}"
         existing = self.taskboard.get_task(checkpoint_id)
         if existing is not None:
@@ -1340,8 +1453,10 @@ class AITeamOrchestrator:
                 )
                 if checkpoint_directives.get("replan"):
                     task.metadata["lead_preflight_replan_requested"] = True
+                    self.taskboard.persist_tasks([task.task_id])
                     return checkpoint_id
                 task.metadata["lead_preflight_approved"] = True
+                self.taskboard.persist_tasks([task.task_id])
                 return None
             return checkpoint_id
 
@@ -1354,8 +1469,11 @@ class AITeamOrchestrator:
                 f"Tarea candidata: {task.task_id}\n"
                 f"Motivos de sensibilidad: {', '.join(sensitive_reasons)}\n"
                 f"Contexto de la tarea: {task.description[:1200]}\n"
+                + (("\n".join(preflight_plan_lines) + "\n") if preflight_plan_lines else "")
+                + (
                 "Objetivo: decidir si se puede continuar, si conviene pedir aclaracion "
                 "al usuario o si hay que replantear el enfoque antes de ejecutar."
+                )
             ),
             role=Role.TEAM_LEAD,
             complexity=task.complexity,
@@ -1373,6 +1491,12 @@ class AITeamOrchestrator:
                 "preflight_for": task.task_id,
                 "preflight_phase": phase_name,
                 "preflight_sensitive_reasons": sensitive_reasons,
+                "preflight_execution_plan_preview": [
+                    dict(step) for step in list(preflight_execution_plan or [])[:4]
+                ],
+                "preflight_execution_plan_diagnostics": dict(
+                    preflight_plan_diagnostics
+                ),
                 "checkpoint_kind": "pre_sensitive_phase",
             },
         )
@@ -1385,6 +1509,13 @@ class AITeamOrchestrator:
             task.dependencies.append(checkpoint_id)
         task.metadata["lead_preflight_checkpoint_id"] = checkpoint_id
         task.metadata["lead_preflight_sensitive_reasons"] = sensitive_reasons
+        if preflight_execution_plan:
+            task.metadata["lead_preflight_execution_plan_preview"] = [
+                dict(step) for step in list(preflight_execution_plan or [])[:4]
+            ]
+        task.metadata["lead_preflight_execution_plan_diagnostics"] = dict(
+            preflight_plan_diagnostics
+        )
         self.taskboard.persist_tasks([task.task_id])
         self.mailbox.send(
             sender="system",
@@ -1407,6 +1538,33 @@ class AITeamOrchestrator:
             },
         )
         return checkpoint_id
+
+    @staticmethod
+    def _missing_execution_plan_waiver_reason(task: WorkTask) -> str:
+        """Devuelve el motivo de waiver si la fase puede continuar sin plan estructurado."""
+        if not bool(task.metadata.get("require_execution_plan", False)):
+            return ""
+        if not bool(task.metadata.get("interactive_chat", False)):
+            return ""
+        if task.role != Role.ENGINEER:
+            return ""
+        if not bool(task.metadata.get("lead_preflight_approved", False)):
+            return ""
+
+        if bool(task.metadata.get("continuation_requested", False)) and not bool(
+            task.metadata.get("continuation_effective", False)
+        ):
+            return "lead_preflight_continuation"
+
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        objective = str(
+            phase_contract.get("objective")
+            or task.metadata.get("delegation_brief")
+            or ""
+        ).strip()
+        if not is_missing_contract_objective(objective):
+            return "lead_preflight_approved"
+        return ""
 
     def _has_pending_chat_directive_checkpoint(self, task: WorkTask) -> bool:
         """Evita avanzar mientras exista una directiva del Lead pendiente de consumo.
@@ -1514,12 +1672,18 @@ class AITeamOrchestrator:
             task_root = self._task_root(task.task_id)
             ws = self.workflow_state.get(task_root, {})
             phase_summaries = ws.get("phase_context_summaries", {})
+            planning_artifacts = ws.get("planning_artifacts", {})
             dep_phase = str(dep_task.metadata.get("phase", "") or "").strip()
             compact_summary = ""
             if isinstance(phase_summaries, dict) and dep_phase:
                 compact_summary = str(phase_summaries.get(dep_phase, "") or "").strip()
+            planning_summary = ""
+            if isinstance(planning_artifacts, dict) and dep_phase:
+                planning_summary = str(
+                    (planning_artifacts.get(dep_phase, {}) or {}).get("summary", "") or ""
+                ).strip()
             result = dep_task.metadata.get("result", "")
-            if not result and not compact_summary:
+            if not result and not compact_summary and not planning_summary:
                 continue
             phase_label = dep_task.role.value.replace("_", " ").title()
             role = dep_task.role.value
@@ -1527,7 +1691,7 @@ class AITeamOrchestrator:
                 limit = 900 if role == "researcher" else 800
             else:
                 limit = 400
-            compacted = compact_summary or self._compact_text(str(result or ""), limit)
+            compacted = planning_summary or compact_summary or self._compact_text(str(result or ""), limit)
             lines.append(f"[{phase_label}] {compacted}")
         if not lines:
             task_root = self._task_root(task.task_id)
@@ -1546,6 +1710,1015 @@ class AITeamOrchestrator:
                     f"[{phase}] {compacted or self._compact_text(output, fallback_limit)}"
                 )
         return "\n".join(lines[:8])
+
+    @staticmethod
+    def _phase_name_for_task(task: WorkTask) -> str:
+        return str(
+            task.metadata.get("phase", "")
+            or (task.task_id.split("::")[-1] if "::" in task.task_id else "")
+        ).strip()
+
+    @classmethod
+    def _is_planning_phase_task(cls, task: WorkTask) -> bool:
+        return cls._phase_name_for_task(task).lower().startswith("plan_")
+
+    @staticmethod
+    def _normalize_delivery_text(value: Any) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip()
+
+    def _is_usable_delivery_text(
+        self,
+        value: Any,
+        *,
+        role: Role,
+        phase: str,
+        source_kind: str,
+    ) -> tuple[bool, str]:
+        text = self._normalize_delivery_text(value)
+        if not text:
+            return False, "empty"
+
+        lower = text.lower()
+        explicit_empty_markers = (
+            "sin datos disponibles",
+            "sin informacion disponible",
+            "sin información disponible",
+            "no data available",
+            "n/a",
+            "none",
+            "null",
+        )
+        if any(lower == marker or lower.startswith(f"{marker}.") for marker in explicit_empty_markers):
+            return False, "explicit_empty_marker"
+
+        quality_ok, quality_reason = self._assess_output_quality(text, role, phase)
+        if quality_ok:
+            return True, quality_reason
+        if quality_reason in {
+            "placeholder_output",
+            "output_vacio",
+            "output_trivial_sin_contenido_tecnico",
+        }:
+            return False, quality_reason
+
+        min_length = 24 if source_kind == "summary" else 80
+        if len(text) >= min_length:
+            return True, f"{source_kind}_fallback_length:{len(text)}"
+        return False, f"{source_kind}_too_short:{len(text)}"
+
+    def _dependency_delivery_gaps(self, task: WorkTask) -> list[dict[str, str]]:
+        if not task.dependencies or task.role == Role.TEAM_LEAD:
+            return []
+        is_chat_phase = bool(task.metadata.get("phase_contract_enforced")) or bool(
+            task.metadata.get("chat_parent")
+        ) or self._task_root(task.task_id).startswith("CHAT-")
+        if not is_chat_phase:
+            return []
+
+        task_root = self._task_root(task.task_id)
+        ws = self._get_workflow_state(task_root)
+        phase_summaries = dict(ws.get("phase_context_summaries", {}) or {})
+        phase_outputs = dict(ws.get("phase_outputs", {}) or {})
+        planning_artifacts = dict(ws.get("planning_artifacts", {}) or {})
+        gaps: list[dict[str, str]] = []
+
+        for dep_id in task.dependencies:
+            dep_task = self.taskboard.get_task(dep_id)
+            if dep_task is None or dep_task.state != TaskState.COMPLETED:
+                continue
+
+            dep_phase = self._phase_name_for_task(dep_task)
+            candidates = [
+                ("planning_artifact", (planning_artifacts.get(dep_phase, {}) or {}).get("summary", "")),
+                ("summary", phase_summaries.get(dep_phase, "")),
+                ("result", dep_task.metadata.get("result", "")),
+                ("output", phase_outputs.get(dep_phase, "")),
+            ]
+            reasons: list[str] = []
+            usable = False
+            for source_kind, candidate in candidates:
+                ok, reason = self._is_usable_delivery_text(
+                    candidate,
+                    role=dep_task.role,
+                    phase=dep_phase,
+                    source_kind=source_kind,
+                )
+                if ok:
+                    usable = True
+                    break
+                reasons.append(f"{source_kind}:{reason}")
+            if usable:
+                continue
+            gaps.append(
+                {
+                    "dependency_task_id": dep_id,
+                    "phase": dep_phase,
+                    "role": dep_task.role.value,
+                    "reason": ", ".join(reasons) or "missing_delivery",
+                }
+            )
+        return gaps
+
+    def _block_task_for_missing_dependency_delivery(
+        self,
+        task: WorkTask,
+        assignee: str,
+        missing_dependencies: list[dict[str, str]],
+    ) -> bool:
+        if not missing_dependencies:
+            return False
+
+        self.taskboard.mark_blocked(task.task_id, reason="missing_dependency_artifacts")
+        self.taskboard.update_metadata(
+            task.task_id,
+            {
+                "blocked_dependencies": [
+                    item.get("dependency_task_id", "") for item in missing_dependencies
+                ],
+                "blocked_missing_artifacts": missing_dependencies,
+            },
+        )
+        self.event_logger.emit(
+            "dependency_artifact_preflight_blocked",
+            {
+                "task_id": task.task_id,
+                "role": task.role.value,
+                "assignee": assignee,
+                "missing_dependencies": missing_dependencies,
+            },
+        )
+        self._emit_agent_event(
+            {
+                "type": "agent_blocked",
+                "task_id": task.task_id,
+                "agent_id": assignee,
+                "role": task.role.value,
+                "phase": self._phase_name_for_task(task),
+                "reason": "missing_dependency_artifacts",
+            }
+        )
+        return True
+
+    def _runtime_phase_contract_objective(
+        self,
+        *,
+        phase_id: str,
+        role_upper: str,
+        objective: str,
+        task: WorkTask,
+    ) -> str:
+        resolved = str(objective or "").strip()
+        if not is_missing_contract_objective(resolved):
+            return resolved
+
+        delegation_brief = str(task.metadata.get("delegation_brief", "") or "").strip()
+        is_chat_phase = bool(task.metadata.get("phase_contract_enforced")) or bool(
+            task.metadata.get("chat_parent")
+        ) or self._task_root(task.task_id).startswith("CHAT-")
+        if not is_chat_phase and not is_missing_contract_objective(delegation_brief):
+            return delegation_brief
+        return ""
+
+    def _missing_phase_contract_objective_details(self, task: WorkTask) -> list[str]:
+        if task.role == Role.TEAM_LEAD:
+            return []
+
+        task_root = self._task_root(task.task_id)
+        ws = self._get_workflow_state(task_root)
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        workflow_contracts = dict(ws.get("phase_contracts", {}) or {})
+        phase_id = str(
+            phase_contract.get("phase_id")
+            or task.metadata.get("phase")
+            or (task.task_id.split("::")[-1] if "::" in task.task_id else "")
+            or task.title
+        ).strip()
+        is_contract_bound = bool(task.metadata.get("phase_contract_enforced")) or bool(
+            phase_contract
+        ) or phase_id in workflow_contracts
+        if not is_contract_bound:
+            return []
+
+        workflow_contract = dict(workflow_contracts.get(phase_id, {}) or {})
+        objective_candidates = [
+            ("task.metadata.phase_contract.objective", phase_contract.get("objective")),
+            ("workflow_state.phase_contracts.objective", workflow_contract.get("objective")),
+        ]
+        if any(not is_missing_contract_objective(value) for _, value in objective_candidates):
+            return []
+
+        return [
+            f"phase={phase_id or 'unknown'}",
+            f"role={task.role.value}",
+            f"task_root={task_root or 'unknown'}",
+            "objective missing or placeholder in phase contract",
+        ]
+
+    def _build_runtime_phase_contract_block(self, task: WorkTask) -> str:
+        task_root = self._task_root(task.task_id)
+        ws = self.workflow_state.get(task_root, {})
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        workflow_contracts = dict(ws.get("phase_contracts", {}) or {})
+
+        phase_id = str(
+            phase_contract.get("phase_id")
+            or task.metadata.get("phase")
+            or (task.task_id.split("::")[-1] if "::" in task.task_id else "")
+            or task.title
+        ).strip()
+        if not phase_id:
+            return ""
+
+        workflow_contract = dict(workflow_contracts.get(phase_id, {}) or {})
+        role_upper = str(
+            phase_contract.get("role") or workflow_contract.get("role") or task.role.name
+        ).strip().upper()
+
+        objective = self._runtime_phase_contract_objective(
+            phase_id=phase_id,
+            role_upper=role_upper,
+            objective=str(
+                phase_contract.get("objective")
+                or workflow_contract.get("objective")
+                or ""
+            ).strip(),
+            task=task,
+        )
+        objective_missing = is_missing_contract_objective(objective)
+        objective_display = (
+            f"[CONTRATO INVALIDO: objective ausente para '{phase_id}']"
+            if objective_missing
+            else objective
+        )
+
+        depends_on_raw = (
+            phase_contract.get("depends_on")
+            or workflow_contract.get("depends_on")
+            or []
+        )
+        depends_on = [str(dep).strip() for dep in list(depends_on_raw or []) if str(dep).strip()]
+        if not depends_on and task.dependencies:
+            inferred_depends: list[str] = []
+            for dep_id in task.dependencies:
+                dep_task = self.taskboard.get_task(dep_id)
+                dep_phase = str(
+                    (dep_task.metadata.get("phase", "") if dep_task is not None else "")
+                    or (str(dep_id).split("::")[-1] if "::" in str(dep_id) else "")
+                ).strip()
+                if dep_phase:
+                    inferred_depends.append(dep_phase)
+            depends_on = inferred_depends[:4]
+
+        phase_outputs = dict(ws.get("phase_outputs", {}) or {})
+        phase_summaries = dict(ws.get("phase_context_summaries", {}) or {})
+        upstream_lines: list[str] = []
+        for dep in depends_on[:4]:
+            dep_summary = str(phase_summaries.get(dep, "") or "").strip()
+            dep_output = str(phase_outputs.get(dep, "") or "").strip()
+            dep_contract = dict(workflow_contracts.get(dep, {}) or {})
+            dep_objective = str(dep_contract.get("objective", "") or "").strip()
+            dep_context = dep_summary or self._compact_text(dep_output, 280) or dep_objective
+            dep_prefix = f"{dep}:"
+            if dep_context.lower().startswith(dep_prefix.lower()):
+                dep_context = dep_context[len(dep_prefix):].strip()
+            if dep_context:
+                upstream_lines.append(f"- {dep}: {dep_context}")
+
+        if objective_missing and role_upper != "TEAM_LEAD":
+            role_guidance = (
+                "Contrato invalido: objective ausente. No infieras el objetivo por nombre de fase, "
+                "contexto o memoria heredada. Declara bloqueo contractual y pide replanificacion del Lead."
+            )
+        else:
+            role_guidance = (
+                "No cambies de slice, no cambies de objetivo y no sustituyas esta fase por otra "
+                "de mayor impacto sin una nueva directiva del Lead."
+                if role_upper == "ENGINEER"
+                else (
+                    "Valida estrictamente si lo ejecutado respeta este contrato. Si detectas deriva, "
+                    "declárala explícitamente."
+                    if role_upper in {"REVIEWER", "QA"}
+                    else "Usa este contrato como restricción autoritativa de la fase."
+                )
+            )
+
+        lines = [
+            "[PHASE_CONTRACT]",
+            f"phase_id: {phase_id}",
+            f"role: {role_upper}",
+            f"objective: {objective_display}",
+            f"depends_on: [{', '.join(depends_on)}]" if depends_on else "depends_on: []",
+            "contract_rule: obligatorio",
+            role_guidance,
+        ]
+        if upstream_lines:
+            lines.append("upstream_context:")
+            lines.extend(upstream_lines)
+        lines.append("[/PHASE_CONTRACT]")
+        return "\n".join(lines)
+
+    def _resolved_phase_objective_for_task(self, task: WorkTask) -> str:
+        task_root = self._task_root(task.task_id)
+        ws = self.workflow_state.get(task_root, {})
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        workflow_contracts = dict(ws.get("phase_contracts", {}) or {})
+        phase_id = str(
+            phase_contract.get("phase_id")
+            or task.metadata.get("phase")
+            or (task.task_id.split("::")[-1] if "::" in task.task_id else "")
+            or task.title
+        ).strip()
+        if not phase_id:
+            return ""
+        workflow_contract = dict(workflow_contracts.get(phase_id, {}) or {})
+        role_upper = str(
+            phase_contract.get("role") or workflow_contract.get("role") or task.role.name
+        ).strip().upper()
+        return self._runtime_phase_contract_objective(
+            phase_id=phase_id,
+            role_upper=role_upper,
+            objective=str(
+                phase_contract.get("objective")
+                or workflow_contract.get("objective")
+                or ""
+            ).strip(),
+            task=task,
+        )
+
+    @staticmethod
+    def _format_phase_verdict_block(verdict: dict[str, Any]) -> str:
+        phase_id = str(verdict.get("phase_id", "") or "").strip()
+        status = str(verdict.get("status", "") or "").strip()
+        contract_status = str(verdict.get("contract_status", "") or "").strip()
+        reason_codes = ", ".join(
+            str(item).strip()
+            for item in list(verdict.get("reason_codes", []) or [])
+            if str(item).strip()
+        )
+        slice_id = str(verdict.get("slice_id", "") or "").strip()
+        summary = str(verdict.get("summary", "") or "").strip()
+        return (
+            "[PHASE_VERDICT]\n"
+            f"phase_id: {phase_id}\n"
+            f"status: {status}\n"
+            f"reason_codes: {reason_codes}\n"
+            f"contract_status: {contract_status}\n"
+            f"slice_id: {slice_id}\n"
+            f"summary: {summary}\n"
+            "[/PHASE_VERDICT]"
+        )
+
+    def _fail_task_for_continuation_drift(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        session,
+    ) -> bool:
+        phase_name = self._phase_name_for_task(task).lower()
+        if task.role != Role.ENGINEER or phase_name != "build":
+            return False
+
+        objective = self._resolved_phase_objective_for_task(task)
+        drift = detect_continuation_drift(
+            objective=objective,
+            output_text=safe_content,
+        )
+        if not drift:
+            return False
+
+        expected_hints = list(drift.get("expected_path_hints", []) or [])
+        proposed_paths = list(drift.get("proposed_paths", []) or [])
+        verdict_payload = {
+            "phase_id": str(drift.get("phase_id", phase_name) or phase_name),
+            "status": str(drift.get("status", "rejected") or "rejected"),
+            "contract_status": str(drift.get("contract_status", "drift") or "drift"),
+            "reason_codes": list(drift.get("reason_codes", []) or []),
+            "summary": str(drift.get("summary", "") or "").strip(),
+        }
+        diagnostic = (
+            f"{self._format_phase_verdict_block(verdict_payload)}\n"
+            "Continuation drift detectada antes de aplicar cambios.\n"
+            f"Objetivo vigente: {objective}\n"
+            f"Paths esperados: {', '.join(expected_hints[:6]) or 'sin pistas explicitas'}\n"
+            f"Paths propuestos: {', '.join(proposed_paths[:6]) or 'sin paths detectados'}"
+        )
+        task.metadata["_last_agent_output"] = safe_content
+        task.metadata["continuation_drift_expected_paths"] = expected_hints
+        task.metadata["continuation_drift_proposed_paths"] = proposed_paths
+        task.metadata["continuation_drift_summary"] = verdict_payload["summary"]
+        task_root = self._task_root(task.task_id)
+        self._update_workflow_state(task_root, phase_name, diagnostic)
+
+        error = (
+            "continuation_drift_detected: "
+            f"expected={', '.join(expected_hints[:4]) or 'unknown'} "
+            f"proposed={', '.join(proposed_paths[:4]) or 'unknown'}"
+        )
+        self.taskboard.mark_failed(task.task_id, error=error)
+        self._maybe_spawn_lead_failure_checkpoint(task, error)
+        self._maybe_run_event_meeting(
+            trigger="task_failed",
+            task_id=task.task_id,
+            reason=error,
+        )
+        self.event_logger.emit(
+            "continuation_drift_detected",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": phase_name,
+                "expected_path_hints": expected_hints[:8],
+                "proposed_paths": proposed_paths[:8],
+                "objective": objective[:240],
+            },
+        )
+        self.session_store.close_session(
+            session,
+            summary=f"continuation_drift:{verdict_payload['summary']}",
+            status="failed",
+        )
+        return True
+
+    def _fail_task_for_contract_path_drift(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        session,
+    ) -> bool:
+        if task.role != Role.ENGINEER:
+            return False
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        proposed_paths = extract_path_candidates(safe_content)
+        drift = detect_contract_path_drift(
+            proposed_paths=proposed_paths,
+            forbidden_path_hints=list(phase_contract.get("forbidden_path_hints", []) or []),
+            allowed_module_path_hints=list(
+                phase_contract.get("allowed_module_path_hints", []) or []
+            ),
+        )
+        if not drift:
+            return False
+
+        phase_name = self._phase_name_for_task(task).lower()
+        verdict_payload = {
+            "phase_id": str(drift.get("phase_id", phase_name) or phase_name),
+            "status": str(drift.get("status", "rejected") or "rejected"),
+            "contract_status": str(drift.get("contract_status", "drift") or "drift"),
+            "reason_codes": list(drift.get("reason_codes", []) or []),
+            "summary": str(drift.get("summary", "") or "").strip(),
+        }
+        diagnostic = (
+            f"{self._format_phase_verdict_block(verdict_payload)}\n"
+            "Contract path drift detectada antes de escribir archivos.\n"
+            f"Propuesta: {', '.join(list(drift.get('proposed_paths', []) or [])[:6])}"
+        )
+        task.metadata["contract_path_drift_summary"] = verdict_payload["summary"]
+        task.metadata["contract_path_drift_proposed_paths"] = list(
+            drift.get("proposed_paths", []) or []
+        )
+        self._update_workflow_state(
+            self._task_root(task.task_id),
+            phase_name,
+            diagnostic,
+        )
+        self.taskboard.mark_failed(
+            task.task_id,
+            error=f"contract_path_drift_detected: {verdict_payload['summary']}",
+        )
+        self.event_logger.emit(
+            "contract_path_drift_detected",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": phase_name,
+                "summary": verdict_payload["summary"],
+                "proposed_paths": list(drift.get("proposed_paths", []) or []),
+            },
+        )
+        self._maybe_spawn_lead_failure_checkpoint(task, verdict_payload["summary"])
+        self._maybe_run_event_meeting(
+            trigger="task_failed",
+            task_id=task.task_id,
+            reason="contract_path_drift",
+        )
+        self.session_store.close_session(
+            session,
+            summary=f"contract_path_drift:{verdict_payload['summary']}",
+            status="failed",
+        )
+        return True
+
+    def _fail_task_for_planning_phase_implementation_drift(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        session,
+    ) -> bool:
+        phase_name = self._phase_name_for_task(task).lower()
+        if not phase_name.startswith("plan_"):
+            return False
+
+        has_code_block = "```" in str(safe_content or "")
+        has_path_annotation = bool(
+            re.search(r"\bpath\s*=\s*[\w./\\\\-]+", str(safe_content or ""), re.IGNORECASE)
+        )
+        if not has_code_block and not has_path_annotation:
+            return False
+
+        summary = (
+            "planning phase must stay at plan level and cannot emit code blocks or path= annotations"
+        )
+        diagnostic = (
+            "[PHASE_VERDICT]\n"
+            f"phase_id: {phase_name}\n"
+            "status: rejected\n"
+            "reason_codes: planning_phase_scope_drift\n"
+            "contract_status: drift\n"
+            "slice_id: \n"
+            f"summary: {summary}\n"
+            "[/PHASE_VERDICT]\n"
+            "La fase de planning intento emitir implementacion concreta en lugar de "
+            "corte, tareas y criterios."
+        )
+        self._update_workflow_state(
+            self._task_root(task.task_id),
+            phase_name,
+            diagnostic,
+        )
+        self.taskboard.mark_failed(
+            task.task_id,
+            error=f"planning_phase_scope_drift_detected: {summary}",
+        )
+        self.event_logger.emit(
+            "planning_phase_scope_drift_detected",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": phase_name,
+                "summary": summary,
+            },
+        )
+        self._maybe_spawn_lead_failure_checkpoint(task, summary)
+        self._maybe_run_event_meeting(
+            trigger="task_failed",
+            task_id=task.task_id,
+            reason="planning_phase_scope_drift",
+        )
+        self.session_store.close_session(
+            session,
+            summary=f"planning_phase_scope_drift:{summary}",
+            status="failed",
+        )
+        return True
+
+    @staticmethod
+    def _planning_section_kind(line: str) -> str:
+        normalized = re.sub(r"[^a-z_ ]+", " ", str(line or "").strip().lower()).strip(" :")
+        normalized = normalized.replace("ó", "o").replace("í", "i").replace("á", "a")
+        normalized = normalized.replace("é", "e").replace("ú", "u")
+        if normalized in {"objective", "objetivo"}:
+            return "objective"
+        if normalized in {
+            "steps",
+            "pasos",
+            "implementation steps",
+            "pasos de implementacion",
+            "plan steps",
+            "tareas",
+            "tasks",
+            "sequence",
+            "secuencia",
+        }:
+            return "steps"
+        if normalized in {
+            "acceptance criteria",
+            "acceptance_criteria",
+            "criteria",
+            "criterios",
+            "criterios de aceptacion",
+            "quality gates",
+            "quality_gates",
+            "checks",
+            "validation",
+            "validacion",
+        }:
+            return "acceptance_criteria"
+        if normalized in {
+            "constraints",
+            "restrictions",
+            "restricciones",
+            "guardrails",
+            "forbidden paths",
+            "forbidden_path_hints",
+        }:
+            return "constraints"
+        return ""
+
+    @classmethod
+    def _extract_planning_artifact(cls, text: str) -> dict[str, Any]:
+        raw_text = str(text or "").strip()
+        if not raw_text:
+            return {}
+
+        block_match = _PLANNING_ARTIFACT_BLOCK_RE.search(raw_text)
+        artifact_text = str(block_match.group(1) if block_match else raw_text).strip()
+        data: dict[str, Any] = {
+            "objective": "",
+            "steps": [],
+            "acceptance_criteria": [],
+            "constraints": [],
+        }
+        current_section = ""
+
+        for raw_line in artifact_text.splitlines():
+            line = str(raw_line or "").rstrip()
+            stripped = line.strip()
+            if not stripped:
+                continue
+            section_kind = cls._planning_section_kind(stripped)
+            if section_kind:
+                current_section = section_kind
+                continue
+            bullet_match = _PLANNING_BULLET_RE.match(stripped)
+            if current_section == "objective":
+                if bullet_match and not data["objective"]:
+                    data["objective"] = str(bullet_match.group(1) or "").strip()
+                elif not data["objective"]:
+                    data["objective"] = stripped
+                continue
+            if current_section in {"steps", "acceptance_criteria", "constraints"}:
+                item = str(bullet_match.group(1) if bullet_match else stripped).strip()
+                if item:
+                    data[current_section].append(item)
+
+        if not block_match:
+            bullets = [
+                str(match.group(1) or "").strip()
+                for line in raw_text.splitlines()
+                for match in [_PLANNING_BULLET_RE.match(line.strip())]
+                if match and str(match.group(1) or "").strip()
+            ]
+            if not data["steps"] and bullets:
+                data["steps"] = bullets[:4]
+            if not data["acceptance_criteria"]:
+                criteria_candidates = [
+                    item
+                    for item in bullets
+                    if re.search(
+                        r"(?i)\b(?:must|debe|verify|verificar|validar|accept|acept|pytest|test|check)\b",
+                        item,
+                    )
+                ]
+                data["acceptance_criteria"] = criteria_candidates[:4]
+
+        data["objective"] = str(data.get("objective", "") or "").strip()
+        data["steps"] = [
+            str(item).strip() for item in list(data.get("steps", []) or []) if str(item).strip()
+        ][:6]
+        data["acceptance_criteria"] = [
+            str(item).strip()
+            for item in list(data.get("acceptance_criteria", []) or [])
+            if str(item).strip()
+        ][:6]
+        data["constraints"] = [
+            str(item).strip()
+            for item in list(data.get("constraints", []) or [])
+            if str(item).strip()
+        ][:6]
+
+        if not data["objective"] or len(data["steps"]) < 2 or len(data["acceptance_criteria"]) < 1:
+            return {}
+
+        summary_parts = [
+            f"objective={data['objective']}",
+            f"steps={'; '.join(data['steps'][:2])}",
+            f"criteria={'; '.join(data['acceptance_criteria'][:2])}",
+        ]
+        if data["constraints"]:
+            summary_parts.append(f"constraints={'; '.join(data['constraints'][:2])}")
+        data["summary"] = " | ".join(summary_parts)
+        return data
+
+    def _persist_planning_artifact(
+        self,
+        *,
+        task: WorkTask,
+        phase_name: str,
+        artifact: dict[str, Any],
+    ) -> None:
+        task.metadata["planning_artifact"] = dict(artifact)
+        task_root = self._task_root(task.task_id)
+        ws = self._get_workflow_state(task_root)
+        planning_artifacts = dict(ws.get("planning_artifacts", {}) or {})
+        planning_artifacts[str(phase_name or "").strip()] = dict(artifact)
+        ws["planning_artifacts"] = planning_artifacts
+        self._save_workflow_state(task_root)
+        self.event_logger.emit(
+            "planning_artifact_persisted",
+            {
+                "task_root": task_root,
+                "task_id": task.task_id,
+                "phase": phase_name,
+                "steps": len(list(artifact.get("steps", []) or [])),
+                "acceptance_criteria": len(
+                    list(artifact.get("acceptance_criteria", []) or [])
+                ),
+            },
+        )
+
+    @staticmethod
+    def _looks_like_execution_command(candidate: object) -> bool:
+        text = str(candidate or "").strip().strip("`")
+        if not text:
+            return False
+        normalized = text.lower()
+        if any(normalized.startswith(prefix) for prefix in _NON_COMMAND_INLINE_PREFIXES):
+            return False
+        first = normalized.split()[0]
+        if first in _POWERSHELL_COMMAND_STARTERS:
+            return True
+        return bool(
+            re.match(
+                r"^(pytest|python|py|pip|npm|node|pnpm|yarn|uv|npx|tox|coverage|playwright|git|cargo|go|dotnet|mvn|gradle|make|pwsh|powershell|bash|sh|cmd)\b",
+                normalized,
+            )
+        )
+
+    @classmethod
+    def _extract_execution_command_candidates(cls, text: object) -> list[str]:
+        raw_text = str(text or "").strip()
+        if not raw_text:
+            return []
+
+        candidates: list[str] = []
+        for match in _EXECUTION_INLINE_CODE_RE.finditer(raw_text):
+            candidate = str(match.group(1) or "").strip()
+            if cls._looks_like_execution_command(candidate):
+                candidates.append(candidate)
+
+        for match in _EXECUTION_LINE_COMMAND_RE.finditer(raw_text):
+            candidate = str(match.group(0) or "").strip()
+            if cls._looks_like_execution_command(candidate):
+                candidates.append(candidate)
+
+        return list(dict.fromkeys(candidates))[:8]
+
+    @staticmethod
+    def _execution_step_type_for_command(command: str) -> str:
+        first = str(command or "").strip().split()[0].lower() if str(command or "").strip() else ""
+        if first in _POWERSHELL_COMMAND_STARTERS or command.strip().startswith("$"):
+            return "powershell"
+        return "cmd"
+
+    @classmethod
+    def _build_execution_plan_from_commands(
+        cls,
+        commands: list[str],
+    ) -> list[dict[str, Any]]:
+        unique_commands = list(dict.fromkeys(cmd for cmd in commands if str(cmd).strip()))[:6]
+        plan: list[dict[str, Any]] = []
+        for command in unique_commands:
+            step_type = cls._execution_step_type_for_command(command)
+            timeout = 180 if re.match(r"(?i)^(pytest|python|py|npm|pnpm|yarn|uv|npx|tox|coverage|cargo|go|dotnet|mvn|gradle|make)\b", command.strip()) else 90
+            plan.append(
+                {
+                    "type": step_type,
+                    "command": command,
+                    "timeout": timeout,
+                }
+            )
+        return plan
+
+    def _execution_plan_source_candidates(
+        self,
+        task: WorkTask,
+    ) -> tuple[list[tuple[str, object]], list[str]]:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        planning_artifact = dict(metadata.get("planning_artifact", {}) or {})
+        phase_contract = dict(metadata.get("phase_contract", {}) or {})
+        objective = str(phase_contract.get("objective", "") or "").strip()
+
+        text_sources: list[tuple[str, object]] = []
+        for key in ("steps", "acceptance_criteria"):
+            values = list(planning_artifact.get(key, []) or [])
+            for index, value in enumerate(values, start=1):
+                text_sources.append((f"task.planning_artifact.{key}[{index}]", value))
+        text_sources.extend(
+            [
+                ("task.phase_contract.objective", objective),
+                ("task.delegation_brief", metadata.get("delegation_brief", "")),
+                ("task.description", task.description),
+            ]
+        )
+
+        task_root = self._task_root(task.task_id)
+        ws = self._get_workflow_state(task_root)
+        planning_artifacts = dict(ws.get("planning_artifacts", {}) or {})
+        phase_outputs = dict(ws.get("phase_outputs", {}) or {})
+        dependency_phases: list[str] = []
+        for dep_id in list(task.dependencies or []):
+            dep_task = self.taskboard.get_task(dep_id)
+            if dep_task is None or dep_task.state != TaskState.COMPLETED:
+                continue
+            dep_phase = self._phase_name_for_task(dep_task)
+            if dep_phase:
+                dependency_phases.append(dep_phase)
+            dep_artifact = dict(
+                dep_task.metadata.get("planning_artifact", {})
+                or planning_artifacts.get(dep_phase, {})
+                or {}
+            )
+            for key in ("steps", "acceptance_criteria"):
+                values = list(dep_artifact.get(key, []) or [])
+                for index, value in enumerate(values, start=1):
+                    text_sources.append((f"dependency.{dep_phase}.{key}[{index}]", value))
+            if dep_artifact.get("objective"):
+                text_sources.append(
+                    (f"dependency.{dep_phase}.planning_artifact.objective", dep_artifact.get("objective", ""))
+                )
+            if dep_artifact.get("summary"):
+                text_sources.append(
+                    (f"dependency.{dep_phase}.planning_artifact.summary", dep_artifact.get("summary", ""))
+                )
+            dep_result = dep_task.metadata.get("result", "")
+            if dep_result:
+                text_sources.append((f"dependency.{dep_phase}.result", dep_result))
+            dep_output = phase_outputs.get(dep_phase, "")
+            if dep_output:
+                text_sources.append((f"dependency.{dep_phase}.phase_output", dep_output))
+
+        filtered_sources: list[tuple[str, object]] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        for source_name, source_value in text_sources:
+            normalized_value = str(source_value or "").strip()
+            if not normalized_value:
+                continue
+            pair = (str(source_name), normalized_value)
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            filtered_sources.append((str(source_name), normalized_value))
+        return filtered_sources, list(dict.fromkeys(phase for phase in dependency_phases if phase))
+
+    def _derive_execution_plan_from_task(
+        self,
+        task: WorkTask,
+    ) -> list[dict[str, Any]]:
+        plan, _ = self._derive_execution_plan_with_diagnostics(task)
+        return plan
+
+    def _derive_execution_plan_with_diagnostics(
+        self,
+        task: WorkTask,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        existing_plan = metadata.get("execution_plan", [])
+        if isinstance(existing_plan, list) and existing_plan:
+            return (
+                [dict(step) for step in existing_plan if isinstance(step, dict)],
+                {
+                    "status": "already_present",
+                    "source_count": 1,
+                    "command_count": len(list(existing_plan or [])),
+                    "checked_sources": [{"source": "task.execution_plan", "commands": len(list(existing_plan or []))}],
+                    "dependency_phases": [],
+                },
+            )
+
+        text_sources, dependency_phases = self._execution_plan_source_candidates(task)
+        commands: list[str] = []
+        checked_sources: list[dict[str, Any]] = []
+        for source_name, source in text_sources:
+            source_text = str(source or "").strip()
+            found = self._extract_execution_command_candidates(source_text)
+            checked_sources.append(
+                {
+                    "source": source_name,
+                    "chars": len(source_text),
+                    "commands": len(found),
+                }
+            )
+            commands.extend(found)
+
+        unique_commands = list(dict.fromkeys(cmd for cmd in commands if str(cmd).strip()))[:6]
+        status = "derived" if unique_commands else "no_commands_detected"
+        return (
+            self._build_execution_plan_from_commands(unique_commands),
+            {
+                "status": status,
+                "source_count": len(checked_sources),
+                "command_count": len(unique_commands),
+                "checked_sources": checked_sources[:12],
+                "dependency_phases": dependency_phases[:8],
+            },
+        )
+
+    def _materialize_execution_plan_if_possible(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        persist: bool,
+    ) -> list[dict[str, Any]]:
+        derived_plan, diagnostics = self._derive_execution_plan_with_diagnostics(task)
+        task.metadata["execution_plan_derivation"] = dict(diagnostics)
+        if not derived_plan:
+            if persist:
+                self.taskboard.persist_tasks([task.task_id])
+            self.event_logger.emit(
+                "execution_plan_derivation_failed",
+                {
+                    "task_id": task.task_id,
+                    "assignee": assignee,
+                    "phase": self._phase_name_for_task(task),
+                    **dict(diagnostics),
+                },
+            )
+            return []
+        task.metadata["execution_plan"] = [dict(step) for step in derived_plan]
+        task.metadata["execution_plan_source"] = "derived_from_contract"
+        if persist:
+            self.taskboard.persist_tasks([task.task_id])
+        self.event_logger.emit(
+            "execution_plan_derived",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "step_count": len(derived_plan),
+                "phase": self._phase_name_for_task(task),
+                "dependency_phases": list(diagnostics.get("dependency_phases", []) or []),
+            },
+        )
+        return derived_plan
+
+    def _fail_task_for_missing_planning_artifact(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        session,
+    ) -> bool:
+        phase_name = self._phase_name_for_task(task).lower()
+        if task.role != Role.ENGINEER or not phase_name.startswith("plan_"):
+            return False
+
+        artifact = self._extract_planning_artifact(safe_content)
+        if artifact:
+            self._persist_planning_artifact(
+                task=task,
+                phase_name=phase_name,
+                artifact=artifact,
+            )
+            return False
+
+        summary = (
+            "planning phase must emit a structured planning artifact with objective, at least "
+            "two implementation steps, and at least one acceptance criterion"
+        )
+        diagnostic = (
+            "[PHASE_VERDICT]\n"
+            f"phase_id: {phase_name}\n"
+            "status: failed\n"
+            "reason_codes: missing_planning_artifact\n"
+            "contract_status: unknown\n"
+            "slice_id: \n"
+            f"summary: {summary}\n"
+            "[/PHASE_VERDICT]\n"
+            "El planning del Engineer no dejo un artefacto estructurado reutilizable para las "
+            "fases siguientes."
+        )
+        self._update_workflow_state(self._task_root(task.task_id), phase_name, diagnostic)
+        self.taskboard.mark_failed(
+            task.task_id,
+            error=f"missing_planning_artifact_required: {summary}",
+        )
+        self.event_logger.emit(
+            "missing_planning_artifact_required",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": phase_name,
+            },
+        )
+        self._maybe_spawn_lead_failure_checkpoint(task, summary)
+        self._maybe_run_event_meeting(
+            trigger="task_failed",
+            task_id=task.task_id,
+            reason="missing_planning_artifact",
+        )
+        self.session_store.close_session(
+            session,
+            summary="missing_planning_artifact",
+            status="failed",
+        )
+        return True
 
     def _phase_tasks_for_run_health(self, task_root: str) -> dict[str, WorkTask]:
         ws = self._get_workflow_state(task_root)
@@ -1669,6 +2842,43 @@ class AITeamOrchestrator:
             },
         )
         return block
+
+    def _build_lead_close_policy_block(self, task: WorkTask) -> str:
+        phase_name = str(task.metadata.get("phase", "") or "").strip()
+        if phase_name != "lead_close":
+            return ""
+
+        task_root = str(task.metadata.get("chat_parent", "") or self._task_root(task.task_id)).strip()
+        ws = self._get_workflow_state(task_root)
+        phase_tasks = self._phase_tasks_for_run_health(task_root)
+        phase_states = {
+            phase_id: phase_task.state.value
+            for phase_id, phase_task in phase_tasks.items()
+        }
+        policy = derive_lead_close_policy(
+            phase_verdicts=ws.get("phase_verdicts", {}),
+            phase_states=phase_states,
+            run_verdict=ws.get("run_verdict", {}),
+            phase_outputs=ws.get("phase_outputs", {}),
+        )
+        authoritative_close_state = str(
+            policy.get("authoritative_close_state", "") or ""
+        ).strip().lower()
+        unique_reasons = [
+            str(item).strip()
+            for item in list(policy.get("blocking_signals", []) or [])
+            if str(item).strip()
+        ]
+        self.event_logger.emit(
+            "lead_close_policy_built",
+            {
+                "task_id": task.task_id,
+                "task_root": task_root,
+                "authoritative_close_state": authoritative_close_state,
+                "blocking_signals": unique_reasons,
+            },
+        )
+        return build_lead_close_policy_prompt_block(policy)
 
     # ── Gate feedback collection ────────────────────────────────────
 
@@ -1814,6 +3024,15 @@ class AITeamOrchestrator:
                     "execution_order": execution_order,
                 },
             )
+            refreshed = self.taskboard.get_task(task.task_id)
+            if refreshed is None:
+                continue
+            if self._block_task_for_missing_dependency_delivery(
+                refreshed,
+                assignee=assignee,
+                missing_dependencies=self._dependency_delivery_gaps(refreshed),
+            ):
+                continue
             # C1: spawn deferred evidence delegate tasks lazily when the parent
             # phase is first claimed.
             self._maybe_spawn_deferred_delegates(task.task_id)
@@ -2109,6 +3328,7 @@ class AITeamOrchestrator:
         thread = self.thread_store.get_thread(
             agent_id=assignee,
             project_key=self._project_thread_key(),
+            role=task.role.value,
         )
         consumed_mailbox_messages = self._consume_actionable_mailbox_messages(
             task=task,
@@ -2137,6 +3357,11 @@ class AITeamOrchestrator:
                 "gate_iteration": gate_iteration,
                 "session_id": session.session_id,
                 "thread_id": thread.thread_id,
+                "thread_generation": int(getattr(thread, "generation", 1) or 1),
+                "thread_version": str(getattr(thread, "thread_version", "") or ""),
+                "thread_provider": str(getattr(thread, "provider", "") or ""),
+                "thread_channel": str(getattr(thread, "channel", "") or ""),
+                "thread_model_family": str(getattr(thread, "model_family", "") or ""),
             },
         )
         workspace = self.sandboxes.task_workspace(
@@ -2168,27 +3393,88 @@ class AITeamOrchestrator:
         if tool_report.integrated_adapters:
             self._sync_router_external_adapters()
 
+        missing_contract_details = self._missing_phase_contract_objective_details(task)
+        if missing_contract_details:
+            self._fail_task_due_to_compliance(
+                task=task,
+                assignee=assignee,
+                reason="missing_phase_contract_objective",
+                details=missing_contract_details,
+            )
+            self.session_store.close_session(
+                session, summary="missing_phase_contract_objective", status="failed"
+            )
+            return
+
         execution_plan = task.metadata.get("execution_plan", [])
         execution_context = ""
         require_execution_plan = bool(
             task.metadata.get("require_execution_plan", False)
         )
         demo_fast_mode = sim_mode_enabled()
+        if require_execution_plan and (
+            not isinstance(execution_plan, list) or not execution_plan
+        ):
+            execution_plan = self._materialize_execution_plan_if_possible(
+                task=task,
+                assignee=assignee,
+                persist=True,
+            )
         if (
             require_execution_plan
             and (not isinstance(execution_plan, list) or not execution_plan)
             and not demo_fast_mode
         ):
-            self._fail_task_due_to_compliance(
-                task=task,
-                assignee=assignee,
-                reason="missing_execution_plan_required",
-                details=["Task requires execution_plan but none was provided"],
-            )
-            self.session_store.close_session(
-                session, summary="missing_execution_plan", status="failed"
-            )
-            return
+            waiver_reason = self._missing_execution_plan_waiver_reason(task)
+            if waiver_reason:
+                task.metadata["execution_plan_requirement_waived"] = waiver_reason
+                self.taskboard.persist_tasks([task.task_id])
+                self.event_logger.emit(
+                    "execution_plan_requirement_waived",
+                    {
+                        "task_id": task.task_id,
+                        "assignee": assignee,
+                        "reason": waiver_reason,
+                    },
+                )
+            else:
+                derivation_details = []
+                derivation_report = dict(
+                    task.metadata.get("execution_plan_derivation", {}) or {}
+                )
+                checked_sources = list(
+                    derivation_report.get("checked_sources", []) or []
+                )[:6]
+                dependency_phases = list(
+                    derivation_report.get("dependency_phases", []) or []
+                )[:6]
+                if checked_sources:
+                    derivation_details.append(
+                        "Execution-plan derivation checked sources: "
+                        + ", ".join(
+                            str(item.get("source", "") or "").strip()
+                            for item in checked_sources
+                            if str(item.get("source", "") or "").strip()
+                        )
+                    )
+                if dependency_phases:
+                    derivation_details.append(
+                        "Completed dependency phases reviewed: "
+                        + ", ".join(str(item).strip() for item in dependency_phases if str(item).strip())
+                    )
+                self._fail_task_due_to_compliance(
+                    task=task,
+                    assignee=assignee,
+                    reason="missing_execution_plan_required",
+                    details=[
+                        "Task requires execution_plan but none was provided or derivable",
+                        *derivation_details,
+                    ],
+                )
+                self.session_store.close_session(
+                    session, summary="missing_execution_plan", status="failed"
+                )
+                return
         if isinstance(execution_plan, list) and execution_plan:
             allowed, reason, sensitive_commands = (
                 self.compliance.validate_execution_plan(
@@ -2251,6 +3537,32 @@ class AITeamOrchestrator:
         context = self._build_collaboration_context(task=task, assignee=assignee)
         skill_mcp_context = self._build_skill_mcp_context(task=task, assignee=assignee)
         specialist_prefetch_context = self._collect_specialist_prefetch_context(task)
+
+        # RC-H: inject actual upstream task RESULTS into context so that
+        # review/QA agents see real engineer/researcher output rather than
+        # just the phase objectives written at task-creation time.
+        _upstream_results_lines: list[str] = []
+        for _dep_id in (task.dependencies or [])[:8]:
+            _dep_task = self.taskboard.get_task(_dep_id)
+            if _dep_task is None:
+                continue
+            _dep_result = str(_dep_task.metadata.get("result", "") or "").strip()
+            if not _dep_result:
+                continue
+            _dep_label = _dep_id.split("::")[-1] if "::" in _dep_id else _dep_id
+            _dep_role = getattr(_dep_task.role, "value", str(_dep_task.role))
+            _short = _dep_result[:2000] + ("…[truncado]" if len(_dep_result) > 2000 else "")
+            _upstream_results_lines.append(f"[{_dep_label} / {_dep_role}]:\n{_short}")
+        if _upstream_results_lines:
+            _upstream_block = (
+                "\n\n[RESULTADOS_UPSTREAM]\n"
+                "Resultados REALES producidos por las fases anteriores "
+                "(usa esto para revisar, validar o continuar el trabajo):\n\n"
+                + "\n\n---\n\n".join(_upstream_results_lines)
+                + "\n[/RESULTADOS_UPSTREAM]"
+            )
+            context = f"{context}{_upstream_block}" if context else _upstream_block
+
         if specialist_prefetch_context:
             skill_mcp_context = (
                 f"{skill_mcp_context}\n\n{specialist_prefetch_context}"
@@ -2261,32 +3573,53 @@ class AITeamOrchestrator:
         if specialist_quorum and not self._to_bool(
             specialist_quorum.get("quorum_met", True)
         ):
-            self.taskboard.mark_blocked(task.task_id, reason="specialist_quorum_not_met")
-            self.taskboard.update_metadata(
-                task.task_id,
-                {
-                    "specialist_quorum_missing": list(
-                        specialist_quorum.get("missing_specialists", []) or []
-                    ),
-                    "specialist_quorum_received": list(
-                        specialist_quorum.get("received_specialists", []) or []
-                    ),
-                },
-            )
-            self._emit_agent_event(
-                {
-                    "type": "agent_blocked",
-                    "task_id": task.task_id,
-                    "agent_id": assignee,
-                    "role": task.role.value,
-                    "phase": _phase,
-                    "reason": "specialist_quorum_not_met",
-                }
-            )
-            self.session_store.close_session(
-                session, summary="specialist_quorum_not_met", status="blocked"
-            )
-            return
+            quorum_metadata = {
+                "specialist_quorum_missing": list(
+                    specialist_quorum.get("missing_specialists", []) or []
+                ),
+                "specialist_quorum_received": list(
+                    specialist_quorum.get("received_specialists", []) or []
+                ),
+            }
+            if self._is_planning_phase_task(task):
+                quorum_metadata.update(
+                    {
+                        "specialist_quorum_degraded": True,
+                        "specialist_quorum_warning": (
+                            "planning_phase_continues_without_full_specialist_quorum"
+                        ),
+                    }
+                )
+                self.taskboard.update_metadata(task.task_id, quorum_metadata)
+                self._emit_agent_event(
+                    {
+                        "type": "specialist_quorum_degraded",
+                        "task_id": task.task_id,
+                        "agent_id": assignee,
+                        "role": task.role.value,
+                        "phase": _phase,
+                        "reason": "specialist_quorum_not_met",
+                        "missing_specialists": quorum_metadata["specialist_quorum_missing"],
+                        "received_specialists": quorum_metadata["specialist_quorum_received"],
+                    }
+                )
+            else:
+                self.taskboard.mark_blocked(task.task_id, reason="specialist_quorum_not_met")
+                self.taskboard.update_metadata(task.task_id, quorum_metadata)
+                self._emit_agent_event(
+                    {
+                        "type": "agent_blocked",
+                        "task_id": task.task_id,
+                        "agent_id": assignee,
+                        "role": task.role.value,
+                        "phase": _phase,
+                        "reason": "specialist_quorum_not_met",
+                    }
+                )
+                self.session_store.close_session(
+                    session, summary="specialist_quorum_not_met", status="blocked"
+                )
+                return
         peer_report = self._run_peer_consultation(task=task, assignee=assignee)
         peer_context = peer_report.text
         decision_governance = self._build_decision_governance_context(
@@ -2400,6 +3733,7 @@ class AITeamOrchestrator:
                 )
 
         run_health_report = self._build_run_health_prompt_block(task)
+        lead_close_policy = self._build_lead_close_policy_block(task)
 
         current_user_turn = self._build_current_task_message(
             task,
@@ -2412,6 +3746,7 @@ class AITeamOrchestrator:
             gate_iteration=gate_iteration,
             prev_summary=prev_summary,
             run_health_report=run_health_report,
+            lead_close_policy=lead_close_policy,
         )
         messages = self._build_task_messages(
             task,
@@ -2427,15 +3762,38 @@ class AITeamOrchestrator:
             gate_iteration=gate_iteration,
             prev_summary=prev_summary,
             run_health_report=run_health_report,
+            lead_close_policy=lead_close_policy,
         )
-        thread.append_turn(
-            role="user",
-            content=current_user_turn,
-            source="task_retry" if gate_iteration > 0 else "task",
-            task_id=task.task_id,
-        )
-        self.thread_store.save_thread(thread)
+        attempt_message_cache: dict[tuple[str, str, str], tuple[ConversationThread, list[dict[str, str]]]] = {}
 
+        def _resolve_attempt_messages(adapter) -> list[dict[str, str]]:
+            cache_key = (
+                str(getattr(adapter, "provider", "") or "").strip().lower(),
+                str(getattr(getattr(adapter, "channel", ""), "value", "") or "").strip().lower(),
+                self._thread_model_family(str(getattr(adapter, "model", "") or "")),
+            )
+            cached = attempt_message_cache.get(cache_key)
+            if cached is not None:
+                return cached[1]
+            bound_thread, bound_messages = self._messages_for_adapter_attempt(
+                task=task,
+                assignee=assignee,
+                ab_version=ab_version,
+                base_thread=thread,
+                adapter=adapter,
+                context=context,
+                peer_context=peer_context,
+                decision_governance=decision_governance,
+                skill_mcp_context=skill_mcp_context,
+                execution_context=execution_context,
+                review_feedback=review_feedback_text,
+                gate_iteration=gate_iteration,
+                prev_summary=prev_summary,
+                run_health_report=run_health_report,
+                lead_close_policy=lead_close_policy,
+            )
+            attempt_message_cache[cache_key] = (bound_thread, bound_messages)
+            return bound_messages
         requested_approved_adapters = task.metadata.get("approved_adapters", [])
         if requested_approved_adapters and not sensitive_approval:
             self._fail_task_due_to_compliance(
@@ -2544,6 +3902,7 @@ class AITeamOrchestrator:
             prompt=prompt,
             task_id=task.task_id,
             messages=messages,
+            messages_resolver=_resolve_attempt_messages,
             tools=native_tools if native_tools else None,
             on_chunk=on_chunk,
         )
@@ -2563,20 +3922,6 @@ class AITeamOrchestrator:
         session.total_tokens += (
             decision.response.input_tokens + decision.response.output_tokens
         )
-        self._emit_agent_event(
-            {
-                "type": "agent_routed",
-                "task_id": task.task_id,
-                "agent_id": assignee,
-                "role": task.role.value,
-                "phase": _phase,
-                "provider": decision.provider,
-                "model": decision.model,
-                "channel": decision.channel.value,
-                "success": decision.success,
-            }
-        )
-
         # ── Adaptive error recovery: strategy switching on failures ──
         if not decision.success:
             retry_count = int(task.metadata.get("retry_count", 0))
@@ -2599,6 +3944,7 @@ class AITeamOrchestrator:
                         prompt=prompt,
                         task_id=task.task_id,
                         messages=messages,
+                        messages_resolver=_resolve_attempt_messages,
                     )
 
             if not decision.success and retry_count < 2:
@@ -2625,6 +3971,7 @@ class AITeamOrchestrator:
                     prompt=prompt,
                     task_id=task.task_id,
                     messages=messages,
+                    messages_resolver=_resolve_attempt_messages,
                 )
 
             if not decision.success:
@@ -2652,6 +3999,36 @@ class AITeamOrchestrator:
                     },
                 )
 
+        thread = self._bind_runtime_thread(
+            thread=thread,
+            assignee=assignee,
+            role=task.role,
+            decision=decision,
+            task_id=task.task_id,
+        )
+        thread.append_turn(
+            role="user",
+            content=current_user_turn,
+            source="task_retry" if gate_iteration > 0 else "task",
+            task_id=task.task_id,
+        )
+        self.thread_store.save_thread(thread)
+        self._emit_agent_event(
+            {
+                "type": "agent_routed",
+                "task_id": task.task_id,
+                "agent_id": assignee,
+                "role": task.role.value,
+                "phase": _phase,
+                "provider": decision.provider,
+                "model": decision.model,
+                "channel": decision.channel.value,
+                "success": decision.success,
+                "thread_id": thread.thread_id,
+                "thread_generation": int(getattr(thread, "generation", 1) or 1),
+            }
+        )
+
         self.event_logger.emit(
             "task_execution",
             {
@@ -2668,6 +4045,11 @@ class AITeamOrchestrator:
                 "execution_order": execution_order,
                 "gate_iteration": gate_iteration,
                 "thread_id": thread.thread_id,
+                "thread_generation": int(getattr(thread, "generation", 1) or 1),
+                "thread_version": str(getattr(thread, "thread_version", "") or ""),
+                "thread_provider": str(getattr(thread, "provider", "") or ""),
+                "thread_channel": str(getattr(thread, "channel", "") or ""),
+                "thread_model_family": str(getattr(thread, "model_family", "") or ""),
             },
         )
 
@@ -2725,6 +4107,7 @@ class AITeamOrchestrator:
                 prompt=prompt,
                 task_id=task.task_id,
                 messages=followup_messages,
+                messages_resolver=None,
                 tools=None,  # no tools en el segundo round para evitar bucle infinito
             )
             session.record_action(
@@ -2744,11 +4127,43 @@ class AITeamOrchestrator:
                 )
                 safe_content = self.compliance.redact_text(safe_content)
 
+            if self._fail_task_for_continuation_drift(
+                task=task,
+                assignee=assignee,
+                safe_content=safe_content,
+                session=session,
+            ):
+                return
+
+            if self._fail_task_for_planning_phase_implementation_drift(
+                task=task,
+                assignee=assignee,
+                safe_content=safe_content,
+                session=session,
+            ):
+                return
+
+            if self._fail_task_for_contract_path_drift(
+                task=task,
+                assignee=assignee,
+                safe_content=safe_content,
+                session=session,
+            ):
+                return
+
+            if self._fail_task_for_missing_planning_artifact(
+                task=task,
+                assignee=assignee,
+                safe_content=safe_content,
+                session=session,
+            ):
+                return
+
             # ── Fix B: extraccion de bloques de codigo con path anotado ──
             # Fallback cuando filesystem_mcp no esta disponible: el Engineer
             # incluye codigo con ```lang path=archivo.py en su output y el
             # orchestrator lo escribe directamente al workspace del proyecto.
-            if task.role == Role.ENGINEER:
+            if task.role == Role.ENGINEER and not self._phase_name_for_task(task).lower().startswith("plan_"):
                 self._extract_and_write_code_blocks(task, safe_content)
 
             found_placeholders = [
@@ -2943,6 +4358,67 @@ class AITeamOrchestrator:
                 )
                 return
 
+            verdict = extract_phase_verdict(safe_content, phase_id=_phase)
+            verdict_status = str(verdict.get("status", "") or "").strip().lower()
+            if (
+                verdict_status in {"blocked", "rejected", "failed"}
+                and not _is_scout_task
+                and task.role != Role.TEAM_LEAD
+            ):
+                self._update_workflow_state(
+                    self._task_root(task.task_id),
+                    _phase,
+                    safe_content,
+                )
+                if verdict_status == "blocked":
+                    self.taskboard.mark_blocked(
+                        task.task_id,
+                        reason="phase_self_reported_blocked",
+                    )
+                    self.taskboard.update_metadata(task.task_id, {"result": safe_content})
+                    self._emit_agent_event(
+                        {
+                            "type": "agent_blocked",
+                            "task_id": task.task_id,
+                            "agent_id": assignee,
+                            "role": task.role.value,
+                            "phase": _phase,
+                            "preview": safe_content[:200] if safe_content else "",
+                            "full_text": safe_content,
+                            "duration_ms": int(decision.response.latency_ms),
+                            "provider": decision.provider,
+                            "model": decision.model,
+                            "channel": decision.channel.value,
+                        }
+                    )
+                else:
+                    self.taskboard.mark_failed(
+                        task.task_id,
+                        error=str(verdict.get("summary", "") or verdict_status),
+                    )
+                    self.taskboard.update_metadata(task.task_id, {"result": safe_content})
+                    self._emit_agent_event(
+                        {
+                            "type": "agent_failed",
+                            "task_id": task.task_id,
+                            "agent_id": assignee,
+                            "role": task.role.value,
+                            "phase": _phase,
+                            "error": str(verdict.get("summary", "") or safe_content[:200]),
+                            "full_text": safe_content,
+                            "duration_ms": int(decision.response.latency_ms),
+                            "provider": decision.provider,
+                            "model": decision.model,
+                            "channel": decision.channel.value,
+                        }
+                    )
+                self.session_store.close_session(
+                    session,
+                    summary=f"phase_verdict:{verdict_status}",
+                    status="failed" if verdict_status in {"rejected", "failed"} else "completed",
+                )
+                return
+
             self.taskboard.mark_completed(task.task_id, details=safe_content)
             self._emit_agent_event(
                 {
@@ -2952,6 +4428,7 @@ class AITeamOrchestrator:
                     "role": task.role.value,
                     "phase": _phase,
                     "preview": safe_content[:200] if safe_content else "",
+                    "full_text": safe_content,
                     "duration_ms": int(decision.response.latency_ms),
                     "provider": decision.provider,
                     "model": decision.model,
@@ -3002,7 +4479,7 @@ class AITeamOrchestrator:
                 ),
                 task_id=task.task_id,
             )
-            self._notify_dependents(task.task_id, summary=safe_content)
+            self._notify_dependents(task.task_id, summary=safe_content, task_role=task.role.value)
             self._maybe_spawn_lead_report_checkpoint(task, safe_content)
 
             # ── Cerrar sesion exitosa ──
@@ -3628,6 +5105,7 @@ class AITeamOrchestrator:
         self, task: WorkTask, source_agent: str, decision: RoutingDecision | None = None
     ) -> str:
         excluded = {"meeting_minutes"}
+        memory_query = self._memory_query_for_task(task)
         recent = self.memory.recent(
             source_agent,
             limit=5,
@@ -3636,7 +5114,7 @@ class AITeamOrchestrator:
         )
         relevant = self.memory.relevant(
             source_agent,
-            f"{task.title}\n{task.description}",
+            memory_query,
             limit=4,
             exclude_kinds=excluded,
             project_key=self._project_thread_key(),
@@ -3671,6 +5149,94 @@ class AITeamOrchestrator:
             "Siguiente accion esperada: continuar desde este contexto, validar el fallo y producir una salida concreta o nuevo bloqueo justificable."
         )
         return self._compact_context(lines, max_lines=12, max_chars=1200)
+
+    def _memory_query_for_task(self, task: WorkTask) -> str:
+        phase_name = self._phase_name_for_task(task)
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        role_upper = str(
+            phase_contract.get("role") or task.role.name
+        ).strip().upper()
+        objective = self._runtime_phase_contract_objective(
+            phase_id=str(phase_contract.get("phase_id") or phase_name or task.title).strip(),
+            role_upper=role_upper,
+            objective=str(
+                phase_contract.get("objective")
+                or task.metadata.get("delegation_brief")
+                or ""
+            ).strip(),
+            task=task,
+        )
+        parts = [
+            str(task.title or "").strip(),
+            f"phase:{phase_name}" if phase_name else "",
+            f"role:{task.role.value}",
+            str(objective or "").strip(),
+        ]
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            normalized = str(part or "").strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(normalized)
+        return "\n".join(deduped)
+
+    @staticmethod
+    def _same_task_root(task_id: str | None, expected_root: str) -> bool:
+        normalized_root = str(expected_root or "").strip()
+        normalized_task_id = str(task_id or "").strip()
+        if not normalized_root or not normalized_task_id:
+            return False
+        return normalized_task_id == normalized_root or normalized_task_id.startswith(
+            f"{normalized_root}::"
+        )
+
+    def _filter_memory_entries_for_run(
+        self,
+        entries: list,
+        *,
+        task_root: str,
+        allow_cross_run_fallback: bool = False,
+    ) -> list:
+        if not task_root:
+            return list(entries or [])
+        same_root = [
+            entry
+            for entry in list(entries or [])
+            if self._same_task_root(getattr(entry, "task_id", None), task_root)
+        ]
+        if same_root:
+            return same_root
+        if allow_cross_run_fallback:
+            return list(entries or [])
+        return []
+
+    def _thread_turns_for_run(
+        self,
+        thread: ConversationThread,
+        *,
+        task_root: str,
+        limit: int = 8,
+        allow_cross_run_fallback: bool = True,
+    ) -> list:
+        turns = list(thread.recent_turns(limit=0))
+        normalized_root = str(task_root or "").strip()
+        if not normalized_root:
+            return turns[-limit:] if limit > 0 else turns
+        same_root = [
+            turn
+            for turn in turns
+            if self._same_task_root(getattr(turn, "task_id", None), normalized_root)
+        ]
+        if same_root:
+            turns = same_root
+        elif not allow_cross_run_fallback:
+            turns = []
+        return turns[-limit:] if limit > 0 else turns
 
     def _verify_task_evidence(
         self, task: WorkTask, workspace: Path
@@ -4164,6 +5730,44 @@ class AITeamOrchestrator:
             getattr(self.router.policy, "peer_consultation_diversity_required", True)
         )
 
+    def _peer_lenient_route(
+        self,
+        task: WorkTask,
+        peer_role: Role,
+        prompt: str,
+        messages: list[dict[str, str]],
+    ) -> RoutingDecision:
+        """Last-resort peer routing with no capability gate.
+
+        Called when all capability-filtered attempts return no_eligible_adapter.
+        Subscription adapters (gemini_worker, claude_haiku) lack 'review'/'qa'
+        capabilities in their registry entries but can still provide useful peer
+        opinions.  Removing the capability filter lets them participate.
+        """
+        lenient_request = RoutingRequest(
+            role=peer_role,
+            complexity=task.complexity,
+            criticality=task.criticality,
+            required_capabilities=set(),
+            environment=self.environment,
+        )
+        lenient_decision = self.router.route_and_invoke(
+            request=lenient_request,
+            prompt=prompt,
+            task_id=task.task_id,
+            messages=messages,
+        )
+        self.event_logger.emit(
+            "peer_capability_relaxed_fallback",
+            {
+                "task_id": task.task_id,
+                "peer_role": peer_role.value,
+                "success": lenient_decision.success,
+                "provider": lenient_decision.provider,
+            },
+        )
+        return lenient_decision
+
     def _route_peer_with_diversity(
         self,
         task: WorkTask,
@@ -4187,12 +5791,15 @@ class AITeamOrchestrator:
         diversity_required = self._peer_diversity_required(task)
         normalized_used = {item.strip().lower() for item in used_providers if str(item).strip()}
         if not diversity_required or not normalized_used:
-            return self.router.route_and_invoke(
+            decision = self.router.route_and_invoke(
                 request=base_request,
                 prompt=prompt,
                 task_id=task.task_id,
                 messages=messages,
             )
+            if not decision.success and decision.reason == "no_eligible_adapter":
+                return self._peer_lenient_route(task, peer_role, prompt, messages)
+            return decision
 
         diverse_request = RoutingRequest(
             role=peer_role,
@@ -4238,7 +5845,13 @@ class AITeamOrchestrator:
                 "fallback_success": fallback_decision.success,
             },
         )
-        if fallback_decision.success or diverse_decision is None:
+        if fallback_decision.success:
+            return fallback_decision
+        # Both diversity and capability-filtered fallback failed.
+        # If no eligible adapters at all, retry without capability gate.
+        if fallback_decision.reason == "no_eligible_adapter":
+            return self._peer_lenient_route(task, peer_role, prompt, messages)
+        if diverse_decision is None:
             return fallback_decision
         return diverse_decision
 
@@ -4452,16 +6065,76 @@ class AITeamOrchestrator:
             "Devuelve recomendaciones concretas, riesgos, orden de ejecucion y justificacion en <= 8 lineas."
         )
 
-    def _notify_dependents(self, task_id: str, summary: str) -> None:
+    def _notify_dependents(
+        self, task_id: str, summary: str, *, task_role: str = ""
+    ) -> None:
+        # Content-based block detection guards:
+        #
+        # Content-based block detection guards:
+        #
+        # Guard 1 — Delegates: tasks whose phase part starts with "delegate_" OR
+        #   "delegated_" act as sub-specialists that REPORT findings about a parent
+        #   phase state.  Two naming conventions exist:
+        #     • deferred spec delegates:   "delegate_qa_scout", "delegate_context"
+        #     • inline [REQUEST_TASK] delegates: "{parent}::delegated_0", "::delegated_1"
+        #   Their output may describe that the parent is "bloqueada" without the delegate
+        #   itself being blocked. Sending "Dependency blocked" from a delegate would
+        #   falsely propagate blocking signals to lead_close and other dependents.
+        #
+        # Guard 2 — Scout role: scouts describe project context (past runs, historical
+        #   blocks). Their output routinely contains "bloqueada" as contextual prose,
+        #   not as a self-report of their own blocking state.
+        #
+        # For all other roles (engineer, reviewer, qa, team_lead, researcher primary
+        # tasks), apply narrowed structural keywords that indicate the TASK ITSELF is
+        # self-reporting a block — NOT merely describing one in context.
+        # Narrowed keywords vs. Fix-J: bare "bloqueada" / "bloqueado" are dropped
+        # because they match too broadly in contextual descriptions. We require either
+        # the status-label pattern ("bloqueada:", "bloqueado:") or specific system
+        # phrases that never appear in contextual prose.
+        _phase_part = (task_id.split("::")[-1] if "::" in task_id else task_id).lower()
+        _role_lower = (task_role or "").lower()
+        _is_delegate = (
+            _phase_part.startswith("delegate_")
+            or _phase_part.startswith("delegated_")
+        )
+        _is_scout = _role_lower == "scout"
+        _applies_content_check = not _is_delegate and not _is_scout
+
+        _summary_lower = (summary or "").lower()
+        # Structural self-block indicators (never appear in normal contextual prose):
+        _BLOCK_KEYWORDS = (
+            "bloqueada:",        # explicit status label: "BLOQUEADA: razon..."
+            "bloqueado:",        # same, masculine form
+            "evidencegate",      # compound system word, only in gate messages
+            "evidence gate",     # alternative gate phrase
+            "no hay evidencia",  # explicit missing-evidence claim
+            "missing evidence",  # same in English
+            "status: blocked",   # structured field (colon alone is too broad)
+        )
+        _is_blocked_output = (
+            _applies_content_check
+            and any(kw in _summary_lower for kw in _BLOCK_KEYWORDS)
+        )
+
         for candidate in self.taskboard.list_tasks():
             if task_id not in candidate.dependencies:
                 continue
             recipient = self._assignee_for_role(candidate.role)
+            if _is_blocked_output:
+                subject = f"Dependency blocked: {task_id}"
+                body = (
+                    f"La dependencia {task_id} de {candidate.task_id} indica bloqueo. "
+                    f"Resumen: {summary[:200]}"
+                )
+            else:
+                subject = f"Dependency ready: {task_id}"
+                body = f"La dependencia de {candidate.task_id} esta resuelta. Resumen: {summary[:200]}"
             self.communicator.send_dm(
                 sender="team_lead",
                 recipient=recipient,
-                subject=f"Dependency ready: {task_id}",
-                body=f"La dependencia de {candidate.task_id} esta resuelta. Resumen: {summary[:200]}",
+                subject=subject,
+                body=body,
                 task_id=candidate.task_id,
             )
 
@@ -4483,12 +6156,18 @@ class AITeamOrchestrator:
 
     def _build_collaboration_context(self, task: WorkTask, assignee: str) -> str:
         excluded_memory = {"meeting_minutes"}
+        memory_query = self._memory_query_for_task(task)
+        task_root = self._task_root(task.task_id)
         relevant_memory = self.memory.relevant(
             assignee,
-            task.description,
+            memory_query,
             limit=3,
             exclude_kinds=excluded_memory,
             project_key=self._project_thread_key(),
+        )
+        relevant_memory = self._filter_memory_entries_for_run(
+            relevant_memory,
+            task_root=task_root,
         )
         recent_memory = self.memory.recent(
             assignee,
@@ -4496,8 +6175,12 @@ class AITeamOrchestrator:
             exclude_kinds=excluded_memory,
             project_key=self._project_thread_key(),
         )
-        dm_messages = self._context_messages(recipient=assignee)
-        role_messages = self._context_messages(recipient=task.role.value)
+        recent_memory = self._filter_memory_entries_for_run(
+            recent_memory,
+            task_root=task_root,
+        )
+        dm_messages = self._context_messages(recipient=assignee, task_root=task_root)
+        role_messages = self._context_messages(recipient=task.role.value, task_root=task_root)
 
         lines: list[str] = []
 
@@ -4528,7 +6211,6 @@ class AITeamOrchestrator:
             lines.append(dep_context)
 
         # ── Facts del equipo (workflow state) ──
-        task_root = self._task_root(task.task_id)
         ws = self.workflow_state.get(task_root, {})
         facts = ws.get("facts", [])
         if facts:
@@ -4561,7 +6243,7 @@ class AITeamOrchestrator:
 
         # ── Multi-query cross-agent memory ──
         cross_agent_memory = self.memory.relevant_across_agents(
-            query=task.description,
+            query=memory_query,
             exclude_agent=assignee,
             limit=3,
             project_key=self._project_thread_key(),
@@ -4584,6 +6266,18 @@ class AITeamOrchestrator:
             limit=2,
             exclude_kinds={"meeting_minutes", "execution_plan_result"},
             project_key=self._project_thread_key(),
+        )
+        cross_agent_memory = self._filter_memory_entries_for_run(
+            cross_agent_memory,
+            task_root=task_root,
+        )
+        failure_memory = self._filter_memory_entries_for_run(
+            failure_memory,
+            task_root=task_root,
+        )
+        arch_memory = self._filter_memory_entries_for_run(
+            arch_memory,
+            task_root=task_root,
         )
         # Merge and deduplicate
         seen_ids: set[str] = set()
@@ -4852,17 +6546,77 @@ class AITeamOrchestrator:
             merged.append(adapter)
         self.router.adapters = merged
 
-    def _context_messages(self, recipient: str) -> list:
+    def _context_messages(self, recipient: str, task_root: str = "") -> list:
         messages = self.mailbox.list_messages(recipient=recipient)
         filtered = [
             message
             for message in messages
             if not message.subject.lower().startswith("sync meeting:")
         ]
+        normalized_root = str(task_root or "").strip()
+        if normalized_root:
+            same_root = [
+                message
+                for message in filtered
+                if self._same_task_root(message.task_id, normalized_root)
+            ]
+            if same_root:
+                filtered = same_root
+            else:
+                filtered = []
         return filtered[-4:]
 
     def _project_thread_key(self) -> str:
         return str(self.project_root)
+
+    @staticmethod
+    def _thread_model_family(model: str) -> str:
+        return str(model or "").strip().lower()
+
+    def _bind_runtime_thread(
+        self,
+        *,
+        thread: ConversationThread,
+        assignee: str,
+        role: Role,
+        decision: RoutingDecision,
+        task_id: str,
+    ) -> ConversationThread:
+        if not decision.success or str(decision.provider or "").strip().lower() in {"", "none"}:
+            thread.bind_provider(role=role.value)
+            self.thread_store.save_thread(thread)
+            return thread
+        rebound = self.thread_store.get_thread(
+            agent_id=assignee,
+            project_key=self._project_thread_key(),
+            role=role.value,
+            provider=decision.provider,
+            channel=decision.channel.value,
+            model_family=self._thread_model_family(decision.model),
+        )
+        rebound.bind_provider(
+            role=role.value,
+            provider=decision.provider,
+            channel=decision.channel.value,
+            model_family=self._thread_model_family(decision.model),
+            model=decision.model,
+        )
+        self.thread_store.save_thread(rebound)
+        if rebound.thread_id != thread.thread_id:
+            self.event_logger.emit(
+                "conversation_thread_rebound",
+                {
+                    "task_id": task_id,
+                    "from_thread_id": thread.thread_id,
+                    "to_thread_id": rebound.thread_id,
+                    "from_generation": int(getattr(thread, "generation", 1) or 1),
+                    "to_generation": int(getattr(rebound, "generation", 1) or 1),
+                    "provider": decision.provider,
+                    "channel": decision.channel.value,
+                    "model_family": self._thread_model_family(decision.model),
+                },
+            )
+        return rebound
 
     def _remember_memory(
         self,
@@ -4884,8 +6638,8 @@ class AITeamOrchestrator:
             project_key=self._project_thread_key(),
         )
 
-    def _thread_context(self, thread: ConversationThread, limit: int = 6) -> str:
-        turns = thread.recent_turns(limit=limit)
+    def _thread_context(self, thread: ConversationThread, limit: int = 6, task_root: str = "") -> str:
+        turns = self._thread_turns_for_run(thread, task_root=task_root, limit=limit)
         if not turns:
             return ""
         lines = ["Hilo conversacional reciente:"]
@@ -4899,10 +6653,12 @@ class AITeamOrchestrator:
     def _thread_messages(
         self,
         thread: ConversationThread,
+        *,
+        task_root: str = "",
         limit: int = 6,
     ) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = []
-        for turn in thread.recent_turns(limit=limit):
+        for turn in self._thread_turns_for_run(thread, task_root=task_root, limit=limit):
             role = str(turn.role or "user").strip().lower() or "user"
             if role not in {"system", "user", "assistant"}:
                 role = (
@@ -4933,8 +6689,10 @@ class AITeamOrchestrator:
         gate_iteration: int,
         prev_summary: str,
         run_health_report: str,
+        lead_close_policy: str,
     ) -> str:
         delegation_brief = str(task.metadata.get("delegation_brief", "") or "").strip()
+        phase_contract_block = self._build_runtime_phase_contract_block(task)
         if gate_iteration > 0:
             retry_parts = [
                 f"Retry de la tarea {task.task_id}.",
@@ -4942,6 +6700,8 @@ class AITeamOrchestrator:
                 f"Gate iteration: {gate_iteration}",
                 "Manten el enfoque valido anterior y cambia solo lo necesario para resolver el feedback.",
             ]
+            if phase_contract_block:
+                retry_parts.append(f"Contrato de fase vigente:\n{phase_contract_block}")
             for block in (
                 self._context_block("Delegation brief", delegation_brief, 700),
                 self._context_block("Feedback de revision", review_feedback, 900),
@@ -4962,8 +6722,11 @@ class AITeamOrchestrator:
             f"Gate iteration: {gate_iteration}",
             "Entrega: propuesta, evidencia, aportes considerados, decision final, plan ejecutable inmediato y definition of done.",
         ]
+        if phase_contract_block:
+            parts.append(f"Contrato de fase vigente:\n{phase_contract_block}")
         for block in (
                 self._context_block("Delegation brief", delegation_brief, 800),
+                self._context_block("Lead Close Policy", lead_close_policy, 1800),
                 self._context_block("Run Health Report", run_health_report, 2400),
                 self._context_block("Contexto de equipo", context, 1200),
                 self._context_block("Consulta entre pares", peer_context, 1000),
@@ -4996,6 +6759,7 @@ class AITeamOrchestrator:
         gate_iteration: int,
         prev_summary: str,
         run_health_report: str,
+        lead_close_policy: str,
     ) -> list[dict[str, str]]:
         system_message = build_system_prompt(
             task.role,
@@ -5013,8 +6777,13 @@ class AITeamOrchestrator:
             gate_iteration=gate_iteration,
             prev_summary=prev_summary,
             run_health_report=run_health_report,
+            lead_close_policy=lead_close_policy,
         )
-        thread_messages = self._thread_messages(thread, limit=6)
+        thread_messages = self._thread_messages(
+            thread,
+            task_root=self._task_root(task.task_id),
+            limit=6,
+        )
         messages = [{"role": "system", "content": system_message}]
         messages.extend(thread_messages)
         messages.append({"role": "user", "content": current_user_turn})
@@ -5024,12 +6793,83 @@ class AITeamOrchestrator:
                 "task_id": task.task_id,
                 "assignee": assignee,
                 "thread_id": thread.thread_id,
+                "thread_generation": int(getattr(thread, "generation", 1) or 1),
+                "thread_version": str(getattr(thread, "thread_version", "") or ""),
+                "thread_provider": str(getattr(thread, "provider", "") or ""),
+                "thread_channel": str(getattr(thread, "channel", "") or ""),
+                "thread_model_family": str(getattr(thread, "model_family", "") or ""),
                 "message_count": len(messages),
                 "history_turns": len(thread_messages),
                 "gate_iteration": gate_iteration,
             },
         )
         return messages
+
+    def _messages_for_adapter_attempt(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        ab_version: str,
+        base_thread: ConversationThread,
+        adapter,
+        context: str,
+        peer_context: str,
+        decision_governance: str,
+        skill_mcp_context: str,
+        execution_context: str,
+        review_feedback: str,
+        gate_iteration: int,
+        prev_summary: str,
+        run_health_report: str,
+        lead_close_policy: str,
+    ) -> tuple[ConversationThread, list[dict[str, str]]]:
+        bound_thread = self.thread_store.get_thread(
+            agent_id=assignee,
+            project_key=self._project_thread_key(),
+            role=task.role.value,
+            provider=str(getattr(adapter, "provider", "") or ""),
+            channel=str(getattr(getattr(adapter, "channel", ""), "value", "") or ""),
+            model_family=self._thread_model_family(str(getattr(adapter, "model", "") or "")),
+        )
+        bound_thread.bind_provider(
+            role=task.role.value,
+            provider=str(getattr(adapter, "provider", "") or ""),
+            channel=str(getattr(getattr(adapter, "channel", ""), "value", "") or ""),
+            model_family=self._thread_model_family(str(getattr(adapter, "model", "") or "")),
+            model=str(getattr(adapter, "model", "") or ""),
+        )
+        self.thread_store.save_thread(bound_thread)
+        if bound_thread.thread_id != base_thread.thread_id:
+            self.event_logger.emit(
+                "conversation_thread_candidate_selected",
+                {
+                    "task_id": task.task_id,
+                    "from_thread_id": base_thread.thread_id,
+                    "to_thread_id": bound_thread.thread_id,
+                    "provider": str(getattr(adapter, "provider", "") or ""),
+                    "channel": str(getattr(getattr(adapter, "channel", ""), "value", "") or ""),
+                    "model_family": self._thread_model_family(str(getattr(adapter, "model", "") or "")),
+                    "thread_generation": int(getattr(bound_thread, "generation", 1) or 1),
+                },
+            )
+        messages = self._build_task_messages(
+            task,
+            assignee=assignee,
+            ab_version=ab_version,
+            thread=bound_thread,
+            context=context,
+            peer_context=peer_context,
+            decision_governance=decision_governance,
+            skill_mcp_context=skill_mcp_context,
+            execution_context=execution_context,
+            review_feedback=review_feedback,
+            gate_iteration=gate_iteration,
+            prev_summary=prev_summary,
+            run_health_report=run_health_report,
+            lead_close_policy=lead_close_policy,
+        )
+        return bound_thread, messages
 
     def _build_peer_messages(
         self,

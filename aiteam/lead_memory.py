@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
 from typing import Any
 
+from aiteam.time_utils import local_display_timestamp
 
 _MAX_RECENT_RUNS = 5
 _RUN_LINE_RE = re.compile(
@@ -67,10 +67,11 @@ def observe_capabilities_snapshot(
     *,
     runtime_dir: Path,
     mcp_status: object | None = None,
+    subscription_providers: list[str] | None = None,
 ) -> dict[str, Any]:
     doctor_payload = _read_json(runtime_dir / "provider_doctor.json")
     api_keys = dict(doctor_payload.get("api_keys", {}) or {})
-    configured_keys = sorted(
+    configured_keys: list[str] = sorted(
         key_name
         for key_name, status in api_keys.items()
         if str(status or "").strip().lower() in {"set", "configured", "ok", "present"}
@@ -80,6 +81,17 @@ def observe_capabilities_snapshot(
         for key_name, status in api_keys.items()
         if str(status or "").strip().lower() == "missing"
     )
+
+    # Supplement with subscription-channel providers (no API key needed —
+    # they are accessed via the model's own account credentials).  These will
+    # not appear in provider_doctor.json because that file tracks API keys only.
+    if subscription_providers:
+        _existing = set(configured_keys)
+        for _prov in sorted(set(str(p).strip() for p in subscription_providers if str(p).strip())):
+            _label = f"{_prov} (subscription)"
+            if _label not in _existing:
+                configured_keys.append(_label)
+                _existing.add(_label)
 
     mcp_rows = _coerce_mcp_rows(mcp_status, runtime_dir)
     healthy_mcps: list[str] = []
@@ -108,7 +120,7 @@ def observe_capabilities_snapshot(
         "missing_keys": sorted(dict.fromkeys(missing_keys)),
         "healthy_mcps": sorted(dict.fromkeys(healthy_mcps)),
         "broken_mcps": sorted(dict.fromkeys(broken_mcps)),
-        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "updated_at": local_display_timestamp(),
     }
 
 
@@ -130,7 +142,7 @@ def update_lead_memory(
     existing_entries = _parse_entries(existing_text)
     existing_capabilities = _parse_capabilities(existing_text)
     normalized_entry = LeadMemoryEntry(
-        timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        timestamp=local_display_timestamp(),
         chat_id=str(chat_id or "").strip(),
         objective=_compact(objective, 160),
         result=str(result or "").strip() or "parcial",

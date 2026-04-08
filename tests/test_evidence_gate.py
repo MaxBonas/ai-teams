@@ -179,6 +179,45 @@ class TestVerifyTaskEvidence:
         assert ok
         assert "live_output_quality" in reason
 
+    def test_chat_engineer_requires_material_artifacts_even_with_good_live_output(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AITEAM_ENABLE_LIVE_API", "1")
+        long_technical_output = "Updated imports in tests/test_cli.py and aligned setup with pyproject.toml. " * 8
+        task = _make_task(
+            task_id="CHAT-ENG-1::engineer_fix_tests",
+            metadata={
+                "_last_agent_output": long_technical_output,
+                "phase_contract_enforced": True,
+                "chat_parent": "CHAT-ENG-1",
+                "required_capabilities": ["coding"],
+                "last_channel": "subscription",
+            },
+        )
+        with patch("aiteam.evidence_gate.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            ok, reason = verify_task_evidence(task, tmp_path, project_root=None, runtime_dir=tmp_path)
+        assert not ok
+        assert reason == "engineer_material_artifacts_required"
+
+    def test_chat_engineer_accepts_material_artifact_metadata(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AITEAM_ENABLE_LIVE_API", "1")
+        task = _make_task(
+            task_id="CHAT-ENG-2::engineer_fix_tests",
+            metadata={
+                "_last_agent_output": "Applied corrections and wrote files.",
+                "phase_contract_enforced": True,
+                "chat_parent": "CHAT-ENG-2",
+                "required_capabilities": ["coding"],
+                "last_channel": "subscription",
+                "artifact_paths": ["tests/test_cli.py"],
+                "artifact_modified_count": 1,
+            },
+        )
+        with patch("aiteam.evidence_gate.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            ok, reason = verify_task_evidence(task, tmp_path, project_root=None, runtime_dir=tmp_path)
+        assert ok
+        assert reason.startswith("artifact_events_detected:")
+
     def test_planning_run_mode_requires_structured_markdown(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AITEAM_ENABLE_LIVE_API", "0")
         task = _make_task(

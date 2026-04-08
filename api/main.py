@@ -65,6 +65,8 @@ from api.chat_models import (
 from api.chat_observability import (
     _build_chat_progress,
     _build_operator_timeline,
+    _coerce_lead_close_policy,
+    _coerce_phase_contracts,
     _coerce_delegate_batches,
     _coerce_phase_evidence_plan,
 )
@@ -142,6 +144,7 @@ from aiteam.chat_policy import (
     resolve_run_type_policy,
 )
 from aiteam.lead_control import (
+    LeadDirectiveEvent,
     extract_clarify_directive as _lead_control_extract_clarify_directive,
     extract_delegate_directive as _lead_control_extract_delegate_directive,
     extract_delegate_request as _lead_control_extract_delegate_request,
@@ -157,7 +160,14 @@ from aiteam.lead_memory import (
     observe_capabilities_snapshot,
     update_lead_memory,
 )
+from aiteam.lead_close_policy import derive_lead_close_policy
 from aiteam.persistence import AtomicFileWriter
+from aiteam.phase_verdicts import (
+    build_phase_verdict_prompt_block,
+    coerce_phase_verdicts,
+    extract_phase_verdict,
+    is_missing_contract_objective,
+)
 from aiteam.pilot import compute_pilot_metrics
 from aiteam.quorum import (
     PLANNING_QUORUM_RUN_MODES,
@@ -167,6 +177,7 @@ from aiteam.quorum import (
 )
 from aiteam.run_health import build_capabilities_briefing
 from aiteam.sim_mode import sim_mode_enabled
+from aiteam.time_utils import local_now, local_now_iso
 from aiteam.tool_specialists import (
     build_tool_specialist_metadata,
     replacement_specialists_from_metadata,
@@ -262,6 +273,18 @@ def _extract_delegate_directive(text: str) -> str | None:
     return _lead_control_extract_delegate_directive(text)
 
 
+def _role_required_capabilities(role_name: str) -> list[str]:
+    normalized = str(role_name or "").strip().upper()
+    capabilities_by_role = {
+        "RESEARCHER": ["analysis", "repo_read", "reasoning"],
+        "ENGINEER": ["coding", "repo_read"],
+        "REVIEWER": ["review", "repo_read", "reasoning"],
+        "QA": ["analysis", "test_execute", "build_execute"],
+        "SCOUT": ["repo_read"],
+    }
+    return list(capabilities_by_role.get(normalized, ["analysis"]))
+
+
 def _workspace_artifact_snapshot(workspace: Path) -> dict[str, tuple[int, int]]:
     skip_dirs = {
         "runtime",
@@ -322,6 +345,44 @@ def _project_instructions_block(project_root: Path) -> str:
     )
 
 
+def _project_instruction_constraints(project_root: Path) -> dict[str, object]:
+    instructions_path = Path(project_root) / ".aiteam" / "instructions.md"
+    if not instructions_path.exists():
+        return {}
+    try:
+        instructions_content = instructions_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return {}
+    text = str(instructions_content or "")
+    if not text.strip():
+        return {}
+
+    forbidden_path_hints: list[str] = []
+    allowed_module_path_hints: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        code_refs = re.findall(r"`([^`\n]+)`", line)
+        if re.search(r"(?i)\b(?:stop:\s*)?no\s+crear\b", line):
+            forbidden_path_hints.extend(code_refs)
+        if re.search(r"(?i)(?:logica|lógica)\s+en|escribirlos\s+contra", line):
+            allowed_module_path_hints.extend(code_refs)
+
+    return {
+        "forbidden_path_hints": [
+            str(item).strip().replace("\\", "/")
+            for item in forbidden_path_hints
+            if str(item).strip()
+        ][:12],
+        "allowed_module_path_hints": [
+            str(item).strip().replace("\\", "/")
+            for item in allowed_module_path_hints
+            if str(item).strip()
+        ][:12],
+    }
+
+
 _PLANNING_RUN_MODES = set(PLANNING_QUORUM_RUN_MODES)
 
 
@@ -335,6 +396,448 @@ def _resolve_project_plan_dir(workspace: Path) -> Path:
     if docs_dir.exists():
         return docs_dir / "aiteam"
     return workspace / "planning"
+
+
+_REVIEW_REJECTED_RE = re.compile(
+    r"(?im)^\s*(?:\*\*)?(?:decisi[oó]n|decision|veredicto|verdict|estado)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(?:rechazad[oa]|rejected|changes_requested|cambios\s+solicitados?|solicita\s+cambios)\b"
+)
+_QA_BLOCKED_RE = re.compile(
+    r"(?is)(?:^\s*(?:\*\*)?(?:summary|resumen|estado|decisi[oó]n|decision|veredicto|verdict)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(?:bloquead[oa]|blocked|failed|fallid[oa])\b|\b(?:summary|resumen|estado)\b.{0,240}\b(?:bloquead[oa]|blocked|failed|fallid[oa])\b)"
+)
+_SLICE_ID_RE = re.compile(r"(?i)\bslice\s+(\d+)\b")
+_BUILD_SLICE_DRIFT_RE = re.compile(
+    r"(?is)(?:\ba pesar de\b.{0,240}\b(?:directriz|directive)\b|\bslice de mayor impacto\b)"
+)
+
+# RC-H: per-run cancel flags.  Keyed by task_root (CHAT-XXXX).
+# Set to True by POST /api/aiteam/chat/{task_root}/cancel.
+# Checked in the streaming loop to close the SSE connection early.
+_RUN_CANCEL_FLAGS: dict[str, bool] = {}
+_WORKSPACE_ACTIVE_RUNS: dict[str, str] = {}
+_WORKSPACE_ACTIVE_RUNS_LOCK = threading.RLock()
+
+
+def _workspace_run_registry_key(workspace: Path | str) -> str:
+    try:
+        return str(Path(workspace).resolve()).strip().lower()
+    except Exception:
+        return str(workspace or "").strip().lower()
+
+
+def _claim_workspace_active_run(workspace: Path | str, task_root: str) -> str:
+    normalized_root = _normalize_task_root(task_root)
+    if not normalized_root:
+        return ""
+    key = _workspace_run_registry_key(workspace)
+    with _WORKSPACE_ACTIVE_RUNS_LOCK:
+        active_root = _normalize_task_root(_WORKSPACE_ACTIVE_RUNS.get(key, ""))
+        if active_root and active_root != normalized_root:
+            return active_root
+        _WORKSPACE_ACTIVE_RUNS[key] = normalized_root
+    return ""
+
+
+def _release_workspace_active_run(workspace: Path | str, task_root: str) -> None:
+    normalized_root = _normalize_task_root(task_root)
+    if not normalized_root:
+        return
+    key = _workspace_run_registry_key(workspace)
+    with _WORKSPACE_ACTIVE_RUNS_LOCK:
+        current_root = _normalize_task_root(_WORKSPACE_ACTIVE_RUNS.get(key, ""))
+        if current_root == normalized_root:
+            _WORKSPACE_ACTIVE_RUNS.pop(key, None)
+
+
+def _workspace_active_run_detail(runtime_dir: Path, task_root: str) -> dict[str, object]:
+    normalized_root = _normalize_task_root(task_root)
+    progress = _build_chat_progress(runtime_dir, normalized_root) if normalized_root else None
+    if progress is None:
+        return {"task_id": normalized_root}
+    return {
+        "task_id": normalized_root,
+        "state": str(progress.state or ""),
+        "waiting_user": bool(progress.waiting_user),
+        "next_action_hint": str((progress.run_verdict or {}).get("next_action_hint", "") or ""),
+        "pending_tasks": int(progress.pending_tasks),
+        "failed_tasks": int(progress.failed_tasks),
+    }
+
+
+def _task_result_text(task: WorkTask | None) -> str:
+    if task is None:
+        return ""
+    return str(task.metadata.get("result") or task.metadata.get("error") or "")
+
+
+def _first_slice_id(*texts: str) -> str:
+    for text in texts:
+        match = _SLICE_ID_RE.search(str(text or ""))
+        if match:
+            return str(match.group(1) or "").strip()
+    return ""
+
+
+def _first_verdict_slice_id(*verdicts: dict[str, object]) -> str:
+    for verdict in verdicts:
+        if not isinstance(verdict, dict):
+            continue
+        slice_id = str(verdict.get("slice_id", "") or "").strip()
+        if slice_id:
+            return slice_id
+    return ""
+
+
+def _sync_phase_verdict_in_workflow_state(
+    workflow_state: dict[str, object],
+    *,
+    phase_id: str,
+    output: str,
+) -> None:
+    normalized_phase = str(phase_id or "").strip().lower()
+    if not normalized_phase or not isinstance(workflow_state, dict):
+        return
+    verdicts = workflow_state.setdefault("phase_verdicts", {})
+    if not isinstance(verdicts, dict):
+        verdicts = {}
+        workflow_state["phase_verdicts"] = verdicts
+    verdict = extract_phase_verdict(output, phase_id=normalized_phase)
+    if verdict:
+        verdicts[normalized_phase] = verdict
+    else:
+        verdicts.pop(normalized_phase, None)
+
+
+def _prune_phase_verdicts(
+    workflow_state: dict[str, object],
+    *,
+    keep_phase_ids: set[str],
+) -> None:
+    if not isinstance(workflow_state, dict):
+        return
+    existing = workflow_state.get("phase_verdicts", {})
+    if not isinstance(existing, dict):
+        workflow_state["phase_verdicts"] = {}
+        return
+    normalized_keep = {
+        str(item).strip().lower()
+        for item in keep_phase_ids
+        if str(item).strip()
+    }
+    workflow_state["phase_verdicts"] = {
+        str(phase_id).strip().lower(): dict(entry)
+        for phase_id, entry in existing.items()
+        if str(phase_id).strip().lower() in normalized_keep and isinstance(entry, dict)
+    }
+
+
+def _evaluate_phase_semantic_gate(
+    *,
+    task_rows_by_phase: dict[str, WorkTask],
+    phase_verdicts: dict[str, dict[str, object]] | None = None,
+) -> list[str]:
+    def _is_slice_source_phase(phase_id: str) -> bool:
+        normalized_phase = str(phase_id or "").strip().lower()
+        return normalized_phase == "lead_intake" or normalized_phase.startswith("plan_")
+
+    def _select_approved_slice_from_verdicts(
+        verdicts_by_phase: dict[str, dict[str, object]],
+    ) -> str:
+        explicit = dict(verdicts_by_phase.get("lead_intake", {}) or {})
+        explicit_slice = str(explicit.get("slice_id", "") or "").strip()
+        if explicit_slice:
+            return explicit_slice
+        for phase_id, entry in verdicts_by_phase.items():
+            if not _is_slice_source_phase(phase_id):
+                continue
+            if not isinstance(entry, dict):
+                continue
+            slice_id = str(entry.get("slice_id", "") or "").strip()
+            if slice_id:
+                return slice_id
+        return ""
+
+    def _select_approved_slice_from_outputs() -> str:
+        lead_intake_text = _task_result_text(task_rows_by_phase.get("lead_intake"))
+        explicit_slice = _first_slice_id(lead_intake_text)
+        if explicit_slice:
+            return explicit_slice
+        for phase_id, candidate in task_rows_by_phase.items():
+            if not _is_slice_source_phase(phase_id):
+                continue
+            slice_id = _first_slice_id(_task_result_text(candidate))
+            if slice_id:
+                return slice_id
+        return ""
+
+    def _select_gate_verdict(
+        verdicts_by_phase: dict[str, dict[str, object]],
+        gate_kind: str,
+    ) -> dict[str, object]:
+        normalized_gate = str(gate_kind or "").strip().lower()
+        explicit = dict(verdicts_by_phase.get(normalized_gate, {}) or {})
+        if explicit:
+            return explicit
+        for phase_id, entry in verdicts_by_phase.items():
+            if not isinstance(entry, dict):
+                continue
+            normalized_phase = str(phase_id or "").strip().lower()
+            if normalized_phase.startswith(("lead_", "delegate_", "plan_")):
+                continue
+            role_hint = str(entry.get("role_hint", "") or "").strip().lower()
+            if normalized_gate == "build" and role_hint == "engineer":
+                return dict(entry)
+            if normalized_gate == "review" and role_hint == "reviewer":
+                return dict(entry)
+            if normalized_gate == "qa" and role_hint == "qa":
+                return dict(entry)
+        return {}
+
+    def _select_gate_task(gate_kind: str) -> WorkTask | None:
+        normalized_gate = str(gate_kind or "").strip().lower()
+        explicit = task_rows_by_phase.get(normalized_gate)
+        if explicit is not None:
+            return explicit
+        for phase_id, candidate in task_rows_by_phase.items():
+            if candidate is None:
+                continue
+            normalized_phase = str(phase_id or "").strip().lower()
+            if normalized_phase.startswith(("lead_", "delegate_", "plan_")):
+                continue
+            if normalized_gate == "build" and candidate.role.value == "engineer":
+                return candidate
+            if normalized_gate == "review" and candidate.role.value == "reviewer":
+                return candidate
+            if normalized_gate == "qa" and candidate.role.value == "qa":
+                return candidate
+        return None
+
+    failures: list[str] = []
+    verdicts = coerce_phase_verdicts(phase_verdicts or {})
+
+    review_verdict = _select_gate_verdict(verdicts, "review")
+    if (
+        str(review_verdict.get("status", "") or "").strip().lower() == "rejected"
+        or "review_rejected"
+        in [
+            str(item).strip().lower()
+            for item in list(review_verdict.get("reason_codes", []) or [])
+            if str(item).strip()
+        ]
+    ):
+        failures.append("review:rejected_decision")
+
+    review_text = _task_result_text(_select_gate_task("review"))
+    if (
+        "review:rejected_decision" not in failures
+        and review_text
+        and _REVIEW_REJECTED_RE.search(review_text)
+    ):
+        failures.append("review:rejected_decision")
+
+    qa_verdict = _select_gate_verdict(verdicts, "qa")
+    if (
+        str(qa_verdict.get("status", "") or "").strip().lower() == "blocked"
+        or "qa_blocked"
+        in [
+            str(item).strip().lower()
+            for item in list(qa_verdict.get("reason_codes", []) or [])
+            if str(item).strip()
+        ]
+    ):
+        failures.append("qa:blocked_status")
+
+    qa_text = _task_result_text(_select_gate_task("qa"))
+    if "qa:blocked_status" not in failures and qa_text and _QA_BLOCKED_RE.search(qa_text):
+        failures.append("qa:blocked_status")
+
+    build_verdict = _select_gate_verdict(verdicts, "build")
+    build_text = _task_result_text(_select_gate_task("build"))
+    approved_slice = _select_approved_slice_from_verdicts(verdicts) or _select_approved_slice_from_outputs()
+    build_slice = str(build_verdict.get("slice_id", "") or "").strip() or _first_slice_id(build_text)
+    build_contract_status = str(build_verdict.get("contract_status", "") or "").strip().lower()
+    build_reason_codes = [
+        str(item).strip().lower()
+        for item in list(build_verdict.get("reason_codes", []) or [])
+        if str(item).strip()
+    ]
+    if approved_slice and build_slice and approved_slice != build_slice:
+        failures.append(f"build:slice_drift:{approved_slice}->{build_slice}")
+    elif approved_slice and (
+        build_contract_status == "drift"
+        or "slice_drift" in build_reason_codes
+    ):
+        failures.append(f"build:slice_drift:{approved_slice}->{build_slice or 'unknown'}")
+    elif approved_slice and build_text and _BUILD_SLICE_DRIFT_RE.search(build_text):
+        failures.append(f"build:slice_drift:{approved_slice}->unknown")
+
+    return list(dict.fromkeys(failures))
+
+
+def _format_pending_phase_summary(
+    pending_phases: list[str],
+    planning_failed_phases: list[str],
+) -> str:
+    normalized_pending = [
+        str(item).strip()
+        for item in list(pending_phases or [])
+        if str(item).strip()
+    ]
+    normalized_planning_failed = [
+        str(item).strip()
+        for item in list(planning_failed_phases or [])
+        if str(item).strip()
+    ]
+    if not normalized_pending:
+        return "none"
+    if not normalized_planning_failed:
+        return ", ".join(normalized_pending)
+
+    downstream_pending = [
+        phase
+        for phase in normalized_pending
+        if not str(phase).strip().lower().startswith("plan_")
+    ]
+    planning_pending = [
+        phase
+        for phase in normalized_pending
+        if str(phase).strip().lower().startswith("plan_")
+    ]
+
+    segments: list[str] = []
+    if planning_pending:
+        segments.append(", ".join(planning_pending))
+    if downstream_pending:
+        segments.append(
+            "downstream bloqueado por planning: " + ", ".join(downstream_pending)
+        )
+    return " | ".join(segments) if segments else "none"
+
+
+def _should_auto_extend_weak_run(
+    *,
+    artifact_created: int,
+    execution_steps_so_far: int,
+    planning_failure_detected: bool,
+    root_task_state_counts: dict[str, int] | None,
+) -> tuple[bool, str]:
+    if planning_failure_detected:
+        return False, "planning_phase_failed"
+    if artifact_created != 0 or execution_steps_so_far != 0:
+        return False, "run_has_execution_or_artifacts"
+
+    counts = dict(root_task_state_counts or {})
+    runnable_count = int(counts.get("ready", 0)) + int(counts.get("claimed", 0))
+    waiting_user_count = int(counts.get("waiting_user", 0))
+    if waiting_user_count > 0:
+        return False, "waiting_user"
+    if runnable_count <= 0:
+        return False, "no_runnable_tasks_for_root"
+    return True, "weak_run_without_artifacts_or_execution_steps"
+
+
+def _should_require_execution_plan_for_chat_phase(
+    *,
+    phase_id: str,
+    role: str,
+    lead_run_mode: str,
+    require_build_execution_plan: bool,
+    derived_execution_plan: list[dict[str, object]] | None,
+) -> bool:
+    normalized_phase = str(phase_id or "").strip().lower()
+    normalized_role = str(role or "").strip().upper()
+    if not require_build_execution_plan or str(lead_run_mode or "").strip().lower() != "standard":
+        return False
+    if normalized_role != "ENGINEER":
+        return False
+    if normalized_phase.startswith("plan_"):
+        return False
+    if normalized_phase == "build":
+        return True
+    return bool(list(derived_execution_plan or []))
+
+
+def _phase_contract_prompt_block(
+    spec: PhaseSpec,
+    *,
+    all_contracts: dict[str, dict[str, object]],
+) -> str:
+    phase_id = str(spec.phase_id or "").strip()
+    if not phase_id:
+        return ""
+
+    contract = dict(all_contracts.get(phase_id, {}) or {})
+    objective = str(contract.get("objective", spec.objective) or "").strip()
+    depends_on = [
+        str(dep).strip()
+        for dep in list(contract.get("depends_on", spec.depends_on) or [])
+        if str(dep).strip()
+    ]
+    upstream_lines: list[str] = []
+    for dep in depends_on[:4]:
+        dep_contract = dict(all_contracts.get(dep, {}) or {})
+        dep_objective = str(dep_contract.get("objective", "") or "").strip()
+        if dep_objective:
+            upstream_lines.append(f"- {dep}: {dep_objective}")
+
+    role_upper = str(spec.role or "").strip().upper()
+    objective_missing = is_missing_contract_objective(objective)
+    if objective_missing and role_upper == "TEAM_LEAD":
+        objective_display = "Planificar y coordinar la corrida actual."
+    else:
+        objective_display = (
+            f"[CONTRATO INVALIDO: objective ausente para '{phase_id}']"
+            if objective_missing
+            else objective
+        )
+
+    if objective_missing and role_upper != "TEAM_LEAD":
+        role_guidance = (
+            "Contrato invalido: objective ausente. No infieras el objetivo por nombre de fase, "
+            "historial o contexto lateral. Declara bloqueo contractual y solicita replanificacion del Lead."
+        )
+    else:
+        role_guidance = (
+            "No cambies de slice, no cambies de objetivo y no sustituyas esta fase por otra "
+            "de 'mayor impacto' sin una nueva directiva del Lead."
+            if role_upper == "ENGINEER"
+            else (
+                "Valida estrictamente si lo ejecutado respeta este contrato. Si detectas deriva, "
+                "decláralo explícitamente."
+                if role_upper in {"REVIEWER", "QA"}
+                else "Usa este contrato como restricción autoritativa de la fase."
+            )
+        )
+
+    lines = [
+        "[PHASE_CONTRACT]",
+        f"phase_id: {phase_id}",
+        f"role: {role_upper}",
+        f"objective: {objective_display}",
+        f"depends_on: [{', '.join(depends_on)}]" if depends_on else "depends_on: []",
+        "contract_rule: obligatorio",
+        role_guidance,
+    ]
+    forbidden_path_hints = [
+        str(item).strip()
+        for item in list(contract.get("forbidden_path_hints", []) or [])
+        if str(item).strip()
+    ]
+    allowed_module_path_hints = [
+        str(item).strip()
+        for item in list(contract.get("allowed_module_path_hints", []) or [])
+        if str(item).strip()
+    ]
+    if forbidden_path_hints:
+        lines.append(f"forbidden_paths: [{', '.join(forbidden_path_hints[:6])}]")
+    if role_upper == "ENGINEER" and allowed_module_path_hints:
+        lines.append(
+            f"allowed_module_scope: [{', '.join(allowed_module_path_hints[:6])}, __init__.py]"
+        )
+    if upstream_lines:
+        lines.append("upstream_context:")
+        lines.extend(upstream_lines)
+    lines.append("[/PHASE_CONTRACT]")
+    return "\n".join(lines)
 
 
 def _persist_planning_markdown(
@@ -359,7 +862,7 @@ def _persist_planning_markdown(
         "",
     )
     title = title_source[:120] if title_source else f"Plan {task_root}"
-    timestamp = datetime.now(timezone.utc)
+    timestamp = local_now()
     file_name = (
         f"{timestamp.strftime('%Y-%m-%d_%H-%M-%S')}"
         f"_{_safe_plan_slug(normalized_mode)}"
@@ -443,6 +946,7 @@ from api.utils import (
     _read_jsonl_records,
     _read_runtime_tasks_payload,
     _read_runtime_workflow_state,
+    _display_ts_local,
     _peer_consultation_summary_fields,
     _specialist_insight_fields,
     _event_summary,
@@ -456,7 +960,12 @@ from api.utils import (
     _safe_workspace_target,
     _extract_user_message_from_task_description,
     _group_chat_roots,
+    _message_requests_close_pending,
+    _collect_continuation_target_pending_details,
+    _phase_specs_from_pending_details,
+    _close_pending_plan_requires_repair,
     _build_project_continuity_context,
+    _build_continuation_target_context,
     _build_scout_project_state_context,
     _build_scout_session_history_context,
     _chat_round_budget,
@@ -569,6 +1078,125 @@ def _maybe_deposit_minimal_output(
         return None
 
 
+def _archive_incomplete_tasks_for_root(
+    runtime_dir: Path,
+    *,
+    task_root: str,
+    reason: str,
+) -> int:
+    normalized_root = _normalize_task_root(task_root)
+    if not normalized_root:
+        return 0
+    archived_count = 0
+    try:
+        import sqlite3 as _sqlite3
+
+        db_path = runtime_dir / "aiteam.db"
+        if not db_path.exists():
+            return 0
+        with _sqlite3.connect(str(db_path)) as _conn:
+            _rows = _conn.execute(
+                "SELECT task_id, payload FROM tasks WHERE task_id LIKE ?",
+                (f"{normalized_root}::%",),
+            ).fetchall()
+            _to_archive = []
+            for _tid, _raw in _rows:
+                try:
+                    _payload = json.loads(_raw)
+                except Exception:
+                    continue
+                if _payload.get("state") in (
+                    "completed",
+                    "failed",
+                    "archived",
+                    "cancelled",
+                ):
+                    continue
+                _payload["state"] = "archived"
+                _payload.setdefault("metadata", {})["archived_reason"] = reason
+                _to_archive.append((json.dumps(_payload), _tid))
+            if _to_archive:
+                _conn.executemany(
+                    "UPDATE tasks SET payload = ? WHERE task_id = ?",
+                    _to_archive,
+                )
+                _conn.commit()
+                archived_count = len(_to_archive)
+    except Exception:
+        return 0
+    return archived_count
+
+
+def _classify_clarification_continuation_policy(
+    question: str,
+    clarification: str,
+) -> str:
+    answer = re.sub(r"\s+", " ", str(clarification or "")).strip().lower()
+    if not answer:
+        return "auto"
+    if any(
+        token in answer
+        for token in (
+            "force continue",
+            "force_continue",
+            "forzar continu",
+            "seguir a la fuerza",
+            "continua igualmente",
+            "continúa igualmente",
+            "continua igual",
+            "continúa igual",
+        )
+    ):
+        return "force_continue"
+    if any(
+        token in answer
+        for token in (
+            "clean retry",
+            "clean_retry",
+            "retry limpio",
+            "reintento limpio",
+            "nuevo objetivo",
+            "nueva run limpia",
+        )
+    ):
+        return "clean_retry"
+    if "clean retry" in str(question or "").lower():
+        if "clean" in answer or "retry" in answer:
+            return "clean_retry"
+    return "auto"
+
+
+def _sanitize_message_for_clean_retry(message: str, continuation_of: str) -> str:
+    text = str(message or "")
+    if continuation_of:
+        text = re.sub(
+            rf"\bcontinue\s+from\s+{re.escape(continuation_of)}\.?\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+    text = re.sub(
+        r"\bcontinue\s+from\s+CHAT-[0-9A-Za-z]{8}\.?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"^\s*[\r\n]+", "", text)
+    return text.strip()
+
+
+def _canonicalize_clarification_for_prompt(
+    clarification: str,
+    selected_policy: str,
+) -> str:
+    raw = re.sub(r"\s+", " ", str(clarification or "")).strip()
+    if selected_policy == "clean_retry":
+        return "clean retry"
+    if selected_policy == "force_continue":
+        return "force continue"
+    return raw
+
+
 @app.post("/api/aiteam/chat")
 async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
     _require_api_auth_request(request)
@@ -651,31 +1279,99 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             if isinstance(item, dict)
             and str(item.get("root_id", "")).upper().startswith("CHAT-")
         }
-        continuation_requested = _is_continuation_message(payload.message)
-        continuation_target = _extract_chat_root_from_message(payload.message)
+        explicit_continuation_target = _normalize_task_root(
+            str(getattr(payload, "continuation_target", "") or "")
+        )
+        continuation_requested = bool(explicit_continuation_target) or _is_continuation_message(payload.message)
+        continuation_target = explicit_continuation_target or _extract_chat_root_from_message(payload.message)
+        continuation_effective = bool(continuation_requested)
         continuation_of = ""
         continuation_snapshot = ""
         continuation_source: dict[str, object] = {}
+        continuation_block_reason = ""
         preplan_surface_hints = _detect_preplan_surface_hints(payload.message)
         preplan_signal_block = _build_preplan_signal_block(preplan_surface_hints)
         if continuation_requested:
             if continuation_target and continuation_target in previous_by_root:
                 continuation_source = previous_by_root.get(continuation_target, {})
-            elif previous_root:
-                continuation_source = previous_root
+            elif continuation_target:
+                # RC-G: The user named a specific CHAT-XXXXXXX that does NOT exist in
+                # this project's runtime.  This almost always means they are referencing
+                # a chat from a different workspace / project (cross-project contamination).
+                # Do NOT fall back to `previous_root` — that would silently execute a
+                # continuation of a completely different project's last run.
+                # Instead: leave continuation_source empty, let continuation_target_not_found
+                # flow through, and emit a clear error to the user.
+                continuation_source = {}
+                continuation_block_reason = "target_not_found_in_current_project"
+            else:
+                # Continuations implicitas sin CHAT-ID crean demasiada ambiguedad y
+                # contaminacion de memoria/proyecto. Exigimos target explicito.
+                continuation_source = {}
+                continuation_effective = False
+                continuation_block_reason = "ambiguous_target_required"
+                continuation_snapshot = "missing_explicit_target"
 
         if continuation_requested and continuation_source:
             continuation_of = str(continuation_source.get("root_id", "") or "")
-            previous_states = continuation_source.get("phase_states", {})
-            unresolved: list[str] = []
-            if isinstance(previous_states, dict):
-                for phase_name, state in previous_states.items():
-                    state_value = str(state or "")
-                    if state_value != "completed":
-                        unresolved.append(f"{phase_name}:{state_value}")
-            continuation_snapshot = (
-                ", ".join(unresolved[:8]) if unresolved else "all_completed"
+            previous_verdict = continuation_source.get("run_verdict", {})
+            previous_verdict_dict = (
+                previous_verdict if isinstance(previous_verdict, dict) else {}
             )
+            previous_verdict_state = str(
+                previous_verdict_dict.get("state", "") or ""
+            ).strip().lower()
+            # RC-F: detect meta-system / infrastructure failures in prior run.
+            # These reason codes indicate that the SYSTEM failed, not the project
+            # work.  A prior run blocked only by these should not prevent continuation
+            # — blocking it creates a deadlock where require_execution_plan=True fires
+            # on build but no structured plan is ever injected into metadata.
+            _INFRA_META_MARKERS: tuple[str, ...] = (
+                "missing_execution_plan_required",
+                "build_phase_missing",
+                "no_implementation_phase",
+                "no_execution_evidence",
+                "no_successful_execution_steps",
+                "build_phase_empty_result",
+                "build_phase_placeholder_output",
+                "phase_failed:",       # build task failed before running (system error)
+                ":not_completed",      # phase did not complete (cascade from blocked build)
+                "routing_failure",
+                "no_eligible_adapter",
+                "infrastructure_routing_failure",
+            )
+            _prior_reason_codes = [
+                str(r) for r in (previous_verdict_dict.get("reason_codes", []) or [])
+                if str(r).strip()
+            ]
+            _prior_all_infra = bool(_prior_reason_codes) and all(
+                any(m in code for m in _INFRA_META_MARKERS)
+                for code in _prior_reason_codes
+            )
+            if (
+                continuation_of
+                and _continuation_policy != "force_continue"
+                and previous_verdict_state in {"failed", "rejected"}
+                and not _prior_all_infra
+            ):
+                continuation_effective = False
+                continuation_block_reason = (
+                    f"prior_run_{previous_verdict_state}"
+                )
+                continuation_snapshot = (
+                    f"blocked:{previous_verdict_state}:use_force_continue_or_clean_retry"
+                )
+            else:
+                previous_states = continuation_source.get("phase_states", {})
+                unresolved: list[str] = []
+                if isinstance(previous_states, dict):
+                    for phase_name, state in previous_states.items():
+                        state_value = str(state or "")
+                        if state_value != "completed":
+                            unresolved.append(f"{phase_name}:{state_value}")
+                continuation_snapshot = (
+                    ", ".join(unresolved[:8]) if unresolved else "all_completed"
+                )
         elif continuation_requested and continuation_target:
             continuation_of = continuation_target
             continuation_snapshot = "target_not_found"
@@ -693,21 +1389,238 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
         preplan_context_pressure = _estimate_preplan_context_pressure(
             runtime_dir=runtime_dir,
-            continuation_requested=continuation_requested,
-            continuation_of=continuation_of,
+            continuation_requested=continuation_effective,
+            continuation_of=(continuation_of if continuation_effective else ""),
             continuation_snapshot=continuation_snapshot,
         )
-        require_build_execution_plan = not bool(continuation_requested)
+        require_build_execution_plan = not bool(continuation_effective)
+        lead_task_id = f"{task_root}::lead_intake"
+        _run_ws = orch._get_workflow_state(task_root)
+        _run_ws["run_status"] = "running"
+        _run_ws.setdefault("run_started_at", local_now_iso())
+        orch._save_workflow_state(task_root)
 
-        # ── Constantes de capabilities por rol ─────────────────────────────
-        _ROLE_CAPABILITIES = {
-            "RESEARCHER": ["analysis"],
-            "ENGINEER": ["coding"],
-            "REVIEWER": ["review"],
-            "QA": ["analysis"],
-        }
+        if continuation_requested and not continuation_target and continuation_block_reason == "ambiguous_target_required":
+            clarification_question = (
+                "He detectado una continuacion, pero necesito el chat exacto. "
+                "Indica `Continue from CHAT-XXXXXXXX` o usa el boton Continue sobre la run que quieres retomar."
+            )
+            lead_intake_task = WorkTask(
+                task_id=lead_task_id,
+                title="Lead intake and planning",
+                description=(
+                    "Aclaracion requerida antes de continuar la run.\n"
+                    f"Solicitud original:\n{payload.message}\n"
+                    "Entrega: identificar el chat exacto a retomar."
+                ),
+                role=Role.TEAM_LEAD,
+                complexity=complexity,
+                criticality=criticality,
+                metadata={
+                    **build_chat_task_policy_metadata(),
+                    "phase": "lead_intake",
+                    "chat_preferred_role": preferred_role.value,
+                    "continuation_requested": True,
+                    "continuation_effective": False,
+                    "continuation_of": "",
+                    "continuation_snapshot": continuation_snapshot,
+                    "continuation_block_reason": continuation_block_reason,
+                },
+            )
+            orch.submit_task(lead_intake_task)
+            orch.taskboard.mark_waiting_user(lead_task_id, question=clarification_question)
+            orch.event_logger.emit(
+                "chat_continuation_blocked",
+                {
+                    "task_id": task_root,
+                    "continuation_of": "",
+                    "reason": continuation_block_reason,
+                    "snapshot": continuation_snapshot,
+                    "source": "user_input",
+                },
+            )
+            pending_file = runtime_dir / f"pending_clarification_{task_root}.json"
+            pending_file.write_text(
+                json.dumps(
+                    {
+                        "type": "lead_intake",
+                        "task_root": task_root,
+                        "question": clarification_question,
+                        "original_message": payload.message,
+                        "original_payload": payload.model_dump(),
+                        "created_at": local_now_iso(),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            ws = orch._get_workflow_state(task_root)
+            ws["continuation_requested"] = True
+            ws["continuation_effective"] = False
+            ws["continuation_of"] = ""
+            ws["continuation_snapshot"] = continuation_snapshot
+            ws["continuation_block_reason"] = continuation_block_reason
+            ws["user_message"] = payload.message
+            ws["run_status"] = "waiting_user"
+            orch._save_workflow_state()
+            orch.event_logger.emit(
+                "chat_waiting_user",
+                {"task_id": task_root, "question": clarification_question},
+            )
+            return TeamChatResponse(
+                task_id=task_root,
+                role=preferred_role.value,
+                state="waiting_user",
+                response=clarification_question,
+                decision_justification="Se requiere un chat explicito para continuar sin ambiguedad.",
+                elapsed_ms=0,
+                lead_task_id=lead_task_id,
+                delegated_task_ids=[],
+                phase_task_ids={"lead_intake": lead_task_id},
+                chat_mode=response_mode,
+                round_budget=round_budget,
+                phase_evidence_plan={},
+                delegate_batches=[],
+                delegate_economics={},
+                specialist_reports=[],
+                specialist_report_summary={},
+                probe_mode=probe_mode,
+                continuation_requested=True,
+                continuation_effective=False,
+                continuation_of="",
+                waiting_user=True,
+                clarification_question=clarification_question,
+                is_sim_mode=sim_mode_enabled(),
+            )
+        if (
+            continuation_requested
+            and not continuation_effective
+            and continuation_block_reason
+            and continuation_block_reason != "ambiguous_target_required"
+        ):
+            if continuation_block_reason == "prior_run_rejected":
+                clarification_question = (
+                    f"La run {continuation_of or continuation_target or 'objetivo'} terminó rechazada. "
+                    "Confirma si quieres `force continue` sobre esa run o prefieres un clean retry con nuevo objetivo."
+                )
+            elif continuation_block_reason == "prior_run_failed":
+                clarification_question = (
+                    f"La run {continuation_of or continuation_target or 'objetivo'} terminó fallida. "
+                    "Confirma si quieres retomar exactamente esa run con `force continue` o abrir un clean retry."
+                )
+            elif continuation_block_reason == "target_not_found_in_current_project":
+                clarification_question = (
+                    "El chat indicado no existe en este proyecto. "
+                    "Indica un `CHAT-XXXXXXXX` válido de este workspace o abre un clean retry."
+                )
+            else:
+                clarification_question = (
+                    "No pude aplicar la continuation solicitada. "
+                    "Confirma si quieres un clean retry o especifica el target exacto a retomar."
+                )
+
+            lead_intake_task = WorkTask(
+                task_id=lead_task_id,
+                title="Lead intake and planning",
+                description=(
+                    "Continuation bloqueada antes de planificar la run.\n"
+                    f"Solicitud original:\n{payload.message}\n"
+                    "Entrega: decidir entre force continue, clean retry o target alternativo."
+                ),
+                role=Role.TEAM_LEAD,
+                complexity=complexity,
+                criticality=criticality,
+                metadata={
+                    **build_chat_task_policy_metadata(),
+                    "phase": "lead_intake",
+                    "chat_preferred_role": preferred_role.value,
+                    "continuation_requested": True,
+                    "continuation_effective": False,
+                    "continuation_of": continuation_of,
+                    "continuation_snapshot": continuation_snapshot,
+                    "continuation_block_reason": continuation_block_reason,
+                },
+            )
+            orch.submit_task(lead_intake_task)
+            orch.taskboard.mark_waiting_user(lead_task_id, question=clarification_question)
+            orch.event_logger.emit(
+                "chat_continuation_blocked",
+                {
+                    "task_id": task_root,
+                    "continuation_of": continuation_of,
+                    "reason": continuation_block_reason,
+                    "snapshot": continuation_snapshot,
+                    "source": "run_verdict",
+                },
+            )
+            pending_file = runtime_dir / f"pending_clarification_{task_root}.json"
+            pending_file.write_text(
+                json.dumps(
+                    {
+                        "type": "lead_intake",
+                        "task_root": task_root,
+                        "question": clarification_question,
+                        "original_message": payload.message,
+                        "original_payload": payload.model_dump(),
+                        "created_at": local_now_iso(),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            ws = orch._get_workflow_state(task_root)
+            ws["continuation_requested"] = True
+            ws["continuation_effective"] = False
+            ws["continuation_of"] = continuation_of
+            ws["continuation_snapshot"] = continuation_snapshot
+            ws["continuation_block_reason"] = continuation_block_reason
+            ws["user_message"] = payload.message
+            ws["run_status"] = "waiting_user"
+            orch._save_workflow_state()
+            orch.event_logger.emit(
+                "chat_waiting_user",
+                {"task_id": task_root, "question": clarification_question},
+            )
+            return TeamChatResponse(
+                task_id=task_root,
+                role=preferred_role.value,
+                state="waiting_user",
+                response=clarification_question,
+                decision_justification=(
+                    "La continuation solicitada no puede aplicarse automáticamente; "
+                    "se requiere decisión explícita del usuario."
+                ),
+                elapsed_ms=0,
+                lead_task_id=lead_task_id,
+                delegated_task_ids=[],
+                phase_task_ids={"lead_intake": lead_task_id},
+                chat_mode=response_mode,
+                round_budget=round_budget,
+                phase_evidence_plan={},
+                delegate_batches=[],
+                delegate_economics={},
+                specialist_reports=[],
+                specialist_report_summary={},
+                probe_mode=probe_mode,
+                continuation_requested=True,
+                continuation_effective=False,
+                continuation_of=continuation_of,
+                waiting_user=True,
+                clarification_question=clarification_question,
+                is_sim_mode=sim_mode_enabled(),
+            )
 
         # ── Instruccion de WORKFLOW_PLAN para el prompt del Lead ────────────
+        _IMPL_KEYWORDS = (
+            "start", "next slice", "implement", "build", "create", "write", "generate",
+            "siguiente", "implementa", "comienza", "construye", "escribe", "genera",
+            "crea", "prueba", "siguiente slice", "proximo", "proxima", "deploy",
+        )
+        _message_lower = payload.message.lower()
+        _user_wants_implementation = any(kw in _message_lower for kw in _IMPL_KEYWORDS)
+
         _WORKFLOW_PLAN_INSTRUCTION = (
             "\n\nTRAS TU ANALISIS, incluye un bloque [WORKFLOW_PLAN] con las fases"
             " especificas que este pedido necesita. NO incluyas lead_intake ni"
@@ -718,16 +1631,79 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             "  role: <RESEARCHER|ENGINEER|REVIEWER|QA>\n"
             "  objective: <objetivo concreto en una linea>\n"
             "  depends_on: [<phase_ids separados por coma, o vacio>]\n"
-            "[/WORKFLOW_PLAN]"
+            "[/WORKFLOW_PLAN]\n"
+            "REGLAS CRITICAS DEL WORKFLOW_PLAN:\n"
+            "1. El campo `objective` es OBLIGATORIO y debe ser especifico para cada fase.\n"
+            "   INVALIDO: 'Ejecutar fase: engineer_toc_implementation'\n"
+            "   VALIDO:   'Implementar tabla de contenidos con anclas y nivel de profundidad configurable'\n"
+            "2. El campo `depends_on` es OBLIGATORIO para fases ENGINEER, REVIEWER y QA.\n"
+            "   Si la fase no depende de ninguna otra, escribe: depends_on: []\n"
+            "3. En runs de CONTINUACION: si retomas una fase de una run anterior, COPIA su\n"
+            "   objetivo real desde el contexto del historial. Un ENGINEER sin objective\n"
+            "   especifico reportara BLOQUEADA sin producir codigo.\n"
+            "4. CONTINUACION + IMPLEMENTACION: si el mensaje del usuario contiene palabras\n"
+            "   como 'start', 'next slice', 'implement', 'siguiente', 'implementa', 'crea',\n"
+            "   'construye' o 'escribe', el plan DEBE incluir al menos una fase ENGINEER.\n"
+            "   Un plan con solo fases RESEARCHER en este contexto es invalido — el\n"
+            "   diagnostico previo ya existe en el historial; no lo repitas.\n"
+            "5. BLOQUEOS DE INFRAESTRUCTURA: si el lead_memory o el historial de sesiones\n"
+            "   muestra runs anteriores marcadas como 'BLOQUEADO IRRECUPERABLEMENTE' cuya\n"
+            "   causa fue HTTP 429, HTTP 403, routing failure o agotamiento de recursos,\n"
+            "   NO las trates como estado actual del proyecto. Escribe en tu output:\n"
+            "   'Bloqueos anteriores: infraestructura transitoria (runs X, Y) — proyecto sano.'\n"
+            "   Luego planifica el slice pendiente normalmente. Los workers leen tu output\n"
+            "   para determinar el estado del proyecto — si no lo aclaras, se auto-bloquean."
         )
 
-        lead_task_id = f"{task_root}::lead_intake"
+        # Mandate block injected when this is a continuation run that asks for
+        # implementation work.  Prevents the Lead from generating a research-only plan
+        # when prior diagnostic context already exists in the history.
+        _continuation_impl_mandate = ""
+        if continuation_effective and _user_wants_implementation:
+            _mandate_source = f" (continua desde {continuation_of})" if continuation_of else ""
+            _continuation_impl_mandate = (
+                "\n\n== DIRECTRIZ DE CONTINUACION-IMPLEMENTACION =="
+                f"\nEsta es una run de continuacion{_mandate_source}."
+                "\nEl historial ya contiene investigacion y diagnostico previos."
+                "\nPROHIBIDO: generar un plan con solo fases RESEARCHER."
+                "\nOBLIGATORIO: tu [WORKFLOW_PLAN] debe incluir al menos una fase ENGINEER"
+                " con un objetivo especifico y concreto extraido del historial."
+                "\nSi el ultimo engineer reporto BLOQUEADA por objective generico,"
+                " asigna ahora el objetivo real (no 'Ejecutar fase: X')."
+                "\n== FIN DIRECTRIZ =="
+            )
+
+        _close_pending_requested = bool(
+            continuation_effective and _message_requests_close_pending(payload.message)
+        )
+        _continuation_close_pending_mandate = ""
+        if _close_pending_requested:
+            _close_source = f" {continuation_of}" if continuation_of else ""
+            _continuation_close_pending_mandate = (
+                "\n\n== DIRECTRIZ DE CONTINUACION-CIERRE =="
+                f"\nEsta run continua desde{_close_source} y el usuario pidio cerrar fases pendientes primero."
+                "\nOBLIGATORIO: prioriza las fases pendientes/no resueltas del continuation target antes de abrir un slice nuevo."
+                "\nPROHIBIDO: sustituir este pedido por 'next highest-impact slice' u otro objetivo historico mas antiguo mientras sigan pendientes visibles."
+                "\nSi hace falta replantear, el [WORKFLOW_PLAN] debe representar el cierre o la replanificacion minima de esas fases pendientes."
+                "\n== FIN DIRECTRIZ =="
+            )
+
+        continuation_target_context = _build_continuation_target_context(
+            runtime_dir,
+            continuation_of,
+            current_message=payload.message,
+        )
         continuity_context = _build_project_continuity_context(runtime_dir)
         continuity_block = f"\n\n{continuity_context}\n" if continuity_context else ""
+        continuation_target_block = (
+            f"\n\n{continuation_target_context}\n"
+            if continuation_target_context
+            else ""
+        )
         curated_context_block = _build_curated_context_block(
             runtime_dir=runtime_dir,
             workspace=workspace,
-            continuation_of=continuation_of,
+            continuation_of=(continuation_of if continuation_effective else ""),
         )
         lead_memory_block = build_memory_prompt_block(
             runtime_dir=runtime_dir,
@@ -765,9 +1741,47 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "criticality": payload.criticality,
                 "message": payload.message,
                 "continuation_requested": continuation_requested,
+                "continuation_effective": continuation_effective,
                 "continuation_of": continuation_of,
+                "continuation_block_reason": continuation_block_reason,
             },
         )
+        if continuation_requested and continuation_source:
+            previous_source_verdict = continuation_source.get("run_verdict", {})
+            if isinstance(previous_source_verdict, dict) and bool(
+                previous_source_verdict.get("reconstructed_from_phase_verdicts", False)
+            ):
+                orch.event_logger.emit(
+                    "chat_continuation_source_reconstructed",
+                    {
+                        "task_id": task_root,
+                        "continuation_of": continuation_of,
+                        "reason_codes": list(
+                            previous_source_verdict.get("reason_codes", []) or []
+                        )[:12],
+                        "source": "phase_verdicts",
+                    },
+                )
+        if continuation_requested and not continuation_effective and continuation_block_reason:
+            orch.event_logger.emit(
+                "chat_continuation_blocked",
+                {
+                    "task_id": task_root,
+                    "continuation_of": continuation_of,
+                    "reason": continuation_block_reason,
+                    "snapshot": continuation_snapshot,
+                    "source": (
+                        "phase_verdicts"
+                        if isinstance(continuation_source.get("run_verdict", {}), dict)
+                        and bool(
+                            continuation_source.get("run_verdict", {}).get(
+                                "reconstructed_from_phase_verdicts", False
+                            )
+                        )
+                        else "run_verdict"
+                    ),
+                },
+            )
         orch.memory.remember(
             agent_id="lead-1",
             role=Role.TEAM_LEAD.value,
@@ -786,8 +1800,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 f"{lead_memory_prompt_block}"
                 f"{capabilities_briefing_block}"
                 f"{preplan_signal_block}"
+                f"{continuation_target_block}"
                 f"{curated_context_block}"
                 f"{_WORKFLOW_PLAN_INSTRUCTION}"
+                f"{_continuation_impl_mandate}"
+                f"{_continuation_close_pending_mandate}"
                 f"{continuity_block}"
             )
         else:
@@ -799,8 +1816,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 f"{lead_memory_prompt_block}"
                 f"{capabilities_briefing_block}"
                 f"{preplan_signal_block}"
+                f"{continuation_target_block}"
                 f"{curated_context_block}"
                 f"{_WORKFLOW_PLAN_INSTRUCTION}"
+                f"{_continuation_impl_mandate}"
+                f"{_continuation_close_pending_mandate}"
                 f"{continuity_block}"
             )
 
@@ -812,7 +1832,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         scout_curator_id = f"{task_root}::scout_context_curator"
 
         _scout_state_raw = _build_scout_project_state_context(workspace)
-        _scout_history_raw = _build_scout_session_history_context(runtime_dir)
+        _scout_history_raw = _build_scout_session_history_context(
+            runtime_dir,
+            continuation_of=continuation_of,
+            current_message=payload.message,
+        )
 
         _scout_state_task = WorkTask(
             task_id=scout_state_id,
@@ -837,6 +1861,16 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "skip_quality_gates": True,
                 "phase": "scout_project_state",
                 "chat_parent": task_root,
+                "phase_contract_enforced": True,
+                "phase_contract": {
+                    "phase_id": "scout_project_state",
+                    "role": "SCOUT",
+                    "objective": (
+                        "Resumir hechos reales y confirmados del workspace actual "
+                        "relevantes para la solicitud del usuario."
+                    ),
+                    "depends_on": [],
+                },
             },
         )
         _scout_history_task = WorkTask(
@@ -863,6 +1897,16 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "skip_quality_gates": True,
                 "phase": "scout_session_history",
                 "chat_parent": task_root,
+                "phase_contract_enforced": True,
+                "phase_contract": {
+                    "phase_id": "scout_session_history",
+                    "role": "SCOUT",
+                    "objective": (
+                        "Extraer hechos recientes del historial del proyecto que sean "
+                        "relevantes para la solicitud actual."
+                    ),
+                    "depends_on": [],
+                },
             },
         )
         _scout_curator_task = WorkTask(
@@ -873,6 +1917,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 surface_hints=preplan_surface_hints,
                 project_state_raw=_scout_state_raw,
                 session_history_raw=_scout_history_raw,
+                continuation_target_context=continuation_target_context,
             ),
             role=Role.SCOUT,
             complexity=Complexity.LOW,
@@ -897,6 +1942,16 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 ),
                 "lead_memory_present": bool(lead_memory_block),
                 "capabilities_briefing_present": bool(capabilities_briefing),
+                "phase_contract_enforced": True,
+                "phase_contract": {
+                    "phase_id": "scout_context_curator",
+                    "role": "SCOUT",
+                    "objective": (
+                        "Compactar el contexto operativo vigente del proyecto para que "
+                        "lead_intake pueda planificar sin arrastrar continuidad vieja."
+                    ),
+                    "depends_on": ["scout_project_state", "scout_session_history"],
+                },
             },
         )
 
@@ -918,6 +1973,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "preplan_signal_block": preplan_signal_block,
                 "preplan_context_curator_task_id": scout_curator_id,
                 "continuation_requested": continuation_requested,
+                "continuation_effective": continuation_effective,
                 "continuation_of": continuation_of,
                 "continuation_snapshot": continuation_snapshot,
                 "context_pressure_score": int(preplan_context_pressure.get("score", 0) or 0),
@@ -933,8 +1989,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         _preplan_ws["preplan_surface_hints"] = dict(preplan_surface_hints)
         _preplan_ws["preplan_signal_block"] = preplan_signal_block
         _preplan_ws["continuation_requested"] = continuation_requested
+        _preplan_ws["continuation_effective"] = continuation_effective
         _preplan_ws["continuation_of"] = continuation_of
         _preplan_ws["continuation_snapshot"] = continuation_snapshot
+        _preplan_ws["continuation_block_reason"] = continuation_block_reason
+        _preplan_ws["user_message"] = payload.message
         _preplan_ws["context_pressure"] = dict(preplan_context_pressure)
         _preplan_ws["context_curator_recommended"] = bool(
             preplan_context_pressure.get("recommend_context_curator", False)
@@ -1009,12 +2068,14 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "original_message": payload.message,
                 "original_payload": payload.model_dump(),
                 "lead_output": _lead_output[:800],
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": local_now_iso(),
             }
             _pending_file.write_text(
                 json.dumps(_pending_state, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            _ws["run_status"] = "waiting_user"
+            orch._save_workflow_state(task_root)
             orch.event_logger.emit(
                 "chat_waiting_user",
                 {"task_id": task_root, "question": _clarify_question},
@@ -1049,6 +2110,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             complexity=complexity,
             criticality=criticality,
             round_budget=round_budget,
+            forbid_direct_answer=bool(
+                continuation_effective and _continuation_close_pending_mandate
+            ),
         )
         _lcp = _lcp_resolution.directives
         _lead_output_clean = _lcp_resolution.cleaned_output
@@ -1077,12 +2141,20 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             if _quorum_result.applied:
                 _lead_output = _quorum_result.final_plan
                 _ws.setdefault("phase_outputs", {})["lead_intake"] = _lead_output
+                _sync_phase_verdict_in_workflow_state(
+                    _ws,
+                    phase_id="lead_intake",
+                    output=_lead_output,
+                )
                 _lcp_resolution = _lead_control_resolve_lead_intake(
                     lead_output=_lead_output,
                     chat_mode=chat_mode,
                     complexity=complexity,
                     criticality=criticality,
                     round_budget=round_budget,
+                    forbid_direct_answer=bool(
+                        continuation_effective and _continuation_close_pending_mandate
+                    ),
                 )
                 _lcp = _lcp_resolution.directives
                 _lead_output_clean = _lcp_resolution.cleaned_output
@@ -1134,6 +2206,40 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     ),
                 },
             )
+
+        if continuation_effective and _close_pending_requested:
+            _pending_details = _collect_continuation_target_pending_details(
+                runtime_dir,
+                continuation_of,
+            )
+            if _close_pending_plan_requires_repair(_lcp_resolution.phases, _pending_details):
+                _repaired_phases = _phase_specs_from_pending_details(_pending_details)
+                if _repaired_phases:
+                    _lcp_resolution = type(_lcp_resolution)(
+                        cleaned_output=_lcp_resolution.cleaned_output,
+                        directives=dict(_lcp_resolution.directives),
+                        phases=_repaired_phases,
+                        complexity=_lcp_resolution.complexity,
+                        criticality=_lcp_resolution.criticality,
+                        round_budget=_lcp_resolution.round_budget,
+                        early_exit=_lcp_resolution.early_exit,
+                        events=[
+                            *_lcp_resolution.events,
+                            LeadDirectiveEvent(
+                                directive="close_pending_plan_repaired",
+                                payload=[spec.phase_id for spec in _repaired_phases],
+                            ),
+                        ],
+                    )
+                    _lcp = _lcp_resolution.directives
+                    orch.event_logger.emit(
+                        "chat_close_pending_plan_repaired",
+                        {
+                            "task_id": task_root,
+                            "continuation_of": continuation_of,
+                            "phase_ids": [spec.phase_id for spec in _repaired_phases],
+                        },
+                    )
         _curator_output = str(_ws.get("phase_outputs", {}).get("scout_context_curator", "") or "")
         _project_context_payload, _chat_context_payload = _persist_preplan_context(
             runtime_dir=runtime_dir,
@@ -1203,6 +2309,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             phases=_lcp_resolution.phases,
             message=payload.message,
             run_mode=_lead_run_mode,
+            close_pending_mode=_close_pending_requested,
         )
         _planned_phases = [
             {
@@ -1271,6 +2378,12 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 phase_task_ids={"lead_intake": lead_task_id},
                 chat_mode=response_mode,
                 round_budget=_lcp_resolution.round_budget,
+                phase_contracts=_coerce_phase_contracts(
+                    orch._get_workflow_state(task_root).get("phase_contracts", {})
+                ),
+                phase_verdicts=coerce_phase_verdicts(
+                    orch._get_workflow_state(task_root).get("phase_verdicts", {})
+                ),
                 phase_evidence_plan=_phase_evidence_plan,
                 delegate_batches=[],
                 delegate_economics={},
@@ -1315,58 +2428,128 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         skipped_phase_reasons: dict[str, str] = {}
         policy_signals: list[str] = []
         phases: list[PhaseSpec] = _chat_run_state.phases
+        _phase_contracts = {
+            spec.phase_id: {
+                "phase_id": spec.phase_id,
+                "role": spec.role,
+                "objective": spec.objective,
+                "depends_on": list(spec.depends_on or []),
+            }
+            for spec in phases
+            if str(spec.phase_id or "").strip()
+        }
+        _instruction_constraints = _project_instruction_constraints(workspace)
+        if _instruction_constraints:
+            for _phase_contract in _phase_contracts.values():
+                if not isinstance(_phase_contract, dict):
+                    continue
+                _phase_contract.update(
+                    {
+                        "forbidden_path_hints": list(
+                            _instruction_constraints.get("forbidden_path_hints", []) or []
+                        ),
+                        "allowed_module_path_hints": list(
+                            _instruction_constraints.get("allowed_module_path_hints", []) or []
+                        ),
+                    }
+                )
         def _submit_chat_plan(
             _state: ChatRunState,
         ) -> tuple[dict[str, str], list[str], list[str]]:
             local_phase_task_ids = _state.phase_task_ids
             local_workflow_phase_keys = _state.workflow_phase_keys
             local_delegated_task_ids = _state.delegated_task_ids
-            local_require_execution_plan = (
-                require_build_execution_plan and _lead_run_mode == "standard"
-            )
 
             for _spec in _state.phases:
                 _phase_task_exists = (
                     orch.taskboard.get_task(local_phase_task_ids[_spec.phase_id]) is not None
                 )
                 _role_enum = Role[_spec.role]
-                _caps = _ROLE_CAPABILITIES.get(_spec.role, ["analysis"])
+                _caps = _role_required_capabilities(_spec.role)
                 _is_engineer = _spec.role == "ENGINEER"
+                _is_planning_phase = str(_spec.phase_id or "").strip().lower().startswith("plan_")
                 _deps = _state.dependency_ids_for(_spec)
+                _sanitized_objective = str(
+                    ((_phase_contracts.get(_spec.phase_id, {}) or {}).get("objective", "") or "")
+                ).strip()
+                _planning_guardrail = (
+                    "Fase de planning puro: entrega solo corte, tareas secuenciadas, "
+                    "riesgos, criterios de aceptacion y definition of done. "
+                    "PROHIBIDO incluir bloques de codigo, path=..., comandos de escritura "
+                    "o proponer archivos/modulos nuevos.\n"
+                    if _is_planning_phase
+                    else ""
+                )
+                _phase_contract_block = _phase_contract_prompt_block(
+                    _spec,
+                    all_contracts=_phase_contracts,
+                )
+                _phase_verdict_block = build_phase_verdict_prompt_block(
+                    phase_id=_spec.phase_id,
+                    role=_spec.role,
+                )
                 if not _phase_task_exists:
+                    _task_metadata = {
+                        **build_chat_task_policy_metadata(require_execution_plan=False),
+                        "required_capabilities": _caps,
+                        "require_peer_consultation": True,
+                        "phase": _spec.phase_id,
+                        "chat_parent": task_root,
+                        "run_mode": _lead_run_mode,
+                        "lead_run_mode": _lead_run_mode,
+                        "delegated_by": "team_lead",
+                        "delegation_brief": _sanitized_objective,
+                        "delegation_from_role": "team_lead",
+                        "continuation_requested": continuation_requested,
+                        "continuation_effective": continuation_effective,
+                        "continuation_of": continuation_of,
+                        "continuation_snapshot": continuation_snapshot,
+                        "phase_contract": dict(
+                            _phase_contracts.get(_spec.phase_id, {}) or {}
+                        ),
+                        "phase_contract_enforced": True,
+                    }
+                    _phase_task = WorkTask(
+                        task_id=local_phase_task_ids[_spec.phase_id],
+                        title=_spec.phase_id.replace("_", " ").title(),
+                        description=(
+                            _planning_guardrail
+                            + (
+                                f"{_sanitized_objective}\n"
+                                if _sanitized_objective
+                                else ""
+                            )
+                            + f"Solicitud original: {payload.message}\n"
+                            + "Entrega: resultado accionable con evidencia para la siguiente fase."
+                            f"\n\n{_phase_contract_block}"
+                            f"{_phase_verdict_block}"
+                            f"{continuity_block}"
+                        ),
+                        role=_role_enum,
+                        complexity=_resolved_complexity,
+                        criticality=_resolved_criticality,
+                        dependencies=_deps,
+                        metadata=_task_metadata,
+                    )
+                    _derived_execution_plan = (
+                        orch._derive_execution_plan_from_task(_phase_task)
+                        if (_is_engineer and not _is_planning_phase)
+                        else []
+                    )
+                    if _derived_execution_plan:
+                        _phase_task.metadata["execution_plan"] = [
+                            dict(step) for step in _derived_execution_plan
+                        ]
+                        _phase_task.metadata["execution_plan_source"] = "derived_from_contract"
+                    _phase_task.metadata["require_execution_plan"] = _should_require_execution_plan_for_chat_phase(
+                        phase_id=_spec.phase_id,
+                        role=_spec.role,
+                        lead_run_mode=_lead_run_mode,
+                        require_build_execution_plan=require_build_execution_plan,
+                        derived_execution_plan=_derived_execution_plan,
+                    )
                     orch.submit_task(
-                        WorkTask(
-                            task_id=local_phase_task_ids[_spec.phase_id],
-                            title=_spec.phase_id.replace("_", " ").title(),
-                            description=(
-                                f"{_spec.objective}\n"
-                                f"Solicitud original: {payload.message}\n"
-                                f"Entrega: resultado accionable con evidencia para la siguiente fase."
-                                f"{continuity_block}"
-                            ),
-                            role=_role_enum,
-                            complexity=_resolved_complexity,
-                            criticality=_resolved_criticality,
-                            dependencies=_deps,
-                            metadata={
-                                **build_chat_task_policy_metadata(
-                                    require_execution_plan=(
-                                        local_require_execution_plan 
-                                        if (_is_engineer and _spec.phase_id not in ("plan_engineering", "plan_engineer")) 
-                                        else False
-                                    )
-                                ),
-                                "required_capabilities": _caps,
-                                "require_peer_consultation": True,
-                                "phase": _spec.phase_id,
-                                "chat_parent": task_root,
-                                "run_mode": _lead_run_mode,
-                                "lead_run_mode": _lead_run_mode,
-                                "delegated_by": "team_lead",
-                                "delegation_brief": _spec.objective,
-                                "delegation_from_role": "team_lead",
-                            },
-                        )
+                        _phase_task
                     )
                 _evidence_specs = _structured_evidence_specs_for_phase(
                     _spec.phase_id,
@@ -1398,8 +2581,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "description": (
                             f"{_evidence_spec['instruction']}\n\n"
                             f"Fase origen: {_spec.phase_id}\n"
-                            f"Objetivo de la fase: {_spec.objective}\n"
+                            f"Objetivo de la fase: {_sanitized_objective or '[CONTRATO INVALIDO: objective ausente]'}\n"
                             f"Solicitud original: {payload.message}\n"
+                            f"{_phase_contract_block}\n\n"
                             f"{_evidence_spec['report_contract']}"
                             f"{continuity_block}"
                         ),
@@ -1432,6 +2616,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                             "delegate_report_contract_version": "operator_report_v1",
                             "skill_targets": _evidence_spec["skill_targets"],
                             "lsp_targets": _evidence_spec["lsp_targets"],
+                            "phase_contract": dict(
+                                _phase_contracts.get(_spec.phase_id, {}) or {}
+                            ),
                             **_specialist_meta,
                         },
                     }
@@ -1477,6 +2664,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                             "chat_parent": task_root,
                             "run_mode": _lead_run_mode,
                             "lead_run_mode": _lead_run_mode,
+                            "phase_contracts": dict(_phase_contracts),
                         },
                     )
                 )
@@ -1525,6 +2713,20 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
 
         # ── PASO 3: ejecutar fases dinamicas + lead_close ───────────────────
+        # RC-H: archive zombie tasks from ALL previous runs before executing
+        # this run. Prevents tasks from old chat_roots being picked up by
+        # run_until_idle() (which calls ready_tasks() with no chat_root filter).
+        _zombie_ids = orch.taskboard.archive_incomplete_tasks(
+            reason=f"zombie_archived_at_run_start::{task_root}",
+            exclude_chat_root=task_root,
+        )
+        if _zombie_ids:
+            orch.event_logger.emit("zombie_tasks_archived", {
+                "task_id": task_root,
+                "archived_count": len(_zombie_ids),
+                "sample_ids": _zombie_ids[:8],
+                "note": "incomplete tasks from previous runs cleared before executing new run",
+            })
         orch.run_until_idle(max_rounds=round_budget)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
 
@@ -1726,6 +2928,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     elif _phase_key in set(_preserved_started_phase_ids):
                         _keep_outputs[_phase_key] = _output
                 _ws["phase_outputs"] = _keep_outputs
+                _prune_phase_verdicts(_ws, keep_phase_ids=set(_keep_outputs.keys()))
                 orch._save_workflow_state()
                 lead_advisory_mode = True
                 lead_advisory_reason = _advisory_reason
@@ -1814,6 +3017,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     if _is_supporting_control_phase(_phase_key):
                         _keep_outputs[_phase_key] = _output
                 _ws["phase_outputs"] = _keep_outputs
+                _prune_phase_verdicts(_ws, keep_phase_ids=set(_keep_outputs.keys()))
                 _phase_context_summaries = dict(_ws.get("phase_context_summaries", {}) or {})
                 for _phase_name in [spec.phase_id for spec in phases]:
                     _phase_context_summaries.pop(_phase_name, None)
@@ -1898,6 +3102,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         elif _phase_key in set(_preserved_phase_ids):
                             _keep_outputs[_phase_key] = _output
                     _ws["phase_outputs"] = _keep_outputs
+                    _prune_phase_verdicts(_ws, keep_phase_ids=set(_keep_outputs.keys()))
                     _phase_context_summaries = dict(_ws.get("phase_context_summaries", {}) or {})
                     for _phase_name in _removed_phase_ids:
                         _phase_context_summaries.pop(_phase_name, None)
@@ -2006,6 +3211,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         elif _phase_key in set(_preserved_started_phase_ids):
                             _keep_outputs[_phase_key] = _output
                     _ws["phase_outputs"] = _keep_outputs
+                    _prune_phase_verdicts(_ws, keep_phase_ids=set(_keep_outputs.keys()))
                     orch._save_workflow_state()
                     _chat_run_state = ChatRunState(
                         chat_root=task_root,
@@ -2112,6 +3318,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         elif _phase_key in set(_preserved_started_phase_ids):
                             _keep_outputs[_phase_key] = _output
                     _ws["phase_outputs"] = _keep_outputs
+                    _prune_phase_verdicts(_ws, keep_phase_ids=set(_keep_outputs.keys()))
                     orch._save_workflow_state()
                     _chat_run_state = ChatRunState(
                         chat_root=task_root,
@@ -2237,6 +3444,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     elif _phase_key in set(_preserved_started_phase_ids):
                         _keep_outputs[_phase_key] = _output
                 _ws["phase_outputs"] = _keep_outputs
+                _prune_phase_verdicts(_ws, keep_phase_ids=set(_keep_outputs.keys()))
                 orch._save_workflow_state()
                 _chat_run_state = ChatRunState(
                     chat_root=task_root,
@@ -2405,6 +3613,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             if _pause_source_phase == "lead_close" and _pause_task is not None:
                 orch.taskboard.mark_waiting_user(_pause_task.task_id, question=_pause_question)
                 _pause_for_user_applied = True
+                _ws["run_status"] = "waiting_user"
+                orch._save_workflow_state(task_root)
                 orch.event_logger.emit(
                     "lcp_directive_applied",
                     {
@@ -2537,7 +3747,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 "chat_mode": chat_mode,
                 "remaining_budget": round_budget,
                 "preferred_role": preferred_role.value,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": local_now_iso(),
             }
             _mid_pending_file.write_text(
                 json.dumps(_mid_state, ensure_ascii=False, indent=2, default=str),
@@ -2560,6 +3770,12 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 delegated_task_ids=delegated_task_ids,
                 phase_task_ids=phase_task_ids,
                 chat_mode=response_mode,
+                phase_contracts=_coerce_phase_contracts(
+                    _ws.get("phase_contracts", {})
+                ),
+                phase_verdicts=coerce_phase_verdicts(
+                    _ws.get("phase_verdicts", {})
+                ),
                 phase_evidence_plan=_coerce_phase_evidence_plan(
                     _ws.get("phase_evidence_plan", _chat_run_state.phase_evidence_plan)
                 ),
@@ -2634,8 +3850,26 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 local_pending,
             )
 
+        def _collect_root_task_state_counts() -> dict[str, int]:
+            counts: dict[str, int] = {}
+            prefix = f"{task_root}::"
+            for task in orch.taskboard.list_tasks():
+                task_id = str(getattr(task, "task_id", "") or "")
+                if not task_id.startswith(prefix):
+                    continue
+                state_value = str(getattr(task.state, "value", task.state) or "").strip().lower()
+                if not state_value:
+                    continue
+                counts[state_value] = int(counts.get(state_value, 0)) + 1
+            return counts
+
         auto_extended_rounds = 0
         if bool(payload.auto_extend_weak_runs) and round_budget < 80:
+            _phase_states_snapshot = _collect_phase_progress()[1]
+            planning_failure_detected = any(
+                str(phase_name).startswith("plan_") and state == "failed"
+                for phase_name, state in _phase_states_snapshot.items()
+            )
             execution_steps_so_far = 0
             for record in _read_jsonl_records(runtime_dir / "events.jsonl"):
                 if str(record.get("event_type", "") or "") != "execution_step":
@@ -2648,44 +3882,91 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     continue
                 execution_steps_so_far += 1
 
-            weak_without_evidence = (
-                artifact_created == 0 and execution_steps_so_far == 0
+            _root_task_state_counts_for_extend = _collect_root_task_state_counts()
+            should_auto_extend, auto_extend_reason = _should_auto_extend_weak_run(
+                artifact_created=artifact_created,
+                execution_steps_so_far=execution_steps_so_far,
+                planning_failure_detected=planning_failure_detected,
+                root_task_state_counts=_root_task_state_counts_for_extend,
             )
-            if weak_without_evidence:
+            if should_auto_extend:
                 next_round_budget = min(80, round_budget + 3)
                 if next_round_budget > round_budget:
                     auto_extended_rounds = next_round_budget - round_budget
+                    _ready_count = int(
+                        _root_task_state_counts_for_extend.get("ready", 0)
+                    )
+                    _claimed_count = int(
+                        _root_task_state_counts_for_extend.get("claimed", 0)
+                    )
                     orch.event_logger.emit(
                         "chat_auto_rounds_extended",
                         {
                             "task_id": task_root,
                             "from_round_budget": round_budget,
                             "to_round_budget": next_round_budget,
-                            "reason": "weak_run_without_artifacts_or_execution_steps",
+                            "reason": auto_extend_reason,
+                            "taskboard_ready_count": _ready_count,
+                            "taskboard_claimed_count": _claimed_count,
                         },
                     )
                     round_budget = next_round_budget
-                    orch.run_until_idle(max_rounds=round_budget)
-                    elapsed_ms = int((time.perf_counter() - started) * 1000)
-                    artifact_after = _workspace_artifact_snapshot(workspace)
-                    created_artifacts, modified_artifacts = _workspace_artifact_diff(
-                        artifact_before, artifact_after
-                    )
-                    artifact_created = len(created_artifacts)
-                    artifact_modified = len(modified_artifacts)
-                    artifact_files = sorted(set(created_artifacts + modified_artifacts))
-                    if artifact_files:
-                        orch.event_logger.emit(
-                            "chat_artifacts_detected",
-                            {
-                                "task_id": task_root,
-                                "created": artifact_created,
-                                "modified": artifact_modified,
-                                "file_count": len(artifact_files),
-                                "files_truncated": len(artifact_files) > 16,
-                                "files": artifact_files[:16],
-                            },
+                    if (_ready_count + _claimed_count) > 0:
+                        orch.run_until_idle(max_rounds=round_budget)
+                        elapsed_ms = int((time.perf_counter() - started) * 1000)
+                        artifact_after = _workspace_artifact_snapshot(workspace)
+                        created_artifacts, modified_artifacts = _workspace_artifact_diff(
+                            artifact_before, artifact_after
                         )
+                        artifact_created = len(created_artifacts)
+                        artifact_modified = len(modified_artifacts)
+                        artifact_files = sorted(set(created_artifacts + modified_artifacts))
+                        if artifact_files:
+                            orch.event_logger.emit(
+                                "chat_artifacts_detected",
+                                {
+                                    "task_id": task_root,
+                                    "created": artifact_created,
+                                    "modified": artifact_modified,
+                                    "file_count": len(artifact_files),
+                                    "files_truncated": len(artifact_files) > 16,
+                                    "files": artifact_files[:16],
+                                },
+                            )
+            elif auto_extend_reason == "planning_phase_failed":
+                orch.event_logger.emit(
+                    "chat_auto_extend_skipped",
+                    {
+                        "task_id": task_root,
+                        "reason": auto_extend_reason,
+                    },
+                )
+            elif auto_extend_reason == "no_runnable_tasks_for_root":
+                orch.event_logger.emit(
+                    "auto_extend_taskboard_empty",
+                    {
+                        "task_id": task_root,
+                        "round_budget": round_budget,
+                        "task_state_counts": dict(_root_task_state_counts_for_extend),
+                        "note": "auto-extend skipped because this run has no runnable tasks",
+                    },
+                )
+                orch.event_logger.emit(
+                    "chat_auto_extend_skipped",
+                    {
+                        "task_id": task_root,
+                        "reason": auto_extend_reason,
+                        "task_state_counts": dict(_root_task_state_counts_for_extend),
+                    },
+                )
+            else:
+                orch.event_logger.emit(
+                    "chat_auto_extend_skipped",
+                    {
+                        "task_id": task_root,
+                        "reason": auto_extend_reason,
+                    },
+                )
 
         lead_result_task, phase_states, rounds_used, completed_tasks, pending_tasks = (
             _collect_phase_progress()
@@ -2703,7 +3984,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         if lead_result_task is None:
             final_state = "in_progress" if pending_tasks > 0 else "failed"
         elif lead_result_task.state.value == "completed":
-            final_state = "completed"
+            final_state = "completed" if pending_tasks == 0 else "in_progress"
         elif lead_result_task.state.value == "failed":
             final_state = "failed"
         else:
@@ -2733,6 +4014,23 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             if task is not None:
                 task_rows_by_phase[phase_name] = task
 
+        # RC-H: evidence gate expects exact keys "build", "review", "qa".
+        # The Lead may use descriptive phase_ids like "implement_p0_artifacts",
+        # "review_p0_artifacts", "qa_p0_val" etc.  Add canonical aliases so the
+        # gate always finds an entry regardless of the Lead's naming choice.
+        _CANONICAL_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+            ("build",  ("build", "implement", "engineer")),
+            ("review", ("review",)),
+            ("qa",     ("qa", "test", "valid")),
+        ]
+        for _canon, _keywords in _CANONICAL_KEYWORDS:
+            if _canon not in task_rows_by_phase:
+                for _pn in phase_task_ids:
+                    _pn_lo = _pn.lower()
+                    if any(kw in _pn_lo for kw in _keywords) and _pn in task_rows_by_phase:
+                        task_rows_by_phase[_canon] = task_rows_by_phase[_pn]
+                        break
+
         role_participants = sorted(
             {task.role.value for task in task_rows_by_phase.values()}
         )
@@ -2758,6 +4056,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             phase
             for phase in workflow_phase_keys
             if phase_states.get(phase) == "failed"
+        ]
+        planning_failed_phases = [
+            phase for phase in failed_phases if str(phase).strip().lower().startswith("plan_")
         ]
 
         intake_task = task_rows_by_phase.get("lead_intake")
@@ -2870,6 +4171,9 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             artifact_modified=artifact_modified,
             require_test_or_build_check=True,
         )
+        if planning_failed_phases:
+            evidence_gate_failures = []
+            live_mode_required = False
         if continuation_requested:
             evidence_gate_failures = [
                 f
@@ -2906,6 +4210,33 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "failure": failure,
                     },
                 )
+
+        _phase_verdicts = coerce_phase_verdicts(_ws.get("phase_verdicts", {}))
+        for _phase_name, _task_row in task_rows_by_phase.items():
+            _phase_output = _task_result_text(_task_row) or str(
+                (_ws.get("phase_outputs", {}) or {}).get(_phase_name, "") or ""
+            )
+            if _phase_output:
+                _sync_phase_verdict_in_workflow_state(
+                    _ws,
+                    phase_id=_phase_name,
+                    output=_phase_output,
+                )
+        _phase_verdicts = coerce_phase_verdicts(_ws.get("phase_verdicts", {}))
+
+        semantic_gate_failures = _evaluate_phase_semantic_gate(
+            task_rows_by_phase=task_rows_by_phase,
+            phase_verdicts=_phase_verdicts,
+        )
+        semantic_gate_applied = bool(semantic_gate_failures)
+        orch.event_logger.emit(
+            "chat_semantic_gate_assessed",
+            {
+                "task_id": task_root,
+                "semantic_gate_applied": semantic_gate_applied,
+                "semantic_gate_failures": list(semantic_gate_failures),
+            },
+        )
 
         lead_justification = ""
         if lead_result_task is not None:
@@ -2962,15 +4293,26 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
         used_line = ", ".join(used_routes[:5]) if used_routes else "none"
         done_line = ", ".join(done_phases) if done_phases else "none"
-        pending_line = ", ".join(pending_phases) if pending_phases else "none"
+        pending_line = _format_pending_phase_summary(
+            pending_phases,
+            planning_failed_phases,
+        )
         failed_line = ", ".join(failed_phases) if failed_phases else "none"
         request_line = _compact_text_line(payload.message, limit=180)
         if continuation_of and continuation_snapshot == "target_not_found":
             continuity_line = (
                 f"requested target not found (continuation_of={continuation_of})"
             )
+        elif continuation_of and continuation_block_reason:
+            continuity_line = (
+                f"requested but not applied (continuation_of={continuation_of}; "
+                f"reason={continuation_block_reason}; snapshot={continuation_snapshot or '-'})"
+            )
         elif continuation_of:
-            continuity_line = f"yes (continuation_of={continuation_of}; carryover={continuation_snapshot or '-'})"
+            continuity_line = (
+                f"yes (continuation_of={continuation_of}; "
+                f"carryover={continuation_snapshot or '-'})"
+            )
         elif continuation_requested:
             continuity_line = "requested, but no previous chat root found"
         elif previous_root:
@@ -3019,7 +4361,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 productivity_status=productivity_status,
                 next_action_hint=next_action_hint,
                 strict_mode=bool(payload.strict_mode),
-                continuation_requested=bool(continuation_requested),
+                continuation_requested=bool(continuation_effective),
                 allow_low_productivity_override=bool(payload.allow_low_productivity_override),
                 lead_advisory_mode=lead_advisory_mode,
                 live_mode_required=live_mode_required,
@@ -3030,6 +4372,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 productivity_score=productivity_score,
                 reasoning_score=reasoning_score,
                 evidence_gate_failures=evidence_gate_failures,
+                semantic_gate_failures=semantic_gate_failures,
             ),
             run_type_policy,
         )
@@ -3037,14 +4380,69 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         productivity_status = _policy_outcome.productivity_status
         next_action_hint = _policy_outcome.next_action_hint
         live_mode_rejected = _policy_outcome.live_mode_rejected
+        semantic_gate_applied = _policy_outcome.semantic_gate_applied
         evidence_gate_applied = _policy_outcome.evidence_gate_applied
         strict_mode_applied = _policy_outcome.strict_mode_applied
         low_productivity_rejected = _policy_outcome.low_productivity_rejected
         low_productivity_override = _policy_outcome.low_productivity_override
         policy_review_required = _policy_outcome.policy_review_required
         policy_signals.extend(_policy_outcome.policy_signals)
+        if planning_failed_phases:
+            policy_signals = [
+                signal for signal in policy_signals
+                if signal not in {"evidence_gate_failed", "live_mode_required_non_live"}
+            ]
+            if final_state == "failed":
+                next_action_hint = (
+                    "Fallo en planning crítico: replanificar la fase "
+                    + ", ".join(planning_failed_phases[:3])
+                    + " antes de volver a abrir build/review/qa."
+                )
+        _root_task_state_counts = _collect_root_task_state_counts()
+        _runnable_task_count = int(_root_task_state_counts.get("ready", 0)) + int(
+            _root_task_state_counts.get("claimed", 0)
+        )
+        _waiting_user_count = int(_root_task_state_counts.get("waiting_user", 0))
+        _stalled_without_runnable = (
+            final_state == "in_progress"
+            and pending_tasks > 0
+            and _runnable_task_count == 0
+            and _waiting_user_count == 0
+        )
+        if _stalled_without_runnable:
+            final_state = "rejected" if semantic_gate_applied else "failed"
+            policy_review_required = True
+            if "run_stalled_without_runnable_tasks" not in policy_signals:
+                policy_signals.append("run_stalled_without_runnable_tasks")
+            if not next_action_hint:
+                next_action_hint = (
+                    "La corrida se agotó sin tareas ejecutables restantes. "
+                    "Replanifica desde la primera fase fallida o bloqueada."
+                )
+            orch.event_logger.emit(
+                "chat_forced_terminal_state",
+                {
+                    "task_id": task_root,
+                    "final_state": final_state,
+                    "reason": "no_runnable_tasks_after_policy",
+                    "pending_tasks": pending_tasks,
+                    "task_state_counts": dict(_root_task_state_counts),
+                },
+            )
         for _policy_event in _policy_outcome.events:
             orch.event_logger.emit(_policy_event.event_type, _policy_event.payload)
+        orch.event_logger.emit(
+            "chat_policy_assessed",
+            {
+                "task_id": task_root,
+                "final_state": final_state,
+                "productivity_status": productivity_status,
+                "semantic_gate_applied": semantic_gate_applied,
+                "evidence_gate_applied": evidence_gate_applied,
+                "policy_review_required": policy_review_required,
+                "policy_signals": list(policy_signals),
+            },
+        )
 
         if not lead_completed:
             orch.event_logger.emit(
@@ -3081,6 +4479,10 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             next_action_hint=next_action_hint,
             execution_mode=execution_mode,
             placeholder_outputs=placeholder_outputs,
+            final_state=final_state,
+            policy_review_required=policy_review_required,
+            semantic_gate_failures=semantic_gate_failures,
+            evidence_gate_failures=evidence_gate_failures,
         )
 
         orch.mailbox.send(
@@ -3174,6 +4576,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         if (
             bool(payload.strict_mode)
             or live_mode_required
+            or semantic_gate_applied
             or evidence_gate_applied
             or low_productivity_rejected
             or policy_review_required
@@ -3202,11 +4605,17 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 if evidence_gate_applied and "evidence_gate_failed" in policy_signals
                 else ("rejected" if evidence_gate_applied else "pass")
             )
+            _semantic_gate_label = (
+                "failed_signal"
+                if semantic_gate_applied and "semantic_gate_failed" in policy_signals
+                else ("rejected" if semantic_gate_applied else "pass")
+            )
             response_lines.extend(
                 [
                     "",
                     f"Strict mode: {_strict_mode_label}",
                     f"Live mode gate: {_live_mode_label}",
+                    f"Semantic gate: {_semantic_gate_label}",
                     f"Evidence gate: {_evidence_gate_label}",
                 ]
             )
@@ -3262,6 +4671,11 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             if evidence_gate_applied and "evidence_gate_failed" in policy_signals
             else ("rejected" if evidence_gate_applied else "pass")
         )
+        _semantic_gate_label = (
+            "failed_signal"
+            if semantic_gate_applied and "semantic_gate_failed" in policy_signals
+            else ("rejected" if semantic_gate_applied else "pass")
+        )
         _low_productivity_label = (
             "rejected"
             if low_productivity_rejected
@@ -3295,6 +4709,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 f"Execution steps: {execution_steps} (success={execution_steps_success})",
                 f"Execution mode: {execution_mode_label} ({output_count_label}={placeholder_outputs}/{max(1, output_result_count)})",
                 f"Live mode gate: {_live_mode_label}",
+                f"Semantic gate: {_semantic_gate_label} ({', '.join(semantic_gate_failures) if semantic_gate_failures else 'ok'})",
                 f"Checks passed: {', '.join(successful_checks) if successful_checks else 'none'}",
                 f"Evidence gate: {_evidence_gate_label} ({', '.join(evidence_gate_failures) if evidence_gate_failures else 'ok'})",
                 f"Artifacts: created={artifact_created} modified={artifact_modified}",
@@ -3318,8 +4733,63 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         _peer_consultation_insights = _peer_consultation_summary_fields(
             runtime_dir, task_root
         )
+        _memory_result = "parcial"
+        if final_state == "completed":
+            if (
+                not lead_advisory_mode
+                and not lead_degraded_delivery
+                and not failed_phases
+                and not semantic_gate_failures
+                and not evidence_gate_failures
+            ):
+                _memory_result = "exitoso"
+        elif final_state in {"failed", "rejected"}:
+            _memory_result = "fallido"
+
+        _run_verdict_reason_codes = list(
+            dict.fromkeys(
+                list(semantic_gate_failures)
+                + list(evidence_gate_failures)
+                + [f"phase_failed:{phase_name}" for phase_name in failed_phases]
+            )
+        )
+        _run_verdict = {
+            "state": final_state,
+            "result": _memory_result,
+            "reason_codes": _run_verdict_reason_codes[:24],
+            "policy_signals": list(policy_signals[:24]),
+            "policy_review_required": bool(policy_review_required),
+            "semantic_gate_applied": bool(semantic_gate_applied),
+            "semantic_gate_failures": list(semantic_gate_failures[:12]),
+            "evidence_gate_applied": bool(evidence_gate_applied),
+            "evidence_gate_failures": list(evidence_gate_failures[:12]),
+            "failed_phases": list(failed_phases[:12]),
+            "pending_phases": list(pending_phases[:12]),
+            "advisory_mode": bool(lead_advisory_mode),
+            "degraded_delivery": bool(lead_degraded_delivery),
+            "next_action_hint": next_action_hint,
+            "updated_at": local_now_iso(),
+        }
+        _ws["run_status"] = final_state
+        _ws["run_verdict"] = dict(_run_verdict)
+        orch._save_workflow_state()
+        orch.event_logger.emit(
+            "chat_run_verdict_persisted",
+            {
+                "task_id": task_root,
+                **_run_verdict,
+            },
+        )
+        _lead_close_policy = _coerce_lead_close_policy(
+            derive_lead_close_policy(
+                phase_verdicts=_ws.get("phase_verdicts", {}),
+                phase_states=phase_states,
+                run_verdict=_run_verdict,
+            )
+        )
 
         _token_queue.put(("done", None))
+        _progress_snapshot = _build_chat_progress(runtime_dir, task_root)
         result = TeamChatResponse(
             task_id=task_root,
             role=Role.TEAM_LEAD.value,
@@ -3361,6 +4831,14 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             policy_review_required=policy_review_required,
             validation_owner=CHAT_VALIDATION_OWNER,
             policy_signals=policy_signals,
+            run_verdict=dict(_run_verdict),
+            lead_close_policy=_lead_close_policy,
+            phase_contracts=_coerce_phase_contracts(
+                _ws.get("phase_contracts", {})
+            ),
+            phase_verdicts=coerce_phase_verdicts(
+                _ws.get("phase_verdicts", {})
+            ),
             phase_evidence_plan=_coerce_phase_evidence_plan(
                 _ws.get("phase_evidence_plan", _chat_run_state.phase_evidence_plan)
             ),
@@ -3372,6 +4850,10 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             ),
             **_specialist_insights,
             **_peer_consultation_insights,
+            phase_states=dict(_progress_snapshot.phase_states),
+            failed_tasks=int(_progress_snapshot.failed_tasks),
+            task_summaries=list(_progress_snapshot.task_summaries),
+            thread_summary=dict(_progress_snapshot.thread_summary),
             next_action_hint=next_action_hint,
             strict_mode=bool(payload.strict_mode),
             strict_mode_applied=strict_mode_applied,
@@ -3401,7 +4883,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         )
         _memory_errors = [
             f"phase_failed:{phase_name}" for phase_name in failed_phases
-        ] + list(evidence_gate_failures[:4])
+        ] + list(semantic_gate_failures[:4]) + list(evidence_gate_failures[:4])
         _memory_errors.extend(
             _compact_text_line(
                 f"routing:{str(item.get('phase', '') or '-')}:"
@@ -3423,17 +4905,6 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             f"SKIP_PHASE:{phase_id}" for phase_id in skipped_phase_ids
         )
         try:
-            _memory_result = "parcial"
-            if final_state == "completed":
-                if (
-                    not lead_advisory_mode
-                    and not lead_degraded_delivery
-                    and not failed_phases
-                    and not evidence_gate_failures
-                ):
-                    _memory_result = "exitoso"
-            elif final_state in {"failed", "rejected"}:
-                _memory_result = "fallido"
             update_lead_memory(
                 runtime_dir=runtime_dir,
                 project_root=workspace,
@@ -3448,6 +4919,12 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                 capabilities=observe_capabilities_snapshot(
                     runtime_dir=runtime_dir,
                     mcp_status=mcp_status_rows,
+                    subscription_providers=sorted({
+                        str(adapter.provider).strip()
+                        for adapter in orch.router.adapters
+                        if str(getattr(adapter, "channel", "") or "").lower() == "subscription"
+                        and str(getattr(adapter, "provider", "") or "").strip()
+                    }) or None,
                 ),
             )
             orch.event_logger.emit(
@@ -3479,64 +4956,84 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             )
         return result
 
+    _stream_task_root = _resolve_task_root(payload.client_task_id)
+    _active_conflict_root = _claim_workspace_active_run(workspace, _stream_task_root)
+    if _active_conflict_root:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    f"Ya hay una run activa en este workspace ({_active_conflict_root}). "
+                    "Espera a que termine o reanúdala desde Continue/clarify antes de abrir otra."
+                ),
+                "active_run": _workspace_active_run_detail(runtime_dir, _active_conflict_root),
+            },
+        )
+
     async def _event_stream():
         import asyncio as _asyncio
 
         _chat_fut = _asyncio.get_event_loop().run_in_executor(None, _run_chat)
-
-        while True:
-            try:
-                item = await _asyncio.to_thread(lambda: _token_queue.get(timeout=2.0))
-                event_type, data = item
-                if event_type == "token_chunk":
-                    yield f"event: token_chunk\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-                elif event_type == "agent_event":
-                    evt_name = (
-                        data.get("type", "agent_event")
-                        if isinstance(data, dict)
-                        else "agent_event"
-                    )
-                    yield f"event: {evt_name}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
-                elif event_type == "done":
-                    # _run_chat already finished — await the future for the result
-                    try:
-                        result = await _asyncio.wait_for(
-                            _asyncio.wrap_future(_chat_fut), timeout=5.0
+        try:
+            while True:
+                try:
+                    item = await _asyncio.to_thread(lambda: _token_queue.get(timeout=2.0))
+                    event_type, data = item
+                    if event_type == "token_chunk":
+                        yield f"event: token_chunk\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    elif event_type == "agent_event":
+                        evt_name = (
+                            data.get("type", "agent_event")
+                            if isinstance(data, dict)
+                            else "agent_event"
                         )
-                        result_dict = (
-                            result.model_dump() if hasattr(result, "model_dump") else {}
-                        )
-                        # M5: truncar el campo "response" en el evento result para evitar
-                        # truncacion SSE en respuestas largas. El frontend ya usa el stream
-                        # acumulado (token_chunk) para el contenido principal; "response"
-                        # solo se usa como fallback cuando accumulated < 80 chars.
-                        _resp_full = result_dict.get("response", "")
-                        if len(_resp_full) > 2000:
-                            result_dict = dict(result_dict)
-                            result_dict["response"] = _resp_full[:2000]
-                            result_dict["response_truncated"] = True
-                        yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
-                    except Exception as exc:
-                        yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
-                    break
-            except Exception:
-                # timeout in queue.get (queue.Empty) — send keepalive or recover if done
-                if _chat_fut.done():
-                    try:
-                        result = _chat_fut.result()
-                        result_dict = (
-                            result.model_dump() if hasattr(result, "model_dump") else {}
-                        )
-                        _resp_full = result_dict.get("response", "")
-                        if len(_resp_full) > 2000:
-                            result_dict = dict(result_dict)
-                            result_dict["response"] = _resp_full[:2000]
-                            result_dict["response_truncated"] = True
-                        yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
-                    except Exception as exc:
-                        yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
-                    break
-                yield "event: keepalive\ndata: {}\n\n"
+                        yield f"event: {evt_name}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+                    elif event_type == "done":
+                        # _run_chat already finished — await the future for the result
+                        try:
+                            result = await _asyncio.wait_for(
+                                _asyncio.wrap_future(_chat_fut), timeout=5.0
+                            )
+                            result_dict = (
+                                result.model_dump() if hasattr(result, "model_dump") else {}
+                            )
+                            # M5: truncar el campo "response" en el evento result para evitar
+                            # truncacion SSE en respuestas largas. El frontend ya usa el stream
+                            # acumulado (token_chunk) para el contenido principal; "response"
+                            # solo se usa como fallback cuando accumulated < 80 chars.
+                            _resp_full = result_dict.get("response", "")
+                            if len(_resp_full) > 6000:
+                                result_dict = dict(result_dict)
+                                result_dict["response"] = _resp_full[:6000]
+                                result_dict["response_truncated"] = True
+                            yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
+                        except Exception as exc:
+                            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+                        break
+                except Exception:
+                    # timeout in queue.get (queue.Empty) — send keepalive or recover if done
+                    if _chat_fut.done():
+                        try:
+                            result = _chat_fut.result()
+                            result_dict = (
+                                result.model_dump() if hasattr(result, "model_dump") else {}
+                            )
+                            _resp_full = result_dict.get("response", "")
+                            if len(_resp_full) > 6000:
+                                result_dict = dict(result_dict)
+                                result_dict["response"] = _resp_full[:6000]
+                                result_dict["response_truncated"] = True
+                            yield f"event: result\ndata: {json.dumps(result_dict, ensure_ascii=False, default=str)}\n\n"
+                        except Exception as exc:
+                            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+                        break
+                    # RC-H: cancel flag — close stream if the run was cancelled
+                    if _RUN_CANCEL_FLAGS.pop(_stream_task_root, False):
+                        yield f"event: cancelled\ndata: {json.dumps({'task_id': _stream_task_root})}\n\n"
+                        break
+                    yield "event: keepalive\ndata: {}\n\n"
+        finally:
+            _release_workspace_active_run(workspace, _stream_task_root)
 
     return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
@@ -3626,6 +5123,20 @@ def _build_resume_stream(
                 lead_task_id=phase_task_ids.get("lead_intake", ""),
                 delegated_task_ids=[],
                 phase_task_ids=phase_task_ids,
+                phase_contracts=_coerce_phase_contracts(
+                    (
+                        orch_resume._get_workflow_state(task_root).get("phase_contracts", {})
+                        if waiting_task is None
+                        else {}
+                    )
+                ),
+                phase_verdicts=coerce_phase_verdicts(
+                    (
+                        orch_resume._get_workflow_state(task_root).get("phase_verdicts", {})
+                        if waiting_task is None
+                        else {}
+                    )
+                ),
                 phase_evidence_plan=(
                     _chat_run_state.phase_evidence_plan if _chat_run_state is not None else {}
                 ),
@@ -3706,6 +5217,12 @@ def _build_resume_stream(
             ),
             phase_task_ids=phase_task_ids,
             phase_states=_phase_states,
+            phase_contracts=_coerce_phase_contracts(
+                _ws_r.get("phase_contracts", {})
+            ),
+            phase_verdicts=coerce_phase_verdicts(
+                _ws_r.get("phase_verdicts", {})
+            ),
             phase_evidence_plan=_coerce_phase_evidence_plan(
                 _ws_r.get(
                     "phase_evidence_plan",
@@ -3750,9 +5267,9 @@ def _build_resume_stream(
                             if hasattr(result_r, "model_dump") else {}
                         )
                         _resp_r = result_dict_r.get("response", "")
-                        if len(_resp_r) > 2000:
+                        if len(_resp_r) > 6000:
                             result_dict_r = dict(result_dict_r)
-                            result_dict_r["response"] = _resp_r[:2000]
+                            result_dict_r["response"] = _resp_r[:6000]
                             result_dict_r["response_truncated"] = True
                         yield f"event: result\ndata: {json.dumps(result_dict_r, ensure_ascii=False, default=str)}\n\n"
                     except Exception as exc:
@@ -3789,26 +5306,57 @@ async def post_aiteam_chat_clarify(payload: ClarifyRequest, request: Request):
     # ── E7-D4: Distinguir pausa de lead_intake vs pausa mid-run ──────────────
     pending_type = pending_state.get("type", "lead_intake")
 
-    # Eliminar estado pendiente antes de reanudar (en ambos paths)
-    pending_file.unlink(missing_ok=True)
-
     if pending_type == "mid_run":
         # Reanudar el run desde la tarea pausada sin reiniciar el workflow completo
-        return _build_resume_stream(pending_state, payload.clarification, runtime_dir)
+        try:
+            result = _build_resume_stream(
+                pending_state, payload.clarification, runtime_dir
+            )
+        except Exception:
+            raise
+        pending_file.unlink(missing_ok=True)
+        return result
 
     # ── Path original: pausa de lead_intake ─────────────────────────────────
     original_payload_data = pending_state.get("original_payload", {})
     original_message = pending_state.get("original_message", original_payload_data.get("message", ""))
     question = pending_state.get("question", "")
+    continuation_of = _normalize_task_root(
+        str(
+            pending_state.get("continuation_of")
+            or original_payload_data.get("continuation_of")
+            or ""
+        )
+    )
+    selected_policy = _classify_clarification_continuation_policy(
+        question,
+        payload.clarification,
+    )
+    base_message = original_message
+    if selected_policy == "clean_retry":
+        base_message = _sanitize_message_for_clean_retry(
+            original_message,
+            continuation_of,
+        )
+        if not base_message:
+            base_message = "Start the next highest-impact slice for the same project objective."
+    elif not base_message.strip():
+        base_message = original_payload_data.get("message", "")
+
+    clarification_for_prompt = _canonicalize_clarification_for_prompt(
+        payload.clarification,
+        selected_policy,
+    )
 
     # Inyectar la respuesta del usuario en el mensaje original
     augmented_message = (
-        f"{original_message}\n\n"
+        f"{base_message}\n\n"
         f"[Respuesta del usuario a tu pregunta previa '{question}': "
-        f"{payload.clarification}]"
+        f"{clarification_for_prompt}]"
     )
 
-    # Construir nuevo request reutilizando los parámetros originales
+    # Construir nuevo request reutilizando los parámetros originales, pero con
+    # un task_root nuevo para no colisionar con la pausa waiting_user original.
     new_payload = TeamChatRequest(
         message=augmented_message,
         role=original_payload_data.get("role", "engineer"),
@@ -3816,16 +5364,96 @@ async def post_aiteam_chat_clarify(payload: ClarifyRequest, request: Request):
         criticality=original_payload_data.get("criticality", "medium"),
         mode=original_payload_data.get("mode", "sprint5"),
         max_rounds=original_payload_data.get("max_rounds"),
-        client_task_id=original_payload_data.get("client_task_id", ""),
+        client_task_id="",
         strict_mode=original_payload_data.get("strict_mode", False),
         auto_extend_weak_runs=original_payload_data.get("auto_extend_weak_runs", True),
         allow_low_productivity_override=original_payload_data.get(
             "allow_low_productivity_override", False
         ),
+        continuation_policy=selected_policy,
     )
 
-    # Reutilizar el endpoint principal (en hilo separado para no bloquear)
-    return await post_aiteam_chat(new_payload, request)
+    try:
+        result = await post_aiteam_chat(new_payload, request)
+    except Exception:
+        raise
+
+    archived_count = _archive_incomplete_tasks_for_root(
+        runtime_dir,
+        task_root=task_root,
+        reason=f"clarification_resolved::{selected_policy}",
+    )
+    pending_file.unlink(missing_ok=True)
+    if archived_count:
+        try:
+            orch = build_default_orchestrator(
+                runtime_dir=runtime_dir,
+                browser_mode="basic",
+                environment="dev",
+            )
+            orch.event_logger.emit(
+                "chat_waiting_user_archived_after_clarify",
+                {
+                    "task_id": task_root,
+                    "archived_tasks": archived_count,
+                    "selected_policy": selected_policy,
+                },
+            )
+        except Exception:
+            pass
+    return result
+
+
+@app.post("/api/aiteam/chat/{task_root}/cancel")
+async def post_aiteam_chat_cancel(task_root: str, request: Request):
+    """RC-H: Cancela un run activo cerrando su SSE stream y archivando sus tareas.
+
+    1. Establece el flag de cancelacion — el streaming loop lo detecta en el
+       proximo keepalive (≤ 2 s) y cierra la conexion.
+    2. Archiva en el SQLite todas las tareas incomplete de ese chat_root para que
+       run_until_idle() no siga procesandolas en el hilo de fondo.
+    """
+    _require_api_auth_request(request)
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+
+    normalized = _normalize_task_root(task_root)
+    # 1. Signal the streaming loop to close
+    _RUN_CANCEL_FLAGS[normalized] = True
+
+    # 2. Archive incomplete tasks in the DB so run_until_idle drains quickly
+    archived_count = 0
+    try:
+        import sqlite3 as _sqlite3, json as _json_cancel
+        db_path = runtime_dir / "aiteam.db"
+        if db_path.exists():
+            with _sqlite3.connect(str(db_path)) as _conn:
+                _rows = _conn.execute("SELECT task_id, payload FROM tasks").fetchall()
+                _to_archive = []
+                for _tid, _raw in _rows:
+                    if not str(_tid).startswith(f"{normalized}::"):
+                        continue
+                    try:
+                        _p = _json_cancel.loads(_raw)
+                    except Exception:
+                        continue
+                    if _p.get("state") not in ("completed", "failed", "archived", "cancelled"):
+                        _p["state"] = "archived"
+                        _p.setdefault("metadata", {})["archived_reason"] = f"cancelled_by_user::{normalized}"
+                        _to_archive.append((_json_cancel.dumps(_p), _tid))
+                if _to_archive:
+                    _conn.executemany("UPDATE tasks SET payload = ? WHERE task_id = ?", _to_archive)
+                    _conn.commit()
+                    archived_count = len(_to_archive)
+    except Exception as _ex:
+        pass  # best-effort — the cancel flag is still set
+
+    return {
+        "cancelled": True,
+        "task_root": normalized,
+        "archived_tasks": archived_count,
+        "note": "SSE stream will close within 2 seconds; background thread drains then terminates.",
+    }
 
 
 @app.get("/api/aiteam/chat/progress/{task_id}", response_model=TeamChatProgressResponse)
@@ -3898,7 +5526,7 @@ async def post_aiteam_chat_async(payload: TeamChatRequest, request: Request):
             "status": "running",
             "progress_queue": progress_queue,
             "result": None,
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": local_now_iso(),
         }
 
     def _run_bg():
@@ -4123,7 +5751,7 @@ async def get_mailbox_inbox(request: Request):
         "messages": [
             {
                 "message_id": m.message_id,
-                "timestamp": m.timestamp,
+                "timestamp": _display_ts_local(m.timestamp),
                 "sender": m.sender,
                 "recipient": m.recipient,
                 "subject": m.subject,
@@ -4137,6 +5765,31 @@ async def get_mailbox_inbox(request: Request):
     }
 
 
+_FS_TREE_EXCLUDED_NAMES = {
+    ".git",
+    "__pycache__",
+    "venv",
+    ".pytest_cache",
+    ".aiteam_snapshots",
+    "node_modules",
+}
+_FS_TREE_EXCLUDED_PREFIXES = (".tmp",)
+_FS_TREE_RUNTIME_TMP_PARENTS = {"runtime", ".aiteam"}
+
+
+def _should_exclude_fs_tree_path(path: Path, workspace: Path) -> bool:
+    if path == workspace:
+        return False
+    name = path.name
+    if name in _FS_TREE_EXCLUDED_NAMES:
+        return True
+    if any(name.startswith(prefix) for prefix in _FS_TREE_EXCLUDED_PREFIXES):
+        return True
+    if name == "tmp" and path.parent.name in _FS_TREE_RUNTIME_TMP_PARENTS:
+        return True
+    return False
+
+
 @app.get("/api/fs/tree")
 async def get_fs_tree(request: Request):
     _require_api_auth_request(request)
@@ -4144,14 +5797,7 @@ async def get_fs_tree(request: Request):
 
     def build_tree(path: Path):
         name = path.name
-        if name in [
-            ".git",
-            "__pycache__",
-            "venv",
-            ".pytest_cache",
-            ".aiteam_snapshots",
-            "node_modules",
-        ]:
+        if _should_exclude_fs_tree_path(path, workspace):
             return None
         try:
             if path.is_file():
@@ -4182,7 +5828,7 @@ async def get_fs_tree(request: Request):
         except Exception:
             return None
 
-    return build_tree(workspace)
+    return await asyncio.to_thread(build_tree, workspace)
 @app.get("/api/fs/file")
 async def read_file(path: str, request: Request):
     _require_api_auth_request(request)

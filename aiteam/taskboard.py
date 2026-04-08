@@ -161,6 +161,7 @@ class TaskBoard:
             before = self._snapshot_tasks()
             task = self._require(task_id)
             task.state = TaskState.BLOCKED
+            self._file_locks.release_for_task(task_id)
             task.metadata["blocked_reason"] = reason
             self._persist_task_changes(before)
 
@@ -188,11 +189,18 @@ class TaskBoard:
             task.metadata.update(patch)
             self._persist_task_changes(before)
 
-    def archive_incomplete_tasks(self, reason: str) -> list[str]:
+    def archive_incomplete_tasks(
+        self, reason: str, exclude_chat_root: str | None = None
+    ) -> list[str]:
         """C2: Marca como ARCHIVED las tareas no terminadas de runs previas.
 
-        Las tareas en PENDING, BLOCKED o WAITING_USER quedan archivadas con el
-        motivo indicado. Las tareas COMPLETED, FAILED o ARCHIVED no se tocan.
+        Las tareas en PENDING, READY, BLOCKED o WAITING_USER quedan archivadas
+        con el motivo indicado. Las tareas COMPLETED, FAILED o ARCHIVED no se tocan.
+
+        Si se indica exclude_chat_root, las tareas cuyo task_id empieza por ese
+        prefijo (formato CHAT-XXXX::phase) se excluyen — util para limpiar zombies
+        de runs anteriores sin tocar las tareas del run actual.
+
         Retorna la lista de task_ids archivadas.
         """
         archivable_states = {TaskState.PENDING, TaskState.READY, TaskState.BLOCKED, TaskState.WAITING_USER}
@@ -200,11 +208,16 @@ class TaskBoard:
             before = self._snapshot_tasks()
             archived: list[str] = []
             for task in self._tasks.values():
-                if task.state in archivable_states:
-                    self._file_locks.release_for_task(task.task_id)
-                    task.state = TaskState.ARCHIVED
-                    task.metadata["archived_reason"] = reason
-                    archived.append(task.task_id)
+                if task.state not in archivable_states:
+                    continue
+                if exclude_chat_root:
+                    task_root = task.task_id.split("::")[0] if "::" in task.task_id else task.task_id
+                    if task_root == exclude_chat_root:
+                        continue
+                self._file_locks.release_for_task(task.task_id)
+                task.state = TaskState.ARCHIVED
+                task.metadata["archived_reason"] = reason
+                archived.append(task.task_id)
             if archived:
                 self._persist_task_changes(before)
             return archived

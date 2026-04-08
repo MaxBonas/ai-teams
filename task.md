@@ -35,6 +35,30 @@ Los bloques 0-6 están cerrados (ver `docs/HISTORY.md`). El sistema tiene:
 - Evidence gate robusto
 - Bootstrap estable en dos máquinas
 
+### Criterio de producto vigente
+
+AITeams debe orientarse en el corto plazo a **agent workspace** y no a **IDE full generalista**.
+
+Priorizar:
+
+- chat + timeline + estado de runs
+- routing/capabilities/status
+- memoria, continuidad y reanudacion
+- diffs, artefactos, aprobaciones y control del flujo
+- UX del Team Lead / operator console
+
+Posponer salvo necesidad clara:
+
+- features de editor avanzadas tipo VSCode
+- ecosistema de extensiones
+- debugger completo
+- complejidad de tabs/layout propia de IDE tradicional
+
+Regla de priorizacion para futuras sesiones:
+
+- si una mejora optimiza sobre todo la edicion manual de codigo, prioridad baja
+- si una mejora optimiza dirigir, entender y controlar agentes, prioridad alta
+
 El siguiente bloque de features está por decidir. Candidatos naturales:
 
 - **Agentes conversacionales reales por proyecto** (`docs/CONVERSATIONAL_AGENTS_PLAN.md`)

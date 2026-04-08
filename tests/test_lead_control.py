@@ -260,6 +260,22 @@ class LeadControlTests(unittest.TestCase):
         self.assertEqual([item.phase_id for item in result.phases], ["build"])
         self.assertEqual([item.role for item in result.phases], ["ENGINEER"])
 
+    def test_direct_answer_is_blocked_when_continuation_has_pending_work(self) -> None:
+        result = resolve_lead_intake(
+            lead_output="[DIRECT_ANSWER]\nResumen directo no permitido.",
+            chat_mode="sprint5",
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            round_budget=5,
+            forbid_direct_answer=True,
+        )
+
+        self.assertIsNone(result.early_exit)
+        self.assertFalse(bool(result.directives.get("direct_answer")))
+        self.assertIn("build", [item.phase_id for item in result.phases])
+        event_names = [item.directive for item in result.events]
+        self.assertIn("direct_answer_blocked", event_names)
+
 
 if __name__ == "__main__":
     unittest.main()

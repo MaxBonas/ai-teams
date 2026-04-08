@@ -13,6 +13,7 @@ parametros explicitos para ser testeables de forma aislada.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -117,6 +118,14 @@ _PLACEHOLDER_PATTERNS: tuple[str, ...] = (
 _PLANNING_RUN_MODES: frozenset[str] = frozenset(
     {"planning_only", "architecture_review", "roadmap"}
 )
+_ENGINEER_MATERIAL_PHASE_HINTS: tuple[str, ...] = (
+    "build",
+    "engineer",
+    "implement",
+    "implementation",
+    "fix",
+    "code",
+)
 
 
 # ── API publica ──────────────────────────────────────────────────────────────
@@ -147,6 +156,8 @@ def verify_task_evidence(
     live_api_enabled = os.getenv("AITEAM_ENABLE_LIVE_API", "0").strip().lower() in {
         "1", "true", "yes", "on",
     }
+    requires_material_artifacts = _requires_material_artifact_evidence(task)
+    real_channel_present = bool(str(task.metadata.get("last_channel", "") or "").strip())
 
     # ── 1. Modo simulado no-conversacional ──────────────────────────────────
     # El output textual del adapter es la unica evidencia valida.
@@ -154,7 +165,11 @@ def verify_task_evidence(
     if not is_conversational:
         if "[SIMULADO |" in agent_output:
             return False, "simulated_placeholder_blocked:placeholder_output"
-        if not live_api_enabled and agent_output.strip():
+        if (
+            not live_api_enabled
+            and agent_output.strip()
+            and not (real_channel_present and requires_material_artifacts)
+        ):
             return True, "simulated_mode_accepted"
 
     # ── 2. Git diff ──────────────────────────────────────────────────────────
@@ -216,6 +231,10 @@ def verify_task_evidence(
     except Exception:
         pass
 
+    artifact_count = _material_artifact_count(task, runtime_dir=runtime_dir)
+    if artifact_count > 0:
+        return True, f"artifact_events_detected:{artifact_count}"
+
     if run_mode in _PLANNING_RUN_MODES:
         structured_doc = _find_structured_markdown_evidence(
             workspace=workspace,
@@ -262,12 +281,79 @@ def verify_task_evidence(
             agent_output, task.role, phase_name
         )
         if quality_ok:
+            if requires_material_artifacts:
+                return False, "engineer_material_artifacts_required"
             return True, f"live_output_quality:{quality_reason}"
+
+    if requires_material_artifacts:
+        return (
+            False,
+            "engineer_material_artifacts_required",
+        )
 
     return (
         False,
         "Strict Evidence Gate: No file modifications detected. Tasks must produce tangible output.",
     )
+
+
+def _requires_material_artifact_evidence(task: WorkTask) -> bool:
+    if task.role != Role.ENGINEER:
+        return False
+    is_chat_contract_task = bool(task.metadata.get("phase_contract_enforced")) or bool(
+        task.metadata.get("chat_parent")
+    ) or str(task.task_id or "").startswith("CHAT-")
+    if not is_chat_contract_task:
+        return False
+
+    required_capabilities = {
+        str(item).strip().lower()
+        for item in list(task.metadata.get("required_capabilities", []) or [])
+        if str(item).strip()
+    }
+    if "coding" in required_capabilities:
+        return True
+
+    phase_name = str(task.metadata.get("phase", "") or "").strip().lower()
+    return any(hint in phase_name for hint in _ENGINEER_MATERIAL_PHASE_HINTS)
+
+
+def _material_artifact_count(task: WorkTask, *, runtime_dir: Path) -> int:
+    metadata_count = int(task.metadata.get("artifact_created_count", 0) or 0) + int(
+        task.metadata.get("artifact_modified_count", 0) or 0
+    )
+    if metadata_count > 0:
+        return metadata_count
+
+    artifact_paths = list(task.metadata.get("artifact_paths", []) or [])
+    if artifact_paths:
+        return len(artifact_paths)
+
+    events_path = runtime_dir / "events.jsonl"
+    if not events_path.exists():
+        return 0
+    count = 0
+    try:
+        with events_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                event_type = str(row.get("event_type", "") or "").strip()
+                if event_type not in {"artifact_created", "artifact_modified"}:
+                    continue
+                payload = row.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+                if str(payload.get("task_id", "") or "").strip() != str(task.task_id or "").strip():
+                    continue
+                count += 1
+    except Exception:
+        return 0
+    return count
 
 
 def _find_structured_markdown_evidence(

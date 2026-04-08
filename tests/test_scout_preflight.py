@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from aiteam.sqlite_store import SqliteStore
 from aiteam.types import (
@@ -211,7 +212,10 @@ class TestScoutContextBuilders(unittest.TestCase):
     """Tests para las funciones que pre-fetchen datos sin LLM."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        local_root = Path.cwd() / ".tmp_test_scout_preflight"
+        local_root.mkdir(parents=True, exist_ok=True)
+        self.tmp = local_root / f"tmp_{uuid4().hex}"
+        self.tmp.mkdir(parents=True, exist_ok=False)
         (self.tmp / "workspace").mkdir()
         self.workspace = self.tmp / "workspace"
         self.runtime = self.tmp / "runtime"
@@ -240,15 +244,28 @@ class TestScoutContextBuilders(unittest.TestCase):
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(stdout="", returncode=0),
-                MagicMock(stdout="", returncode=0),
+                MagicMock(stdout="false\n", returncode=0),
             ]
             _build_scout_project_state_context(self.workspace)
 
-        self.assertEqual(mock_run.call_count, 2)
+        self.assertEqual(mock_run.call_count, 1)
         for call in mock_run.call_args_list:
             self.assertEqual(call.kwargs.get("encoding"), "utf-8")
             self.assertEqual(call.kwargs.get("errors"), "replace")
+
+    def test_scout_project_state_reports_non_git_workspace_and_real_snapshot(self):
+        from api.utils import _build_scout_project_state_context
+
+        (self.workspace / "README.md").write_text("# readme")
+        (self.workspace / "src").mkdir(exist_ok=True)
+        (self.workspace / "src" / "app.py").write_text("print('ok')\n")
+
+        result = _build_scout_project_state_context(self.workspace)
+
+        self.assertIn("git repository: no", result)
+        self.assertIn("workspace snapshot autoritativo:", result)
+        self.assertIn("- README.md", result)
+        self.assertIn("- src/app.py", result)
 
     def test_scout_session_history_no_sessions(self):
         from api.utils import _build_scout_session_history_context
@@ -282,6 +299,56 @@ class TestScoutContextBuilders(unittest.TestCase):
         result = _build_scout_session_history_context(self.runtime)
         self.assertIn("HISTORIAL DE SESIONES", result)
         self.assertIn("CHAT-ABC", result)
+
+    def test_scout_session_history_reconstructs_failed_result_from_phase_verdicts(self):
+        tasks = [
+            {
+                "task_id": "CHAT-ABCD1234::lead_intake",
+                "title": "test",
+                "description": "Solicitud original:\ncontinuar run dañada",
+                "role": "team_lead",
+                "state": "completed",
+                "metadata": {"phase": "lead_intake"},
+            }
+        ]
+        SqliteStore(self.runtime / "aiteam.db").save_all_tasks(tasks)
+        SqliteStore(self.runtime / "aiteam.db").save_workflow_state(
+            {
+                "CHAT-ABCD1234": {
+                    "phase_verdicts": {
+                        "lead_intake": {
+                            "phase_id": "lead_intake",
+                            "status": "completed",
+                            "slice_id": "2",
+                        },
+                        "build": {
+                            "phase_id": "build",
+                            "status": "completed",
+                            "contract_status": "drift",
+                            "slice_id": "4",
+                            "reason_codes": ["slice_drift"],
+                        },
+                        "review": {
+                            "phase_id": "review",
+                            "status": "rejected",
+                            "reason_codes": ["review_rejected"],
+                        },
+                        "qa": {
+                            "phase_id": "qa",
+                            "status": "blocked",
+                            "reason_codes": ["qa_blocked"],
+                        },
+                    }
+                }
+            }
+        )
+
+        from api.utils import _build_scout_session_history_context
+
+        result = _build_scout_session_history_context(self.runtime)
+        self.assertIn("resultado_reconstruido: fallido", result)
+        self.assertIn("review:rejected_decision", result)
+        self.assertIn("qa:blocked_status", result)
 
 
 class TestScoutNotInPhaseTaskIds(unittest.TestCase):

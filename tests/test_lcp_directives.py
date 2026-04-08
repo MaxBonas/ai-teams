@@ -29,6 +29,11 @@ class TestExtractLcpDirectives(unittest.TestCase):
         result = _extract_lcp_directives("[direct_answer]")
         self.assertTrue(result.get("direct_answer"))
 
+    def test_direct_answer_with_payload_detected(self):
+        result = _extract_lcp_directives('[DIRECT_ANSWER: "Respuesta resumida"]')
+        self.assertTrue(result.get("direct_answer"))
+        self.assertEqual(result.get("direct_answer_text"), "Respuesta resumida")
+
     def test_direct_answer_not_present(self):
         result = _extract_lcp_directives("Respuesta normal sin directiva.")
         self.assertNotIn("direct_answer", result)

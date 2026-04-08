@@ -367,8 +367,14 @@ def infer_tool_specialist(
         return "skill_worker"
 
     normalized = normalize_tool_capabilities(required_capabilities)
+    if role == Role.REVIEWER and (
+        "review" in normalized or "repo_read" in normalized or "reasoning" in normalized
+    ):
+        return "lsp_navigator"
     if role == Role.SCOUT and "repo_read" in normalized:
         return "repo_scout"
+    if role == Role.QA and {"test_execute", "build_execute"} & set(normalized):
+        return "test_runner"
     if {"lsp_symbols", "lsp_references"} & set(normalized):
         return "lsp_navigator"
     if {"browser_nav", "browser_test"} & set(normalized):
@@ -523,6 +529,7 @@ def select_specialists_for_task(
         profiles = [s for s in roster_override if s in TOOL_SPECIALISTS]
         if profiles:
             return _build_roster(
+                role=role,
                 specialists=profiles,
                 criticality=criticality,
                 reasoning="explicit_roster_from_metadata",
@@ -646,6 +653,7 @@ def select_specialists_for_task(
     selected = selected[:3]
 
     return _build_roster(
+        role=role,
         specialists=selected,
         criticality=criticality,
         reasoning="; ".join(reasons) if reasons else "no_specialist_inferred",
@@ -678,6 +686,7 @@ def _roster_preferred_tier(economics: dict[str, str]) -> str:
 
 def _build_roster(
     *,
+    role: Role,
     specialists: list[str],
     criticality: Criticality,
     reasoning: str,
@@ -699,6 +708,9 @@ def _build_roster(
     # Quorum: HIGH criticality → todos; 3 specialists → mayoría; resto → any
     if is_high_criticality:
         quorum_required = n
+        quorum_mode = "all"
+    elif role in (Role.REVIEWER, Role.QA) and n == 2:
+        quorum_required = 2
         quorum_mode = "all"
     elif n >= 3:
         quorum_required = 2

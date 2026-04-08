@@ -104,6 +104,13 @@ class TestSelectSpecialistsBasic(unittest.TestCase):
         )
         self.assertIn("context_curator", roster.specialists)
 
+    def test_reviewer_gets_lsp_navigator_as_base_specialist(self):
+        roster = select_specialists_for_task(
+            role=Role.REVIEWER,
+            required_capabilities=["review", "repo_read", "reasoning"],
+        )
+        self.assertIn("lsp_navigator", roster.specialists)
+
     def test_context_compaction_priority_promotes_context_curator_to_front(self):
         roster = select_specialists_for_task(
             role=Role.ENGINEER,
@@ -221,6 +228,16 @@ class TestSpecialistRosterQuorum(unittest.TestCase):
         )
         if len(roster.specialists) >= 3:
             self.assertEqual(roster.quorum_mode, "majority")
+            self.assertEqual(roster.quorum_required, 2)
+
+    def test_qa_two_specialists_medium_criticality_require_all(self):
+        roster = select_specialists_for_task(
+            role=Role.QA,
+            required_capabilities=["browser_test", "test_execute"],
+            criticality=Criticality.MEDIUM,
+        )
+        if len(roster.specialists) == 2:
+            self.assertEqual(roster.quorum_mode, "all")
             self.assertEqual(roster.quorum_required, 2)
 
     def test_empty_roster_quorum_zero(self):

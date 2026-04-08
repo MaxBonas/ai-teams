@@ -35,3 +35,8 @@ exclude = ["tests*", "runtime*", "docs*", "ide-frontend*", "config*", "default*"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+markers = [
+    "slow: tests that instantiate real orchestrators, use TestClient, or run full integration flows (deselect with '-m not slow')",
+    "integration: tests that touch SQLite, filesystem, or the FastAPI app (subset of slow)",
+    "unit: fast tests with no I/O and no orchestrator (complement of slow)",
+]

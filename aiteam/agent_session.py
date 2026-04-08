@@ -135,6 +135,19 @@ class ConversationThread:
     project_key: str
     created_at: str
     last_updated: str
+    thread_version: str = "v2"
+    role: str = ""
+    provider: str = ""
+    channel: str = ""
+    model_family: str = ""
+    generation: int = 1
+    parent_thread_id: str = ""
+    turn_count_total: int = 0
+    char_count_total: int = 0
+    last_rotation_reason: str = ""
+    last_provider: str = ""
+    last_model: str = ""
+    last_channel: str = ""
     turns: list[ConversationTurn] = field(default_factory=list)
     consumed_message_ids: list[str] = field(default_factory=list)
 
@@ -172,6 +185,8 @@ class ConversationThread:
             )
         )
         self.last_updated = now
+        self.turn_count_total += 1
+        self.char_count_total += len(normalized)
         if message_id and message_id not in self.consumed_message_ids:
             self.consumed_message_ids.append(message_id)
         self._compact_turns()
@@ -181,6 +196,62 @@ class ConversationThread:
 
     def has_consumed_message(self, message_id: str) -> bool:
         return message_id in self.consumed_message_ids
+
+    def bind_provider(
+        self,
+        *,
+        provider: str = "",
+        channel: str = "",
+        model_family: str = "",
+        model: str = "",
+        role: str = "",
+    ) -> bool:
+        changed = False
+        normalized_role = str(role or "").strip().lower()
+        normalized_provider = str(provider or "").strip().lower()
+        normalized_channel = str(channel or "").strip().lower()
+        normalized_model_family = str(model_family or "").strip().lower()
+        normalized_model = str(model or "").strip()
+        if normalized_role and self.role != normalized_role:
+            self.role = normalized_role
+            changed = True
+        if normalized_provider and self.provider != normalized_provider:
+            self.provider = normalized_provider
+            changed = True
+        if normalized_channel and self.channel != normalized_channel:
+            self.channel = normalized_channel
+            changed = True
+        if normalized_model_family and self.model_family != normalized_model_family:
+            self.model_family = normalized_model_family
+            changed = True
+        if normalized_provider:
+            self.last_provider = normalized_provider
+        if normalized_channel:
+            self.last_channel = normalized_channel
+        if normalized_model:
+            self.last_model = normalized_model
+        if changed:
+            self.last_updated = datetime.now(timezone.utc).isoformat()
+        return changed
+
+    def should_rotate(
+        self,
+        *,
+        max_turns_total: int = 24,
+        max_chars_total: int = 40_000,
+    ) -> bool:
+        return self.turn_count_total >= max_turns_total or self.char_count_total >= max_chars_total
+
+    def rotation_seed_summary(self) -> str:
+        snippets = []
+        for turn in self.recent_turns(limit=4):
+            text = turn.content.strip().replace("\n", " ")[:80]
+            snippets.append(f"{turn.role}:{text}")
+        suffix = " | ".join(snippets) if snippets else "sin turnos recientes"
+        return (
+            f"Continuidad previa g{self.generation} ({self.turn_count_total} turnos, "
+            f"{self.char_count_total} chars): {suffix}"
+        )[:500]
 
     def _compact_turns(
         self,
@@ -377,33 +448,215 @@ class ThreadStore:
         self.threads_dir = runtime_dir / "sessions" / "threads"
         self.threads_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._rotate_max_turns_total = 24
+        self._rotate_max_chars_total = 40_000
 
-    def get_thread(self, agent_id: str, project_key: str) -> ConversationThread:
-        path = self._path_for(agent_id=agent_id, project_key=project_key)
+    def get_thread(
+        self,
+        agent_id: str,
+        project_key: str,
+        *,
+        role: str = "",
+        provider: str = "",
+        channel: str = "",
+        model_family: str = "",
+    ) -> ConversationThread:
+        normalized_role = self._slug(role)
+        normalized_provider = self._slug(provider)
+        normalized_channel = self._slug(channel)
+        normalized_model_family = self._slug(model_family)
         with self._lock:
-            thread = self._load_thread(path)
-            if thread is not None:
-                return thread
-            now = datetime.now(timezone.utc).isoformat()
-            created = ConversationThread(
-                thread_id=str(uuid.uuid4())[:12],
-                agent_id=agent_id,
-                project_key=project_key,
-                created_at=now,
-                last_updated=now,
-            )
-            self._persist_thread(path, created)
-            return created
+            thread = None
+            if (
+                normalized_provider
+                or normalized_channel
+                or normalized_model_family
+                or normalized_role
+            ):
+                thread = self._find_latest_v2_thread(
+                    agent_id=agent_id,
+                    project_key=project_key,
+                    role=normalized_role,
+                    provider=normalized_provider,
+                    channel=normalized_channel,
+                    model_family=normalized_model_family,
+                )
+            else:
+                thread = self._find_latest_v2_thread(
+                    agent_id=agent_id,
+                    project_key=project_key,
+                    role=normalized_role,
+                )
+
+            if thread is None:
+                legacy = self._load_thread(self._legacy_path_for(agent_id=agent_id, project_key=project_key))
+                if legacy is not None:
+                    thread = legacy
+
+            if thread is None:
+                thread = self._create_thread(
+                    agent_id=agent_id,
+                    project_key=project_key,
+                    role=normalized_role,
+                    provider=normalized_provider,
+                    channel=normalized_channel,
+                    model_family=normalized_model_family,
+                )
+            else:
+                thread.thread_version = "v2"
+                if normalized_role:
+                    thread.role = normalized_role
+                if normalized_provider:
+                    thread.provider = normalized_provider
+                if normalized_channel:
+                    thread.channel = normalized_channel
+                if normalized_model_family:
+                    thread.model_family = normalized_model_family
+                if not isinstance(thread.generation, int) or thread.generation <= 0:
+                    thread.generation = 1
+
+            if thread.should_rotate(
+                max_turns_total=self._rotate_max_turns_total,
+                max_chars_total=self._rotate_max_chars_total,
+            ):
+                thread = self._rotate_thread(thread, reason="context_budget")
+
+            self._persist_thread(self._path_for_thread(thread), thread)
+            return thread
 
     def save_thread(self, thread: ConversationThread) -> None:
-        path = self._path_for(agent_id=thread.agent_id, project_key=thread.project_key)
+        path = self._path_for_thread(thread)
         with self._lock:
             self._persist_thread(path, thread)
 
-    def _path_for(self, agent_id: str, project_key: str) -> Path:
+    def _legacy_path_for(self, agent_id: str, project_key: str) -> Path:
         safe_agent = self._slug(agent_id)
         safe_project = self._slug(project_key)
         return self.threads_dir / f"{safe_agent}__{safe_project}.json"
+
+    def _path_for_v2(
+        self,
+        *,
+        agent_id: str,
+        project_key: str,
+        role: str,
+        provider: str,
+        channel: str,
+        model_family: str,
+        generation: int,
+    ) -> Path:
+        safe_agent = self._slug(agent_id)
+        safe_project = self._slug(project_key)
+        safe_role = self._slug(role) or "role"
+        safe_provider = self._slug(provider) or "unbound"
+        safe_channel = self._slug(channel) or "unbound"
+        safe_model = self._slug(model_family) or "unbound"
+        safe_generation = max(1, int(generation))
+        return self.threads_dir / (
+            f"{safe_agent}__{safe_project}__{safe_role}__"
+            f"{safe_provider}__{safe_channel}__{safe_model}__g{safe_generation}.json"
+        )
+
+    def _path_for_thread(self, thread: ConversationThread) -> Path:
+        if str(thread.thread_version or "").strip().lower() != "v2":
+            return self._legacy_path_for(agent_id=thread.agent_id, project_key=thread.project_key)
+        return self._path_for_v2(
+            agent_id=thread.agent_id,
+            project_key=thread.project_key,
+            role=thread.role,
+            provider=thread.provider,
+            channel=thread.channel,
+            model_family=thread.model_family,
+            generation=thread.generation,
+        )
+
+    def _create_thread(
+        self,
+        *,
+        agent_id: str,
+        project_key: str,
+        role: str,
+        provider: str,
+        channel: str,
+        model_family: str,
+        generation: int = 1,
+        parent_thread_id: str = "",
+        last_rotation_reason: str = "",
+        seed_summary: str = "",
+    ) -> ConversationThread:
+        now = datetime.now(timezone.utc).isoformat()
+        created = ConversationThread(
+            thread_id=str(uuid.uuid4())[:12],
+            agent_id=agent_id,
+            project_key=project_key,
+            created_at=now,
+            last_updated=now,
+            thread_version="v2",
+            role=role,
+            provider=provider,
+            channel=channel,
+            model_family=model_family,
+            generation=max(1, int(generation)),
+            parent_thread_id=parent_thread_id,
+            last_rotation_reason=last_rotation_reason,
+        )
+        if seed_summary.strip():
+            created.append_turn(
+                role="system",
+                content=seed_summary,
+                source="summary",
+            )
+        return created
+
+    def _rotate_thread(self, thread: ConversationThread, *, reason: str) -> ConversationThread:
+        next_thread = self._create_thread(
+            agent_id=thread.agent_id,
+            project_key=thread.project_key,
+            role=thread.role,
+            provider=thread.provider,
+            channel=thread.channel,
+            model_family=thread.model_family,
+            generation=int(thread.generation or 1) + 1,
+            parent_thread_id=thread.thread_id,
+            last_rotation_reason=reason,
+            seed_summary=thread.rotation_seed_summary(),
+        )
+        self._persist_thread(self._path_for_thread(next_thread), next_thread)
+        return next_thread
+
+    def _find_latest_v2_thread(
+        self,
+        *,
+        agent_id: str,
+        project_key: str,
+        role: str,
+        provider: str = "",
+        channel: str = "",
+        model_family: str = "",
+    ) -> ConversationThread | None:
+        safe_agent = self._slug(agent_id)
+        safe_project = self._slug(project_key)
+        prefix = f"{safe_agent}__{safe_project}__"
+        candidates: list[ConversationThread] = []
+        for path in self.threads_dir.glob(f"{prefix}*.json"):
+            thread = self._load_thread(path)
+            if thread is None:
+                continue
+            if str(thread.thread_version or "").strip().lower() != "v2":
+                continue
+            if role and self._slug(thread.role) != role:
+                continue
+            if provider and self._slug(thread.provider) != provider:
+                continue
+            if channel and self._slug(thread.channel) != channel:
+                continue
+            if model_family and self._slug(thread.model_family) != model_family:
+                continue
+            candidates.append(thread)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: str(item.last_updated or item.created_at or ""))
+        return candidates[-1]
 
     @staticmethod
     def _slug(value: str) -> str:

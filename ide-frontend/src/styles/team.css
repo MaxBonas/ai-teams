@@ -914,6 +914,30 @@
   cursor: not-allowed;
 }
 
+.team-chat-continue-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.team-chat-continue-modal p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.team-chat-continue-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.team-chat-continue-modal-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 .team-empty-state,
 .team-error {
   color: var(--text-secondary);
@@ -1771,6 +1795,188 @@
   font-size: 10.5px;
   line-height: 1.3;
   word-break: break-all;
+}
+
+.status-root-cause {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.status-root-cause--hard {
+  background: rgba(248, 81, 73, 0.10);
+  border-color: rgba(248, 81, 73, 0.28);
+  color: #ffb4ad;
+}
+
+.status-root-cause--warn {
+  background: rgba(210, 153, 34, 0.10);
+  border-color: rgba(210, 153, 34, 0.28);
+  color: #f2cc60;
+}
+
+.status-root-cause--ok {
+  background: rgba(63, 185, 80, 0.10);
+  border-color: rgba(63, 185, 80, 0.28);
+  color: #7ee787;
+}
+
+.status-root-cause--neutral {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary, #8b949e);
+}
+
+.status-root-cause-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.status-root-cause-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #e6edf3);
+}
+
+.status-root-cause-state {
+  font-size: 10px;
+  font-family: 'SF Mono', monospace;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.status-root-cause-copy {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.status-root-cause-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-root-cause-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.3;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(17, 24, 39, 0.28);
+  color: var(--text-primary, #e6edf3);
+  font-family: 'SF Mono', monospace;
+}
+
+.status-phase-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-phase-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.status-phase-card--hard {
+  border-color: rgba(248, 81, 73, 0.28);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.status-phase-card--warn {
+  border-color: rgba(210, 153, 34, 0.28);
+  background: rgba(210, 153, 34, 0.07);
+}
+
+.status-phase-card--ok {
+  border-color: rgba(63, 185, 80, 0.22);
+  background: rgba(63, 185, 80, 0.05);
+}
+
+.status-phase-card--neutral {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.status-phase-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-phase-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #e6edf3);
+}
+
+.status-phase-role {
+  font-size: 10px;
+  font-family: 'SF Mono', monospace;
+  color: var(--text-secondary, #8b949e);
+}
+
+.status-phase-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.status-phase-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.3;
+  background: rgba(17, 24, 39, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: var(--text-secondary, #c9d1d9);
+}
+
+.status-phase-badge--hard {
+  color: #ffb4ad;
+  border-color: rgba(248, 81, 73, 0.28);
+}
+
+.status-phase-row {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.status-phase-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #8b949e);
+}
+
+.status-phase-value {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-primary, #d0d7de);
+  word-break: break-word;
+}
+
+.status-phase-value--missing {
+  color: #f2cc60;
 }
 
 .routing-catalog-panel {

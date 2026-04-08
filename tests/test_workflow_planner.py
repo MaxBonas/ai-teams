@@ -132,6 +132,23 @@ PLAN_EMPTY_DEPS = """
 [/WORKFLOW_PLAN]
 """
 
+PLAN_MULTILINE_OBJECTIVE = """
+[WORKFLOW_PLAN]
+- phase_id: verify_codebase_state
+  role: RESEARCHER
+  objective: |
+    Validar estado actual del repositorio
+    Confirmar imports en tests y dependencia markdown
+  depends_on: []
+- phase_id: fix_test_imports
+  role: ENGINEER
+  objective: |
+    Corregir imports en test_cli.py
+    Ajustar referencias al paquete principal
+  depends_on: [verify_codebase_state]
+[/WORKFLOW_PLAN]
+"""
+
 
 # ---------------------------------------------------------------------------
 # parse_workflow_plan — casos validos
@@ -187,6 +204,14 @@ class TestParseWorkflowPlanValid:
         """El bloque puede estar en medio de texto del Lead."""
         result = parse_workflow_plan(VALID_PLAN_SIMPLE)
         assert result is not None
+
+    def test_multiline_objective_block_is_preserved(self):
+        result = parse_workflow_plan(PLAN_MULTILINE_OBJECTIVE)
+        assert result is not None
+        assert len(result) == 2
+        assert "Validar estado actual del repositorio" in result[0].objective
+        assert "Confirmar imports en tests" in result[0].objective
+        assert "Corregir imports en test_cli.py" in result[1].objective
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +352,12 @@ class TestDefaultPhases:
         phases = default_phases("sprint5")
         build = next(p for p in phases if p.phase_id == "build")
         assert set(build.depends_on) == {"plan_engineering", "plan_risks"}
+
+    def test_sprint5_build_objective_forbids_slice_drift(self):
+        phases = default_phases("sprint5")
+        build = next(p for p in phases if p.phase_id == "build")
+        assert "exactamente el slice aprobado" in build.objective.lower()
+        assert "mayor impacto" not in build.objective.lower()
 
     def test_unknown_mode_returns_sprint5(self):
         phases = default_phases("unknown_mode")

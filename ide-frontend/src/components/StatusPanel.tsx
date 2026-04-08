@@ -80,9 +80,55 @@ interface OperationalTaskSummary {
   blocked_reasons: OperationalReason[];
   sample_items: OperationalSummaryItem[];
   carryover_roots: string[];
+  authoritative_close_state?: string;
+  authoritative_blockers?: Array<{ reason_code: string; reason_label: string; count: number }>;
 }
 
+interface LeadClosePolicySummary {
+  authoritative_close_state: string;
+  blocking_signals: string[];
+  can_declare_done: boolean;
+  requires_close_rewrite: boolean;
+}
+
+interface PhaseDeliveryItem {
+  phase_id: string;
+  role: string;
+  objective: string;
+  objective_missing: boolean;
+  depends_on: string[];
+  verdict_status: string;
+  contract_status: string;
+  reason_codes: string[];
+  verdict_summary: string;
+  delivery_summary: string;
+  delivery_source: string;
+  has_delivery: boolean;
+  has_output: boolean;
+}
+
+const resolveWorkspaceRunState = (run: Record<string, unknown>): string => {
+  const workflowRunStatus = String(run.workflow_run_status ?? '').trim().toLowerCase();
+  if (workflowRunStatus) return workflowRunStatus;
+  const authoritativeState = String(run.authoritative_state ?? '').trim().toLowerCase();
+  if (authoritativeState) return authoritativeState;
+  return String(run.status ?? run.state ?? '').trim().toLowerCase();
+};
+
 type WorkbenchTab = 'status' | 'routing' | 'files' | 'terminal';
+
+const isTerminalWorkspaceRunState = (state: string): boolean => {
+  const normalized = String(state || '').trim().toLowerCase();
+  return ['completed', 'failed', 'rejected', 'cancelled', 'aborted', 'not_completed'].includes(normalized);
+};
+
+const nextStatusPanelPollDelay = (runActive: boolean, minimized: boolean, activeTab: WorkbenchTab): number => {
+  if (minimized) return 20000;
+  if (runActive) {
+    return activeTab === 'status' ? 12000 : 15000;
+  }
+  return 4000;
+};
 
 export default function StatusPanel({ workspacePath, minimized, onToggleMinimize, onLoadChat }: StatusPanelProps) {
   const [budget, setBudget] = useState<BudgetInfo | null>(null);
@@ -92,20 +138,26 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
   const [peerConsultation, setPeerConsultation] = useState<PeerConsultationSummary | null>(null);
   const [productArtifacts, setProductArtifacts] = useState<ProductArtifactsSummary | null>(null);
   const [operationalSummary, setOperationalSummary] = useState<OperationalTaskSummary | null>(null);
+  const [leadClosePolicy, setLeadClosePolicy] = useState<LeadClosePolicySummary | null>(null);
+  const [phaseDeliverySummary, setPhaseDeliverySummary] = useState<PhaseDeliveryItem[]>([]);
   const [activeTab, setActiveTab] = useState<WorkbenchTab>('status');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileRefreshToken, setFileRefreshToken] = useState(0);
   const [refreshingTree, setRefreshingTree] = useState(false);
+  const [runActive, setRunActive] = useState(false);
 
   useEffect(() => {
     setRecentRuns([]);
     const headers: Record<string, string> = workspacePath ? { 'x-workspace-path': workspacePath } : {};
+    let cancelled = false;
+    let timerId: ReturnType<typeof window.setTimeout> | null = null;
 
     const poll = async () => {
       try {
         const res = await apiFetch('/api/dashboard', { headers });
         if (!res.ok) return;
         const data = await res.json() as Record<string, unknown>;
+        if (cancelled) return;
         if (data.budget && typeof data.budget === 'object') {
           setBudget(data.budget as BudgetInfo);
         }
@@ -122,13 +174,16 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
         const res = await apiFetch('/api/aiteam/state?environment=dev', { headers });
         if (!res.ok) return;
         const data = await res.json() as Record<string, unknown>;
+        if (cancelled) return;
         const run = data.last_chat_run;
         if (run && typeof run === 'object') {
           const r = run as Record<string, unknown>;
+          const runState = resolveWorkspaceRunState(r);
+          setRunActive(Boolean(runState) && !isTerminalWorkspaceRunState(runState));
           setRecentRuns(prev => {
             const entry: RecentRun = {
               task_id: String(r.task_id ?? '').slice(0, 22),
-              state: String(r.status ?? r.state ?? ''),
+              state: runState,
               rounds_used: Number(r.rounds_used ?? 0),
               round_budget: Number(r.round_budget ?? 0),
               elapsed_ms: Number(r.elapsed_ms ?? 0),
@@ -239,34 +294,123 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
               carryover_roots: Array.isArray(operational.carryover_roots)
                 ? (operational.carryover_roots as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0)
                 : [],
+              authoritative_close_state: String(operational.authoritative_close_state ?? ''),
+              authoritative_blockers: Array.isArray(operational.authoritative_blockers)
+                ? (operational.authoritative_blockers as unknown[])
+                  .map((item) => {
+                    const row = (item && typeof item === 'object') ? item as Record<string, unknown> : {};
+                    return {
+                      reason_code: String(row.reason_code ?? ''),
+                      reason_label: String(row.reason_label ?? ''),
+                      count: Number.isFinite(Number(row.count)) ? Number(row.count) : 0,
+                    };
+                  })
+                  .filter((item) => item.reason_code.length > 0)
+                : [],
             });
           } else {
             setOperationalSummary(null);
           }
+          const closePolicyRaw = r.lead_close_policy;
+          if (closePolicyRaw && typeof closePolicyRaw === 'object') {
+            const policy = closePolicyRaw as Record<string, unknown>;
+            setLeadClosePolicy({
+              authoritative_close_state: String(policy.authoritative_close_state ?? '').trim(),
+              blocking_signals: Array.isArray(policy.blocking_signals)
+                ? (policy.blocking_signals as unknown[]).map((item) => String(item ?? '').trim()).filter((item) => item.length > 0)
+                : [],
+              can_declare_done: Boolean(policy.can_declare_done),
+              requires_close_rewrite: Boolean(policy.requires_close_rewrite),
+            });
+          } else {
+            setLeadClosePolicy(null);
+          }
+          const phaseDeliveryRaw = Array.isArray(r.phase_delivery_summary) ? r.phase_delivery_summary : [];
+          setPhaseDeliverySummary(
+            phaseDeliveryRaw
+              .map((item) => {
+                const row = (item && typeof item === 'object') ? item as Record<string, unknown> : {};
+                return {
+                  phase_id: String(row.phase_id ?? '').trim(),
+                  role: String(row.role ?? '').trim(),
+                  objective: String(row.objective ?? '').trim(),
+                  objective_missing: Boolean(row.objective_missing),
+                  depends_on: Array.isArray(row.depends_on)
+                    ? (row.depends_on as unknown[]).map((dep) => String(dep ?? '').trim()).filter((dep) => dep.length > 0)
+                    : [],
+                  verdict_status: String(row.verdict_status ?? '').trim(),
+                  contract_status: String(row.contract_status ?? '').trim(),
+                  reason_codes: Array.isArray(row.reason_codes)
+                    ? (row.reason_codes as unknown[]).map((reason) => String(reason ?? '').trim()).filter((reason) => reason.length > 0)
+                    : [],
+                  verdict_summary: String(row.verdict_summary ?? '').trim(),
+                  delivery_summary: String(row.delivery_summary ?? '').trim(),
+                  delivery_source: String(row.delivery_source ?? '').trim(),
+                  has_delivery: Boolean(row.has_delivery),
+                  has_output: Boolean(row.has_output),
+                } satisfies PhaseDeliveryItem;
+              })
+              .filter((item) => item.phase_id.length > 0),
+          );
         } else {
+          setRunActive(false);
           setLeadDecisions(null);
           setPeerConsultation(null);
           setProductArtifacts(null);
           setOperationalSummary(null);
+          setLeadClosePolicy(null);
+          setPhaseDeliverySummary([]);
         }
       } catch { /* ignore */ }
     };
 
-    void poll();
-    void pollState();
-    const interval = setInterval(() => { void poll(); void pollState(); }, 4000);
-    return () => clearInterval(interval);
-  }, [workspacePath]);
+    const scheduleNextPoll = () => {
+      if (cancelled) return;
+      timerId = window.setTimeout(() => {
+        void tick();
+      }, nextStatusPanelPollDelay(runActive, minimized, activeTab));
+    };
+
+    const tick = async () => {
+      await Promise.allSettled([poll(), pollState()]);
+      scheduleNextPoll();
+    };
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [workspacePath, runActive, minimized, activeTab]);
 
   useEffect(() => {
     setSelectedFile(null);
   }, [workspacePath]);
 
   const stateColor = (s: string) => {
-    if (s.includes('completed') || s === 'completed_or_closed') return 'var(--status-green)';
+    if (s === 'completed') return 'var(--status-green)';
     if (s.includes('fail') || s.includes('error')) return 'var(--status-red)';
+    if (s === 'not_completed') return 'var(--status-red)';
+    if (s.includes('reject')) return 'var(--status-red)';
+    if (s.includes('waiting')) return 'var(--status-amber)';
     if (s.includes('progress') || s.includes('exhaust')) return 'var(--status-amber)';
     return 'var(--text-secondary)';
+  };
+
+  const rootCauseTone = (state: string) => {
+    if (state === 'rejected') return 'status-root-cause status-root-cause--hard';
+    if (state === 'not_completed' || state === 'failed') return 'status-root-cause status-root-cause--warn';
+    if (state === 'eligible_for_done') return 'status-root-cause status-root-cause--ok';
+    return 'status-root-cause status-root-cause--neutral';
+  };
+
+  const phaseTone = (item: PhaseDeliveryItem) => {
+    if (item.contract_status === 'drift' || item.verdict_status === 'rejected') return 'status-phase-card status-phase-card--hard';
+    if (item.verdict_status === 'blocked' || !item.has_delivery || item.objective_missing) return 'status-phase-card status-phase-card--warn';
+    if (item.verdict_status === 'completed' || item.verdict_status === 'approved') return 'status-phase-card status-phase-card--ok';
+    return 'status-phase-card status-phase-card--neutral';
   };
 
   return (
@@ -367,6 +511,42 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
                         <span className="status-run-rounds">{run.rounds_used}/{run.round_budget}r</span>
                       </button>
                     ))}
+                  </div>
+                </section>
+              )}
+
+              {leadClosePolicy && (
+                <section className="status-section">
+                  <div className="status-section-label">Causa autoritativa</div>
+                  <div className={rootCauseTone(leadClosePolicy.authoritative_close_state)}>
+                    <div className="status-root-cause-header">
+                      <span className="status-root-cause-title">
+                        {leadClosePolicy.authoritative_close_state === 'rejected'
+                          ? 'Run rechazada'
+                          : leadClosePolicy.authoritative_close_state === 'not_completed'
+                            ? 'Run no completada'
+                            : leadClosePolicy.authoritative_close_state === 'eligible_for_done'
+                              ? 'Run elegible para cierre'
+                              : 'Estado autoritativo disponible'}
+                      </span>
+                      <span className="status-root-cause-state">{leadClosePolicy.authoritative_close_state || 'unknown'}</span>
+                    </div>
+                    {leadClosePolicy.blocking_signals.length > 0 ? (
+                      <>
+                        <div className="status-root-cause-copy">
+                          La capa autoritativa del run está señalando estos bloqueadores principales.
+                        </div>
+                        <div className="status-root-cause-tags">
+                          {leadClosePolicy.blocking_signals.slice(0, 6).map((signal) => (
+                            <span key={signal} className="status-root-cause-tag">{signal}</span>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="status-root-cause-copy">
+                        No hay bloqueadores autoritativos activos en este cierre.
+                      </div>
+                    )}
                   </div>
                 </section>
               )}
@@ -518,6 +698,61 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
                 </section>
               )}
 
+              {phaseDeliverySummary.length > 0 && (
+                <section className="status-section">
+                  <div className="status-section-label">Fases — contrato, veredicto y evidencia</div>
+                  <div className="status-phase-list">
+                    {phaseDeliverySummary.map((item) => (
+                      <div key={item.phase_id} className={phaseTone(item)}>
+                        <div className="status-phase-card-header">
+                          <div className="status-phase-card-title">
+                            <span>{item.phase_id}</span>
+                            {item.role && <span className="status-phase-role">{item.role}</span>}
+                          </div>
+                          <div className="status-phase-badges">
+                            {item.verdict_status && (
+                              <span className="status-phase-badge">{item.verdict_status}</span>
+                            )}
+                            {item.contract_status && (
+                              <span className={`status-phase-badge ${item.contract_status === 'drift' ? 'status-phase-badge--hard' : ''}`}>
+                                {item.contract_status}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="status-phase-row">
+                          <span className="status-phase-label">Objetivo</span>
+                          <span className={item.objective_missing ? 'status-phase-value status-phase-value--missing' : 'status-phase-value'}>
+                            {item.objective || 'No especificado'}
+                          </span>
+                        </div>
+                        {item.depends_on.length > 0 && (
+                          <div className="status-phase-row">
+                            <span className="status-phase-label">Deps</span>
+                            <span className="status-phase-value">{item.depends_on.join(', ')}</span>
+                          </div>
+                        )}
+                        <div className="status-phase-row">
+                          <span className="status-phase-label">Evidencia</span>
+                          <span className={item.has_delivery ? 'status-phase-value' : 'status-phase-value status-phase-value--missing'}>
+                            {item.delivery_summary || 'No hay entrega visible para esta fase'}
+                          </span>
+                        </div>
+                        {(item.verdict_summary || item.reason_codes.length > 0) && (
+                          <div className="status-phase-row">
+                            <span className="status-phase-label">Veredicto</span>
+                            <span className="status-phase-value">
+                              {item.verdict_summary || 'Sin summary de veredicto'}
+                              {item.reason_codes.length > 0 ? ` · ${item.reason_codes.join(', ')}` : ''}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {!budget && recentRuns.length === 0 && (
                 <div className="status-empty-hint">
                   Conecta el backend real para ver estado operativo.
@@ -527,7 +762,7 @@ export default function StatusPanel({ workspacePath, minimized, onToggleMinimize
           )}
 
           {activeTab === 'routing' && (
-            <RoutingCatalogPanel workspacePath={workspacePath} />
+            <RoutingCatalogPanel workspacePath={workspacePath} autoRefreshPaused={runActive} />
           )}
 
           {activeTab === 'files' && (

@@ -57,6 +57,42 @@ Workflow base por fases: `lead_intake -> dynamic phases -> lead_close`
 - **Compliance**: guardrails para operaciones sensibles, redaccion de secretos, doble aprobacion en `prod`.
 - **FinOps**: presupuesto diario/mensual, señal de presion, ledger de costos.
 
+## Direccion de producto para agentes de desarrollo
+
+Orientacion vigente del producto: **AITeams no debe perseguir a corto plazo un IDE generalista tipo VSCode**.
+La prioridad es construir un **agent workspace** o **cockpit operativo del Team Lead**:
+
+- interfaz para dirigir, observar, pausar, replanificar y auditar agentes
+- continuidad entre runs, memoria, routing, capabilities, gates y trazabilidad
+- experiencia clara de artefactos, diffs, estado y aprobaciones
+
+### Minimo de IDE necesario para AITeams v1
+
+- arbol de archivos
+- visor/editor suficiente
+- terminal estable
+- chat
+- timeline/estado de runs
+- paneles de routing/capabilities/status
+- diffs, artefactos generados y trazabilidad por fase/agente
+- pausa/reanudacion/aprobacion del flujo
+
+### Lo que NO es prioritario ahora
+
+- competir con VSCode en edicion avanzada
+- sistema complejo de tabs/layout
+- ecosistema de extensiones de terceros
+- debugger completo
+- refactors/LSP de nivel IDE generalista
+- features de UX cuyo valor principal sea "editar codigo a mano mejor"
+
+### Regla de decision para capa 1
+
+Si una tarea mejora principalmente la **edicion manual de codigo**, tratarla como prioridad baja salvo que desbloquee una capacidad central del orquestador.
+Si una tarea mejora **direccion de agentes, observabilidad, continuidad, memoria, gates, routing o control operativo**, tratarla como prioridad alta.
+
+En dudas de roadmap o implementacion frontend, preferir siempre **agent workspace** sobre **IDE full**.
+
 ## Archivos clave
 
 | Archivo | Funcion |

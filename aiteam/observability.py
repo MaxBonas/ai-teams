@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from aiteam.persistence import AtomicFileWriter
+from aiteam.time_utils import local_now, local_now_iso
 
 
 class EventLogger:
@@ -20,7 +21,7 @@ class EventLogger:
 
     def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         record = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": local_now_iso(),
             "event_id": str(uuid.uuid4()),  # garantiza checksum unico por evento
             "event_type": event_type,
             "payload": payload,
@@ -37,7 +38,7 @@ class EventLogger:
         records = self._records()
         if hours is None:
             return records
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        cutoff = local_now() - timedelta(hours=hours)
         return [
             r for r in records
             if r.get("ts") and (dt := self._safe_parse_ts(r["ts"])) is not None and dt >= cutoff
@@ -167,7 +168,7 @@ class EventLogger:
 
     def prune_events(self, max_days: int = 30, archive_dir: Path | None = None) -> int:
         """Remove events older than max_days and optionally archive them."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=max_days)
+        cutoff = local_now() - timedelta(days=max_days)
         records = self._records()
         valid_records = []
         archived_records = []
@@ -193,7 +194,7 @@ class EventLogger:
         
         if archive_dir and archived_records:
             archive_dir.mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            stamp = local_now().strftime("%Y%m%dT%H%M%S%z")
             archive_path = archive_dir / f"events_archive_{stamp}.jsonl"
             AtomicFileWriter.rewrite_jsonl_with_checksums(archive_path, archived_records)
             

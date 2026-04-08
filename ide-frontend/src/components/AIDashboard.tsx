@@ -45,7 +45,7 @@ export default function AIDashboard({ workspacePath }: AIDashboardProps) {
         void load(true);
         const timer = window.setInterval(() => {
             void load(true);
-        }, 5000);
+        }, 10000);
         return () => window.clearInterval(timer);
     }, [workspacePath]);
 
