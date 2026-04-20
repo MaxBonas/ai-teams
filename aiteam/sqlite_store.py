@@ -36,6 +36,14 @@ class SqliteStore:
         # isolation_level=None allows manual transaction management or auto-commit
         return sqlite3.connect(str(self.db_path), isolation_level=None, timeout=20.0)
 
+    @staticmethod
+    def _workflow_payload_with_task_root(task_root: str, payload: Any) -> dict[str, Any]:
+        normalized = str(task_root or "").strip()
+        base = dict(payload) if isinstance(payload, dict) else {}
+        if normalized:
+            base["task_root"] = normalized
+        return base
+
     def load_all_tasks(self) -> list[dict]:
         import contextlib
         with contextlib.closing(self._get_conn()) as conn:
@@ -102,7 +110,10 @@ class SqliteStore:
             state: dict[str, Any] = {}
             for task_root, payload in rows:
                 try:
-                    state[str(task_root)] = json.loads(payload)
+                    state[str(task_root)] = self._workflow_payload_with_task_root(
+                        str(task_root),
+                        json.loads(payload),
+                    )
                 except Exception:
                     continue
             return state
@@ -118,7 +129,15 @@ class SqliteStore:
             return {}
         if not isinstance(legacy_payload, dict):
             return {}
-        return legacy_payload
+        normalized_state: dict[str, Any] = {}
+        for task_root, payload in legacy_payload.items():
+            if not str(task_root or "").strip() or not isinstance(payload, dict):
+                continue
+            normalized_state[str(task_root)] = self._workflow_payload_with_task_root(
+                str(task_root),
+                payload,
+            )
+        return normalized_state
 
     def load_workflow_state(self) -> dict[str, Any]:
         import contextlib
@@ -140,10 +159,14 @@ class SqliteStore:
                     payload = json.loads(row[0])
                 except Exception:
                     return {}
-                return payload if isinstance(payload, dict) else {}
+                if isinstance(payload, dict):
+                    return self._workflow_payload_with_task_root(normalized, payload)
+                return {}
             legacy = self._load_workflow_entries(conn)
             entry = legacy.get(normalized, {})
-            return entry if isinstance(entry, dict) else {}
+            if isinstance(entry, dict):
+                return self._workflow_payload_with_task_root(normalized, entry)
+            return {}
 
     def save_workflow_state(self, state: dict[str, Any]):
         import contextlib
@@ -154,7 +177,13 @@ class SqliteStore:
                 conn.executemany(
                     "INSERT OR REPLACE INTO workflow_state_entries (task_root, payload) VALUES (?, ?)",
                     [
-                        (str(task_root), json.dumps(payload, ensure_ascii=False))
+                        (
+                            str(task_root),
+                            json.dumps(
+                                self._workflow_payload_with_task_root(str(task_root), payload),
+                                ensure_ascii=False,
+                            ),
+                        )
                         for task_root, payload in state.items()
                         if str(task_root).strip() and isinstance(payload, dict)
                     ],
@@ -174,7 +203,13 @@ class SqliteStore:
             try:
                 conn.execute(
                     "INSERT OR REPLACE INTO workflow_state_entries (task_root, payload) VALUES (?, ?)",
-                    (normalized, json.dumps(payload, ensure_ascii=False)),
+                    (
+                        normalized,
+                        json.dumps(
+                            self._workflow_payload_with_task_root(normalized, payload),
+                            ensure_ascii=False,
+                        ),
+                    ),
                 )
                 conn.execute("COMMIT")
             except Exception:

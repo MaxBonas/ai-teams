@@ -58,6 +58,7 @@ class ChatPolicyInput:
     continuation_requested: bool
     allow_low_productivity_override: bool
     lead_advisory_mode: bool
+    lead_degraded_delivery: bool
     live_mode_required: bool
     execution_mode: str
     execution_steps: int
@@ -125,6 +126,12 @@ def resolve_run_type_policy(run_type: str, reasoning_score: int) -> RunTypePolic
             productivity_threshold=0,
             passes_by_reasoning=reasoning_score >= 50,
             is_context_query=True,
+        )
+    if normalized == "review_revalidation":
+        return RunTypePolicy(
+            productivity_threshold=0,
+            passes_by_reasoning=False,
+            is_context_query=False,
         )
     return RunTypePolicy(
         productivity_threshold=35,
@@ -237,11 +244,23 @@ def evaluate_chat_policy(
 
     if policy.evidence_gate_failures:
         evidence_gate_applied = True
-        if policy.lead_advisory_mode:
+        hard_evidence_failures = [
+            failure
+            for failure in policy.evidence_gate_failures
+            if failure
+            in {
+                "build:no_successful_execution_steps",
+                "build:no_successful_post_build_checks",
+                "build:missing_test_or_build_check",
+                "build:auto_post_build_validation_failed",
+            }
+        ]
+        explicit_risk_close = policy.lead_advisory_mode or policy.lead_degraded_delivery
+        if explicit_risk_close:
             policy_signals.append("evidence_gate_failed")
             next_action_hint = (
-                "Advisory mode activo: hay fallos del evidence gate, pero el "
-                "Lead decidió cerrar como advisory."
+                "Cierre con riesgo explícito: hay fallos del evidence gate, "
+                "pero el Lead decidió cerrar en advisory o entrega degradada."
             )
             events.append(
                 ChatPolicyEvent(
@@ -250,7 +269,8 @@ def evaluate_chat_policy(
                         "task_id": policy.task_id,
                         "signal": "evidence_gate_failed",
                         "failures": list(policy.evidence_gate_failures),
-                        "advisory_mode": True,
+                        "advisory_mode": bool(policy.lead_advisory_mode),
+                        "degraded_delivery": bool(policy.lead_degraded_delivery),
                     },
                 )
             )
@@ -258,10 +278,18 @@ def evaluate_chat_policy(
             policy_signals.append("evidence_gate_failed")
             policy_review_required = True
             productivity_status = "weak"
-            next_action_hint = (
-                "Señal de policy: el evidence gate detectó evidencia débil o "
-                "incompleta. El Lead puede continuar, replanificar o cerrar en advisory."
-            )
+            if hard_evidence_failures and final_state == "completed":
+                final_state = "rejected"
+                next_action_hint = (
+                    "Validación real ausente: una entrega de build no puede "
+                    "cerrar como completada solo con file_delivery. Ejecuta un "
+                    "test/build/import real o cierra explícitamente como degradada."
+                )
+            else:
+                next_action_hint = (
+                    "Señal de policy: el evidence gate detectó evidencia débil o "
+                    "incompleta. El Lead puede continuar, replanificar o cerrar en advisory."
+                )
             events.append(
                 ChatPolicyEvent(
                     event_type="chat_policy_signal",
@@ -274,7 +302,10 @@ def evaluate_chat_policy(
                         "artifact_created": policy.artifact_created,
                         "artifact_modified": policy.artifact_modified,
                         "advisory_mode": False,
+                        "degraded_delivery": False,
                         "review_required": True,
+                        "hard_failures": list(hard_evidence_failures),
+                        "final_state": final_state,
                     },
                 )
             )
@@ -360,16 +391,17 @@ def evaluate_chat_policy(
     if (
         policy.productivity_score < run_type_policy.productivity_threshold
         and not low_productivity_override
-        and final_state not in {"failed", "rejected"}
     ):
         if policy.lead_advisory_mode:
-            policy_signals.append("low_productivity_below_threshold")
+            if "low_productivity_below_threshold" not in policy_signals:
+                policy_signals.append("low_productivity_below_threshold")
             productivity_status = "weak"
-            next_action_hint = (
-                f"Advisory mode activo: productividad<"
-                f"{run_type_policy.productivity_threshold}, "
-                "pero el Lead decidió cerrar sin bloquear."
-            )
+            if final_state not in {"failed", "rejected"}:
+                next_action_hint = (
+                    f"Advisory mode activo: productividad<"
+                    f"{run_type_policy.productivity_threshold}, "
+                    "pero el Lead decidió cerrar sin bloquear."
+                )
             events.append(
                 ChatPolicyEvent(
                     event_type="chat_policy_signal",
@@ -383,14 +415,16 @@ def evaluate_chat_policy(
                 )
             )
         else:
-            policy_signals.append("low_productivity_below_threshold")
+            if "low_productivity_below_threshold" not in policy_signals:
+                policy_signals.append("low_productivity_below_threshold")
             policy_review_required = True
             productivity_status = "weak"
-            next_action_hint = (
-                f"Señal de policy: productividad<"
-                f"{run_type_policy.productivity_threshold}. "
-                "El Lead puede continuar, recortar alcance o cerrar en advisory."
-            )
+            if final_state not in {"failed", "rejected"}:
+                next_action_hint = (
+                    f"Señal de policy: productividad<"
+                    f"{run_type_policy.productivity_threshold}. "
+                    "El Lead puede continuar, recortar alcance o cerrar en advisory."
+                )
             events.append(
                 ChatPolicyEvent(
                     event_type="chat_policy_signal",

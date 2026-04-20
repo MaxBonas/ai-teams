@@ -40,6 +40,7 @@ from aiteam.lead_close_policy import (
 from aiteam.memory import AgentMemoryStore
 from aiteam.observability import EventLogger
 from aiteam.phase_verdicts import (
+    _looks_like_noise_path_hint,
     detect_contract_path_drift,
     detect_continuation_drift,
     extract_path_candidates,
@@ -107,6 +108,7 @@ _PLACEHOLDER_OUTPUT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
 ]
+_SOFT_PLACEHOLDER_LABELS = frozenset({"todo:", "fixme:"})
 
 _PLANNING_ARTIFACT_BLOCK_RE = re.compile(
     r"(?is)\[PLANNING_ARTIFACT\](.*?)\[/PLANNING_ARTIFACT\]"
@@ -420,6 +422,52 @@ class AITeamOrchestrator:
         required_caps = normalize_tool_capabilities(metadata.get("required_capabilities", []))
         skill_targets = normalize_skill_targets(metadata.get("skill_targets", []))
         lsp_targets = normalize_lsp_targets(metadata.get("lsp_targets", []))
+        explicit_specialist_roster = bool(
+            [
+                item
+                for item in list(metadata.get("specialist_roster", []) or [])
+                if str(item).strip()
+            ]
+        )
+        phase_name = self._phase_name_for_task(task).lower()
+        specialist_capabilities = {
+            "test_execute",
+            "build_execute",
+            "browser_nav",
+            "browser_test",
+            "external_mcp",
+            "skill_run",
+            "lsp_symbols",
+            "lsp_references",
+        }
+        specialist_prefetch_implied = bool(
+            specialist_capabilities & set(required_caps)
+            or skill_targets
+            or lsp_targets
+            or explicit_specialist_roster
+            or self._to_bool(metadata.get("context_curator_requested", False))
+            or self._to_bool(metadata.get("context_curator_recommended", False))
+            or self._to_bool(metadata.get("context_pressure_high", False))
+            or (
+                self._to_bool(metadata.get("continuation_requested", False))
+                and task.role == Role.TEAM_LEAD
+            )
+        )
+        if (
+            task.role in {Role.ENGINEER, Role.REVIEWER, Role.QA}
+            and not phase_name.startswith("plan_")
+            and not self._to_bool(metadata.get("require_specialist_prefetch", False))
+            and not specialist_prefetch_implied
+        ):
+            metadata["_specialist_prefetch_done"] = True
+            self._record_specialist_quorum_result(
+                task=task,
+                specialists=[],
+                quorum_required=0,
+                quorum_mode="any",
+                reports=[],
+            )
+            return ""
         task_root = self._task_root(task.task_id)
         pressure = self._refresh_context_pressure(task_root, metadata=metadata)
         wants_context_curator = (
@@ -431,6 +479,23 @@ class AITeamOrchestrator:
                 and task.role == Role.TEAM_LEAD
             )
         )
+        if (
+            phase_name.startswith("plan_")
+            and not self._to_bool(metadata.get("require_specialist_prefetch", False))
+            and not skill_targets
+            and not lsp_targets
+            and not explicit_specialist_roster
+            and not wants_context_curator
+        ):
+            metadata["_specialist_prefetch_done"] = True
+            self._record_specialist_quorum_result(
+                task=task,
+                specialists=[],
+                quorum_required=0,
+                quorum_mode="any",
+                reports=[],
+            )
+            return ""
         if not required_caps and not skill_targets and not lsp_targets and not wants_context_curator:
             metadata["_specialist_prefetch_done"] = True
             self._record_specialist_quorum_result(
@@ -515,26 +580,31 @@ class AITeamOrchestrator:
                 sensitive_approval=self.compliance.evaluate_sensitive_approval(task.metadata)[0],
                 environment=self.environment,
             )
-            specialist_prompt = build_prompt(
-                profile.owner_role,
-                f"Specialist precheck: {task.title}",
-                (
-                    f"Tarea principal: {task.title}\n"
-                    f"Descripcion: {task.description}\n"
-                    "Devuelve un informe operativo compacto para ayudar a otra tarea principal."
-                ),
+            specialist_prompt = (
+                f"Specialist precheck: {profile.label} ({specialist_name}).\n"
+                f"Especializacion activa: {profile.label} ({specialist_name}).\n"
+                f"Tarea principal: {task.title}\n"
+                f"Descripcion: {task.description}\n"
+                "Devuelve solo un informe operativo compacto y grounded para apoyar a la "
+                "tarea principal. No hables por otros specialists ni cambies de especialidad."
             )
             specialist_messages = [
                 {
                     "role": "system",
-                    "content": build_system_prompt(
-                        profile.owner_role,
-                        task_metadata=specialist_metadata,
+                    "content": (
+                        f"Eres {profile.label}. Especialista activo: {specialist_name}.\n"
+                        f"Especializacion activa: {profile.label} ({specialist_name}).\n"
+                        f"Familias: {', '.join(list(specialist_metadata.get('tool_specialist_tool_families', []) or [])) or 'unknown'}.\n"
+                        f"Capacidades preferentes: {', '.join(list(specialist_metadata.get('tool_specialist_preferred_capabilities', []) or [])) or 'unknown'}.\n"
+                        "Devuelve preferentemente JSON con schema "
+                        '{"summary":"","evidence":[],"artifacts":[],"risks":[],"recommendation":"","confidence":0.0}.\n'
+                        "No menciones ni asumas otros specialists salvo que aparezcan como evidencia real."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
+                        f"Specialist objetivo: {specialist_name}.\n"
                         f"Analiza la tarea principal '{task.title}'.\n"
                         f"Descripcion:\n{task.description}\n\n"
                         "Entrega un informe compacto con summary, evidence, artifacts, risks y recommendation."
@@ -628,7 +698,11 @@ class AITeamOrchestrator:
         else:
             metadata.pop("specialist_prefetch_degraded", None)
         existing_reports = list(metadata.get("specialist_reports", []) or [])
-        metadata["specialist_reports"] = existing_reports + reports
+        for report in reports:
+            if not isinstance(report, dict):
+                continue
+            existing_reports.append(report)
+        metadata["specialist_reports"] = existing_reports
         self._record_specialist_quorum_result(
             task=task,
             specialists=effective_specialists,
@@ -732,6 +806,120 @@ class AITeamOrchestrator:
             return True
         return len(summary) >= 40
 
+    def _route_and_invoke_with_compat(self, **kwargs) -> RoutingDecision:
+        """Allow older tests/mocks that do not yet accept `messages_resolver`."""
+        try:
+            return self.router.route_and_invoke(**kwargs)
+        except TypeError as exc:
+            if "messages_resolver" not in str(exc or ""):
+                raise
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs.pop("messages_resolver", None)
+            return self.router.route_and_invoke(**fallback_kwargs)
+
+    @staticmethod
+    def _routing_capabilities_for_task(task: WorkTask) -> set[str]:
+        raw_capabilities = {
+            str(item).strip()
+            for item in list(task.metadata.get("required_capabilities", []) or [])
+            if str(item).strip()
+        }
+        run_profile = str(task.metadata.get("run_profile", "") or "").strip().lower()
+        if run_profile not in {"solo_lead", "direct"} and not bool(
+            task.metadata.get("direct_coding_executor", False)
+        ):
+            return raw_capabilities
+        # En perfil directo, repo/test/build access son capacidades del runtime
+        # del workspace, no del modelo LLM. Filtrarlas aqui evita no_eligible_adapter
+        # durante reparaciones antiguas que arrastran metadata de runtime.
+        model_level_capabilities = {
+            "analysis",
+            "coding",
+            "multimodal",
+            "reasoning",
+            "review",
+            "summarization",
+            "thinking",
+            "tool_calling",
+            "vision",
+        }
+        return {
+            capability
+            for capability in raw_capabilities
+            if capability.lower() in model_level_capabilities
+        }
+
+    @staticmethod
+    def _direct_profile_should_suppress_midrun_clarify(
+        task: WorkTask,
+        question: str = "",
+    ) -> bool:
+        run_profile = str(task.metadata.get("run_profile", "") or "").strip().lower()
+        if run_profile not in {"solo_lead", "direct"} and not bool(
+            task.metadata.get("direct_coding_executor", False)
+        ):
+            return False
+        phase_name = str(task.metadata.get("phase", "") or "").strip().lower()
+        normalized_question = str(question or "").strip().lower()
+        safety_markers = (
+            "api key",
+            "borrar",
+            "credential",
+            "delete",
+            "destruct",
+            "eliminar",
+            "extern",
+            "network",
+            "pago",
+            "payment",
+            "permiso",
+            "prod",
+            "production",
+            "secret",
+        )
+        if phase_name in {"build", "lead_close"} and not any(
+            marker in normalized_question for marker in safety_markers
+        ):
+            return True
+        if phase_name == "build" and (
+            bool(task.metadata.get("repair_first_required", False))
+            or bool(task.metadata.get("direct_coding_executor", False))
+        ):
+            return True
+        if phase_name == "lead_close" and bool(
+            task.metadata.get("post_build_repair_pending", False)
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _specialist_report_fingerprint(report: dict[str, Any]) -> tuple[object, ...]:
+        return (
+            str(report.get("specialist", "") or "").strip().lower(),
+            str(report.get("summary", "") or "").strip(),
+            tuple(str(item).strip() for item in list(report.get("evidence", []) or [])),
+            tuple(str(item).strip() for item in list(report.get("artifacts", []) or [])),
+            tuple(str(item).strip() for item in list(report.get("risks", []) or [])),
+            str(report.get("recommendation", "") or "").strip(),
+        )
+
+    def _append_specialist_report_once(
+        self,
+        *,
+        task: WorkTask,
+        report: dict[str, Any],
+    ) -> bool:
+        reports = list(task.metadata.get("specialist_reports", []) or [])
+        fingerprint = self._specialist_report_fingerprint(report)
+        for existing in reports:
+            if not isinstance(existing, dict):
+                continue
+            if self._specialist_report_fingerprint(existing) == fingerprint:
+                return False
+        reports.append(report)
+        task.metadata["specialist_reports"] = reports
+        return True
+
     def _init_tool_dispatcher(self) -> None:
         catalog_path = self.project_root / "config" / "tool_sources.catalog.json"
         try:
@@ -823,11 +1011,65 @@ class AITeamOrchestrator:
         # Acepta:  ```python path=foo   ```lang path=foo   ``` path=foo   ```path=foo
         # (?:\w+\s+|\s*) = (language + space) OR (optional space, no language)
         # Esto evita que (?:\w+)? consuma "path" como si fuera el lenguaje.
-        r"```(?:\w+\s+|\s*)path=[\"']?([^\"'\n\s`]+)[\"']?[^\n]*\n(.*?)```",
-        re.DOTALL,
+        r"^\s*```(?:\w+\s+|\s*)path=[\"']?([^\"'\n\s`]+)[\"']?[^\n]*$",
+        re.MULTILINE,
     )
+    _STANDALONE_PATH_RE = re.compile(
+        r"^\s*(?:[-*]\s*)?path=[\"']?([^\"'\n\s`]+)[\"']?\s*$",
+        re.IGNORECASE,
+    )
+    _GENERIC_CODE_BLOCK_OPEN_RE = re.compile(r"^\s*```[^\n`]*$")
+    _CODE_BLOCK_CLOSE_RE = re.compile(r"^\s*```\s*$")
     _MAX_CODE_FILES_PER_TASK = 10
     _MAX_CODE_FILE_BYTES = 512 * 1024  # 512 KB por archivo
+
+    def _iter_path_code_blocks(self, content: str) -> list[tuple[str, str]]:
+        lines = str(content or "").splitlines(keepends=True)
+        blocks: list[tuple[str, str]] = []
+        index = 0
+        pending_path: str | None = None
+        while index < len(lines):
+            line = lines[index].rstrip("\r\n")
+            standalone_path = self._STANDALONE_PATH_RE.match(line)
+            if standalone_path is not None:
+                pending_path = standalone_path.group(1).strip()
+                index += 1
+                continue
+
+            opener = self._CODE_BLOCK_RE.match(line)
+            if opener is None and pending_path:
+                opener = self._GENERIC_CODE_BLOCK_OPEN_RE.match(line)
+            if opener is None:
+                if line.strip():
+                    pending_path = None
+                index += 1
+                continue
+            raw_path = (
+                opener.group(1).strip()
+                if self._CODE_BLOCK_RE.match(line)
+                else str(pending_path or "").strip()
+            )
+            pending_path = None
+            if not raw_path:
+                index += 1
+                continue
+            index += 1
+            block_lines: list[str] = []
+            while index < len(lines):
+                line = lines[index]
+                if self._CODE_BLOCK_CLOSE_RE.match(line.rstrip("\r\n")):
+                    break
+                block_lines.append(line)
+                index += 1
+            if index < len(lines):
+                blocks.append((raw_path, "".join(block_lines)))
+                index += 1
+            else:
+                self.event_logger.emit(
+                    "code_block_write_skipped",
+                    {"path": raw_path, "reason": "unterminated_code_block"},
+                )
+        return blocks
 
     def _extract_and_write_code_blocks(self, task: "WorkTask", content: str) -> int:
         """Extrae bloques ```lang path=archivo y los escribe al workspace.
@@ -838,17 +1080,14 @@ class AITeamOrchestrator:
 
         Devuelve el numero de archivos escritos correctamente.
         """
-        matches = list(self._CODE_BLOCK_RE.finditer(content))
-        if not matches:
+        blocks = self._iter_path_code_blocks(content)
+        if not blocks:
             return 0
 
         workspace = self.execution.executor.workspace_root
         written = 0
 
-        for match in matches[: self._MAX_CODE_FILES_PER_TASK]:
-            raw_path = match.group(1).strip()
-            file_content = match.group(2)
-
+        for raw_path, file_content in blocks[: self._MAX_CODE_FILES_PER_TASK]:
             # Seguridad: solo paths relativos sin traversal
             try:
                 rel = Path(raw_path)
@@ -930,6 +1169,134 @@ class AITeamOrchestrator:
 
         return written
 
+    # ── Post-write validation (solo_lead / direct_coding_executor) ──
+
+    def _solo_lead_post_write_validation(self, task: "WorkTask") -> str:
+        """Valida sintaxis de los .py escritos por _extract_and_write_code_blocks.
+
+        Usa ast.parse() — no crea .pyc ni toca el filesystem.
+        Devuelve el primer error encontrado como string, o "" si todo es valido.
+        Solo se invoca cuando direct_coding_executor=True (perfil solo_lead).
+        """
+        import ast
+
+        artifact_paths = [
+            str(p).strip()
+            for p in list(task.metadata.get("artifact_paths", []) or [])
+            if str(p).strip().endswith(".py")
+        ]
+        if not artifact_paths:
+            return ""
+
+        # _extract_and_write_code_blocks siempre escribe en execution.executor.workspace_root.
+        ws_root = self.execution.executor.workspace_root.resolve()
+
+        for rel_path in artifact_paths:
+            abs_path = (ws_root / rel_path).resolve()
+            if not abs_path.exists():
+                continue
+            try:
+                source = abs_path.read_text(encoding="utf-8", errors="replace")
+                ast.parse(source, filename=rel_path)
+            except SyntaxError as exc:
+                short = f"line {exc.lineno}: {exc.msg}"
+                self.event_logger.emit(
+                    "solo_lead_post_write_syntax_error",
+                    {"task_id": task.task_id, "file": rel_path, "error": short},
+                )
+                return f"SyntaxError in {rel_path}: {short}"
+            except Exception as exc:
+                self.event_logger.emit(
+                    "solo_lead_post_write_compile_check_failed",
+                    {"task_id": task.task_id, "file": rel_path, "error": str(exc)[:200]},
+                )
+        return ""
+
+    def _build_solo_lead_workspace_context(self, task: "WorkTask") -> str:
+        """Lee archivos relevantes del workspace para inyectarlos en el prompt del build.
+
+        Solo se invoca para la fase build en perfil solo_lead (direct_coding_executor=True).
+        Lee hasta _MAX_WORKSPACE_FILES archivos de allowed_module_path_hints, limitando
+        cada uno a _MAX_FILE_LINES lineas para no saturar el contexto.
+        """
+        _MAX_WORKSPACE_FILES = 6
+        _MAX_FILE_LINES = 120
+
+        phase_contract = dict(task.metadata.get("phase_contract") or {})
+        hints_raw = phase_contract.get("allowed_module_path_hints") or task.metadata.get(
+            "allowed_module_path_hints"
+        )
+        if not hints_raw:
+            return ""
+        hints = [str(h).strip() for h in (hints_raw if isinstance(hints_raw, list) else [hints_raw]) if str(h).strip()]
+        if not hints:
+            return ""
+
+        ws_root = self.execution.executor.workspace_root.resolve()
+        blocks: list[str] = []
+        for hint in hints[:_MAX_WORKSPACE_FILES]:
+            abs_path = (ws_root / hint).resolve()
+            if not abs_path.is_file():
+                continue
+            try:
+                lines = abs_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                truncated = lines[:_MAX_FILE_LINES]
+                suffix = f"\n... ({len(lines) - _MAX_FILE_LINES} lineas omitidas)" if len(lines) > _MAX_FILE_LINES else ""
+                blocks.append(f"# {hint}\n```\n" + "\n".join(truncated) + "\n```" + suffix)
+            except Exception:
+                pass
+        if not blocks:
+            return ""
+        return "== CONTENIDO ACTUAL DEL WORKSPACE ==\n" + "\n\n".join(blocks)
+
+    def _run_solo_lead_pytest(self, task: "WorkTask", task_root: str) -> str:
+        """Corre pytest en el workspace tras escribir archivos en perfil solo_lead.
+
+        Captura stdout/stderr, limita a 60 lineas para no saturar el contexto.
+        Guarda el resultado en workflow_state para que lead_close lo consuma.
+        Devuelve el resultado resumido como string.
+        """
+        import subprocess
+
+        _MAX_LINES = 60
+        ws_root = self.execution.executor.workspace_root.resolve()
+        try:
+            proc = subprocess.run(
+                ["python", "-m", "pytest", "--tb=short", "-q", "--no-header"],
+                cwd=str(ws_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+            )
+            combined = (proc.stdout or "") + (proc.stderr or "")
+            lines = combined.splitlines()
+            if len(lines) > _MAX_LINES:
+                lines = lines[:_MAX_LINES] + [f"... ({len(lines) - _MAX_LINES} lineas omitidas)"]
+            result = "\n".join(lines).strip()
+            status = "passed" if proc.returncode == 0 else "failed"
+        except subprocess.TimeoutExpired:
+            result = "pytest: timeout (>120s)"
+            status = "timeout"
+        except FileNotFoundError:
+            result = "pytest: python no encontrado en PATH"
+            status = "not_found"
+        except Exception as exc:
+            result = f"pytest: error al ejecutar — {str(exc)[:120]}"
+            status = "error"
+
+        summary = f"pytest_status={status}\n{result}"
+        ws = self._get_workflow_state(task_root)
+        ws["solo_lead_pytest_result"] = summary
+        ws["solo_lead_pytest_status"] = status
+        self._save_workflow_state(task_root)
+        self.event_logger.emit(
+            "solo_lead_pytest_run",
+            {"task_id": task.task_id, "status": status, "lines": len(result.splitlines())},
+        )
+        return summary
+
     # ── Workflow State (shared blackboard) ──────────────────────────
 
     def _load_workflow_state(self) -> None:
@@ -994,6 +1361,27 @@ class AITeamOrchestrator:
             "workflow_state_updated",
             {"task_root": task_root, "phase": phase, "facts_count": len(ws["facts"])},
         )
+
+    @staticmethod
+    def _append_agent_output_history(
+        task: WorkTask,
+        output: str,
+        *,
+        limit: int = 5,
+    ) -> None:
+        text = str(output or "").strip()
+        if not text:
+            return
+        history = [
+            str(item).strip()
+            for item in list(task.metadata.get("_agent_output_history", []) or [])
+            if str(item).strip()
+        ]
+        if history and history[-1] == text:
+            task.metadata["_agent_output_history"] = history[-limit:]
+            return
+        history.append(text)
+        task.metadata["_agent_output_history"] = history[-limit:]
 
     def _update_context_curator_for_phase(
         self,
@@ -1175,6 +1563,12 @@ class AITeamOrchestrator:
         checkpoint_id = f"{chat_parent}::lead_failure_{phase_name}"
         if self.taskboard.get_task(checkpoint_id) is not None:
             task.metadata["lead_failure_checkpoint_id"] = checkpoint_id
+            self._attach_checkpoint_as_downstream_gate(
+                chat_parent=chat_parent,
+                checkpoint_id=checkpoint_id,
+                origin_task_id=task.task_id,
+                metadata_key="lead_failure_gate_dependencies",
+            )
             return checkpoint_id
 
         checkpoint_task = WorkTask(
@@ -1211,6 +1605,13 @@ class AITeamOrchestrator:
         except ValueError:
             pass
 
+        self._attach_checkpoint_as_downstream_gate(
+            chat_parent=chat_parent,
+            checkpoint_id=checkpoint_id,
+            origin_task_id=task.task_id,
+            metadata_key="lead_failure_gate_dependencies",
+        )
+
         task.metadata["lead_failure_checkpoint_id"] = checkpoint_id
         self.mailbox.send(
             sender="system",
@@ -1232,6 +1633,54 @@ class AITeamOrchestrator:
             },
         )
         return checkpoint_id
+
+    def _attach_checkpoint_as_downstream_gate(
+        self,
+        *,
+        chat_parent: str,
+        checkpoint_id: str,
+        origin_task_id: str,
+        metadata_key: str,
+    ) -> None:
+        if not chat_parent or not checkpoint_id:
+            return
+
+        lead_close_id = f"{chat_parent}::lead_close"
+        lead_close_task = self.taskboard.get_task(lead_close_id)
+        if (
+            lead_close_task is not None
+            and lead_close_task.state not in (TaskState.CLAIMED, TaskState.COMPLETED)
+            and checkpoint_id not in lead_close_task.dependencies
+        ):
+            lead_close_task.dependencies.append(checkpoint_id)
+            lead_close_task.metadata[metadata_key] = sorted(
+                set(list(lead_close_task.metadata.get(metadata_key, [])) + [checkpoint_id])
+            )
+            self.taskboard.persist_tasks([lead_close_task.task_id])
+
+        for downstream_task in self.taskboard.list_tasks():
+            if downstream_task.task_id in {origin_task_id, checkpoint_id}:
+                continue
+            if str(downstream_task.metadata.get("chat_parent", "") or "").strip() != chat_parent:
+                continue
+            if downstream_task.state in (
+                TaskState.CLAIMED,
+                TaskState.COMPLETED,
+                TaskState.FAILED,
+                TaskState.SKIPPED,
+                TaskState.ARCHIVED,
+            ):
+                continue
+            phase_name = self._phase_name_for_task(downstream_task)
+            if phase_name == "lead_intake" or phase_name.startswith(("lead_failure_", "lead_report_")):
+                continue
+            if checkpoint_id in downstream_task.dependencies:
+                continue
+            downstream_task.dependencies.append(checkpoint_id)
+            downstream_task.metadata[metadata_key] = sorted(
+                set(list(downstream_task.metadata.get(metadata_key, [])) + [checkpoint_id])
+            )
+            self.taskboard.persist_tasks([downstream_task.task_id])
 
     def _maybe_spawn_lead_report_checkpoint(
         self,
@@ -1577,6 +2026,12 @@ class AITeamOrchestrator:
         chat_parent = str(task.metadata.get("chat_parent", "") or "").strip()
         if not chat_parent:
             return False
+        phase_name = str(task.metadata.get("phase", "") or "").strip()
+        if phase_name.startswith(("lead_failure_", "lead_report_", "lead_preflight_")):
+            return False
+        delegate_source_phase = str(task.metadata.get("delegate_source_phase", "") or "").strip()
+        if delegate_source_phase.startswith("lead_failure_"):
+            return False
 
         phase_outputs = self._get_workflow_state(chat_parent).get("phase_outputs", {})
         if not isinstance(phase_outputs, dict):
@@ -1589,16 +2044,15 @@ class AITeamOrchestrator:
             if not dep_id.startswith(prefix):
                 continue
             phase_name = dep_id[len(prefix):]
-            if phase_name.startswith(("lead_preflight_", "lead_report_")):
+            if phase_name.startswith(("lead_preflight_", "lead_report_", "lead_failure_")):
                 dependency_phases.append(phase_name)
 
         if not dependency_phases:
-            phase_name = str(task.metadata.get("phase", "") or "").strip()
             if phase_name == "lead_close":
                 dependency_phases = [
                     name
                     for name in phase_outputs.keys()
-                    if isinstance(name, str) and name.startswith("lead_report_")
+                    if isinstance(name, str) and name.startswith(("lead_report_", "lead_failure_"))
                 ]
             else:
                 dependency_phases = [
@@ -1606,8 +2060,14 @@ class AITeamOrchestrator:
                     for name in phase_outputs.keys()
                     if isinstance(name, str) and name.startswith("lead_preflight_")
                 ]
+                dependency_phases.extend(self._active_failure_checkpoint_phase_names(chat_parent))
+
+        dependency_phases = list(dict.fromkeys(dependency_phases))
+        active_failure_phases = set(self._active_failure_checkpoint_phase_names(chat_parent))
 
         for checkpoint_phase in dependency_phases:
+            if checkpoint_phase in active_failure_phases:
+                return True
             output = phase_outputs.get(checkpoint_phase, "")
             if checkpoint_phase not in phase_outputs:
                 continue
@@ -1622,6 +2082,26 @@ class AITeamOrchestrator:
             ):
                 return True
         return False
+
+    def _active_failure_checkpoint_phase_names(self, chat_parent: str) -> list[str]:
+        if not chat_parent:
+            return []
+        active: list[str] = []
+        for candidate in self.taskboard.list_tasks():
+            if str(candidate.metadata.get("chat_parent", "") or "").strip() != chat_parent:
+                continue
+            phase_name = self._phase_name_for_task(candidate)
+            if not phase_name.startswith("lead_failure_"):
+                continue
+            if candidate.state in (
+                TaskState.COMPLETED,
+                TaskState.FAILED,
+                TaskState.SKIPPED,
+                TaskState.ARCHIVED,
+            ):
+                continue
+            active.append(phase_name)
+        return active
 
     # ── Team Ledger ─────────────────────────────────────────────────
 
@@ -1657,6 +2137,159 @@ class AITeamOrchestrator:
 
     # ── Dependency output context ───────────────────────────────────
 
+    def _format_dependency_planning_artifact(
+        self,
+        artifact: object,
+        *,
+        limit: int,
+    ) -> str:
+        if not isinstance(artifact, dict):
+            return ""
+        objective = str(artifact.get("objective", "") or "").strip()
+        steps = [
+            str(item).strip()
+            for item in list(artifact.get("steps", []) or [])
+            if str(item).strip()
+        ]
+        acceptance = [
+            str(item).strip()
+            for item in list(artifact.get("acceptance_criteria", []) or [])
+            if str(item).strip()
+        ]
+        constraints = [
+            str(item).strip()
+            for item in list(artifact.get("constraints", []) or [])
+            if str(item).strip()
+        ]
+        if not objective and not steps and not acceptance and not constraints:
+            return ""
+        sections: list[str] = []
+        if objective:
+            sections.append(f"objective={objective}")
+        if steps:
+            sections.append(
+                "steps=" + "; ".join(f"{idx}. {step}" for idx, step in enumerate(steps[:3], start=1))
+            )
+        if acceptance:
+            sections.append("acceptance=" + "; ".join(acceptance[:2]))
+        if constraints:
+            sections.append("constraints=" + "; ".join(constraints[:2]))
+        return self._compact_text("planning_artifact: " + " | ".join(sections), limit)
+
+    def _completed_dependency_planning_artifacts(
+        self,
+        task: WorkTask,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        task_root = self._task_root(task.task_id)
+        ws = self.workflow_state.get(task_root, {})
+        planning_artifacts = dict(ws.get("planning_artifacts", {}) or {})
+        completed: list[tuple[str, dict[str, Any]]] = []
+        for dep_id in list(task.dependencies or []):
+            dep_task = self.taskboard.get_task(dep_id)
+            if dep_task is None or dep_task.state != TaskState.COMPLETED:
+                continue
+            dep_phase = str(dep_task.metadata.get("phase", "") or "").strip()
+            if not dep_phase:
+                continue
+            artifact = dict(
+                dep_task.metadata.get("planning_artifact", {})
+                or planning_artifacts.get(dep_phase, {})
+                or {}
+            )
+            if artifact:
+                completed.append((dep_phase, artifact))
+        return completed
+
+    def _repair_plan_risks_upstream_relitigation(
+        self,
+        *,
+        task: WorkTask,
+        safe_content: str,
+        assignee: str,
+    ) -> str:
+        phase_name = self._phase_name_for_task(task).lower()
+        if phase_name != "plan_risks":
+            return safe_content
+        completed_artifacts = self._completed_dependency_planning_artifacts(task)
+        if not completed_artifacts:
+            return safe_content
+        normalized = str(safe_content or "").strip()
+        if not normalized:
+            return safe_content
+        contradiction_markers = [
+            re.compile(r"(?i)\b(?:no puede|cannot|can't)\b.{0,80}\b(?:iniciarse|continuar|start|proceed)\b"),
+            re.compile(r"(?i)\bdependenc(?:ia|y)\b.{0,40}\b(?:cr[ií]tica|critical)\b.{0,40}\b(?:violad|failed|incomplete|truncat|insuficiente)\w*"),
+            re.compile(r"(?i)\b(?:artifact|artefacto|planning_artifact|plan)\b.{0,40}\b(?:truncad|incomplet|insuficiente)\w*"),
+            re.compile(r"(?i)\bintegridad\b.{0,40}\b(?:no|insuficiente|violad)\w*"),
+        ]
+        if not any(pattern.search(normalized) for pattern in contradiction_markers):
+            return safe_content
+
+        dep_phase, artifact = completed_artifacts[0]
+        objective = str(artifact.get("objective", "") or "").strip() or f"Continuar desde {dep_phase}"
+        acceptance = [
+            str(item).strip()
+            for item in list(artifact.get("acceptance_criteria", []) or [])
+            if str(item).strip()
+        ]
+        constraints = [
+            str(item).strip()
+            for item in list(artifact.get("constraints", []) or [])
+            if str(item).strip()
+        ]
+        steps = [
+            str(item).strip()
+            for item in list(artifact.get("steps", []) or [])
+            if str(item).strip()
+        ]
+        reconciled = (
+            "Riesgos:\n"
+            f"- Riesgo principal: el slice definido en {dep_phase} debe mantenerse dentro del objetivo aprobado ({objective}).\n"
+            + (
+                f"- Riesgo de regresion: validar especificamente {acceptance[0]}.\n"
+                if acceptance
+                else "- Riesgo de regresion: confirmar que el cambio mantiene el comportamiento esperado del slice.\n"
+            )
+            + "Quality Gates:\n"
+            + (
+                "".join(f"- {item}\n" for item in acceptance[:2])
+                if acceptance
+                else "- El resultado debe cumplir los criterios de aceptacion del planning upstream.\n"
+            )
+            + "Pruebas Minimas:\n"
+            + (
+                f"- Verificar el paso de mayor impacto ligado a: {steps[0]}.\n"
+                if steps
+                else "- Verificar el comportamiento mas critico del slice aprobado.\n"
+            )
+            + "Supuestos/Huecos:\n"
+            + f"- Upstream autoritativo: {dep_phase} ya esta completed; esta fase no debe relitigar si el planning debio existir.\n"
+            + (
+                f"- Restriccion a vigilar: {constraints[0]}.\n"
+                if constraints
+                else "- Si aparece un hueco nuevo, tratarlo como riesgo residual y no como bloqueo automatico.\n"
+            )
+            + "[PHASE_VERDICT]\n"
+            + "phase_id: plan_risks\n"
+            + "status: completed\n"
+            + "reason_codes: aligned\n"
+            + "contract_status: aligned\n"
+            + "summary: Riesgos, quality gates y pruebas minimas derivados desde planning upstream completado, sin relitigar dependencias ya cerradas.\n"
+            + "[/PHASE_VERDICT]\n"
+        )
+        self.event_logger.emit(
+            "plan_risks_upstream_relitigation_repaired",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": phase_name,
+                "dependency_phase": dep_phase,
+            },
+        )
+        task.metadata["plan_risks_repaired_from_output"] = True
+        task.metadata["plan_risks_original_output"] = normalized
+        return reconciled
+
     def _build_dependency_output_context(self, task: WorkTask) -> str:
         if not task.dependencies:
             return ""
@@ -1664,35 +2297,117 @@ class AITeamOrchestrator:
         # Researcher (900) y QA (800) deben llegar completos al Team Lead.
         _phase_name = task.task_id.split("::")[-1] if "::" in task.task_id else ""
         _is_lead_close = _phase_name == "lead_close"
+        _is_compact_executor = (
+            task.role in {Role.ENGINEER, Role.REVIEWER, Role.QA}
+            and not self._phase_name_for_task(task).lower().startswith("plan_")
+        )
         lines: list[str] = []
+        recovery_context = self._compact_recovery_context(task)
+        if recovery_context:
+            lines.append(recovery_context)
         for dep_id in task.dependencies:
             dep_task = self.taskboard.get_task(dep_id)
             if dep_task is None or dep_task.state != TaskState.COMPLETED:
+                if (
+                    dep_task is not None
+                    and TaskBoard._is_soft_support_dependency(task, dep_task)
+                    and dep_task.state
+                    in (
+                        TaskState.FAILED,
+                        TaskState.BLOCKED,
+                        TaskState.SKIPPED,
+                        TaskState.ARCHIVED,
+                    )
+                ):
+                    dep_phase = str(dep_task.metadata.get("phase", "") or "").strip()
+                    dep_label = dep_phase or dep_task.task_id
+                    dep_state = getattr(dep_task.state, "value", str(dep_task.state))
+                    reason = str(
+                        dep_task.metadata.get("error")
+                        or dep_task.metadata.get("blocked_reason")
+                        or dep_task.metadata.get("skipped_reason")
+                        or "support_unavailable"
+                    ).strip()
+                    lines.append(
+                        "[Support] "
+                        f"support_dependency=degraded; phase={dep_label}; "
+                        f"state={dep_state}; reason={self._compact_text(reason, 220)}; "
+                        "decision_authority=parent_phase"
+                    )
                 continue
             task_root = self._task_root(task.task_id)
             ws = self.workflow_state.get(task_root, {})
             phase_summaries = ws.get("phase_context_summaries", {})
             planning_artifacts = ws.get("planning_artifacts", {})
             dep_phase = str(dep_task.metadata.get("phase", "") or "").strip()
+            if _is_compact_executor and (
+                self._to_bool(dep_task.metadata.get("advisory_context_phase", False))
+                or self._to_bool(dep_task.metadata.get("advisory_planning_phase", False))
+            ):
+                continue
+            if dep_phase.startswith("lead_preflight_"):
+                preflight_target = dep_phase.removeprefix("lead_preflight_") or dep_phase
+                lines.append(
+                    f"[Team Lead] state=completed; preflight=approved; phase={preflight_target}"
+                )
+                continue
             compact_summary = ""
             if isinstance(phase_summaries, dict) and dep_phase:
                 compact_summary = str(phase_summaries.get(dep_phase, "") or "").strip()
             planning_summary = ""
-            if isinstance(planning_artifacts, dict) and dep_phase:
-                planning_summary = str(
-                    (planning_artifacts.get(dep_phase, {}) or {}).get("summary", "") or ""
-                ).strip()
-            result = dep_task.metadata.get("result", "")
-            if not result and not compact_summary and not planning_summary:
-                continue
+            planning_context = ""
             phase_label = dep_task.role.value.replace("_", " ").title()
             role = dep_task.role.value
             if _is_lead_close and role in ("researcher", "qa"):
                 limit = 900 if role == "researcher" else 800
+            elif _is_compact_executor and dep_phase.lower().startswith("plan_"):
+                limit = 1400
             else:
                 limit = 400
-            compacted = planning_summary or compact_summary or self._compact_text(str(result or ""), limit)
-            lines.append(f"[{phase_label}] {compacted}")
+            if isinstance(planning_artifacts, dict) and dep_phase:
+                dep_artifact = dict(
+                    dep_task.metadata.get("planning_artifact", {})
+                    or planning_artifacts.get(dep_phase, {})
+                    or {}
+                )
+                planning_summary = str(
+                    (planning_artifacts.get(dep_phase, {}) or {}).get("summary", "") or ""
+                ).strip()
+                planning_limit = limit
+                if dep_phase.lower().startswith("plan_"):
+                    planning_limit = 1400 if _is_compact_executor else max(limit, 550)
+                planning_context = self._format_dependency_planning_artifact(
+                    dep_artifact,
+                    limit=planning_limit,
+                )
+            result = dep_task.metadata.get("result", "")
+            if not result and not compact_summary and not planning_summary and not planning_context:
+                continue
+            if planning_context:
+                compacted = planning_context
+            elif planning_summary:
+                compacted = planning_summary
+            elif compact_summary:
+                compacted = compact_summary
+            else:
+                compacted = self._compact_text(str(result or ""), limit)
+            dep_state = getattr(dep_task.state, "value", str(dep_task.state))
+            artifact_paths = [
+                str(item).strip()
+                for item in list(dep_task.metadata.get("artifact_paths", []) or [])
+                if str(item).strip()
+            ]
+            prefix_bits: list[str] = []
+            if dep_state:
+                prefix_bits.append(f"state={dep_state}")
+            if artifact_paths:
+                prefix_bits.append(f"artifacts={', '.join(artifact_paths[:4])}")
+            prefix = ("; ".join(prefix_bits) + "; ") if prefix_bits else ""
+            lines.append(f"[{phase_label}] {prefix}{compacted}")
+        if _is_compact_executor and task.role in {Role.REVIEWER, Role.QA}:
+            reviewable_context = self._build_reviewable_artifact_context(task)
+            if reviewable_context:
+                lines.append(reviewable_context)
         if not lines:
             task_root = self._task_root(task.task_id)
             ws = self.workflow_state.get(task_root, {})
@@ -1710,6 +2425,140 @@ class AITeamOrchestrator:
                     f"[{phase}] {compacted or self._compact_text(output, fallback_limit)}"
                 )
         return "\n".join(lines[:8])
+
+    def _build_reviewable_artifact_context(self, task: WorkTask) -> str:
+        """Attach small, contract-scoped file snippets for review/QA phases."""
+
+        if task.role not in {Role.REVIEWER, Role.QA}:
+            return ""
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        raw_hints = list(self._dependency_artifact_hints(task))
+        raw_hints.extend(
+            str(item).strip().replace("\\", "/")
+            for item in list(phase_contract.get("allowed_module_path_hints", []) or [])
+            if str(item).strip()
+        )
+        hints = list(dict.fromkeys(raw_hints))
+        if not hints:
+            return ""
+
+        root = self.project_root if self.project_root.exists() else self.runtime_dir
+        try:
+            root_resolved = root.resolve()
+        except Exception:
+            root_resolved = root
+        focus_text = " ".join(
+            str(item or "")
+            for item in (
+                task.task_id,
+                task.title,
+                task.description,
+                phase_contract.get("phase_id", ""),
+                phase_contract.get("objective", ""),
+            )
+        ).lower()
+        ignored_roots = {
+            ".aiteam",
+            ".git",
+            "venv",
+            "node_modules",
+            "__pycache__",
+            ".pytest_cache",
+        }
+        scored: list[tuple[int, str, Path]] = []
+        for hint in hints:
+            normalized = str(hint or "").strip().replace("\\", "/").strip("/")
+            if not normalized or normalized.endswith("/"):
+                continue
+            if normalized.split("/", 1)[0] in ignored_roots:
+                continue
+            candidate = (root / normalized)
+            try:
+                resolved = candidate.resolve()
+                resolved.relative_to(root_resolved)
+            except Exception:
+                continue
+            if not resolved.is_file():
+                continue
+            try:
+                if resolved.stat().st_size > 16_000:
+                    continue
+            except OSError:
+                continue
+            basename = resolved.name.lower()
+            stem = resolved.stem.lower()
+            score = 0
+            if normalized in raw_hints[:8]:
+                score += 4
+            if basename == "__init__.py":
+                score -= 4
+            if basename in focus_text or stem in focus_text:
+                score += 4
+            for token in stem.replace("-", "_").split("_"):
+                if len(token) >= 3 and token in focus_text:
+                    score += 2
+            if "test" in basename and task.role == Role.QA:
+                score += 2
+            if "test" in basename and task.role == Role.REVIEWER:
+                score += 1
+            scored.append((score, normalized, resolved))
+
+        if not scored:
+            return ""
+        snippets: list[str] = []
+        total_chars = 0
+        for _score, normalized, resolved in sorted(scored, key=lambda item: (-item[0], item[1]))[:3]:
+            try:
+                text = resolved.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if not text.strip():
+                continue
+            remaining = max(0, 3200 - total_chars)
+            if remaining < 300:
+                break
+            snippet = self._compact_text(text, min(1400, remaining))
+            total_chars += len(snippet)
+            snippets.append(f"- {normalized}:\n{snippet}")
+        if not snippets:
+            return ""
+        return "Reviewable artifact snippets:\n" + "\n".join(snippets)
+
+    def _compact_recovery_context(self, task: WorkTask) -> str:
+        if task.role not in {Role.REVIEWER, Role.QA}:
+            return ""
+        chat_parent = str(task.metadata.get("chat_parent", "") or "").strip()
+        if not chat_parent:
+            return ""
+
+        pending_checkpoints: list[str] = []
+        retried_phases: list[str] = []
+        for candidate in self.taskboard.list_tasks():
+            if str(candidate.metadata.get("chat_parent", "") or "").strip() != chat_parent:
+                continue
+            phase_name = self._phase_name_for_task(candidate)
+            if phase_name.startswith("lead_failure_") and candidate.state not in (
+                TaskState.COMPLETED,
+                TaskState.FAILED,
+                TaskState.SKIPPED,
+                TaskState.ARCHIVED,
+            ):
+                pending_checkpoints.append(phase_name)
+                continue
+            if self._to_bool(candidate.metadata.get("retry_route_requested", False)):
+                retried_phases.append(phase_name or candidate.task_id)
+
+        if pending_checkpoints:
+            return (
+                "[System] recovery=pending; unresolved_failure_checkpoints="
+                + ", ".join(sorted(dict.fromkeys(pending_checkpoints))[:3])
+            )
+        if retried_phases:
+            return (
+                "[System] recovery=applied; retried_phases="
+                + ", ".join(sorted(dict.fromkeys(retried_phases))[:3])
+            )
+        return "[System] recovery=stable; unresolved_failure_checkpoints=none"
 
     @staticmethod
     def _phase_name_for_task(task: WorkTask) -> str:
@@ -1788,6 +2637,20 @@ class AITeamOrchestrator:
                 continue
 
             dep_phase = self._phase_name_for_task(dep_task)
+            dep_planning_artifact = dict(
+                dep_task.metadata.get("planning_artifact", {})
+                or planning_artifacts.get(dep_phase, {})
+                or {}
+            )
+            dependency_artifacts = [
+                str(item).strip()
+                for item in list(dep_task.metadata.get("artifact_paths", []) or [])
+                if str(item).strip()
+            ]
+            if dependency_artifacts:
+                continue
+            if self._format_dependency_planning_artifact(dep_planning_artifact, limit=500):
+                continue
             candidates = [
                 ("planning_artifact", (planning_artifacts.get(dep_phase, {}) or {}).get("summary", "")),
                 ("summary", phase_summaries.get(dep_phase, "")),
@@ -1818,6 +2681,610 @@ class AITeamOrchestrator:
                 }
             )
         return gaps
+
+    @staticmethod
+    def _workspace_visible_project_files(
+        workspace: Path,
+        *,
+        limit: int = 8,
+    ) -> list[str]:
+        ignored_roots = {
+            ".aiteam",
+            ".git",
+            "venv",
+            "node_modules",
+            "__pycache__",
+            ".pytest_cache",
+        }
+        visible: list[str] = []
+        if not workspace.exists():
+            return visible
+        try:
+            for path in workspace.rglob("*"):
+                parts = set(path.relative_to(workspace).parts)
+                if parts & ignored_roots:
+                    continue
+                if not path.is_file():
+                    continue
+                visible.append(path.relative_to(workspace).as_posix())
+                if len(visible) >= limit:
+                    break
+        except Exception:
+            return visible
+        return visible
+
+    @staticmethod
+    def _workspace_grounding_visible_files(
+        project_workspace: Path,
+        *,
+        limit: int = 12,
+    ) -> list[str]:
+        visible = AITeamOrchestrator._workspace_visible_project_files(
+            project_workspace,
+            limit=max(limit, 8),
+        )
+        internal_hints: list[str] = []
+        aiteam_dir = project_workspace / ".aiteam"
+        if aiteam_dir.exists():
+            internal_hints.append(".aiteam/")
+            for candidate in (
+                "aiteam.db",
+                "lead_memory.md",
+                "instructions.md",
+                "context/",
+                "memory/",
+                "sandboxes/",
+            ):
+                internal_name = candidate.rstrip("/")
+                internal_path = aiteam_dir / internal_name
+                if internal_path.exists():
+                    suffix = "/" if candidate.endswith("/") else ""
+                    internal_hints.append(f".aiteam/{internal_name}{suffix}")
+        root_dir_hints: list[str] = []
+        for candidate in ("src", "tests", "docs", "api", "config", "scripts"):
+            if (project_workspace / candidate).exists():
+                root_dir_hints.append(f"{candidate}/")
+        return list(dict.fromkeys(visible + root_dir_hints + internal_hints))[:limit]
+
+    @staticmethod
+    def _workspace_grounding_candidate_paths(
+        path_hint: str,
+        *,
+        project_workspace: Path,
+        task_workspace: Path,
+    ) -> list[Path]:
+        normalized = str(path_hint or "").strip().strip("/")
+        if not normalized:
+            return []
+        candidates: list[Path] = []
+        for base in (project_workspace, task_workspace):
+            try:
+                candidates.append(base / Path(normalized))
+            except Exception:
+                continue
+
+        if normalized.startswith(".aiteam/"):
+            internal_name = normalized.split("/", 1)[1].strip()
+            if internal_name:
+                candidates.append(project_workspace / ".aiteam" / internal_name)
+        elif normalized in {
+            ".aiteam",
+            "aiteam.db",
+            "lead_memory.md",
+            "instructions.md",
+            "context",
+            "context/",
+            "memory",
+            "memory/",
+            "sandboxes",
+            "sandboxes/",
+        }:
+            if normalized == ".aiteam":
+                candidates.append(project_workspace / ".aiteam")
+            elif normalized == "aiteam.db":
+                candidates.append(project_workspace / ".aiteam" / "aiteam.db")
+            else:
+                candidates.append(project_workspace / ".aiteam" / normalized.rstrip("/"))
+        return list(dict.fromkeys(candidates))
+
+    @staticmethod
+    def _path_hint_exists_in_workspace(
+        path_hint: str,
+        *,
+        project_workspace: Path,
+        task_workspace: Path,
+    ) -> bool:
+        for candidate in AITeamOrchestrator._workspace_grounding_candidate_paths(
+            path_hint,
+            project_workspace=project_workspace,
+            task_workspace=task_workspace,
+        ):
+            try:
+                if candidate.exists():
+                    return True
+                if not str(candidate.suffix or "").strip():
+                    parent = candidate.parent
+                    stem = candidate.name
+                    if parent.exists():
+                        for sibling in parent.glob(f"{stem}.*"):
+                            if sibling.exists():
+                                return True
+                normalized = str(path_hint or "").strip().replace("\\", "/").strip("/")
+                if "/" not in normalized and candidate.suffix:
+                    ignored_roots = {
+                        ".aiteam",
+                        ".git",
+                        "venv",
+                        "node_modules",
+                        "__pycache__",
+                        ".pytest_cache",
+                    }
+                    for base in (project_workspace, task_workspace):
+                        if not base.exists():
+                            continue
+                        for sibling in base.rglob(candidate.name):
+                            try:
+                                parts = set(sibling.relative_to(base).parts)
+                            except Exception:
+                                continue
+                            if parts & ignored_roots:
+                                continue
+                            if sibling.is_file():
+                                return True
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _path_hint_matches_grounding_hints(
+        path_hint: str,
+        *,
+        visible_files: list[str],
+        dependency_artifacts: list[str],
+    ) -> bool:
+        normalized = str(path_hint or "").strip().replace("\\", "/").strip("/").lower()
+        if not normalized:
+            return False
+
+        hint_pool = [
+            str(item or "").strip().replace("\\", "/").strip("/").lower()
+            for item in list(visible_files or []) + list(dependency_artifacts or [])
+            if str(item or "").strip()
+        ]
+        if not hint_pool:
+            return False
+
+        normalized_parent = normalized.rsplit("/", 1)[0] if "/" in normalized else ""
+        normalized_basename = normalized.rsplit("/", 1)[-1]
+        normalized_stem = (
+            normalized_basename.rsplit(".", 1)[0]
+            if "." in normalized_basename
+            else normalized_basename
+        )
+
+        def _matches_segment_prefix(partial: str, full: str) -> bool:
+            partial_segments = [segment for segment in partial.split("/") if segment]
+            full_segments = [segment for segment in full.split("/") if segment]
+            if (
+                len(partial_segments) < 2
+                or len(partial_segments) > len(full_segments)
+            ):
+                return False
+            if any(len(segment) < 2 for segment in partial_segments[:-1]):
+                return False
+            if len(partial_segments[-1]) < 4:
+                return False
+            if partial_segments[:-1] != full_segments[: len(partial_segments) - 1]:
+                return False
+            return full_segments[len(partial_segments) - 1].startswith(partial_segments[-1])
+
+        for hint in hint_pool:
+            if not hint:
+                continue
+            hint_clean = hint.rstrip("/")
+            hint_parent = hint_clean.rsplit("/", 1)[0] if "/" in hint_clean else ""
+            hint_basename = hint_clean.rsplit("/", 1)[-1]
+            hint_stem = (
+                hint_basename.rsplit(".", 1)[0]
+                if "." in hint_basename
+                else hint_basename
+            )
+            if hint == normalized or hint.endswith("/" + normalized):
+                return True
+            if hint_basename == normalized_basename:
+                return True
+            if normalized_stem and hint_stem == normalized_stem:
+                if normalized_parent and hint_parent:
+                    if hint_parent.endswith(normalized_parent) or normalized_parent.endswith(hint_parent):
+                        return True
+                else:
+                    return True
+            if "/" in normalized and "." not in normalized and _matches_segment_prefix(normalized, hint):
+                return True
+        return False
+
+    def _dependency_artifact_hints(self, task: WorkTask) -> list[str]:
+        hints: list[str] = []
+        for dep_id in list(task.dependencies or []):
+            dep_task = self.taskboard.get_task(dep_id)
+            if dep_task is None:
+                continue
+            dep_artifacts = [
+                str(item).strip()
+                for item in list(dep_task.metadata.get("artifact_paths", []) or [])
+                if str(item).strip()
+            ]
+            hints.extend(dep_artifacts[:6])
+        deduped = list(dict.fromkeys(hints))[:8]
+        if deduped:
+            return deduped
+
+        metadata_hints = [
+            str(item).strip()
+            for item in list(task.metadata.get("workspace_artifact_hints", []) or [])
+            if str(item).strip()
+        ]
+        if metadata_hints and task.role in {Role.REVIEWER, Role.QA}:
+            return list(dict.fromkeys(metadata_hints))[:8]
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        contract_hints = [
+            str(item).strip().replace("\\", "/")
+            for item in list(phase_contract.get("allowed_module_path_hints", []) or [])
+            if str(item).strip()
+        ]
+        if contract_hints and task.role in {Role.RESEARCHER, Role.REVIEWER, Role.QA}:
+            return list(dict.fromkeys(contract_hints))[:8]
+        return []
+
+    def _detect_ungrounded_evidence_issue(
+        self,
+        *,
+        task: WorkTask,
+        safe_content: str,
+        workspace: Path,
+    ) -> dict[str, Any]:
+        phase_name = self._phase_name_for_task(task).lower()
+        is_support_or_delegate = phase_name.startswith("delegate_") or task.role in {
+            Role.SCOUT,
+            Role.RESEARCHER,
+            Role.REVIEWER,
+            Role.QA,
+        }
+        if not is_support_or_delegate:
+            return {}
+
+        normalized_text = str(safe_content or "").strip()
+        if not normalized_text:
+            return {}
+        lower = normalized_text.lower()
+        project_workspace = self.project_root if self.project_root.exists() else workspace
+        visible_files = self._workspace_grounding_visible_files(project_workspace, limit=12)
+        dependency_artifacts = self._dependency_artifact_hints(task)
+        if not visible_files and not dependency_artifacts:
+            return {}
+
+        path_candidates = [
+            path
+            for path in extract_path_candidates(normalized_text)
+            if path and not path.startswith(".aiteam/")
+        ]
+        missing_paths: list[str] = []
+        for path_hint in path_candidates:
+            if not self._path_hint_exists_in_workspace(
+                path_hint,
+                project_workspace=project_workspace,
+                task_workspace=workspace,
+            ) and not self._path_hint_matches_grounding_hints(
+                path_hint,
+                visible_files=visible_files,
+                dependency_artifacts=dependency_artifacts,
+            ):
+                missing_paths.append(path_hint)
+
+        presence_claim_markers = (
+            "confirma",
+            "confirma la estructura",
+            "confirm",
+            "confirmed",
+            "ya implementado",
+            "ya está implementado",
+            "ya esta implementado",
+            "implemented",
+            "presente",
+            "presente en",
+            "existing",
+            "exists",
+            "utiliza",
+            "usa ",
+            "encapsula",
+            "estructura y las interdependencias",
+            "se verificó la presencia",
+            "se verifico la presencia",
+        )
+        if missing_paths and any(marker in lower for marker in presence_claim_markers):
+            return {
+                "reason": "ungrounded_evidence_paths",
+                "missing_paths": missing_paths[:8],
+                "visible_files": visible_files[:8],
+                "dependency_artifacts": dependency_artifacts[:8],
+            }
+
+        empty_claim_markers = (
+            "workspace vacío",
+            "workspace vacio",
+            "sin archivos de proyecto",
+            "no hay artefactos",
+            "no se han generado artefactos",
+            "ausencia total de base de código",
+            "ausencia total de base de codigo",
+        )
+        if any(marker in lower for marker in empty_claim_markers) and (
+            visible_files or dependency_artifacts
+        ):
+            return {
+                "reason": "ungrounded_evidence_state",
+                "visible_files": visible_files[:8],
+                "dependency_artifacts": dependency_artifacts[:8],
+            }
+        return {}
+
+    def _fail_task_for_ungrounded_evidence_output(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        workspace: Path,
+        session,
+    ) -> bool:
+        issue = self._detect_ungrounded_evidence_issue(
+            task=task,
+            safe_content=safe_content,
+            workspace=workspace,
+        )
+        if not issue:
+            return False
+
+        phase_name = self._phase_name_for_task(task)
+        summary_bits = [str(issue.get("reason", "") or "ungrounded_evidence_output")]
+        missing_paths = list(issue.get("missing_paths", []) or [])
+        if missing_paths:
+            summary_bits.append("missing=" + ", ".join(missing_paths[:4]))
+        visible_files = list(issue.get("visible_files", []) or [])
+        if visible_files:
+            summary_bits.append("visible=" + ", ".join(visible_files[:4]))
+        dependency_artifacts = list(issue.get("dependency_artifacts", []) or [])
+        if dependency_artifacts:
+            summary_bits.append("dependency_artifacts=" + ", ".join(dependency_artifacts[:4]))
+        summary = " | ".join(summary_bits)
+
+        diagnostic = (
+            f"[PHASE_VERDICT]\n"
+            f"phase_id: {phase_name}\n"
+            "status: failed\n"
+            "reason_codes: ungrounded_evidence\n"
+            "contract_status: drift\n"
+            "slice_id: \n"
+            f"summary: {summary}\n"
+            "[/PHASE_VERDICT]\n"
+            "La salida afirmo evidencia o estado del workspace que no se pudo corroborar "
+            "contra los archivos visibles y los artefactos de dependencias completadas."
+        )
+        task.metadata["_last_agent_output"] = safe_content
+        self._append_agent_output_history(task, safe_content)
+        task.metadata["ungrounded_evidence_issue"] = dict(issue)
+        self._update_workflow_state(self._task_root(task.task_id), phase_name, diagnostic)
+        error = f"ungrounded_evidence_output_detected: {summary}"
+        self.taskboard.mark_failed(task.task_id, error=error)
+        self.event_logger.emit(
+            "ungrounded_evidence_output_detected",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": phase_name,
+                **dict(issue),
+            },
+        )
+        self.session_store.close_session(
+            session,
+            summary="ungrounded_evidence_output",
+            status="failed",
+        )
+        return True
+
+    def _detect_ungrounded_phase_block_issue(
+        self,
+        *,
+        task: WorkTask,
+        safe_content: str,
+        workspace: Path,
+    ) -> dict[str, Any]:
+        if task.role in {Role.TEAM_LEAD, Role.SCOUT, Role.RESEARCHER}:
+            return {}
+        normalized_text = str(safe_content or "").strip()
+        if not normalized_text:
+            return {}
+        lower = normalized_text.lower()
+        project_workspace = self.project_root if self.project_root.exists() else workspace
+        contradiction_markers = (
+            "workspace vacío",
+            "workspace vacio",
+            "no hay artefactos",
+            "no se han generado artefactos",
+            "ausencia total de base de código",
+            "ausencia total de base de codigo",
+            "no hay evidencia ejecutable",
+            "no se ha proporcionado",
+            "no se han proporcionado",
+            "no fueron proporcionados",
+            "no son accesibles",
+            "sin acceso a los artefactos",
+            "sin acceso al codigo",
+            "sin acceso al código",
+            "necesito acceso a los artefactos",
+            "imposible realizar la revisión sin acceso",
+            "imposible realizar la revision sin acceso",
+            "no tengo acceso a los artefactos",
+            "no se ha proporcionado el código fuente",
+            "no se ha proporcionado el codigo fuente",
+        )
+        if any(marker in lower for marker in contradiction_markers):
+            visible_files = self._workspace_visible_project_files(project_workspace, limit=12)
+            dependency_artifacts = self._dependency_artifact_hints(task)
+            if visible_files or dependency_artifacts:
+                return {
+                    "reason": "ungrounded_phase_block",
+                    "visible_files": visible_files[:8],
+                    "dependency_artifacts": dependency_artifacts[:8],
+                }
+
+        dependency_state_markers = (
+            "dependency pending",
+            "dependencia pendiente",
+            "estado pending",
+            "status pending",
+            "depends on",
+            "depende de",
+            "upstream",
+        )
+        if not task.dependencies or not any(marker in lower for marker in dependency_state_markers):
+            return {}
+
+        dependency_states: list[str] = []
+        dependency_artifacts: list[str] = []
+        for dep_id in list(task.dependencies or []):
+            dep_task = self.taskboard.get_task(dep_id)
+            if dep_task is None:
+                continue
+            dependency_states.append(str(dep_task.state.value))
+            dependency_artifacts.extend(self._dependency_artifact_hints(dep_task))
+
+        normalized_dependency_states = {
+            str(item or "").strip().lower()
+            for item in dependency_states
+            if str(item or "").strip()
+        }
+        if normalized_dependency_states and normalized_dependency_states.issubset({"completed", "approved"}):
+            return {
+                "reason": "stale_dependency_block",
+                "dependency_states": sorted(normalized_dependency_states),
+                "dependency_artifacts": list(dict.fromkeys(dependency_artifacts))[:8],
+                "visible_files": self._workspace_visible_project_files(project_workspace, limit=8),
+            }
+        return {}
+
+    def _sanitize_peer_consultation_report(
+        self,
+        *,
+        task: WorkTask,
+        report: PeerConsultationReport,
+    ) -> PeerConsultationReport:
+        raw_text = str(getattr(report, "text", "") or "").strip()
+        if not raw_text:
+            return report
+
+        project_workspace = self.project_root if self.project_root.exists() else self.runtime_dir
+        visible_files = self._workspace_visible_project_files(project_workspace, limit=8)
+        dependency_artifacts = self._dependency_artifact_hints(task)
+        dependency_states: set[str] = set()
+        for dep_id in list(task.dependencies or []):
+            dep_task = self.taskboard.get_task(dep_id)
+            if dep_task is None:
+                continue
+            dep_state = str(getattr(dep_task.state, "value", dep_task.state) or "").strip().lower()
+            if dep_state:
+                dependency_states.add(dep_state)
+        dependencies_completed = bool(dependency_states) and dependency_states.issubset(
+            {"completed", "approved"}
+        )
+
+        workspace_contradiction_markers = (
+            "workspace vacío",
+            "workspace vacio",
+            "workspace empty",
+            "no hay artefactos",
+            "no se han generado artefactos",
+            "ausencia total de base de código",
+            "ausencia total de base de codigo",
+            "no hay repositorio git",
+            "no existe repositorio git",
+            "sin repositorio git",
+            "no existen los archivos",
+            "no existen archivos",
+            "no hay archivos",
+            "allowed_module_scope",
+        )
+        stale_dependency_markers = (
+            "dependency pending",
+            "dependencia pendiente",
+            "estado pending",
+            "status pending",
+            "sigue pending",
+            "está pending",
+            "esta pending",
+            "blocked by upstream",
+            "bloqueado por upstream",
+            "bloqueada por upstream",
+            "esperando upstream",
+            "waiting on upstream",
+        )
+
+        filtered_lines: list[str] = []
+        dropped_lines: list[str] = []
+        for line in raw_text.splitlines():
+            normalized_line = str(line or "").strip()
+            if not normalized_line:
+                continue
+            lower_line = normalized_line.lower()
+
+            contradicts_workspace = (
+                (visible_files or dependency_artifacts)
+                and any(marker in lower_line for marker in workspace_contradiction_markers)
+            )
+            contradicts_dependencies = dependencies_completed and any(
+                marker in lower_line for marker in stale_dependency_markers
+            )
+            if contradicts_workspace or contradicts_dependencies:
+                dropped_lines.append(normalized_line)
+                continue
+            filtered_lines.append(normalized_line)
+
+        if not dropped_lines:
+            return report
+
+        authoritative_note = (
+            "- sistema: se ignoraron aportes entre pares que contradicen el estado "
+            "autoritativo actual del workspace o dependencias ya completadas."
+        )
+        if authoritative_note not in filtered_lines:
+            filtered_lines.append(authoritative_note)
+
+        self.event_logger.emit(
+            "peer_context_filtered",
+            {
+                "task_id": task.task_id,
+                "phase": self._phase_name_for_task(task),
+                "role": task.role.value,
+                "dropped_lines": dropped_lines[:6],
+                "visible_files": visible_files[:6],
+                "dependency_artifacts": dependency_artifacts[:6],
+                "dependency_states": sorted(dependency_states),
+            },
+        )
+        if self.taskboard.get_task(task.task_id) is not None:
+            self.taskboard.update_metadata(
+                task.task_id,
+                {
+                    "peer_context_filtered": True,
+                    "peer_context_filtered_lines": dropped_lines[:6],
+                },
+            )
+        return PeerConsultationReport(
+            text="\n".join(filtered_lines),
+            consulted_roles=list(report.consulted_roles or []),
+            unavailable_roles=list(report.unavailable_roles or []),
+            consulted_providers=list(report.consulted_providers or []),
+        )
 
     def _block_task_for_missing_dependency_delivery(
         self,
@@ -1973,14 +3440,49 @@ class AITeamOrchestrator:
         phase_summaries = dict(ws.get("phase_context_summaries", {}) or {})
         upstream_lines: list[str] = []
         for dep in depends_on[:4]:
+            dep_task_id = f"{task_root}::{dep}" if task_root else dep
+            dep_task = self.taskboard.get_task(dep_task_id)
             dep_summary = str(phase_summaries.get(dep, "") or "").strip()
             dep_output = str(phase_outputs.get(dep, "") or "").strip()
             dep_contract = dict(workflow_contracts.get(dep, {}) or {})
             dep_objective = str(dep_contract.get("objective", "") or "").strip()
-            dep_context = dep_summary or self._compact_text(dep_output, 280) or dep_objective
+            dep_planning_artifact = {}
+            if dep_task is not None:
+                dep_planning_artifact = dict(
+                    dep_task.metadata.get("planning_artifact", {})
+                    or dict(ws.get("planning_artifacts", {}) or {}).get(dep, {})
+                    or {}
+                )
+            artifact_paths = [
+                str(item).strip()
+                for item in list(
+                    (dep_task.metadata.get("artifact_paths", []) if dep_task is not None else [])
+                    or []
+                )
+                if str(item).strip()
+            ]
+            state_bits: list[str] = []
+            if dep_task is not None:
+                dep_state = getattr(dep_task.state, "value", str(dep_task.state))
+                if dep_state:
+                    state_bits.append(f"state={dep_state}")
+            if artifact_paths:
+                state_bits.append(f"artifacts={', '.join(artifact_paths[:4])}")
+            dep_planning_context = self._format_dependency_planning_artifact(
+                dep_planning_artifact,
+                limit=1400 if role_upper == "ENGINEER" else 650,
+            )
+            dep_context = (
+                dep_planning_context
+                or dep_summary
+                or self._compact_text(dep_output, 280)
+                or dep_objective
+            )
             dep_prefix = f"{dep}:"
             if dep_context.lower().startswith(dep_prefix.lower()):
                 dep_context = dep_context[len(dep_prefix):].strip()
+            if state_bits:
+                dep_context = ("; ".join(state_bits) + (f"; {dep_context}" if dep_context else "")).strip()
             if dep_context:
                 upstream_lines.append(f"- {dep}: {dep_context}")
 
@@ -1990,13 +3492,32 @@ class AITeamOrchestrator:
                 "contexto o memoria heredada. Declara bloqueo contractual y pide replanificacion del Lead."
             )
         else:
+            validation_guidance = (
+                "Valida estrictamente si lo ejecutado respeta este contrato. Si detectas deriva, "
+                "declárala explícitamente. No afirmes tests, cobertura, rutas o artefactos que no "
+                "aparezcan en evidencia upstream o en archivos visibles; si faltan, bloquea o rechaza "
+                "con el faltante concreto. No conviertas entregables planeados ni criterios de "
+                "aceptación en evidencia existente."
+            )
+            if role_upper == "REVIEWER":
+                validation_guidance += (
+                    " Si tu recomendación es CHANGES_REQUESTED, el [PHASE_VERDICT] debe usar "
+                    "status: rejected y reason_codes: review_rejected."
+                )
+            elif role_upper == "QA":
+                validation_guidance += (
+                    " Si el contrato pide un test/reporte que no existe o no se ejecutó, no lo des por "
+                    "pasado: usa status: blocked o failed y nombra el archivo/check ausente."
+                )
             role_guidance = (
                 "No cambies de slice, no cambies de objetivo y no sustituyas esta fase por otra "
-                "de mayor impacto sin una nueva directiva del Lead."
+                "de mayor impacto sin una nueva directiva del Lead. Si tus dependencias estan "
+                "completed y el upstream_context contiene planning_artifact con objective, steps "
+                "y acceptance, ese artefacto estructurado es suficiente autoridad para ejecutar; "
+                "no bloquees por narrativa resumida, elipsis o falta de transcripcion completa."
                 if role_upper == "ENGINEER"
                 else (
-                    "Valida estrictamente si lo ejecutado respeta este contrato. Si detectas deriva, "
-                    "declárala explícitamente."
+                    validation_guidance
                     if role_upper in {"REVIEWER", "QA"}
                     else "Usa este contrato como restricción autoritativa de la fase."
                 )
@@ -2016,6 +3537,285 @@ class AITeamOrchestrator:
             lines.extend(upstream_lines)
         lines.append("[/PHASE_CONTRACT]")
         return "\n".join(lines)
+
+    def _retry_executor_on_stale_dependency_block(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        issue: dict[str, Any],
+        session,
+    ) -> bool:
+        if task.role not in {Role.ENGINEER, Role.REVIEWER, Role.QA}:
+            return False
+        if str(issue.get("reason", "") or "").strip().lower() != "stale_dependency_block":
+            return False
+        retry_count = int(task.metadata.get("stale_dependency_block_retry_count", 0) or 0)
+        max_retries = int(task.metadata.get("max_stale_dependency_block_retries", 1) or 1)
+        if retry_count >= max_retries:
+            return False
+
+        completed_artifacts = self._completed_dependency_planning_artifacts(task)
+        dependency_artifacts = list(issue.get("dependency_artifacts", []) or [])
+        visible_files = list(issue.get("visible_files", []) or [])
+        if not completed_artifacts and not dependency_artifacts and not visible_files:
+            return False
+
+        artifact_hint = ""
+        if completed_artifacts:
+            dep_phase, artifact = completed_artifacts[0]
+            artifact_hint = self._format_dependency_planning_artifact(artifact, limit=1200)
+            artifact_hint = f"Planning autoritativo de {dep_phase}: {artifact_hint}"
+        elif dependency_artifacts:
+            artifact_hint = "Artefactos upstream visibles: " + ", ".join(
+                str(item).strip() for item in dependency_artifacts[:6] if str(item).strip()
+            )
+        else:
+            artifact_hint = "Archivos visibles del workspace: " + ", ".join(
+                str(item).strip() for item in visible_files[:6] if str(item).strip()
+            )
+
+        feedback = (
+            "Retry automatico por bloqueo stale_dependency_block. Las dependencias requeridas "
+            "ya estan completed; no bloquees por elipsis, resumen parcial o falta de transcripcion "
+            "literal si existe evidencia estructurada o archivos visibles. Ejecuta/valida el slice "
+            "minimo dentro del contrato vigente.\n"
+            f"{artifact_hint}"
+        )
+        task.metadata["result"] = safe_content
+        task.metadata["_last_agent_output"] = safe_content
+        self._append_agent_output_history(task, safe_content)
+        task.metadata["review_feedback"] = feedback
+        task.metadata["gate_iteration"] = int(task.metadata.get("gate_iteration", 0) or 0) + 1
+        task.metadata["stale_dependency_block_retry_count"] = retry_count + 1
+        task.metadata["stale_dependency_block_issue"] = dict(issue)
+        self.taskboard.retry_task(
+            task.task_id,
+            reason=f"stale_dependency_block_retry_{retry_count + 1}",
+        )
+        self.event_logger.emit(
+            "stale_dependency_block_retried",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": self._phase_name_for_task(task),
+                "retry_count": retry_count + 1,
+                "has_planning_artifact": bool(completed_artifacts),
+                "visible_files": visible_files[:6],
+                "dependency_artifacts": dependency_artifacts[:6],
+            },
+        )
+        self.session_store.close_session(
+            session,
+            summary="stale_dependency_block_retry",
+            status="retried",
+        )
+        return True
+
+    def _retry_executor_on_recoverable_ungrounded_phase_block(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        issue: dict[str, Any],
+        session,
+    ) -> bool:
+        if task.role not in {Role.REVIEWER, Role.QA}:
+            return False
+        if str(issue.get("reason", "") or "").strip().lower() != "ungrounded_phase_block":
+            return False
+        retry_count = int(task.metadata.get("ungrounded_phase_block_retry_count", 0) or 0)
+        max_retries = int(task.metadata.get("max_ungrounded_phase_block_retries", 1) or 1)
+        if retry_count >= max_retries:
+            return False
+        visible_files = [
+            str(item).strip()
+            for item in list(issue.get("visible_files", []) or [])
+            if str(item).strip()
+        ]
+        dependency_artifacts = [
+            str(item).strip()
+            for item in list(issue.get("dependency_artifacts", []) or [])
+            if str(item).strip()
+        ]
+        if not visible_files and not dependency_artifacts:
+            return False
+
+        artifact_hint = []
+        if dependency_artifacts:
+            artifact_hint.append(
+                "Artefactos/scope revisables: " + ", ".join(dependency_artifacts[:8])
+            )
+        if visible_files:
+            artifact_hint.append(
+                "Archivos visibles del workspace: " + ", ".join(visible_files[:8])
+            )
+        feedback = (
+            "Retry automatico por bloqueo de visibilidad no fundamentado. "
+            "No afirmes que faltan artefactos/codigo si hay archivos visibles, "
+            "workspace_artifact_hints o allowed_module_path_hints. Inspecciona o revisa "
+            "contra esos paths y solo bloquea si el problema permanece tras usar esa evidencia.\n"
+            + "\n".join(artifact_hint)
+        )
+        task.metadata["result"] = safe_content
+        task.metadata["_last_agent_output"] = safe_content
+        self._append_agent_output_history(task, safe_content)
+        task.metadata["review_feedback"] = feedback
+        task.metadata["gate_iteration"] = int(task.metadata.get("gate_iteration", 0) or 0) + 1
+        task.metadata["ungrounded_phase_block_retry_count"] = retry_count + 1
+        task.metadata["ungrounded_phase_block_retry_issue"] = dict(issue)
+        self.taskboard.retry_task(
+            task.task_id,
+            reason=f"ungrounded_phase_block_retry_{retry_count + 1}",
+        )
+        self.event_logger.emit(
+            "ungrounded_phase_block_retried",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": self._phase_name_for_task(task),
+                "retry_count": retry_count + 1,
+                "visible_files": visible_files[:8],
+                "dependency_artifacts": dependency_artifacts[:8],
+            },
+        )
+        self.session_store.close_session(
+            session,
+            summary="ungrounded_phase_block_retry",
+            status="retried",
+        )
+        return True
+
+    def _complete_research_phase_as_degraded(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        verdict_status: str,
+        session,
+    ) -> None:
+        """Researcher is support: report degraded evidence, do not block the workflow."""
+        phase_name = self._phase_name_for_task(task)
+        status = str(verdict_status or "").strip().lower() or "partial"
+        self._update_workflow_state(self._task_root(task.task_id), phase_name, safe_content)
+        self.taskboard.mark_completed(task.task_id, details=safe_content)
+        refreshed = self.taskboard.get_task(task.task_id) or task
+        self._append_agent_output_history(refreshed, safe_content)
+        self.taskboard.update_metadata(
+            task.task_id,
+            {
+                "research_degraded": True,
+                "research_self_reported_status": status,
+                "research_degraded_reason": "support_phase_self_reported_block",
+                "result": safe_content,
+                "_last_agent_output": safe_content,
+            },
+        )
+        self.event_logger.emit(
+            "research_phase_degraded_completed",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": phase_name,
+                "reported_status": status,
+            },
+        )
+        self.session_store.close_session(
+            session,
+            summary=f"research_degraded:{status}",
+            status="completed",
+        )
+
+    def _complete_validation_visibility_issue_as_degraded(
+        self,
+        *,
+        task: WorkTask,
+        assignee: str,
+        safe_content: str,
+        issue: dict[str, Any],
+        session,
+    ) -> bool:
+        if task.role not in {Role.REVIEWER, Role.QA}:
+            return False
+        if str(issue.get("reason", "") or "").strip().lower() != "ungrounded_phase_block":
+            return False
+        visible_files = [
+            str(item).strip()
+            for item in list(issue.get("visible_files", []) or [])
+            if str(item).strip()
+        ]
+        dependency_artifacts = [
+            str(item).strip()
+            for item in list(issue.get("dependency_artifacts", []) or [])
+            if str(item).strip()
+        ]
+        if not visible_files and not dependency_artifacts:
+            return False
+
+        phase_name = self._phase_name_for_task(task)
+        evidence_lines: list[str] = []
+        if visible_files:
+            evidence_lines.append("visible_files: " + ", ".join(visible_files[:8]))
+        if dependency_artifacts:
+            evidence_lines.append(
+                "dependency_artifacts: " + ", ".join(dependency_artifacts[:8])
+            )
+        degraded_content = "\n".join(
+            [
+                "[PHASE_VERDICT]",
+                f"phase_id: {phase_name}",
+                "status: completed",
+                "contract_status: completed",
+                "reason_codes: validation_visibility_degraded",
+                (
+                    "summary: Validacion degradada: el agente reporto falta de visibilidad, "
+                    "pero el runtime detecto evidencia revisable."
+                ),
+                "[/PHASE_VERDICT]",
+                "[DEGRADED_VALIDATION_REPORT]",
+                "decision_authority: team_lead",
+                "degraded_reason: validation_visibility_degraded",
+                *evidence_lines,
+                "note: No se trata como rechazo de producto; queda como senal para el Lead.",
+                "[/DEGRADED_VALIDATION_REPORT]",
+            ]
+        )
+
+        self._update_workflow_state(self._task_root(task.task_id), phase_name, degraded_content)
+        self.taskboard.mark_completed(task.task_id, details=degraded_content)
+        refreshed = self.taskboard.get_task(task.task_id) or task
+        self._append_agent_output_history(refreshed, safe_content)
+        self.taskboard.update_metadata(
+            task.task_id,
+            {
+                "validation_degraded": True,
+                "validation_degraded_reason": "ungrounded_visibility_block",
+                "ungrounded_phase_block_issue": dict(issue),
+                "validation_original_output_preview": safe_content[:4000],
+                "result": degraded_content,
+                "_last_agent_output": safe_content,
+            },
+        )
+        self.event_logger.emit(
+            "validation_visibility_issue_degraded",
+            {
+                "task_id": task.task_id,
+                "assignee": assignee,
+                "phase": phase_name,
+                "role": task.role.value,
+                "visible_files": visible_files[:8],
+                "dependency_artifacts": dependency_artifacts[:8],
+            },
+        )
+        self.session_store.close_session(
+            session,
+            summary="validation_visibility_degraded",
+            status="completed",
+        )
+        return True
 
     def _resolved_phase_objective_for_task(self, task: WorkTask) -> str:
         task_root = self._task_root(task.task_id)
@@ -2077,7 +3877,10 @@ class AITeamOrchestrator:
         session,
     ) -> bool:
         phase_name = self._phase_name_for_task(task).lower()
-        if task.role != Role.ENGINEER or phase_name != "build":
+        if (
+            task.role != Role.ENGINEER
+            and not bool(task.metadata.get("direct_coding_executor", False))
+        ) or phase_name != "build":
             return False
 
         objective = self._resolved_phase_objective_for_task(task)
@@ -2090,6 +3893,19 @@ class AITeamOrchestrator:
 
         expected_hints = list(drift.get("expected_path_hints", []) or [])
         proposed_paths = list(drift.get("proposed_paths", []) or [])
+        if self._repair_first_context_allows_continuation_paths(task, proposed_paths):
+            self.event_logger.emit(
+                "continuation_drift_suppressed",
+                {
+                    "task_id": task.task_id,
+                    "assignee": assignee,
+                    "phase": phase_name,
+                    "reason": "repair_first_validation_context_allows_path",
+                    "expected_path_hints": expected_hints[:8],
+                    "proposed_paths": proposed_paths[:8],
+                },
+            )
+            return False
         verdict_payload = {
             "phase_id": str(drift.get("phase_id", phase_name) or phase_name),
             "status": str(drift.get("status", "rejected") or "rejected"),
@@ -2104,7 +3920,7 @@ class AITeamOrchestrator:
             f"Paths esperados: {', '.join(expected_hints[:6]) or 'sin pistas explicitas'}\n"
             f"Paths propuestos: {', '.join(proposed_paths[:6]) or 'sin paths detectados'}"
         )
-        task.metadata["_last_agent_output"] = safe_content
+        self._snapshot_agent_output_on_task(task=task, safe_content=safe_content)
         task.metadata["continuation_drift_expected_paths"] = expected_hints
         task.metadata["continuation_drift_proposed_paths"] = proposed_paths
         task.metadata["continuation_drift_summary"] = verdict_payload["summary"]
@@ -2141,6 +3957,64 @@ class AITeamOrchestrator:
         )
         return True
 
+    @staticmethod
+    def _repair_first_context_allows_continuation_paths(
+        task: WorkTask,
+        proposed_paths: list[str],
+    ) -> bool:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        if not bool(metadata.get("repair_first_required", False)):
+            return False
+        origin = str(metadata.get("repair_first_origin", "") or "").strip().lower()
+        if origin and not origin.startswith("auto_"):
+            return False
+
+        context_parts = [
+            str(task.description or ""),
+            str(metadata.get("review_feedback", "") or ""),
+            str(metadata.get("repair_first_command", "") or ""),
+        ]
+        phase_contract = metadata.get("phase_contract", {})
+        if isinstance(phase_contract, dict):
+            context_parts.append(str(phase_contract.get("objective", "") or ""))
+            context_parts.append(
+                str(phase_contract.get("repair_first_original_objective", "") or "")
+            )
+        auto_pre = metadata.get("auto_pre_validation_result", {})
+        if isinstance(auto_pre, dict):
+            context_parts.append(str(auto_pre.get("command", "") or ""))
+            context_parts.append(str(auto_pre.get("reason", "") or ""))
+        context = "\n".join(part for part in context_parts if part).lower()
+        if not context.strip():
+            return False
+
+        context_paths = extract_path_candidates(context)
+        for proposed in list(proposed_paths or []):
+            normalized = str(proposed or "").strip().replace("\\", "/").lower()
+            if not normalized:
+                continue
+            if detect_continuation_drift(
+                objective="\n".join(context_paths),
+                proposed_paths=[normalized],
+            ) == {} and context_paths:
+                return True
+            if normalized.startswith("src/") and normalized.endswith(".py"):
+                module_name = normalized[:-3].replace("/", ".")
+                module_without_src = module_name[4:] if module_name.startswith("src.") else module_name
+                basename = normalized.rsplit("/", 1)[-1][:-3]
+                if (
+                    "importerror" in context
+                    or "cannot import name" in context
+                    or "no module named" in context
+                ) and (
+                    module_name in context
+                    or module_without_src in context
+                    or normalized in context
+                    or basename in context
+                ):
+                    return True
+        return False
+
     def _fail_task_for_contract_path_drift(
         self,
         *,
@@ -2149,7 +4023,9 @@ class AITeamOrchestrator:
         safe_content: str,
         session,
     ) -> bool:
-        if task.role != Role.ENGINEER:
+        if task.role != Role.ENGINEER and not bool(
+            task.metadata.get("direct_coding_executor", False)
+        ):
             return False
         phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
         proposed_paths = extract_path_candidates(safe_content)
@@ -2176,6 +4052,7 @@ class AITeamOrchestrator:
             "Contract path drift detectada antes de escribir archivos.\n"
             f"Propuesta: {', '.join(list(drift.get('proposed_paths', []) or [])[:6])}"
         )
+        self._snapshot_agent_output_on_task(task=task, safe_content=safe_content)
         task.metadata["contract_path_drift_summary"] = verdict_payload["summary"]
         task.metadata["contract_path_drift_proposed_paths"] = list(
             drift.get("proposed_paths", []) or []
@@ -2224,16 +4101,49 @@ class AITeamOrchestrator:
         if not phase_name.startswith("plan_"):
             return False
 
-        has_code_block = "```" in str(safe_content or "")
+        raw_text = str(safe_content or "")
+        has_code_block = "```" in raw_text
         has_path_annotation = bool(
-            re.search(r"\bpath\s*=\s*[\w./\\\\-]+", str(safe_content or ""), re.IGNORECASE)
+            re.search(r"\bpath\s*=\s*[\w./\\\\-]+", raw_text, re.IGNORECASE)
         )
-        if not has_code_block and not has_path_annotation:
+        has_shell_command = bool(_EXECUTION_LINE_COMMAND_RE.search(raw_text))
+        has_write_or_file_action = bool(
+            re.search(
+                r"(?i)\b(?:crear|create|modificar|modify|editar|edit|escribir|write|guardar|save|implementar|implement)\b.{0,80}\b(?:archivo|file|modulo|m[oó]dulo|src/|tests/)\b",
+                raw_text,
+            )
+        )
+        has_concrete_path_action = bool(
+            re.search(
+                r"(?i)\b(?:crear|create|modificar|modify|editar|edit|escribir|write|guardar|save|mover|move|renombrar|rename|extraer|extract|separar|split|aislar|isolate)\b.{0,120}\b(?:src|tests|docs|api|config|scripts)/[\w./-]+",
+                raw_text,
+            )
+        )
+        has_runtime_file_path = bool(
+            re.search(r"(?i)\b(?:src|tests|docs|api|config|scripts)/[\w./-]+", raw_text)
+        )
+        if not (
+            has_code_block
+            or has_path_annotation
+            or (
+                phase_name == "plan_risks"
+                and (
+                    has_shell_command
+                    or has_write_or_file_action
+                    or has_concrete_path_action
+                )
+            )
+        ):
             return False
 
         summary = (
             "planning phase must stay at plan level and cannot emit code blocks or path= annotations"
         )
+        if phase_name == "plan_risks":
+            summary = (
+                "plan_risks must stay at risk/gate/test level and cannot emit implementation commands, file actions or concrete source paths"
+            )
+        self._snapshot_agent_output_on_task(task=task, safe_content=safe_content)
         diagnostic = (
             "[PHASE_VERDICT]\n"
             f"phase_id: {phase_name}\n"
@@ -2290,6 +4200,176 @@ class AITeamOrchestrator:
         return sanitized, sanitized != content
 
     @staticmethod
+    def _sanitize_plan_risks_output(content: str) -> tuple[str, bool]:
+        """Reduce `plan_risks` a contenido de riesgo/gates/tests y un verdict estructurado.
+
+        El modelo a veces mezcla un [PHASE_VERDICT] valido con lineas narrativas
+        que ya entran en comandos, acciones de archivo o rutas concretas. En vez
+        de matar la fase de inmediato, limpiamos esas lineas y conservamos la
+        parte estructurada.
+        """
+        raw = str(content or "")
+        if not raw.strip():
+            return raw, False
+
+        verdict_blocks = re.findall(
+            r"(?is)\[PHASE_VERDICT\].*?\[/PHASE_VERDICT\]",
+            raw,
+        )
+        placeholder = "\n".join(verdict_blocks)
+        body = re.sub(r"(?is)\[PHASE_VERDICT\].*?\[/PHASE_VERDICT\]", "", raw)
+
+        sanitized_lines: list[str] = []
+        changed = False
+        action_verb_re = re.compile(
+            r"(?i)\b(?:crear|create|modificar|modify|editar|edit|escribir|write|guardar|save|mover|move|renombrar|rename|extraer|extract|separar|split|aislar|isolate|implementar|implement)\b"
+        )
+        operational_line_re = re.compile(
+            r"(?i)(?:"
+            r"\bpython\s+-m\s+pytest\b|"
+            r"\bpytest\b|"
+            r"\bpath\s*=\s*[\w./\\\\-]+|"
+            r"\b(?:src|tests|docs|api|config|scripts)/[\w./-]+"
+            r")"
+        )
+        slash_phrase_re = re.compile(
+            r"(?i)\b([a-z][a-z0-9_-]*(?:/[a-z][a-z0-9_-]*)+)\b"
+        )
+        for line in body.splitlines():
+            if operational_line_re.search(line) and not action_verb_re.search(line):
+                changed = True
+                continue
+            rewritten = slash_phrase_re.sub(
+                lambda match: (
+                    match.group(1).replace("/", " or ")
+                    if _looks_like_noise_path_hint(match.group(1))
+                    else match.group(1)
+                ),
+                line,
+            )
+            if rewritten != line:
+                changed = True
+                line = rewritten
+            sanitized_lines.append(line)
+
+        sanitized_body = "\n".join(sanitized_lines).strip()
+        parts = [part for part in (sanitized_body, placeholder.strip()) if part]
+        sanitized = "\n\n".join(parts).strip()
+        return sanitized, changed or sanitized != raw.strip()
+
+    @staticmethod
+    def _sanitize_review_output(content: str) -> tuple[str, bool]:
+        """Reduce ruido tecnico no-ruta en outputs de review.
+
+        Algunas respuestas de review incluyen literales regex o snippets raw entre
+        backticks que no son evidencia material del repo y luego contaminan el
+        grounding como si fueran paths. Aqui los reformulamos de forma generica
+        sin tocar rutas reales, simbolos reales ni el veredicto estructurado.
+        """
+        raw = str(content or "")
+        if not raw.strip():
+            return raw, False
+
+        regexish_inline_re = re.compile(
+            r"`?(?:r|rf|fr|f)?['\"][^`\n]{0,200}(?:\^|\$|\[|\]|\(|\)|\{|\}|\*|\+|\?)[^`\n]{0,200}['\"]`?",
+            re.IGNORECASE,
+        )
+        sanitized = regexish_inline_re.sub("patron tecnico", raw)
+        return sanitized, sanitized != raw
+
+    @staticmethod
+    def _sanitize_lead_close_output(content: str) -> tuple[str, bool]:
+        """Limpia marcadores editoriales blandos en sintesis de cierre.
+
+        `lead_close` resume una corrida; no es un artefacto de producto ni una fase
+        de implementacion. Marcadores blandos como `todo:` o `fixme:` no deben
+        derribar una run avanzada si el resto del cierre es valido.
+        """
+        raw = str(content or "")
+        if not raw.strip():
+            return raw, False
+
+        replacements = {
+            r"\btodo:\s*": "pendiente editorial: ",
+            r"\bfixme:\s*": "nota editorial: ",
+            r"\btbd:\s*": "pendiente editorial: ",
+            r"\bpending:\s*": "seguimiento: ",
+            r"\bfollow[\s-]?up:\s*": "seguimiento: ",
+        }
+        sanitized = raw
+        for pattern, replacement in replacements.items():
+            sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+        return sanitized, sanitized != raw
+
+    def _sanitize_test_runner_output(
+        self,
+        *,
+        task: WorkTask,
+        content: str,
+        workspace: Path,
+    ) -> tuple[str, bool]:
+        """Evita que `test_runner` convierta nombres hipoteticos de tests en paths.
+
+        Regla generica: si un reporte menciona nombres de test `.py` que no estan
+        ni en el workspace visible ni en artefactos upstream, se reformulan como
+        referencias genericas a tests visibles, sin inventar rutas.
+        """
+        raw = str(content or "")
+        if not raw.strip():
+            return raw, False
+
+        specialist_name = str(task.metadata.get("tool_specialist", "") or "").strip().lower()
+        if specialist_name != "test_runner":
+            return raw, False
+
+        project_workspace = self.project_root if self.project_root.exists() else workspace
+        visible_files = self._workspace_grounding_visible_files(project_workspace, limit=24)
+        dependency_artifacts = self._dependency_artifact_hints(task)
+        known_test_paths = {
+            str(item).strip().replace("\\", "/").lower()
+            for item in list(visible_files or []) + list(dependency_artifacts or [])
+            if str(item).strip().lower().endswith(".py")
+            and ("/tests/" in f"/{str(item).strip().replace('\\', '/').lower()}" or str(item).strip().lower().startswith("tests/"))
+        }
+        known_test_basenames = {item.rsplit("/", 1)[-1] for item in known_test_paths}
+        if not known_test_paths and not known_test_basenames:
+            return raw, False
+
+        pattern = re.compile(
+            r"(?<![\w/.-])(?:(tests/)?([A-Za-z0-9_]+\.py))(?![\w/.-])",
+            re.IGNORECASE,
+        )
+
+        def _looks_like_test_filename(name: str, has_tests_prefix: bool) -> bool:
+            normalized = str(name or "").strip().lower()
+            return bool(
+                has_tests_prefix
+                or normalized.startswith("test_")
+                or normalized.endswith("_test.py")
+                or normalized.endswith("_tests.py")
+            )
+
+        def _replace(match: re.Match[str]) -> str:
+            tests_prefix = bool(str(match.group(1) or "").strip())
+            basename = str(match.group(2) or "").strip().lower()
+            if not _looks_like_test_filename(basename, tests_prefix):
+                return match.group(0)
+            full = str(match.group(0) or "").strip().replace("\\", "/").lower()
+            normalized = full if full.startswith("tests/") else f"tests/{basename}"
+            if normalized in known_test_paths or basename in known_test_basenames:
+                return match.group(0)
+            return "tests visibles del workspace"
+
+        sanitized = pattern.sub(_replace, raw)
+        return sanitized, sanitized != raw
+
+    def _effective_placeholder_labels(self, task: WorkTask, labels: list[str]) -> list[str]:
+        phase_name = self._phase_name_for_task(task).lower()
+        if phase_name == "lead_close" or phase_name.startswith(("lead_failure_", "lead_report_", "lead_preflight_")):
+            return [label for label in list(labels or []) if label not in _SOFT_PLACEHOLDER_LABELS]
+        return list(labels or [])
+
+    @staticmethod
     def _planning_section_kind(line: str) -> str:
         normalized = re.sub(r"[^a-z_ ]+", " ", str(line or "").strip().lower()).strip(" :")
         normalized = normalized.replace("ó", "o").replace("í", "i").replace("á", "a")
@@ -2304,6 +4384,8 @@ class AITeamOrchestrator:
             "plan steps",
             "tareas",
             "tasks",
+            "tareas secuenciadas",
+            "sequenced tasks",
             "sequence",
             "secuencia",
         }:
@@ -2319,18 +4401,100 @@ class AITeamOrchestrator:
             "checks",
             "validation",
             "validacion",
+            "pruebas minimas",
+            "pruebas minimas",
+            "minimum tests",
         }:
             return "acceptance_criteria"
         if normalized in {
             "constraints",
             "restrictions",
             "restricciones",
+            "risks",
+            "riesgos",
             "guardrails",
             "forbidden paths",
             "forbidden_path_hints",
         }:
             return "constraints"
         return ""
+
+    @classmethod
+    def _planning_section_with_inline_value(cls, line: str) -> tuple[str, str]:
+        stripped = str(line or "").strip().strip("*")
+        if not stripped:
+            return "", ""
+        inline_match = re.match(r"^\s*([^:]{2,40})\s*:\s*(.+?)\s*$", stripped)
+        if not inline_match:
+            return "", ""
+        section_kind = cls._planning_section_kind(str(inline_match.group(1) or ""))
+        if not section_kind:
+            return "", ""
+        value = str(inline_match.group(2) or "").strip()
+        return section_kind, value
+
+    @staticmethod
+    def _planning_action_candidates_from_text(text: str) -> list[str]:
+        raw_text = str(text or "").strip()
+        if not raw_text:
+            return []
+        sentences = re.split(r"[\n.;]+", raw_text)
+        action_phrases: list[str] = []
+        action_re = re.compile(
+            r"(?i)\b(?:revisar|analizar|definir|implementar|ajustar|integrar|validar|preparar|actualizar|refactorizar|probar|documentar|extraer|generar|insertar|calcular|construir)\b"
+        )
+        for sentence in sentences:
+            candidate = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", str(sentence or "").strip())
+            if not candidate:
+                continue
+            if " antes de " in candidate.lower():
+                parts = re.split(r"(?i)\bantes de\b", candidate)
+                for part in parts:
+                    normalized_part = str(part or "").strip(" ,")
+                    if normalized_part and action_re.search(normalized_part):
+                        action_phrases.append(normalized_part)
+                continue
+            if action_re.search(candidate):
+                action_phrases.append(candidate)
+        return list(dict.fromkeys(item for item in action_phrases if item))[:6]
+
+    def _derive_minimal_planning_artifact_from_narrative(
+        self,
+        *,
+        task: WorkTask,
+        text: str,
+    ) -> dict[str, Any]:
+        phase_name = self._phase_name_for_task(task).lower()
+        if phase_name != "plan_engineering":
+            return {}
+        phase_contract = dict(task.metadata.get("phase_contract", {}) or {})
+        objective = str(phase_contract.get("objective", "") or "").strip()
+        action_candidates = self._planning_action_candidates_from_text(text)
+        validation_hint_re = re.compile(
+            r"(?i)\b(?:validar|validate|validation|verificar|verify|verified|test|tests|pytest|check|checks|criteri[oa]s?|aceptaci[oó]n|acceptance)\b"
+        )
+        if (
+            not objective
+            or len(action_candidates) < 2
+            or not validation_hint_re.search(str(text or ""))
+        ):
+            return {}
+        acceptance = [
+            "La implementación respeta el objetivo del slice y el scope permitido por el contrato."
+        ]
+        return {
+            "objective": objective,
+            "steps": action_candidates[:4],
+            "acceptance_criteria": acceptance,
+            "constraints": [],
+            "summary": " | ".join(
+                [
+                    f"objective={objective}",
+                    f"steps={'; '.join(action_candidates[:2])}",
+                    f"criteria={acceptance[0]}",
+                ]
+            ),
+        }
 
     @classmethod
     def _extract_planning_artifact(cls, text: str) -> dict[str, Any]:
@@ -2352,6 +4516,17 @@ class AITeamOrchestrator:
             line = str(raw_line or "").rstrip()
             stripped = line.strip()
             if not stripped:
+                continue
+            inline_section_kind, inline_value = cls._planning_section_with_inline_value(stripped)
+            if inline_section_kind:
+                current_section = inline_section_kind
+                if inline_section_kind == "objective" and inline_value and not data["objective"]:
+                    data["objective"] = inline_value
+                elif (
+                    inline_section_kind in {"steps", "acceptance_criteria", "constraints"}
+                    and inline_value
+                ):
+                    data[inline_section_kind].append(inline_value)
                 continue
             section_kind = cls._planning_section_kind(stripped)
             if section_kind:
@@ -2482,6 +4657,19 @@ class AITeamOrchestrator:
         return list(dict.fromkeys(candidates))[:8]
 
     @staticmethod
+    def _dependency_execution_plan_preview(task: WorkTask) -> list[str]:
+        metadata = task.metadata if isinstance(task.metadata, dict) else {}
+        raw_plan = metadata.get("execution_plan", [])
+        if not isinstance(raw_plan, list):
+            return []
+        commands = [
+            str((step or {}).get("command", "") or "").strip()
+            for step in raw_plan
+            if isinstance(step, dict)
+        ]
+        return [command for command in commands if command][:6]
+
+    @staticmethod
     def _execution_step_type_for_command(command: str) -> str:
         first = str(command or "").strip().split()[0].lower() if str(command or "").strip() else ""
         if first in _POWERSHELL_COMMAND_STARTERS or command.strip().startswith("$"):
@@ -2507,6 +4695,23 @@ class AITeamOrchestrator:
             )
         return plan
 
+    @staticmethod
+    def _source_text_contains_explicit_commands(source_text: str) -> bool:
+        normalized = str(source_text or "").strip()
+        if not normalized:
+            return False
+        if re.search(
+            r"(?is)`(?:pytest|python\s+-m\s+pytest|py\s+-m\s+pytest|npm|pnpm|yarn|uv|npx|tox|coverage|cargo|go\s+test|dotnet\s+test|mvn(?:\s+test)?|gradle(?:\s+test)?|make(?:\s+test)?)\b[^`\n]*`",
+            normalized,
+        ):
+            return True
+        if re.search(
+            r"(?im)^\s*(?:\d+[.)]|[-*])\s*(?:pytest|python\s+-m\s+pytest|py\s+-m\s+pytest|npm|pnpm|yarn|uv|npx|tox|coverage|cargo|go\s+test|dotnet\s+test|mvn(?:\s+test)?|gradle(?:\s+test)?|make(?:\s+test)?)\b",
+            normalized,
+        ):
+            return True
+        return False
+
     def _execution_plan_source_candidates(
         self,
         task: WorkTask,
@@ -2521,13 +4726,8 @@ class AITeamOrchestrator:
             values = list(planning_artifact.get(key, []) or [])
             for index, value in enumerate(values, start=1):
                 text_sources.append((f"task.planning_artifact.{key}[{index}]", value))
-        text_sources.extend(
-            [
-                ("task.phase_contract.objective", objective),
-                ("task.delegation_brief", metadata.get("delegation_brief", "")),
-                ("task.description", task.description),
-            ]
-        )
+        if objective:
+            text_sources.append(("task.phase_contract.objective", objective))
 
         task_root = self._task_root(task.task_id)
         ws = self._get_workflow_state(task_root)
@@ -2541,29 +4741,19 @@ class AITeamOrchestrator:
             dep_phase = self._phase_name_for_task(dep_task)
             if dep_phase:
                 dependency_phases.append(dep_phase)
+            dep_execution_preview = self._dependency_execution_plan_preview(dep_task)
+            for index, command in enumerate(dep_execution_preview, start=1):
+                text_sources.append((f"dependency.{dep_phase}.execution_plan[{index}]", command))
             dep_artifact = dict(
                 dep_task.metadata.get("planning_artifact", {})
                 or planning_artifacts.get(dep_phase, {})
                 or {}
             )
+            dep_is_planning = dep_phase.lower().startswith("plan_")
             for key in ("steps", "acceptance_criteria"):
                 values = list(dep_artifact.get(key, []) or [])
                 for index, value in enumerate(values, start=1):
                     text_sources.append((f"dependency.{dep_phase}.{key}[{index}]", value))
-            if dep_artifact.get("objective"):
-                text_sources.append(
-                    (f"dependency.{dep_phase}.planning_artifact.objective", dep_artifact.get("objective", ""))
-                )
-            if dep_artifact.get("summary"):
-                text_sources.append(
-                    (f"dependency.{dep_phase}.planning_artifact.summary", dep_artifact.get("summary", ""))
-                )
-            dep_result = dep_task.metadata.get("result", "")
-            if dep_result:
-                text_sources.append((f"dependency.{dep_phase}.result", dep_result))
-            dep_output = phase_outputs.get(dep_phase, "")
-            if dep_output:
-                text_sources.append((f"dependency.{dep_phase}.phase_output", dep_output))
 
         filtered_sources: list[tuple[str, object]] = []
         seen_pairs: set[tuple[str, str]] = set()
@@ -2608,7 +4798,13 @@ class AITeamOrchestrator:
         checked_sources: list[dict[str, Any]] = []
         for source_name, source in text_sources:
             source_text = str(source or "").strip()
-            found = self._extract_execution_command_candidates(source_text)
+            if (
+                source_name.endswith("phase_contract.objective")
+                and not self._source_text_contains_explicit_commands(source_text)
+            ):
+                found = []
+            else:
+                found = self._extract_execution_command_candidates(source_text)
             checked_sources.append(
                 {
                     "source": source_name,
@@ -2669,6 +4865,19 @@ class AITeamOrchestrator:
         )
         return derived_plan
 
+    def _snapshot_agent_output_on_task(
+        self,
+        *,
+        task: WorkTask,
+        safe_content: str,
+    ) -> None:
+        normalized_output = str(safe_content or "").strip()
+        if not normalized_output:
+            return
+        task.metadata["_last_agent_output"] = normalized_output
+        task.metadata["result"] = normalized_output
+        self._append_agent_output_history(task, normalized_output)
+
     def _fail_task_for_missing_planning_artifact(
         self,
         *,
@@ -2682,6 +4891,11 @@ class AITeamOrchestrator:
             return False
 
         artifact = self._extract_planning_artifact(safe_content)
+        if not artifact:
+            artifact = self._derive_minimal_planning_artifact_from_narrative(
+                task=task,
+                text=safe_content,
+            )
         if artifact:
             self._persist_planning_artifact(
                 task=task,
@@ -2694,6 +4908,7 @@ class AITeamOrchestrator:
             "planning phase must emit a structured planning artifact with objective, at least "
             "two implementation steps, and at least one acceptance criterion"
         )
+        self._snapshot_agent_output_on_task(task=task, safe_content=safe_content)
         diagnostic = (
             "[PHASE_VERDICT]\n"
             f"phase_id: {phase_name}\n"
@@ -2867,10 +5082,15 @@ class AITeamOrchestrator:
             phase_id: phase_task.state.value
             for phase_id, phase_task in phase_tasks.items()
         }
+        run_verdict = dict(ws.get("run_verdict", {}) or {})
+        if not str(run_verdict.get("run_profile", "") or "").strip():
+            run_verdict["run_profile"] = str(
+                ws.get("run_profile") or task.metadata.get("run_profile") or ""
+            )
         policy = derive_lead_close_policy(
             phase_verdicts=ws.get("phase_verdicts", {}),
             phase_states=phase_states,
-            run_verdict=ws.get("run_verdict", {}),
+            run_verdict=run_verdict,
             phase_outputs=ws.get("phase_outputs", {}),
         )
         authoritative_close_state = str(
@@ -2890,7 +5110,19 @@ class AITeamOrchestrator:
                 "blocking_signals": unique_reasons,
             },
         )
-        return build_lead_close_policy_prompt_block(policy)
+        policy_block = build_lead_close_policy_prompt_block(policy)
+
+        # Para solo_lead, adjuntar el resultado de pytest si existe en workflow_state.
+        _lc_run_profile = str(
+            ws.get("run_profile") or task.metadata.get("run_profile") or ""
+        ).strip().lower()
+        if _lc_run_profile in {"solo_lead", "direct"}:
+            _pytest_result = str(ws.get("solo_lead_pytest_result", "") or "").strip()
+            if _pytest_result:
+                policy_block = (
+                    f"{policy_block}\n\n== PYTEST RESULT (solo_lead build) ==\n{_pytest_result}"
+                )
+        return policy_block
 
     # ── Gate feedback collection ────────────────────────────────────
 
@@ -2935,12 +5167,28 @@ class AITeamOrchestrator:
         # Sanitizar input de usuario antes de que llegue a cualquier agente
         task.title = self.compliance.sanitize_context(task.title)
         task.description = self.compliance.sanitize_context(task.description)
+        self._attach_existing_failure_checkpoints_to_new_task(task)
         self.taskboard.add_task(task)
+        _phase_name = str(task.metadata.get("phase", "") or "").strip().lower()
+        _mailbox_body = str(task.title or "").strip()
+        if _phase_name == "lead_close" or _phase_name.startswith("lead_"):
+            _objective = str(
+                (
+                    dict(task.metadata.get("phase_contract") or {}).get("objective")
+                    or task.metadata.get("delegation_brief")
+                    or _phase_name
+                    or "control_task"
+                )
+            ).strip()
+            _mailbox_body = (
+                f"control_task phase={_phase_name or 'unknown'} "
+                f"objective={_objective[:160]}"
+            ).strip()
         self.mailbox.send(
             sender="system",
             recipient="team_lead",
             subject=f"Nueva tarea: {task.task_id}",
-            body=f"{task.title}",
+            body=_mailbox_body,
             task_id=task.task_id,
             kind="actionable",
         )
@@ -2953,11 +5201,39 @@ class AITeamOrchestrator:
             tags=["task", "inbox"],
         )
 
+    def _attach_existing_failure_checkpoints_to_new_task(self, task: WorkTask) -> None:
+        chat_parent = str(task.metadata.get("chat_parent", "") or "").strip()
+        if not chat_parent:
+            return
+        delegate_source_phase = str(task.metadata.get("delegate_source_phase", "") or "").strip()
+        if delegate_source_phase.startswith("lead_failure_"):
+            return
+        phase_name = self._phase_name_for_task(task)
+        if phase_name == "lead_intake" or phase_name.startswith(("lead_failure_", "lead_report_")):
+            return
+        checkpoint_ids = [
+            f"{chat_parent}::{phase_name}"
+            for phase_name in self._active_failure_checkpoint_phase_names(chat_parent)
+        ]
+        if not checkpoint_ids:
+            return
+        existing = list(task.dependencies or [])
+        task.dependencies = list(dict.fromkeys(existing + checkpoint_ids))
+        if checkpoint_ids:
+            task.metadata["lead_failure_gate_dependencies"] = sorted(
+                set(list(task.metadata.get("lead_failure_gate_dependencies", [])) + checkpoint_ids)
+            )
+
     def _maybe_spawn_deferred_delegates(self, task_id: str) -> None:
         """C1: Spawn evidence delegate tasks that were deferred until the parent
         phase starts executing. Runs once per task (guarded by delegates_spawned flag)."""
         task = self.taskboard.get_task(task_id)
         if task is None:
+            return
+        if (
+            str(task.metadata.get("run_profile", "") or "").strip().lower() == "solo_lead"
+            or bool(task.metadata.get("direct_coding_executor", False))
+        ):
             return
         if task.metadata.get("delegates_spawned"):
             return
@@ -2990,7 +5266,11 @@ class AITeamOrchestrator:
                     role=role_enum,
                     complexity=Complexity.LOW,
                     criticality=criticality_enum,
-                    dependencies=[task_id],
+                    dependencies=[
+                        str(dep).strip()
+                        for dep in list(spec.get("dependencies") or [task_id])
+                        if str(dep).strip()
+                    ],
                     metadata=dict(spec.get("metadata", {})),
                 )
                 self.submit_task(child_task)
@@ -3615,6 +5895,28 @@ class AITeamOrchestrator:
                         "received_specialists": quorum_metadata["specialist_quorum_received"],
                     }
                 )
+            elif task.role in {Role.REVIEWER, Role.QA}:
+                quorum_metadata.update(
+                    {
+                        "specialist_quorum_degraded": True,
+                        "specialist_quorum_warning": (
+                            "review_or_qa_continues_without_full_specialist_quorum"
+                        ),
+                    }
+                )
+                self.taskboard.update_metadata(task.task_id, quorum_metadata)
+                self._emit_agent_event(
+                    {
+                        "type": "specialist_quorum_degraded",
+                        "task_id": task.task_id,
+                        "agent_id": assignee,
+                        "role": task.role.value,
+                        "phase": _phase,
+                        "reason": "specialist_quorum_not_met",
+                        "missing_specialists": quorum_metadata["specialist_quorum_missing"],
+                        "received_specialists": quorum_metadata["specialist_quorum_received"],
+                    }
+                )
             else:
                 self.taskboard.mark_blocked(task.task_id, reason="specialist_quorum_not_met")
                 self.taskboard.update_metadata(task.task_id, quorum_metadata)
@@ -3633,6 +5935,7 @@ class AITeamOrchestrator:
                 )
                 return
         peer_report = self._run_peer_consultation(task=task, assignee=assignee)
+        peer_report = self._sanitize_peer_consultation_report(task=task, report=peer_report)
         peer_context = peer_report.text
         decision_governance = self._build_decision_governance_context(
             task=task,
@@ -3689,7 +5992,11 @@ class AITeamOrchestrator:
 
         ab_version = str(task.metadata.get("prompt_ab_version", "A"))
         prompt = build_prompt(
-            task.role, task.title, task.description, ab_version=ab_version
+            task.role,
+            task.title,
+            task.description,
+            ab_version=ab_version,
+            task_metadata=task.metadata,
         )
 
         # ── Tool context: herramientas disponibles + recomendaciones ──
@@ -3823,7 +6130,7 @@ class AITeamOrchestrator:
             role=task.role,
             complexity=task.complexity,
             criticality=task.criticality,
-            required_capabilities=set(task.metadata.get("required_capabilities", [])),
+            required_capabilities=self._routing_capabilities_for_task(task),
             tool_specialist=str(task.metadata.get("tool_specialist", "") or "").strip(),
             tool_rewiring_preferred_specialist=str(
                 task.metadata.get("tool_rewiring_preferred_specialist", "") or ""
@@ -3843,6 +6150,11 @@ class AITeamOrchestrator:
                 if str(item).strip()
             },
             approved_adapters=self.compliance.approved_adapters(task.metadata),
+            preferred_adapters={
+                str(name).strip()
+                for name in list(task.metadata.get("preferred_adapters", []) or [])
+                if str(name).strip()
+            },
             excluded_adapters={
                 str(name).strip()
                 for name in list(task.metadata.get("excluded_adapters", []) or [])
@@ -3909,7 +6221,7 @@ class AITeamOrchestrator:
                     except Exception:
                         pass
 
-        decision = self.router.route_and_invoke(
+        decision = self._route_and_invoke_with_compat(
             request=request,
             prompt=prompt,
             task_id=task.task_id,
@@ -3951,7 +6263,7 @@ class AITeamOrchestrator:
                 if suggestion_report.integrated_adapters:
                     self._sync_router_external_adapters()
                     session.record_action("llm_call", "retry_after_tool_discovery")
-                    decision = self.router.route_and_invoke(
+                    decision = self._route_and_invoke_with_compat(
                         request=request,
                         prompt=prompt,
                         task_id=task.task_id,
@@ -3970,7 +6282,12 @@ class AITeamOrchestrator:
                     tool_rewiring_preferred_specialist=request.tool_rewiring_preferred_specialist,
                     prefer_economic_routing=request.prefer_economic_routing,
                     preferred_tool_tier=request.preferred_tool_tier,
+                    skill_targets=set(request.skill_targets or set()),
+                    lsp_targets=set(request.lsp_targets or set()),
                     approved_adapters=request.approved_adapters,
+                    preferred_adapters=set(request.preferred_adapters or set()),
+                    excluded_adapters=set(request.excluded_adapters or set()),
+                    excluded_providers=set(request.excluded_providers or set()),
                     sensitive_approval=request.sensitive_approval,
                     environment=request.environment,
                 )
@@ -3978,7 +6295,7 @@ class AITeamOrchestrator:
                     "llm_call",
                     f"adaptive_retry_{retry_count + 1}:relaxed_capabilities",
                 )
-                decision = self.router.route_and_invoke(
+                decision = self._route_and_invoke_with_compat(
                     request=fallback_request,
                     prompt=prompt,
                     task_id=task.task_id,
@@ -4018,9 +6335,14 @@ class AITeamOrchestrator:
             decision=decision,
             task_id=task.task_id,
         )
+        persisted_user_turn = self._build_persisted_thread_task_turn(
+            task,
+            gate_iteration=gate_iteration,
+            current_user_turn=current_user_turn,
+        )
         thread.append_turn(
             role="user",
-            content=current_user_turn,
+            content=persisted_user_turn,
             source="task_retry" if gate_iteration > 0 else "task",
             task_id=task.task_id,
         )
@@ -4114,7 +6436,7 @@ class AITeamOrchestrator:
                     + "\n\nContinua con tu tarea usando los resultados anteriores.",
                 },
             ]
-            decision = self.router.route_and_invoke(
+            decision = self._route_and_invoke_with_compat(
                 request=request,
                 prompt=prompt,
                 task_id=task.task_id,
@@ -4128,6 +6450,7 @@ class AITeamOrchestrator:
 
         if decision.success:
             safe_content = self.compliance.redact_text(decision.response.content)
+            _specialist_name_early = str(task.metadata.get("tool_specialist", "") or "").strip().lower()
 
             # ── Agent tool invocation: parsear [USE_TOOL] y ejecutar ──
             if self._USE_TOOL_RE.search(safe_content):
@@ -4147,25 +6470,88 @@ class AITeamOrchestrator:
             ):
                 return
 
-            # Sanitización programática de fases plan_*: strip code fences antes
-            # del drift check. El agente no puede emitir código — si lo hace,
-            # se elimina automáticamente en lugar de fallar toda la fase.
             _plan_phase_name = self._phase_name_for_task(task).lower()
+            _raw_planning_content = safe_content
+            if _plan_phase_name == "plan_risks":
+                safe_content, _risks_sanitized = self._sanitize_plan_risks_output(
+                    safe_content
+                )
+                if _risks_sanitized:
+                    task.metadata["plan_risks_output_sanitized"] = True
+                    self.event_logger.emit(
+                        "plan_risks_output_sanitized",
+                        {
+                            "task_id": task.task_id,
+                            "phase": _plan_phase_name,
+                            "assignee": assignee,
+                        },
+                    )
+                _raw_planning_content = safe_content
+
+            # Para planning, validamos drift antes del parser/materializacion.
+            # En plan_risks primero saneamos lineas operativas residuales para
+            # no tumbar una salida estructurada correcta por narrativa sobrante.
+            if self._fail_task_for_planning_phase_implementation_drift(
+                task=task,
+                assignee=assignee,
+                safe_content=_raw_planning_content,
+                session=session,
+            ):
+                return
+
             if _plan_phase_name.startswith("plan_"):
                 safe_content, _code_stripped = self._sanitize_planning_phase_output(safe_content)
                 if _code_stripped:
                     self.event_logger.emit(
                         "planning_phase_code_stripped",
-                        {"task_id": task.task_id, "phase": _plan_phase_name, "assignee": assignee},
+                            {"task_id": task.task_id, "phase": _plan_phase_name, "assignee": assignee},
+                        )
+                safe_content = self._repair_plan_risks_upstream_relitigation(
+                    task=task,
+                    safe_content=safe_content,
+                    assignee=assignee,
+                )
+            elif task.role == Role.REVIEWER:
+                safe_content, _review_sanitized = self._sanitize_review_output(safe_content)
+                if _review_sanitized:
+                    task.metadata["review_output_sanitized"] = True
+                    self.event_logger.emit(
+                        "review_output_sanitized",
+                        {
+                            "task_id": task.task_id,
+                            "phase": _plan_phase_name,
+                            "assignee": assignee,
+                        },
+                    )
+            elif task.role == Role.TEAM_LEAD and _plan_phase_name == "lead_close":
+                safe_content, _lead_close_sanitized = self._sanitize_lead_close_output(safe_content)
+                if _lead_close_sanitized:
+                    task.metadata["lead_close_output_sanitized"] = True
+                    self.event_logger.emit(
+                        "lead_close_output_sanitized",
+                        {
+                            "task_id": task.task_id,
+                            "phase": _plan_phase_name,
+                            "assignee": assignee,
+                        },
                     )
 
-            if self._fail_task_for_planning_phase_implementation_drift(
-                task=task,
-                assignee=assignee,
-                safe_content=safe_content,
-                session=session,
-            ):
-                return
+            if _specialist_name_early == "test_runner":
+                safe_content, _test_runner_sanitized = self._sanitize_test_runner_output(
+                    task=task,
+                    content=safe_content,
+                    workspace=workspace,
+                )
+                if _test_runner_sanitized:
+                    task.metadata["test_runner_output_sanitized"] = True
+                    self.event_logger.emit(
+                        "test_runner_output_sanitized",
+                        {
+                            "task_id": task.task_id,
+                            "phase": _plan_phase_name,
+                            "assignee": assignee,
+                        },
+                    )
 
             if self._fail_task_for_contract_path_drift(
                 task=task,
@@ -4187,14 +6573,52 @@ class AITeamOrchestrator:
             # Fallback cuando filesystem_mcp no esta disponible: el Engineer
             # incluye codigo con ```lang path=archivo.py en su output y el
             # orchestrator lo escribe directamente al workspace del proyecto.
-            if task.role == Role.ENGINEER and not self._phase_name_for_task(task).lower().startswith("plan_"):
+            if (
+                (
+                    task.role == Role.ENGINEER
+                    or bool(task.metadata.get("direct_coding_executor", False))
+                )
+                and not self._phase_name_for_task(task).lower().startswith("plan_")
+            ):
                 self._extract_and_write_code_blocks(task, safe_content)
+
+                # Post-write validation para solo_lead / direct_coding_executor:
+                # corre py_compile en cada .py escrito. Si falla → mark_failed con
+                # el error real; nunca marcar completed con archivos rotos.
+                if bool(task.metadata.get("direct_coding_executor", False)):
+                    _pw_error = self._solo_lead_post_write_validation(task)
+                    if _pw_error:
+                        self.taskboard.mark_failed(task.task_id, error=_pw_error)
+                        self._maybe_spawn_lead_failure_checkpoint(task, _pw_error)
+                        self.event_logger.emit(
+                            "solo_lead_build_failed_post_write",
+                            {
+                                "task_id": task.task_id,
+                                "phase": _phase_name,
+                                "error": _pw_error[:300],
+                                "artifact_paths": list(task.metadata.get("artifact_paths", []) or [])[:8],
+                            },
+                        )
+                        self.session_store.close_session(
+                            session, summary=f"post_write_syntax_error:{_pw_error[:120]}", status="failed"
+                        )
+                        return
+                    task.metadata["post_write_validated"] = True
+
+                    # Gap 4: correr pytest tras escritura exitosa y guardar resultado
+                    # para que lead_close lo consuma. No bloquea si pytest falla —
+                    # el Lead decide si el fallo requiere reparacion.
+                    _pytest_task_root = self._task_root(task.task_id)
+                    task.metadata["solo_lead_pytest_result"] = self._run_solo_lead_pytest(
+                        task, _pytest_task_root
+                    )
 
             found_placeholders = [
                 label
                 for label, pattern in _PLACEHOLDER_OUTPUT_PATTERNS
                 if pattern.search(safe_content)
             ]
+            found_placeholders = self._effective_placeholder_labels(task, found_placeholders)
             if found_placeholders and not task.metadata.get("skip_placeholder_check"):
                 reason = f"Placeholder detected: {', '.join(found_placeholders)}"
                 self.taskboard.mark_failed(task.task_id, error=reason)
@@ -4230,9 +6654,10 @@ class AITeamOrchestrator:
                     toolset_used=list(task.metadata.get("tool_specialist_tool_families", []) or []),
                     tokens_used=decision.response.input_tokens + decision.response.output_tokens,
                 )
-                reports = list(task.metadata.get("specialist_reports", []) or [])
-                reports.append(parsed_report.to_metadata())
-                task.metadata["specialist_reports"] = reports
+                _report_added = self._append_specialist_report_once(
+                    task=task,
+                    report=parsed_report.to_metadata(),
+                )
                 self.event_logger.emit(
                     "specialist_report_parsed",
                     {
@@ -4243,6 +6668,7 @@ class AITeamOrchestrator:
                         "validation_status": parsed_report.validation_status,
                         "validation_errors": list(parsed_report.validation_errors),
                         "report_version": parsed_report.report_version,
+                        "deduplicated": not _report_added,
                     },
                 )
             thread.append_turn(
@@ -4288,22 +6714,39 @@ class AITeamOrchestrator:
                 )
                 if _mid_clarify:
                     _mid_cq = _mid_clarify.group(1).strip()
-                    _wstate_root = self._task_root(task.task_id)
-                    _wstate_phase = _phase_name or task.role.value
-                    self._update_workflow_state(_wstate_root, _wstate_phase, safe_content)
-                    self.taskboard.mark_waiting_user(task.task_id, question=_mid_cq)
-                    self.event_logger.emit(
-                        "chat_waiting_user",
-                        {
-                            "task_id": task.task_id,
-                            "phase": _phase_name,
-                            "question": _mid_cq,
-                        },
-                    )
-                    self.session_store.close_session(
-                        session, summary="mid_run_waiting_user", status="paused"
-                    )
-                    return
+                    if self._direct_profile_should_suppress_midrun_clarify(task, _mid_cq):
+                        self.event_logger.emit(
+                            "direct_profile_clarify_suppressed",
+                            {
+                                "task_id": task.task_id,
+                                "phase": _phase_name,
+                                "question": _mid_cq[:500],
+                                "reason": "solo_lead_autonomy",
+                            },
+                        )
+                        safe_content = _re_mid.sub(
+                            r'\[CLARIFY:\s*".+?"\]',
+                            "[CLARIFY_SUPPRESSED: solo_lead repair-first continues autonomously]",
+                            safe_content,
+                            flags=_re_mid.DOTALL | _re_mid.IGNORECASE,
+                        )
+                    else:
+                        _wstate_root = self._task_root(task.task_id)
+                        _wstate_phase = _phase_name or task.role.value
+                        self._update_workflow_state(_wstate_root, _wstate_phase, safe_content)
+                        self.taskboard.mark_waiting_user(task.task_id, question=_mid_cq)
+                        self.event_logger.emit(
+                            "chat_waiting_user",
+                            {
+                                "task_id": task.task_id,
+                                "phase": _phase_name,
+                                "question": _mid_cq,
+                            },
+                        )
+                        self.session_store.close_session(
+                            session, summary="mid_run_waiting_user", status="paused"
+                        )
+                        return
 
             # Evidence gate: solo para fases de build/ejecucion, no para plan_* ni scouts
             _is_planning_phase = _is_scout_task or _phase_name.startswith("plan_") or _phase_name in (
@@ -4313,6 +6756,7 @@ class AITeamOrchestrator:
             )
             # Guardar output del agente para evidence gate conversacional
             task.metadata["_last_agent_output"] = safe_content
+            self._append_agent_output_history(task, safe_content)
             # Auto-detectar tarea conversacional/teorica si no ya marcada
             if not task.metadata.get("conversational") and not _is_planning_phase:
                 if self._detect_conversational_task(task):
@@ -4345,6 +6789,173 @@ class AITeamOrchestrator:
                     )
                     return
                 task.metadata["evidence_reason"] = reason
+
+            if self._fail_task_for_ungrounded_evidence_output(
+                task=task,
+                assignee=assignee,
+                safe_content=safe_content,
+                workspace=workspace,
+                session=session,
+            ):
+                return
+
+            verdict = extract_phase_verdict(safe_content, phase_id=_phase)
+            verdict_status = str(verdict.get("status", "") or "").strip().lower()
+            if (
+                verdict_status in {"blocked", "partial", "rejected", "failed"}
+                and not _is_scout_task
+                and task.role != Role.TEAM_LEAD
+            ):
+                self._update_workflow_state(
+                    self._task_root(task.task_id),
+                    _phase,
+                    safe_content,
+                )
+                is_chat_phase = bool(task.metadata.get("phase_contract_enforced")) or bool(
+                    task.metadata.get("chat_parent")
+                ) or self._task_root(task.task_id).startswith("CHAT-")
+                if (
+                    is_chat_phase
+                    and task.role == Role.RESEARCHER
+                    and verdict_status in {"blocked", "partial"}
+                ):
+                    self._complete_research_phase_as_degraded(
+                        task=task,
+                        assignee=assignee,
+                        safe_content=safe_content,
+                        verdict_status=verdict_status,
+                        session=session,
+                    )
+                    return
+                if verdict_status in {"blocked", "partial"}:
+                    ungrounded_block = self._detect_ungrounded_phase_block_issue(
+                        task=task,
+                        safe_content=safe_content,
+                        workspace=workspace,
+                    )
+                    if ungrounded_block:
+                        if self._retry_executor_on_stale_dependency_block(
+                            task=task,
+                            assignee=assignee,
+                            safe_content=safe_content,
+                            issue=ungrounded_block,
+                            session=session,
+                        ):
+                            return
+                        if self._retry_executor_on_recoverable_ungrounded_phase_block(
+                            task=task,
+                            assignee=assignee,
+                            safe_content=safe_content,
+                            issue=ungrounded_block,
+                            session=session,
+                        ):
+                            return
+                        if self._complete_validation_visibility_issue_as_degraded(
+                            task=task,
+                            assignee=assignee,
+                            safe_content=safe_content,
+                            issue=ungrounded_block,
+                            session=session,
+                        ):
+                            return
+                        summary = "ungrounded_phase_block"
+                        visible_files = list(ungrounded_block.get("visible_files", []) or [])
+                        dependency_artifacts = list(
+                            ungrounded_block.get("dependency_artifacts", []) or []
+                        )
+                        if visible_files:
+                            summary += f" | visible={', '.join(visible_files[:4])}"
+                        if dependency_artifacts:
+                            summary += (
+                                f" | dependency_artifacts={', '.join(dependency_artifacts[:4])}"
+                            )
+                        self.taskboard.mark_failed(
+                            task.task_id,
+                            error=f"ungrounded_phase_block_detected: {summary}",
+                        )
+                        self.taskboard.update_metadata(
+                            task.task_id,
+                            {
+                                "result": safe_content,
+                                "ungrounded_phase_block_issue": dict(ungrounded_block),
+                            },
+                        )
+                        self.event_logger.emit(
+                            "ungrounded_phase_block_detected",
+                            {
+                                "task_id": task.task_id,
+                                "assignee": assignee,
+                                "phase": _phase,
+                                **dict(ungrounded_block),
+                            },
+                        )
+                        self._emit_agent_event(
+                            {
+                                "type": "agent_failed",
+                                "task_id": task.task_id,
+                                "agent_id": assignee,
+                                "role": task.role.value,
+                                "phase": _phase,
+                                "error": summary,
+                                "full_text": safe_content,
+                                "duration_ms": int(decision.response.latency_ms),
+                                "provider": decision.provider,
+                                "model": decision.model,
+                                "channel": decision.channel.value,
+                            }
+                        )
+                    else:
+                        self.taskboard.mark_blocked(
+                            task.task_id,
+                            reason=(
+                                "phase_self_reported_partial"
+                                if verdict_status == "partial"
+                                else "phase_self_reported_blocked"
+                            ),
+                        )
+                        self.taskboard.update_metadata(task.task_id, {"result": safe_content})
+                        self._emit_agent_event(
+                            {
+                                "type": "agent_blocked",
+                                "task_id": task.task_id,
+                                "agent_id": assignee,
+                                "role": task.role.value,
+                                "phase": _phase,
+                                "preview": safe_content[:200] if safe_content else "",
+                                "full_text": safe_content,
+                                "duration_ms": int(decision.response.latency_ms),
+                                "provider": decision.provider,
+                                "model": decision.model,
+                                "channel": decision.channel.value,
+                            }
+                        )
+                else:
+                    self.taskboard.mark_failed(
+                        task.task_id,
+                        error=str(verdict.get("summary", "") or verdict_status),
+                    )
+                    self.taskboard.update_metadata(task.task_id, {"result": safe_content})
+                    self._emit_agent_event(
+                        {
+                            "type": "agent_failed",
+                            "task_id": task.task_id,
+                            "agent_id": assignee,
+                            "role": task.role.value,
+                            "phase": _phase,
+                            "error": str(verdict.get("summary", "") or safe_content[:200]),
+                            "full_text": safe_content,
+                            "duration_ms": int(decision.response.latency_ms),
+                            "provider": decision.provider,
+                            "model": decision.model,
+                            "channel": decision.channel.value,
+                        }
+                    )
+                self.session_store.close_session(
+                    session,
+                    summary=f"phase_verdict:{verdict_status}",
+                    status="failed" if verdict_status in {"rejected", "failed"} else "completed",
+                )
+                return
 
             if self._should_open_quality_gates(task):
                 self._spawn_quality_gates(task)
@@ -4382,66 +6993,32 @@ class AITeamOrchestrator:
                 )
                 return
 
-            verdict = extract_phase_verdict(safe_content, phase_id=_phase)
-            verdict_status = str(verdict.get("status", "") or "").strip().lower()
-            if (
-                verdict_status in {"blocked", "rejected", "failed"}
-                and not _is_scout_task
-                and task.role != Role.TEAM_LEAD
-            ):
-                self._update_workflow_state(
-                    self._task_root(task.task_id),
-                    _phase,
-                    safe_content,
-                )
-                if verdict_status == "blocked":
-                    self.taskboard.mark_blocked(
-                        task.task_id,
-                        reason="phase_self_reported_blocked",
-                    )
-                    self.taskboard.update_metadata(task.task_id, {"result": safe_content})
-                    self._emit_agent_event(
-                        {
-                            "type": "agent_blocked",
-                            "task_id": task.task_id,
-                            "agent_id": assignee,
-                            "role": task.role.value,
-                            "phase": _phase,
-                            "preview": safe_content[:200] if safe_content else "",
-                            "full_text": safe_content,
-                            "duration_ms": int(decision.response.latency_ms),
-                            "provider": decision.provider,
-                            "model": decision.model,
-                            "channel": decision.channel.value,
-                        }
-                    )
-                else:
-                    self.taskboard.mark_failed(
-                        task.task_id,
-                        error=str(verdict.get("summary", "") or verdict_status),
-                    )
-                    self.taskboard.update_metadata(task.task_id, {"result": safe_content})
-                    self._emit_agent_event(
-                        {
-                            "type": "agent_failed",
-                            "task_id": task.task_id,
-                            "agent_id": assignee,
-                            "role": task.role.value,
-                            "phase": _phase,
-                            "error": str(verdict.get("summary", "") or safe_content[:200]),
-                            "full_text": safe_content,
-                            "duration_ms": int(decision.response.latency_ms),
-                            "provider": decision.provider,
-                            "model": decision.model,
-                            "channel": decision.channel.value,
-                        }
-                    )
-                self.session_store.close_session(
-                    session,
-                    summary=f"phase_verdict:{verdict_status}",
-                    status="failed" if verdict_status in {"rejected", "failed"} else "completed",
-                )
-                return
+            # Guardia post-write para solo_lead: si el Lead escribió archivos .py
+            # via filesystem_mcp (no code blocks) y no hay validación registrada,
+            # corre py_compile como safety net antes de marcar completed.
+            if bool(task.metadata.get("direct_coding_executor", False)):
+                _artifacts = [
+                    p for p in list(task.metadata.get("artifact_paths", []) or [])
+                    if str(p).strip().endswith(".py")
+                ]
+                if _artifacts and not task.metadata.get("post_write_validated"):
+                    _pw_late_error = self._solo_lead_post_write_validation(task)
+                    if _pw_late_error:
+                        self.taskboard.mark_failed(task.task_id, error=_pw_late_error)
+                        self._maybe_spawn_lead_failure_checkpoint(task, _pw_late_error)
+                        self.event_logger.emit(
+                            "solo_lead_build_failed_late_validation",
+                            {
+                                "task_id": task.task_id,
+                                "phase": _phase_name,
+                                "error": _pw_late_error[:300],
+                            },
+                        )
+                        self.session_store.close_session(
+                            session, summary=f"late_post_write_error:{_pw_late_error[:120]}", status="failed"
+                        )
+                        return
+                    task.metadata["post_write_validated"] = True
 
             self.taskboard.mark_completed(task.task_id, details=safe_content)
             self._emit_agent_event(
@@ -6036,8 +8613,24 @@ class AITeamOrchestrator:
     def _needs_peer_consultation(task: WorkTask) -> bool:
         if task.metadata.get("skip_peer_consultation"):
             return False
+        run_profile = str(task.metadata.get("run_profile", "") or "").strip().lower()
+        if run_profile in {"solo_lead", "direct"} or task.metadata.get(
+            "direct_coding_executor"
+        ):
+            return False
         if task.metadata.get("require_peer_consultation"):
             return True
+        phase_name = str(task.metadata.get("phase", "") or "").strip().lower()
+        if phase_name == "lead_close":
+            return False
+        if phase_name.startswith("plan_"):
+            return False
+        if task.role in {Role.ENGINEER, Role.REVIEWER, Role.QA}:
+            return False
+        if task.metadata.get("advisory_context_phase") or task.metadata.get(
+            "advisory_planning_phase"
+        ):
+            return False
         return task.complexity.value in {
             "medium",
             "high",
@@ -6233,6 +8826,15 @@ class AITeamOrchestrator:
         if dep_context:
             lines.append("Resultados de fases anteriores:")
             lines.append(dep_context)
+        if self._phase_name_for_task(task).lower() == "plan_risks":
+            completed_artifacts = self._completed_dependency_planning_artifacts(task)
+            if completed_artifacts:
+                authority_bits = [
+                    f"- {phase}: state=completed; planning_artifact autoritativo disponible"
+                    for phase, _artifact in completed_artifacts[:3]
+                ]
+                lines.append("Dependencias autoritativas de planning:")
+                lines.extend(authority_bits)
 
         # ── Facts del equipo (workflow state) ──
         ws = self.workflow_state.get(task_root, {})
@@ -6717,6 +9319,13 @@ class AITeamOrchestrator:
     ) -> str:
         delegation_brief = str(task.metadata.get("delegation_brief", "") or "").strip()
         phase_contract_block = self._build_runtime_phase_contract_block(task)
+        normalized_phase = self._phase_name_for_task(task).lower()
+        is_compact_executor_phase = (
+            task.role in {Role.ENGINEER, Role.REVIEWER, Role.QA}
+            and not normalized_phase.startswith("plan_")
+            and not normalized_phase.startswith("lead_")
+            and bool(task.metadata.get("phase_contract_enforced"))
+        )
         if gate_iteration > 0:
             retry_parts = [
                 f"Retry de la tarea {task.task_id}.",
@@ -6739,6 +9348,28 @@ class AITeamOrchestrator:
             )
             return "\n\n".join(retry_parts)
 
+        if is_compact_executor_phase:
+            parts = [
+                f"Tarea actual: {task.task_id}",
+                f"Titulo: {task.title}",
+                "Modo de ejecucion: sigue el contrato del Lead sin reinterpretar la solicitud original ni reabrir el slice.",
+                "Entrega: solo decision ejecutora, evidencia material, cambios concretos y siguiente accion inmediata.",
+            ]
+            if phase_contract_block:
+                parts.append(f"Contrato de fase vigente:\n{phase_contract_block}")
+            for block in (
+                self._context_block("Delegation brief", delegation_brief, 500),
+                self._context_block("Contexto operativo", context, 900),
+                self._context_block("Resultados de ejecucion", execution_context, 900),
+                self._context_block("Feedback de revision", review_feedback, 900),
+            ):
+                if block:
+                    parts.append(block)
+            parts.append(
+                "No reinterpretes la solicitud inicial del usuario. Si el contrato es ambiguo o invalido, reporta la contradiccion concreta y para."
+            )
+            return "\n\n".join(parts)
+
         parts = [
             f"Tarea actual: {task.task_id}",
             f"Titulo: {task.title}",
@@ -6746,8 +9377,24 @@ class AITeamOrchestrator:
             f"Gate iteration: {gate_iteration}",
             "Entrega: propuesta, evidencia, aportes considerados, decision final, plan ejecutable inmediato y definition of done.",
         ]
+        if normalized_phase.startswith("plan_"):
+            parts.append(
+                "FORMATO DE RESPUESTA: esquema compacto. Usa secciones cortas y bullets; evita auditorias narrativas largas."
+            )
+        elif normalized_phase == "lead_intake":
+            parts.append(
+                "FORMATO DE RESPUESTA: decide de forma compacta. Prioriza objetivo, slice, fases y siguiente accion."
+            )
         if phase_contract_block:
             parts.append(f"Contrato de fase vigente:\n{phase_contract_block}")
+
+        # Gap 3: inyectar contenido de archivos del workspace para build en solo_lead.
+        # El Lead escribe codigo ciego sin ver los archivos existentes → esto corrige eso.
+        if bool(task.metadata.get("direct_coding_executor", False)) and normalized_phase == "build":
+            _ws_ctx = self._build_solo_lead_workspace_context(task)
+            if _ws_ctx:
+                parts.append(_ws_ctx)
+
         for block in (
                 self._context_block("Delegation brief", delegation_brief, 800),
                 self._context_block("Lead Close Policy", lead_close_policy, 1800),
@@ -6766,6 +9413,74 @@ class AITeamOrchestrator:
             "Responde de forma eficiente: poco relleno, detalle solo donde cambie la decision o la ejecucion."
         )
         return "\n\n".join(parts)
+
+    def _build_persisted_thread_task_turn(
+        self,
+        task: WorkTask,
+        *,
+        gate_iteration: int,
+        current_user_turn: str,
+    ) -> str:
+        phase_name = str(task.metadata.get("phase", "") or "").strip()
+        normalized_phase = phase_name.lower()
+        if (
+            task.role in {Role.ENGINEER, Role.REVIEWER, Role.QA}
+            and not normalized_phase.startswith("plan_")
+            and not normalized_phase.startswith("lead_")
+            and bool(task.metadata.get("phase_contract_enforced"))
+        ):
+            compact_bits = [
+                f"Tarea ejecutora: {task.task_id}",
+                f"Fase: {phase_name or task.title}",
+            ]
+            phase_contract = dict(task.metadata.get("phase_contract") or {})
+            objective = str(
+                phase_contract.get("objective")
+                or task.metadata.get("delegation_brief")
+                or ""
+            ).strip()
+            if objective:
+                compact_bits.append(
+                    "Objetivo compacto: " + " ".join(objective.split())[:280]
+                )
+            if gate_iteration > 0:
+                compact_bits.append(f"Retry gate_iteration={gate_iteration}")
+            return "\n".join(compact_bits)
+        if normalized_phase == "lead_close" or normalized_phase.startswith("lead_"):
+            compact_bits = [
+                f"Tarea de control: {task.task_id}",
+            ]
+            if phase_name:
+                compact_bits.append(f"Fase: {phase_name}")
+            if gate_iteration > 0:
+                compact_bits.append(f"Retry gate_iteration={gate_iteration}")
+            phase_contract = dict(task.metadata.get("phase_contract") or {})
+            objective = str(
+                phase_contract.get("objective")
+                or task.metadata.get("delegation_brief")
+                or ""
+            ).strip()
+            if not objective and normalized_phase.startswith("lead_preflight_"):
+                preflight_phase = str(task.metadata.get("preflight_phase", "") or "").strip()
+                sensitive_reasons = ", ".join(
+                    str(item).strip()
+                    for item in list(task.metadata.get("preflight_sensitive_reasons", []) or [])
+                    if str(item).strip()
+                )
+                objective = (
+                    f"Autorizar fase sensible {preflight_phase or task.title}."
+                    + (f" Motivos: {sensitive_reasons}." if sensitive_reasons else "")
+                ).strip()
+            if not objective and normalized_phase == "lead_close":
+                objective = "Sintetizar el run, decidir cierre y siguiente paso."
+            if not objective:
+                objective = phase_name or "control_task"
+            if objective:
+                compact_bits.append(
+                    "Objetivo compacto: " + " ".join(objective.split())[:240]
+                )
+            return "\n".join(compact_bits)
+        return current_user_turn
 
     def _build_task_messages(
         self,
@@ -6803,11 +9518,18 @@ class AITeamOrchestrator:
             run_health_report=run_health_report,
             lead_close_policy=lead_close_policy,
         )
-        thread_messages = self._thread_messages(
-            thread,
-            task_root=self._task_root(task.task_id),
-            limit=6,
-        )
+        if (
+            task.role in {Role.ENGINEER, Role.REVIEWER, Role.QA}
+            and not self._phase_name_for_task(task).lower().startswith("plan_")
+            and bool(task.metadata.get("phase_contract_enforced"))
+        ):
+            thread_messages = []
+        else:
+            thread_messages = self._thread_messages(
+                thread,
+                task_root=self._task_root(task.task_id),
+                limit=6,
+            )
         messages = [{"role": "system", "content": system_message}]
         messages.extend(thread_messages)
         messages.append({"role": "user", "content": current_user_turn})

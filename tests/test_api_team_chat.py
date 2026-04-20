@@ -1,8 +1,10 @@
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -12,8 +14,9 @@ from fastapi.testclient import TestClient
 
 import api.main as api_main
 from api.chat_quality import _evaluate_phase_evidence_gate
-from api.utils import PROJECT_ROOT, resolve_runtime_dir
+from api.utils import PROJECT_ROOT, _read_runtime_workflow_state, resolve_runtime_dir
 from aiteam.config import build_default_router_policy
+from aiteam.context_curator import ContextCuratorStore
 from aiteam.orchestrator import AITeamOrchestrator
 from aiteam.router import HybridRouter
 from aiteam.adapters.base import ModelAdapter
@@ -39,6 +42,16 @@ def _parse_sse_result(response) -> dict:
         return {}
 
 
+@contextmanager
+def _safe_tempdir(prefix: str):
+    root = Path(".pytest-tmp-safe") / f"{prefix}-{uuid4().hex}"
+    root.mkdir(parents=True, exist_ok=False)
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def _load_runtime_tasks(runtime_dir: Path) -> list[dict]:
     return SqliteStore(runtime_dir / "aiteam.db").load_all_tasks()
 
@@ -61,6 +74,573 @@ pytestmark = pytest.mark.slow
 
 
 class GatePhaseResolutionTests(unittest.TestCase):
+    def test_default_phases_are_bound_to_authoritative_lead_objective(self) -> None:
+        phases = [
+            PhaseSpec(
+                phase_id="plan_engineering",
+                role="ENGINEER",
+                objective="Define corte de implementacion.",
+                depends_on=[],
+            ),
+            PhaseSpec(
+                phase_id="build",
+                role="ENGINEER",
+                objective="Ejecuta exactamente el slice aprobado.",
+                depends_on=["plan_engineering"],
+            ),
+        ]
+
+        bound = api_main._bind_default_phases_to_lead_objective(
+            phases,
+            plan_source="default",
+            lead_output=(
+                "## [OBJECTIVE]\n"
+                "Implementar generación de Tabla de Contenidos navegable con profundidad configurable.\n"
+                "## Siguiente"
+            ),
+            user_message="Start next slice",
+        )
+
+        self.assertIn("Tabla de Contenidos navegable", bound[0].objective)
+        self.assertIn("No sustituyas este objetivo", bound[0].objective)
+        self.assertIn("Tabla de Contenidos navegable", bound[1].objective)
+        self.assertIn("menor cambio coherente", bound[1].objective)
+
+    def test_authoritative_lead_objective_uses_slice_objective_not_yaml_pipe(self) -> None:
+        objective = api_main._extract_authoritative_lead_objective(
+            lead_output=(
+                "```yaml\n"
+                "[RUN_MODE]\n"
+                "slice_objective: \"Implementar TOC con anclas MD y flags CLI\"\n"
+                "[CONTEXT]\n"
+                "workspace_state: |\n"
+                "  src/md_report/{cli.py,generator.py}\n"
+                "```\n"
+            ),
+            user_message="Start next slice",
+        )
+
+        self.assertEqual(objective, "Implementar TOC con anclas MD y flags CLI")
+
+    def test_phase_defaults_to_skip_peer_consultation_for_planning_and_advisory(self) -> None:
+        self.assertTrue(
+            api_main._phase_defaults_to_skip_peer_consultation(
+                "plan_engineering",
+                "ENGINEER",
+            )
+        )
+        self.assertTrue(
+            api_main._phase_defaults_to_skip_peer_consultation(
+                "research_current_toc_state",
+                "RESEARCHER",
+                advisory_context_phase=True,
+            )
+        )
+        self.assertTrue(
+            api_main._phase_defaults_to_skip_peer_consultation(
+                "build",
+                "ENGINEER",
+            )
+        )
+        self.assertTrue(
+            api_main._phase_defaults_to_skip_peer_consultation(
+                "lead_close",
+                "TEAM_LEAD",
+            )
+        )
+
+    def test_phase_defaults_to_skip_specialist_prefetch_for_planning_and_advisory(self) -> None:
+        self.assertTrue(
+            api_main._phase_defaults_to_skip_specialist_prefetch(
+                "plan_risks",
+                "REVIEWER",
+            )
+        )
+        self.assertTrue(
+            api_main._phase_defaults_to_skip_specialist_prefetch(
+                "research_current_toc_state",
+                "RESEARCHER",
+                advisory_context_phase=True,
+            )
+        )
+        self.assertTrue(
+            api_main._phase_defaults_to_skip_specialist_prefetch(
+                "build",
+                "ENGINEER",
+            )
+        )
+        self.assertTrue(
+            api_main._phase_defaults_to_skip_specialist_prefetch(
+                "lead_close",
+                "TEAM_LEAD",
+            )
+        )
+
+    def test_normalize_advisory_context_phase_specs_removes_hard_dependency_from_build_flow(self) -> None:
+        phases = [
+            PhaseSpec(
+                phase_id="research_current_toc_state",
+                role="RESEARCHER",
+                objective="Audita el estado actual del repo.",
+                depends_on=[],
+            ),
+            PhaseSpec(
+                phase_id="implement_toc_feature",
+                role="ENGINEER",
+                objective="Implementa TOC.",
+                depends_on=["research_current_toc_state"],
+            ),
+            PhaseSpec(
+                phase_id="review_toc_implementation",
+                role="REVIEWER",
+                objective="Revisa TOC.",
+                depends_on=["implement_toc_feature", "research_current_toc_state"],
+            ),
+        ]
+        normalized = api_main._normalize_advisory_context_phase_specs(phases)
+        normalized_by_id = {spec.phase_id: spec for spec in normalized}
+        self.assertEqual(
+            normalized_by_id["research_current_toc_state"].role,
+            "SCOUT",
+        )
+        self.assertEqual(
+            normalized_by_id["implement_toc_feature"].depends_on,
+            [],
+        )
+        self.assertEqual(
+            normalized_by_id["review_toc_implementation"].depends_on,
+            ["implement_toc_feature"],
+        )
+
+    def test_normalize_advisory_planning_phase_specs_removes_hard_dependency_from_incremental_flow(self) -> None:
+        phases = [
+            PhaseSpec(
+                phase_id="plan_research",
+                role="RESEARCHER",
+                objective="Compacta restricciones y riesgos.",
+                depends_on=[],
+            ),
+            PhaseSpec(
+                phase_id="plan_engineering",
+                role="ENGINEER",
+                objective="Define el slice implementable.",
+                depends_on=["plan_research"],
+            ),
+            PhaseSpec(
+                phase_id="plan_risks",
+                role="REVIEWER",
+                objective="Lista riesgos y quality gates.",
+                depends_on=["plan_research", "plan_engineering"],
+            ),
+            PhaseSpec(
+                phase_id="build",
+                role="ENGINEER",
+                objective="Implementa el slice.",
+                depends_on=["plan_engineering", "plan_risks"],
+            ),
+        ]
+        normalized = api_main._normalize_advisory_context_phase_specs(phases)
+        normalized_by_id = {spec.phase_id: spec for spec in normalized}
+        self.assertEqual(normalized_by_id["plan_engineering"].depends_on, [])
+        self.assertEqual(normalized_by_id["plan_risks"].depends_on, ["plan_engineering"])
+        self.assertEqual(
+            normalized_by_id["build"].depends_on,
+            ["plan_engineering", "plan_risks"],
+        )
+
+    def test_actionable_failed_phase_ignores_advisory_context_research_phase(self) -> None:
+        task_rows = {
+            "research_current_toc_state": WorkTask(
+                task_id="CHAT-A1::research_current_toc_state",
+                title="Research current state",
+                description="",
+                role=Role.RESEARCHER,
+                state=TaskState.FAILED,
+            ),
+            "implement_toc_feature": WorkTask(
+                task_id="CHAT-A1::implement_toc_feature",
+                title="Implement TOC",
+                description="",
+                role=Role.ENGINEER,
+                state=TaskState.PENDING,
+            ),
+        }
+        self.assertFalse(
+            api_main._is_actionable_failed_phase(
+                "research_current_toc_state",
+                task_rows,
+            )
+        )
+        self.assertTrue(
+            api_main._is_actionable_failed_phase(
+                "implement_toc_feature",
+                task_rows,
+            )
+        )
+
+    def test_actionable_failed_phase_ignores_delegate_support_phase(self) -> None:
+        task_rows = {
+            "delegate_review_test_runner_0": WorkTask(
+                task_id="CHAT-ADELEGATE::delegate_review_test_runner_0",
+                title="Support evidence",
+                description="",
+                role=Role.QA,
+                state=TaskState.FAILED,
+            ),
+            "review": WorkTask(
+                task_id="CHAT-ADELEGATE::review",
+                title="Review",
+                description="",
+                role=Role.REVIEWER,
+                state=TaskState.PENDING,
+            ),
+        }
+
+        self.assertFalse(
+            api_main._is_actionable_failed_phase(
+                "delegate_review_test_runner_0",
+                task_rows,
+            )
+        )
+        self.assertTrue(api_main._is_actionable_failed_phase("review", task_rows))
+
+    def test_actionable_failed_phase_ignores_advisory_plan_research_when_engineering_exists(self) -> None:
+        task_rows = {
+            "plan_research": WorkTask(
+                task_id="CHAT-A2::plan_research",
+                title="Plan Research",
+                description="",
+                role=Role.RESEARCHER,
+                state=TaskState.FAILED,
+            ),
+            "plan_engineering": WorkTask(
+                task_id="CHAT-A2::plan_engineering",
+                title="Plan Engineering",
+                description="",
+                role=Role.ENGINEER,
+                state=TaskState.PENDING,
+            ),
+            "build": WorkTask(
+                task_id="CHAT-A2::build",
+                title="Build",
+                description="",
+                role=Role.ENGINEER,
+                state=TaskState.PENDING,
+            ),
+        }
+        self.assertFalse(
+            api_main._is_actionable_failed_phase(
+                "plan_research",
+                task_rows,
+            )
+        )
+        self.assertTrue(
+            api_main._is_actionable_failed_phase(
+                "plan_engineering",
+                task_rows,
+            )
+        )
+
+    def test_preplanning_support_failure_detected_before_workflow_starts(self) -> None:
+        detected, failed_support, reason_codes = api_main._detect_preplanning_support_failure(
+            phase_states={
+                "scout_context_curator": "failed",
+                "lead_intake": "blocked",
+                "plan_research": "pending",
+                "build": "pending",
+            },
+            task_rows_by_phase={
+                "lead_intake": WorkTask(
+                    task_id="CHAT-P0::lead_intake",
+                    title="Lead intake",
+                    description="",
+                    role=Role.TEAM_LEAD,
+                    state=TaskState.BLOCKED,
+                ),
+                "scout_context_curator": WorkTask(
+                    task_id="CHAT-P0::scout_context_curator",
+                    title="Curator",
+                    description="",
+                    role=Role.SCOUT,
+                    state=TaskState.FAILED,
+                ),
+                "plan_research": WorkTask(
+                    task_id="CHAT-P0::plan_research",
+                    title="Plan Research",
+                    description="",
+                    role=Role.RESEARCHER,
+                    state=TaskState.PENDING,
+                ),
+            },
+        )
+        self.assertTrue(detected)
+        self.assertEqual(failed_support, ["scout_context_curator"])
+        self.assertIn("phase_failed:scout_context_curator", reason_codes)
+        self.assertIn("lead_intake:blocked_by_support_context", reason_codes)
+
+    def test_run_failed_phases_use_support_failures_when_preplanning_detected(self) -> None:
+        resolved = api_main._resolve_run_failed_phases(
+            failed_phases=[],
+            preplanning_support_failure_detected=True,
+            preplanning_support_failed_phases=[
+                "scout_session_history",
+                "scout_context_curator",
+            ],
+        )
+        self.assertEqual(
+            resolved,
+            ["scout_session_history", "scout_context_curator"],
+        )
+
+    def test_routing_pause_is_skipped_when_review_rejected_is_authoritative(self) -> None:
+        skip = api_main._should_skip_pause_for_user_due_to_authoritative_policy(
+            (
+                "El pipeline está bloqueado por falta de adaptadores disponibles "
+                "para la fase de revisión. ¿Reconfiguro routing?"
+            ),
+            {
+                "authoritative_close_state": "rejected",
+                "primary_blocking_signals": ["review_rejected"],
+                "blocking_signals": ["review_rejected", "qa_blocked"],
+            },
+        )
+        self.assertTrue(skip)
+
+    def test_non_routing_pause_is_not_skipped_when_review_rejected(self) -> None:
+        skip = api_main._should_skip_pause_for_user_due_to_authoritative_policy(
+            "La review pide elegir entre alcance mínimo o refactor completo. ¿Qué prefieres?",
+            {
+                "authoritative_close_state": "rejected",
+                "primary_blocking_signals": ["review_rejected"],
+                "blocking_signals": ["review_rejected"],
+            },
+        )
+        self.assertFalse(skip)
+
+    def test_review_rework_phase_specs_replace_rejected_review_tail(self) -> None:
+        repaired = api_main._review_rework_phase_specs(
+            [
+                PhaseSpec(
+                    phase_id="build_core",
+                    role="ENGINEER",
+                    objective="Implementar core",
+                    depends_on=[],
+                ),
+                PhaseSpec(
+                    phase_id="review_core",
+                    role="REVIEWER",
+                    objective="Revisar core",
+                    depends_on=["build_core"],
+                ),
+                PhaseSpec(
+                    phase_id="qa_core",
+                    role="QA",
+                    objective="Validar core",
+                    depends_on=["review_core"],
+                ),
+            ],
+            rejected_review_phase="review_core",
+            review_feedback="status: rejected; falta cubrir imports rotos y tests.",
+        )
+
+        self.assertEqual([spec.phase_id for spec in repaired], [
+            "build_core",
+            "repair_after_review_core",
+            "review_after_repair_after_review_core",
+            "qa_after_repair_after_review_core",
+        ])
+        self.assertEqual(repaired[1].role, "ENGINEER")
+        self.assertEqual(repaired[1].depends_on, ["build_core"])
+        self.assertIn("review_core", repaired[1].objective)
+        self.assertIn("imports rotos", repaired[1].objective)
+
+    def test_failure_origin_prefers_preplanning_support(self) -> None:
+        origin = api_main._determine_run_failure_origin(
+            preplanning_support_failure_detected=True,
+            planning_failed_phases=["plan_research"],
+            failed_phases=["scout_session_history"],
+            blocked_phases=[],
+            semantic_gate_failures=[],
+            evidence_gate_failures=[],
+        )
+        self.assertEqual(origin, "preplanning_support")
+
+    def test_failure_origin_uses_execution_when_phase_is_blocked(self) -> None:
+        origin = api_main._determine_run_failure_origin(
+            preplanning_support_failure_detected=False,
+            planning_failed_phases=[],
+            failed_phases=[],
+            blocked_phases=["validate_core_logic"],
+            semantic_gate_failures=[],
+            evidence_gate_failures=[],
+        )
+        self.assertEqual(origin, "execution")
+
+    def test_failure_origin_uses_execution_when_only_quality_failures_exist(self) -> None:
+        origin = api_main._determine_run_failure_origin(
+            preplanning_support_failure_detected=False,
+            planning_failed_phases=[],
+            failed_phases=[],
+            blocked_phases=[],
+            semantic_gate_failures=["qa:blocked_status"],
+            evidence_gate_failures=["qa:blocked"],
+        )
+        self.assertEqual(origin, "execution")
+
+    def test_cascade_blocked_phases_do_not_become_evidence_root_causes(self) -> None:
+        build = WorkTask(
+            task_id="CHAT-CASCADE::build",
+            title="Build",
+            description="",
+            role=Role.ENGINEER,
+            state=TaskState.FAILED,
+            metadata={"phase": "build", "error": "ungrounded_phase_block_detected"},
+        )
+        review = WorkTask(
+            task_id="CHAT-CASCADE::review",
+            title="Review",
+            description="",
+            role=Role.REVIEWER,
+            dependencies=["CHAT-CASCADE::build"],
+            state=TaskState.BLOCKED,
+            metadata={
+                "phase": "review",
+                "blocked_reason": "dependency_failed",
+                "blocked_dependencies": ["CHAT-CASCADE::build"],
+            },
+        )
+        qa = WorkTask(
+            task_id="CHAT-CASCADE::qa",
+            title="QA",
+            description="",
+            role=Role.QA,
+            dependencies=["CHAT-CASCADE::review"],
+            state=TaskState.BLOCKED,
+            metadata={
+                "phase": "qa",
+                "blocked_reason": "dependency_failed",
+                "blocked_dependencies": ["CHAT-CASCADE::review"],
+            },
+        )
+
+        cascade = api_main._cascade_blocked_phases(
+            ["review", "qa"],
+            {"build": build, "review": review, "qa": qa},
+        )
+        failures = api_main._filter_cascade_blocked_evidence_failures(
+            ["build:ungrounded_phase_block", "review:blocked", "qa:blocked"],
+            cascade_blocked_phases=cascade,
+        )
+
+        self.assertEqual(cascade, ["review", "qa"])
+        self.assertEqual(failures, ["build:ungrounded_phase_block"])
+
+    def test_build_preplanning_run_verdict_uses_support_failures_not_build_noise(self) -> None:
+        verdict = api_main._build_preplanning_run_verdict(
+            lead_state="blocked",
+            preplanning_support_failure_detected=True,
+            preplanning_support_failed_phases=[
+                "scout_session_history",
+                "scout_context_curator",
+            ],
+            preplanning_support_reason_codes=[
+                "phase_failed:scout_session_history",
+                "phase_failed:scout_context_curator",
+                "lead_intake:blocked_by_support_context",
+            ],
+        )
+        self.assertEqual(verdict["failure_origin"], "preplanning_support")
+        self.assertEqual(
+            verdict["failed_phases"],
+            ["scout_session_history", "scout_context_curator"],
+        )
+        self.assertNotIn("build:not_completed", verdict["reason_codes"])
+
+    def test_build_preplanning_run_verdict_for_plain_lead_block(self) -> None:
+        verdict = api_main._build_preplanning_run_verdict(
+            lead_state="blocked",
+            preplanning_support_failure_detected=False,
+            preplanning_support_failed_phases=[],
+            preplanning_support_reason_codes=[],
+        )
+        self.assertEqual(verdict["failure_origin"], "none")
+        self.assertEqual(verdict["failed_phases"], [])
+        self.assertEqual(verdict["reason_codes"], ["lead_intake:blocked_before_workflow"])
+
+    def test_generic_retry_requires_objective_clarification_when_workspace_has_no_product_scope(self) -> None:
+        self.assertTrue(
+            api_main._requires_explicit_project_objective_clarification(
+                "Start the next highest-impact slice for the same project objective. "
+                "Treat this as a clean retry from the current validated project state.",
+                workspace_snapshot={"pyproject.toml": (1, 1), "README.md": (1, 1)},
+            )
+        )
+
+    def test_generic_retry_does_not_require_clarification_when_workspace_has_product_scope(self) -> None:
+        self.assertFalse(
+            api_main._requires_explicit_project_objective_clarification(
+                "Start the next highest-impact slice for the same project objective. "
+                "Treat this as a clean retry from the current validated project state.",
+                workspace_snapshot={"src/md_report/cli.py": (1, 1), "tests/test_cli.py": (1, 1)},
+            )
+        )
+
+    def test_chat_waits_for_explicit_objective_before_planning_generic_retry_on_sparse_workspace(self) -> None:
+        tmp_root = Path.cwd() / ".tmp-tests"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        workspace = tmp_root / f"objective-clarify-{uuid4().hex}"
+        workspace.mkdir(parents=True, exist_ok=True)
+        try:
+            (workspace / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.post(
+                    "/api/aiteam/chat",
+                    json={
+                        "message": (
+                            "Start the next highest-impact slice for the same project objective. "
+                            "Treat this as a clean retry from the current validated project state."
+                        ),
+                        "mode": "sprint5",
+                        "max_rounds": 6,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertEqual(str(payload.get("state", "")), "waiting_user")
+                self.assertTrue(bool(payload.get("waiting_user")))
+                self.assertIn(
+                    "¿Cuál es el objetivo específico del proyecto que debo planificar?",
+                    str(payload.get("clarification_question", "")),
+                )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+        finally:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+    def test_failed_phase_root_cause_reason_codes_include_ungrounded_phase_block(self) -> None:
+        task_rows_by_phase = {
+            "code_review": WorkTask(
+                task_id="CHAT-X::code_review",
+                title="Code review",
+                description="",
+                role=Role.REVIEWER,
+                state=TaskState.FAILED,
+                metadata={
+                    "error": "ungrounded_phase_block_detected: ungrounded_phase_block | visible=tests/test_md_report.py"
+                },
+            )
+        }
+        self.assertEqual(
+            api_main._failed_phase_root_cause_reason_codes(
+                task_rows_by_phase,
+                ["code_review"],
+            ),
+            ["phase_failed:code_review:ungrounded_phase_block"],
+        )
+
     def test_semantic_gate_uses_custom_plan_phase_slice_for_build_drift(self) -> None:
         failures = api_main._evaluate_phase_semantic_gate(
             task_rows_by_phase={
@@ -131,6 +711,72 @@ class GatePhaseResolutionTests(unittest.TestCase):
         self.assertIn("review:rejected_decision", failures)
         self.assertIn("qa:blocked_status", failures)
 
+    def test_semantic_gate_detects_review_json_changes_requested(self) -> None:
+        failures = api_main._evaluate_phase_semantic_gate(
+            task_rows_by_phase={
+                "review_toc_implementation": WorkTask(
+                    task_id="CHAT-G1::review_toc_implementation",
+                    title="Review Toc Implementation",
+                    description="",
+                    role=Role.REVIEWER,
+                    state=TaskState.COMPLETED,
+                    metadata={
+                        "result": (
+                            '{"summary":"Unicode handling needs work",'
+                            '"recommendation":"CHANGES_REQUESTED"}'
+                        )
+                    },
+                ),
+            },
+            phase_verdicts={},
+        )
+
+        self.assertIn("review:rejected_decision", failures)
+
+    def test_semantic_gate_detects_review_json_blocked(self) -> None:
+        failures = api_main._evaluate_phase_semantic_gate(
+            task_rows_by_phase={
+                "review_toc_implementation": WorkTask(
+                    task_id="CHAT-G1::review_toc_implementation",
+                    title="Review Toc Implementation",
+                    description="",
+                    role=Role.REVIEWER,
+                    state=TaskState.COMPLETED,
+                    metadata={
+                        "result": (
+                            '{"summary":"missing upstream artifacts",'
+                            '"status":"BLOCKED"}'
+                        )
+                    },
+                ),
+            },
+            phase_verdicts={},
+        )
+
+        self.assertIn("review:blocked_status", failures)
+
+    def test_semantic_gate_detects_qa_json_failed(self) -> None:
+        failures = api_main._evaluate_phase_semantic_gate(
+            task_rows_by_phase={
+                "qa_toc_functionality": WorkTask(
+                    task_id="CHAT-G1::qa_toc_functionality",
+                    title="Qa Toc Functionality",
+                    description="",
+                    role=Role.QA,
+                    state=TaskState.COMPLETED,
+                    metadata={
+                        "result": (
+                            '{"summary":"required validation evidence is missing",'
+                            '"recommendation":"FAILED"}'
+                        )
+                    },
+                ),
+            },
+            phase_verdicts={},
+        )
+
+        self.assertIn("qa:blocked_status", failures)
+
     def test_evidence_gate_uses_custom_engineer_reviewer_qa_phase_ids(self) -> None:
         failures = _evaluate_phase_evidence_gate(
             task_rows_by_phase={
@@ -167,6 +813,1004 @@ class GatePhaseResolutionTests(unittest.TestCase):
             require_test_or_build_check=True,
         )
         self.assertEqual(failures, [])
+
+    def test_evidence_gate_surfaces_specific_failed_gate_phase_reason(self) -> None:
+        failures = _evaluate_phase_evidence_gate(
+            task_rows_by_phase={
+                "build": WorkTask(
+                    task_id="CHAT-G3::build",
+                    title="Build",
+                    description="",
+                    role=Role.ENGINEER,
+                    state=TaskState.COMPLETED,
+                    metadata={"result": "Build ok."},
+                ),
+                "code_review": WorkTask(
+                    task_id="CHAT-G3::code_review",
+                    title="Code review",
+                    description="",
+                    role=Role.REVIEWER,
+                    state=TaskState.FAILED,
+                    metadata={
+                        "error": "ungrounded_phase_block_detected: ungrounded_phase_block"
+                    },
+                ),
+                "qa_validation": WorkTask(
+                    task_id="CHAT-G3::qa_validation",
+                    title="Qa validation",
+                    description="",
+                    role=Role.QA,
+                    state=TaskState.BLOCKED,
+                    metadata={},
+                ),
+            },
+            execution_steps=1,
+            execution_steps_success=1,
+            successful_checks=["test"],
+            artifact_created=1,
+            artifact_modified=1,
+            require_test_or_build_check=True,
+        )
+        self.assertIn("review:ungrounded_phase_block", failures)
+        self.assertIn("qa:blocked", failures)
+
+    def test_evidence_gate_does_not_require_build_for_review_revalidation_flow(self) -> None:
+        failures = _evaluate_phase_evidence_gate(
+            task_rows_by_phase={
+                "code_review_revalidation": WorkTask(
+                    task_id="CHAT-R1::code_review_revalidation",
+                    title="Code review revalidation",
+                    description="",
+                    role=Role.REVIEWER,
+                    state=TaskState.COMPLETED,
+                    metadata={"result": "APPROVED tras revisar artefactos visibles."},
+                ),
+                "qa_validation_toc": WorkTask(
+                    task_id="CHAT-R1::qa_validation_toc",
+                    title="QA validation toc",
+                    description="",
+                    role=Role.QA,
+                    state=TaskState.COMPLETED,
+                    metadata={"result": "PASSED con evidencia de validacion."},
+                ),
+            },
+            execution_steps=0,
+            execution_steps_success=0,
+            successful_checks=[],
+            artifact_created=0,
+            artifact_modified=0,
+            require_test_or_build_check=True,
+        )
+        self.assertEqual(failures, [])
+
+    def test_evidence_gate_does_not_require_review_for_qa_only_validation_flow(self) -> None:
+        failures = _evaluate_phase_evidence_gate(
+            task_rows_by_phase={
+                "qa_core_functionality": WorkTask(
+                    task_id="CHAT-QA1::qa_core_functionality",
+                    title="QA core functionality",
+                    description="",
+                    role=Role.QA,
+                    state=TaskState.COMPLETED,
+                    metadata={"result": "FAILED con evidencia real de validacion."},
+                ),
+            },
+            execution_steps=1,
+            execution_steps_success=1,
+            successful_checks=["test"],
+            artifact_created=0,
+            artifact_modified=0,
+            require_test_or_build_check=True,
+        )
+        self.assertEqual(failures, [])
+
+    def test_evidence_gate_preserves_missing_execution_plan_for_failed_build(self) -> None:
+        failures = _evaluate_phase_evidence_gate(
+            task_rows_by_phase={
+                "build": WorkTask(
+                    task_id="CHAT-GPLAN::build",
+                    title="Build",
+                    description="",
+                    role=Role.ENGINEER,
+                    state=TaskState.FAILED,
+                    metadata={
+                        "phase": "build",
+                        "require_execution_plan": True,
+                        "error": "missing_execution_plan_required",
+                    },
+                ),
+                "review": WorkTask(
+                    task_id="CHAT-GPLAN::review",
+                    title="Review",
+                    description="",
+                    role=Role.REVIEWER,
+                    state=TaskState.BLOCKED,
+                    metadata={"blocked_reason": "dependency_failed"},
+                ),
+                "qa": WorkTask(
+                    task_id="CHAT-GPLAN::qa",
+                    title="Qa",
+                    description="",
+                    role=Role.QA,
+                    state=TaskState.BLOCKED,
+                    metadata={"blocked_reason": "dependency_failed"},
+                ),
+            },
+            execution_steps=0,
+            execution_steps_success=0,
+            successful_checks=[],
+            artifact_created=0,
+            artifact_modified=0,
+            require_test_or_build_check=True,
+        )
+
+        self.assertIn("build:missing_execution_plan", failures)
+        self.assertIn("build:phase_failed", failures)
+
+    def test_evidence_gate_does_not_treat_file_delivery_as_build_validation(self) -> None:
+        base_tasks = {
+            "build": WorkTask(
+                task_id="CHAT-G4::build",
+                title="Build",
+                description="",
+                role=Role.ENGINEER,
+                state=TaskState.COMPLETED,
+                metadata={"result": "Se entrego el archivo solicitado."},
+            ),
+            "review": WorkTask(
+                task_id="CHAT-G4::review",
+                title="Review",
+                description="",
+                role=Role.REVIEWER,
+                state=TaskState.COMPLETED,
+                metadata={"result": "APPROVED con alcance revisado."},
+            ),
+            "qa": WorkTask(
+                task_id="CHAT-G4::qa",
+                title="Qa",
+                description="",
+                role=Role.QA,
+                state=TaskState.COMPLETED,
+                metadata={"result": "PASSED con validacion declarada."},
+            ),
+        }
+        failures = _evaluate_phase_evidence_gate(
+            task_rows_by_phase=base_tasks,
+            execution_steps=1,
+            execution_steps_success=1,
+            successful_checks=["file_delivery"],
+            artifact_created=0,
+            artifact_modified=1,
+            require_test_or_build_check=True,
+        )
+        self.assertIn("build:missing_test_or_build_check", failures)
+
+        failures = _evaluate_phase_evidence_gate(
+            task_rows_by_phase=base_tasks,
+            execution_steps=1,
+            execution_steps_success=1,
+            successful_checks=["import"],
+            artifact_created=0,
+            artifact_modified=1,
+            require_test_or_build_check=True,
+        )
+        self.assertNotIn("build:missing_test_or_build_check", failures)
+
+    def test_continuation_with_modified_artifacts_keeps_build_validation_failure(self) -> None:
+        failures = api_main._filter_continuation_evidence_gate_failures(
+            ["build:missing_test_or_build_check"],
+            continuation_requested=True,
+            artifact_created=0,
+            artifact_modified=1,
+        )
+        self.assertEqual(failures, ["build:missing_test_or_build_check"])
+
+    def test_continuation_without_artifacts_can_suppress_delivery_validation_noise(self) -> None:
+        failures = api_main._filter_continuation_evidence_gate_failures(
+            [
+                "build:no_execution_evidence",
+                "build:no_successful_execution_steps",
+                "build:missing_test_or_build_check",
+            ],
+            continuation_requested=True,
+            artifact_created=0,
+            artifact_modified=0,
+        )
+        self.assertEqual(failures, [])
+
+    def test_auto_post_validation_failure_replaces_missing_check_noise(self) -> None:
+        failures = api_main._merge_auto_post_validation_failure(
+            ["build:missing_test_or_build_check"],
+            {"success": False, "skipped": False, "command": "python syntax smoke src"},
+        )
+
+        self.assertEqual(failures, ["build:auto_post_build_validation_failed"])
+
+    def test_semantic_gate_detects_review_and_qa_evidence_blockers_from_text(self) -> None:
+        failures = api_main._evaluate_phase_semantic_gate(
+            task_rows_by_phase={
+                "review": WorkTask(
+                    task_id="CHAT-G5::review",
+                    title="Review",
+                    description="",
+                    role=Role.REVIEWER,
+                    state=TaskState.COMPLETED,
+                    metadata={
+                        "result": "No puedo revisar la implementacion: insufficient evidence."
+                    },
+                ),
+                "qa": WorkTask(
+                    task_id="CHAT-G5::qa",
+                    title="Qa",
+                    description="",
+                    role=Role.QA,
+                    state=TaskState.COMPLETED,
+                    metadata={
+                        "result": "No puedo validar el comportamiento: faltan checks ejecutados."
+                    },
+                ),
+            },
+            phase_verdicts={},
+        )
+        self.assertIn("review:blocked_status", failures)
+        self.assertIn("qa:blocked_status", failures)
+
+    def test_classify_check_detects_import_and_compile_checks(self) -> None:
+        self.assertEqual(
+            api_main._classify_check_from_command("python -c \"import md_report\""),
+            "import",
+        )
+        self.assertEqual(
+            api_main._classify_check_from_command("python syntax smoke src/md_report/cli.py"),
+            "build",
+        )
+        self.assertEqual(
+            api_main._classify_check_from_command("py -m compileall src"),
+            "build",
+        )
+
+    def test_auto_post_build_validation_prefers_changed_python_artifact_smoke(self) -> None:
+        with _safe_tempdir("auto-post-ok") as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            workspace = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_ok.py").write_text(
+                "def test_ok():\n    assert True\n",
+                encoding="utf-8",
+            )
+            events: list[tuple[str, dict]] = []
+
+            class _Logger:
+                def emit(self, event_type: str, payload: dict) -> None:
+                    events.append((event_type, payload))
+
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="1 passed",
+                stderr="",
+            )
+            with patch.object(api_main.subprocess, "run", return_value=completed) as run_mock:
+                result = api_main._run_auto_post_build_validation(
+                    runtime_dir=runtime_dir,
+                    workspace=workspace,
+                    task_root="CHAT-AUTO",
+                    phase_task_set={"CHAT-AUTO::build"},
+                    artifact_files=["src/pkg/module.py"],
+                    event_logger=_Logger(),
+                )
+
+            run_mock.assert_called_once()
+            self.assertTrue(bool(result.get("success")))
+            self.assertEqual(result.get("reason"), "auto_post_build_validation")
+            step_payloads = [
+                payload for event_type, payload in events if event_type == "execution_step"
+            ]
+            self.assertEqual(len(step_payloads), 1)
+            self.assertTrue(bool(step_payloads[0].get("success")))
+            self.assertEqual(
+                api_main._classify_check_from_command(str(step_payloads[0].get("command", ""))),
+                "build",
+            )
+            self.assertIn("src/pkg/module.py", str(step_payloads[0].get("command", "")))
+
+    def test_direct_auto_post_build_validation_replays_failed_pytest_check(self) -> None:
+        with _safe_tempdir("auto-post-replay-pytest") as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            workspace = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_ok.py").write_text(
+                "def test_ok():\n    assert True\n",
+                encoding="utf-8",
+            )
+            events: list[tuple[str, dict]] = []
+
+            class _Logger:
+                def emit(self, event_type: str, payload: dict) -> None:
+                    events.append((event_type, payload))
+
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="1 passed",
+                stderr="",
+            )
+            with patch.object(api_main.subprocess, "run", return_value=completed) as run_mock:
+                result = api_main._run_auto_post_build_validation(
+                    runtime_dir=runtime_dir,
+                    workspace=workspace,
+                    task_root="CHAT-AUTO",
+                    phase_task_set={"CHAT-AUTO::build"},
+                    artifact_files=["src/pkg/module.py"],
+                    event_logger=_Logger(),
+                    run_profile="solo_lead",
+                    failed_validation_result={
+                        "success": False,
+                        "command": "python -m pytest -q --tb=short",
+                        "exit_code": 1,
+                    },
+                )
+
+            run_mock.assert_called_once()
+            called_args = list(run_mock.call_args.args[0])
+            self.assertIn("-m", called_args)
+            self.assertIn("pytest", called_args)
+            self.assertNotIn("-c", called_args)
+            self.assertTrue(bool(result.get("success")))
+            self.assertTrue(bool(result.get("replayed_failed_command")))
+            self.assertEqual(result.get("command"), "python -m pytest -q --tb=short")
+            step_payloads = [
+                payload for event_type, payload in events if event_type == "execution_step"
+            ]
+            self.assertEqual(len(step_payloads), 1)
+            self.assertTrue(bool(step_payloads[0].get("replayed_failed_command")))
+
+    def test_direct_auto_post_build_validation_replays_failed_check_without_artifacts(self) -> None:
+        with _safe_tempdir("auto-post-replay-no-artifacts") as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            workspace = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_ok.py").write_text(
+                "def test_ok():\n    assert True\n",
+                encoding="utf-8",
+            )
+            events: list[tuple[str, dict]] = []
+
+            class _Logger:
+                def emit(self, event_type: str, payload: dict) -> None:
+                    events.append((event_type, payload))
+
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="still failing",
+                stderr="",
+            )
+            with patch.object(api_main.subprocess, "run", return_value=completed) as run_mock:
+                result = api_main._run_auto_post_build_validation(
+                    runtime_dir=runtime_dir,
+                    workspace=workspace,
+                    task_root="CHAT-AUTO",
+                    phase_task_set={"CHAT-AUTO::build"},
+                    artifact_files=[],
+                    event_logger=_Logger(),
+                    run_profile="solo_lead",
+                    failed_validation_result={
+                        "success": False,
+                        "command": "python -m pytest -q --tb=short",
+                        "exit_code": 1,
+                    },
+                )
+
+            run_mock.assert_called_once()
+            self.assertFalse(bool(result.get("success")))
+            self.assertTrue(bool(result.get("replayed_failed_command")))
+            self.assertEqual(result.get("target_task_id"), "CHAT-AUTO::build")
+            self.assertEqual(result.get("command"), "python -m pytest -q --tb=short")
+            step_payloads = [
+                payload for event_type, payload in events if event_type == "execution_step"
+            ]
+            self.assertEqual(len(step_payloads), 1)
+            self.assertTrue(bool(step_payloads[0].get("replayed_failed_command")))
+
+    def test_safe_replay_auto_validation_command_accepts_own_syntax_smoke(self) -> None:
+        with _safe_tempdir("auto-post-replay-syntax-smoke") as workspace:
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+
+            args, label = api_main._safe_replay_auto_validation_command(
+                workspace,
+                "python syntax smoke imports src/pkg/module.py",
+            )
+
+            self.assertTrue(args)
+            self.assertEqual(label, "python syntax smoke imports src/pkg/module.py")
+            self.assertIn("--import-modules", args)
+            self.assertIn("src/pkg/module.py", args)
+
+    def test_auto_post_build_validation_records_failed_artifact_smoke_without_success_check(self) -> None:
+        with _safe_tempdir("auto-post-fail") as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            workspace = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_fail.py").write_text(
+                "def test_fail():\n    assert False\n",
+                encoding="utf-8",
+            )
+            events: list[tuple[str, dict]] = []
+
+            class _Logger:
+                def emit(self, event_type: str, payload: dict) -> None:
+                    events.append((event_type, payload))
+
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="failed",
+                stderr="",
+            )
+            with patch.object(api_main.subprocess, "run", return_value=completed):
+                result = api_main._run_auto_post_build_validation(
+                    runtime_dir=runtime_dir,
+                    workspace=workspace,
+                    task_root="CHAT-AUTO",
+                    phase_task_set={"CHAT-AUTO::repair_generator"},
+                    artifact_files=["src/pkg/module.py"],
+                    event_logger=_Logger(),
+                )
+
+            step_payloads = [
+                payload for event_type, payload in events if event_type == "execution_step"
+            ]
+            self.assertFalse(bool(result.get("success")))
+            self.assertEqual(result.get("exit_code"), 1)
+            self.assertEqual(result.get("target_task_id"), "CHAT-AUTO::repair_generator")
+            self.assertEqual(len(step_payloads), 1)
+            self.assertFalse(bool(step_payloads[0].get("success")))
+            self.assertEqual(
+                api_main._classify_check_from_command(str(step_payloads[0].get("command", ""))),
+                "build",
+            )
+            self.assertEqual(step_payloads[0].get("target_task_id"), None)
+
+    def test_auto_post_build_validation_skip_returns_structured_reason(self) -> None:
+        with _safe_tempdir("auto-post-skip") as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            workspace = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            workspace.mkdir(parents=True, exist_ok=True)
+            events: list[tuple[str, dict]] = []
+
+            class _Logger:
+                def emit(self, event_type: str, payload: dict) -> None:
+                    events.append((event_type, payload))
+
+            result = api_main._run_auto_post_build_validation(
+                runtime_dir=runtime_dir,
+                workspace=workspace,
+                task_root="CHAT-AUTO",
+                phase_task_set={"CHAT-AUTO::build"},
+                artifact_files=["README.md"],
+                event_logger=_Logger(),
+            )
+
+            self.assertTrue(bool(result.get("skipped")))
+            self.assertEqual(result.get("reason"), "no_safe_validation_command")
+            self.assertTrue(
+                any(event_type == "chat_auto_validation_skipped" for event_type, _ in events)
+            )
+
+    def test_auto_validation_artifact_smoke_ignores_unrelated_broken_tests(self) -> None:
+        with _safe_tempdir("auto-validation-artifact-smoke") as workspace:
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_broken.py").write_text(
+                "assert 'unterminated\n",
+                encoding="utf-8",
+            )
+
+            args, command_label = api_main._auto_validation_command_for_workspace(
+                workspace,
+                ["src/pkg/module.py"],
+            )
+            completed = subprocess.run(
+                args,
+                cwd=str(workspace),
+                env=api_main._auto_validation_env(),
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertIn("syntax smoke", command_label)
+            self.assertIn("src/pkg/module.py", command_label)
+            self.assertEqual(
+                api_main._classify_check_from_command(command_label),
+                "build",
+            )
+            self.assertEqual(completed.returncode, 0)
+
+    def test_auto_validation_artifact_smoke_imports_changed_test_artifacts(self) -> None:
+        workspace = Path.cwd() / ".tmp" / f"auto_validation_changed_test_{uuid4().hex}"
+        try:
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_module.py").write_text(
+                "from src.pkg.module import MISSING\n\n"
+                "def test_missing():\n"
+                "    assert MISSING\n",
+                encoding="utf-8",
+            )
+
+            args, command_label = api_main._auto_validation_command_for_workspace(
+                workspace,
+                ["src/pkg/module.py", "tests/test_module.py"],
+            )
+            completed = subprocess.run(
+                args,
+                cwd=str(workspace),
+                env=api_main._auto_validation_env(),
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertIn("syntax smoke", command_label)
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("ImportError", completed.stdout)
+        finally:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+    def test_auto_validation_solo_lead_imports_related_src_package_modules(self) -> None:
+        workspace = Path.cwd() / ".tmp" / f"auto_validation_related_imports_{uuid4().hex}"
+        try:
+            package_dir = workspace / "src" / "md_report"
+            package_dir.mkdir(parents=True, exist_ok=True)
+            (package_dir / "__init__.py").write_text("", encoding="utf-8")
+            (package_dir / "toc_generator.py").write_text(
+                "class TocGenerator:\n"
+                "    pass\n",
+                encoding="utf-8",
+            )
+            (package_dir / "report_generator.py").write_text(
+                "from src.md_report.toc_generator import generate_toc\n",
+                encoding="utf-8",
+            )
+            (package_dir / "cli.py").write_text(
+                "from .report_generator import ReportGenerator\n",
+                encoding="utf-8",
+            )
+            (package_dir / "test_integration_toc.py").write_text(
+                "def test_placeholder():\n"
+                "    assert True\n",
+                encoding="utf-8",
+            )
+
+            args, command_label = api_main._auto_validation_command_for_workspace(
+                workspace,
+                ["src/md_report/test_integration_toc.py"],
+                import_related_modules=True,
+            )
+            completed = subprocess.run(
+                args,
+                cwd=str(workspace),
+                env=api_main._auto_validation_env(),
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertIn("syntax smoke", command_label)
+            self.assertIn("src/md_report/cli.py", command_label)
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("ImportError", completed.stdout)
+            self.assertIn("generate_toc", completed.stdout)
+        finally:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+    def test_auto_validation_non_python_artifact_does_not_run_global_pytest(self) -> None:
+        with _safe_tempdir("auto-validation-non-python") as workspace:
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            (workspace / "docs").mkdir(parents=True, exist_ok=True)
+            (workspace / "docs" / "plan.md").write_text("plan\n", encoding="utf-8")
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_broken.py").write_text(
+                "assert 'unterminated\n",
+                encoding="utf-8",
+            )
+
+            args, command_label = api_main._auto_validation_command_for_workspace(
+                workspace,
+                ["docs/plan.md"],
+            )
+
+            self.assertIn("syntax smoke", command_label)
+            self.assertIn("src", command_label)
+            self.assertNotIn("pytest", command_label)
+            self.assertNotIn("-m", args)
+
+    def test_auto_pre_phase_validation_runs_for_validation_only_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            workspace = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_ok.py").write_text(
+                "def test_ok():\n    assert True\n",
+                encoding="utf-8",
+            )
+            events: list[tuple[str, dict]] = []
+
+            class _Logger:
+                def emit(self, event_type: str, payload: dict) -> None:
+                    events.append((event_type, payload))
+
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="1 passed",
+                stderr="",
+            )
+            phases = [
+                PhaseSpec(
+                    phase_id="validate_core_logic",
+                    role="RESEARCHER",
+                    objective="Ejecutar pytest tests/ y validar la logica actual.",
+                    depends_on=[],
+                ),
+                PhaseSpec(
+                    phase_id="qa_core_functionality",
+                    role="QA",
+                    objective="Ejecutar suite completa de tests.",
+                    depends_on=["validate_core_logic"],
+                ),
+            ]
+
+            with patch.object(api_main.subprocess, "run", return_value=completed) as run_mock:
+                result = api_main._run_auto_pre_phase_validation(
+                    runtime_dir=runtime_dir,
+                    workspace=workspace,
+                    task_root="CHAT-AUTO-PRE",
+                    phases=phases,
+                    phase_task_ids={
+                        "validate_core_logic": "CHAT-AUTO-PRE::validate_core_logic",
+                        "qa_core_functionality": "CHAT-AUTO-PRE::qa_core_functionality",
+                    },
+                    event_logger=_Logger(),
+                )
+
+            run_mock.assert_called_once()
+            self.assertEqual(run_mock.call_args.args[0][-2], "-c")
+            self.assertTrue(bool(result.get("success")))
+            self.assertEqual(result.get("command"), "python test import smoke")
+            self.assertEqual(result.get("target_phase"), "validate_core_logic")
+            step_payloads = [
+                payload for event_type, payload in events if event_type == "execution_step"
+            ]
+            self.assertEqual(len(step_payloads), 1)
+            self.assertEqual(step_payloads[0].get("reason"), "auto_pre_phase_validation")
+            self.assertEqual(
+                api_main._classify_check_from_command(str(step_payloads[0].get("command", ""))),
+                "test",
+            )
+
+    def test_auto_pre_phase_validation_runs_for_solo_lead_build(self) -> None:
+        with _safe_tempdir("auto-pre-solo-lead") as tmp:
+            runtime_dir = tmp / "runtime"
+            workspace = tmp / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            events: list[tuple[str, dict]] = []
+
+            class _Logger:
+                def emit(self, event_type: str, payload: dict) -> None:
+                    events.append((event_type, payload))
+
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="src/pkg/module.py: ImportError: broken import\n",
+                stderr="",
+            )
+            phases = [
+                PhaseSpec(
+                    phase_id="build",
+                    role="TEAM_LEAD",
+                    objective="Perfil solo_lead/direct: reparar primero el estado actual.",
+                    depends_on=[],
+                )
+            ]
+
+            with patch.object(api_main.subprocess, "run", return_value=completed):
+                result = api_main._run_auto_pre_phase_validation(
+                    runtime_dir=runtime_dir,
+                    workspace=workspace,
+                    task_root="CHAT-AUTO-PRE-SOLO",
+                    phases=phases,
+                    phase_task_ids={"build": "CHAT-AUTO-PRE-SOLO::build"},
+                    event_logger=_Logger(),
+                    run_profile="solo_lead",
+                )
+
+            self.assertFalse(bool(result.get("success")))
+            self.assertEqual(result.get("target_phase"), "build")
+            self.assertEqual(result.get("task_id"), "CHAT-AUTO-PRE-SOLO::build")
+            self.assertIn("syntax smoke", str(result.get("command", "")))
+            step_payloads = [
+                payload for event_type, payload in events if event_type == "execution_step"
+            ]
+            self.assertEqual(len(step_payloads), 1)
+            self.assertEqual(step_payloads[0].get("reason"), "auto_pre_phase_validation")
+
+    def test_auto_validation_context_tells_solo_lead_to_repair_failed_precheck(self) -> None:
+        block = api_main._format_auto_validation_context(
+            {
+                "command": "python -m pytest -q --tb=short",
+                "success": False,
+                "exit_code": 2,
+                "stdout": "SyntaxError: unterminated string literal\n",
+                "stderr": "",
+            },
+            direct_profile=True,
+            repair_first_mode=True,
+        )
+
+        self.assertIn("repara primero", block.lower())
+        self.assertIn("no abras un slice nuevo", block.lower())
+        self.assertIn("path=...", block)
+        self.assertIn("SyntaxError", block)
+
+    def test_direct_repair_first_rewrites_build_task_contract(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-REPAIR::build",
+            title="Build",
+            description="Original build objective\n",
+            role=Role.TEAM_LEAD,
+            metadata={
+                "phase_contract": {
+                    "phase_id": "build",
+                    "role": "TEAM_LEAD",
+                    "objective": "Start the next slice",
+                }
+            },
+        )
+
+        changed = api_main._apply_direct_repair_first_to_phase_task(
+            task,
+            {
+                "success": False,
+                "command": "python -m pytest -q --tb=short",
+                "exit_code": 2,
+                "stdout": "SyntaxError: unterminated string literal",
+                "stderr": "",
+            },
+        )
+
+        self.assertTrue(changed)
+        self.assertTrue(task.title.startswith("Repair "))
+        self.assertIn("[REPAIR_FIRST_DIRECTIVE]", task.description)
+        self.assertIn("Prohibido: cerrar solo con diagnostico", task.description)
+        self.assertTrue(task.metadata.get("repair_first_required"))
+        phase_contract = task.metadata.get("phase_contract", {})
+        self.assertEqual(phase_contract.get("contract_kind"), "solo_lead_repair_first")
+        self.assertIn("Repair the failed pre-build validation", phase_contract.get("objective", ""))
+        self.assertEqual(
+            phase_contract.get("repair_first_original_objective"),
+            "Start the next slice",
+        )
+
+    def test_direct_post_build_repair_rewrites_build_task_contract(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-REPAIR-POST::build",
+            title="Build",
+            description="[REPAIR_FIRST_DIRECTIVE]\nprecheck anterior\n[/REPAIR_FIRST_DIRECTIVE]\n",
+            role=Role.TEAM_LEAD,
+            metadata={
+                "phase_contract": {
+                    "phase_id": "build",
+                    "role": "TEAM_LEAD",
+                    "objective": "Repair syntax-only failure",
+                }
+            },
+        )
+
+        changed = api_main._apply_direct_post_build_repair_to_phase_task(
+            task,
+            {
+                "success": False,
+                "command": "python syntax smoke imports tests/test_report_generator.py",
+                "exit_code": 1,
+                "stdout": (
+                    "ImportError: cannot import name 'generate_report' from "
+                    "'src.md_report.generator'\n"
+                ),
+                "stderr": "",
+            },
+        )
+
+        self.assertTrue(changed)
+        self.assertIn("generate_report", task.description)
+        self.assertIn("modificar todos los archivos relacionados", task.description)
+        self.assertEqual(task.metadata.get("repair_first_origin"), "auto_post_build_validation")
+        self.assertTrue(task.metadata.get("auto_post_build_repair_attempted"))
+        phase_contract = task.metadata.get("phase_contract", {})
+        self.assertEqual(phase_contract.get("contract_kind"), "solo_lead_post_build_repair")
+        self.assertIn("post-build validation", phase_contract.get("objective", ""))
+        self.assertIn("all minimal related files", phase_contract.get("objective", ""))
+        self.assertEqual(
+            phase_contract.get("repair_first_original_objective"),
+            "Repair syntax-only failure",
+        )
+
+    def test_auto_post_build_validation_ignores_prior_pre_phase_smoke(self) -> None:
+        with _safe_tempdir("auto-post-after-pre") as tmp:
+            runtime_dir = tmp / "runtime"
+            workspace = tmp / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "pkg" / "module.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
+            )
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "event_type": "execution_step",
+                        "payload": {
+                            "task_id": "CHAT-AUTO-POST::build",
+                            "success": True,
+                            "command": "python syntax smoke src",
+                            "reason": "auto_pre_phase_validation",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            events: list[tuple[str, dict]] = []
+
+            class _Logger:
+                def emit(self, event_type: str, payload: dict) -> None:
+                    events.append((event_type, payload))
+
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="python_syntax_smoke: 1 files, 0 failed\n",
+                stderr="",
+            )
+            with patch.object(api_main.subprocess, "run", return_value=completed) as run_mock:
+                result = api_main._run_auto_post_build_validation(
+                    runtime_dir=runtime_dir,
+                    workspace=workspace,
+                    task_root="CHAT-AUTO-POST",
+                    phase_task_set={"CHAT-AUTO-POST::build"},
+                    artifact_files=["src/pkg/module.py"],
+                    event_logger=_Logger(),
+                    run_profile="solo_lead",
+                )
+
+            run_mock.assert_called_once()
+            self.assertTrue(bool(result.get("success")))
+            self.assertEqual(result.get("reason"), "auto_post_build_validation")
+
+    def test_auto_pre_validation_command_uses_fast_test_import_smoke(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_imports.py").write_text(
+                "import missing_dependency_for_precheck\n",
+                encoding="utf-8",
+            )
+
+            args, command_label = api_main._auto_pre_validation_command_for_workspace(workspace)
+            completed = subprocess.run(
+                args,
+                cwd=str(workspace),
+                env=api_main._auto_validation_env(),
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertEqual(command_label, "python test import smoke")
+            self.assertNotIn("-m", args)
+            self.assertEqual(api_main._classify_check_from_command(command_label), "test")
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("missing_dependency_for_precheck", completed.stdout)
+            self.assertIn("test_import_smoke: 1 failed", completed.stdout)
+
+    def test_auto_validation_prefers_workspace_python_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            workspace_python = workspace / ".venv" / "Scripts" / "python.exe"
+            workspace_python.parent.mkdir(parents=True, exist_ok=True)
+            workspace_python.write_text("", encoding="utf-8")
+
+            args, command_label = api_main._auto_pre_validation_command_for_workspace(workspace)
+
+            self.assertEqual(args, [])
+            self.assertEqual(command_label, "")
+            self.assertEqual(api_main._python_executable_for_workspace(workspace), str(workspace_python))
+
+    def test_auto_pre_phase_validation_skips_when_plan_has_implementation_phase(self) -> None:
+        phases = [
+            PhaseSpec(
+                phase_id="build",
+                role="ENGINEER",
+                objective="Implementar el cambio aprobado.",
+                depends_on=[],
+            ),
+            PhaseSpec(
+                phase_id="qa",
+                role="QA",
+                objective="Ejecutar tests despues del build.",
+                depends_on=["build"],
+            ),
+        ]
+
+        self.assertFalse(api_main._plan_allows_pre_phase_validation(phases))
+
+    def test_auto_pre_phase_validation_skips_engineer_phase_that_mentions_tests(self) -> None:
+        phases = [
+            PhaseSpec(
+                phase_id="engineer_core_implementation",
+                role="ENGINEER",
+                objective="Implementar la funcionalidad principal y sus tests de regresion.",
+                depends_on=[],
+            ),
+            PhaseSpec(
+                phase_id="qa_core_functionality",
+                role="QA",
+                objective="Ejecutar tests despues de la implementacion.",
+                depends_on=["engineer_core_implementation"],
+            ),
+        ]
+
+        self.assertFalse(api_main._phase_requests_validation_execution(phases[0]))
+        self.assertFalse(api_main._plan_allows_pre_phase_validation(phases))
 
 
 class ReplanIntegrationAdapter(ModelAdapter):
@@ -299,6 +1943,48 @@ class ProbeIntegrationAdapter(ModelAdapter):
         return AdapterResponse(
             success=True,
             content="Scout/probe output.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=10,
+        )
+
+
+class PlanModeIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "MODO PLAN" in joined or "Lead intake and planning" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "Plan del Lead:\n"
+                    "- Objetivo: definir alcance sin ejecutar.\n"
+                    "- Riesgo principal: validar dependencias antes del build.\n"
+                    "- Siguiente paso: lanzar Sprint solo cuando el objetivo este cerrado."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=40,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Scout output for plan mode.",
             latency_ms=1,
             input_tokens=10,
             output_tokens=10,
@@ -464,6 +2150,17 @@ class DelegateSpecialistHelpersTests(unittest.TestCase):
         self.assertIn("delegate_mcp_probe", list(hints.get("recommended_delegate_intents", []) or []))
         self.assertIn("skill_worker", list(hints.get("recommended_specialists", []) or []))
 
+    def test_detect_preplan_surface_hints_does_not_treat_cli_html_css_as_browser(self) -> None:
+        hints = api_main._detect_preplan_surface_hints(
+            "Crea un CLI Python que convierta Markdown a HTML con CSS embebido y tests con pytest"
+        )
+
+        self.assertNotIn("browser", list(hints.get("surfaces", []) or []))
+        self.assertNotIn(
+            "delegate_browser_repro",
+            list(hints.get("recommended_delegate_intents", []) or []),
+        )
+
     def test_build_preplan_signal_block_includes_detected_hints(self) -> None:
         block = api_main._build_preplan_signal_block(
             {
@@ -576,8 +2273,32 @@ class DelegateSpecialistHelpersTests(unittest.TestCase):
                 continuation_of="CHAT-curated-1",
             )
 
-            self.assertIn("Contexto curado del proyecto:", block)
-            self.assertIn("Contexto curado de CHAT-curated-1:", block)
+            self.assertIn("Contexto historico del proyecto (no confirmado; revalidar antes de usar):", block)
+            self.assertIn("Contexto curado de CHAT-curated-1 (actual y operativo):", block)
+            self.assertIn("Contexto historico de CHAT-curated-1 (no confirmado; revalidar antes de usar):", block)
+
+    def test_build_curated_context_block_filters_explicit_foreign_project_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = _runtime_dir_for(workspace)
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            store = ContextCuratorStore(runtime_dir)
+            project_key = str(workspace.resolve())
+            project_ctx = store.load_project_context(project_key)
+            project_ctx["historical_context"] = [
+                {"text": "Proyecto: Book-TTS-Cloneable | pipeline multi-libro", "confidence": 0.4},
+                {"text": f"Proyecto: {workspace.resolve().name} | parser_toc pendiente", "confidence": 0.5},
+            ]
+            store._write_project_context(project_key, project_ctx)
+
+            block = api_main._build_curated_context_block(
+                runtime_dir=runtime_dir,
+                workspace=workspace,
+                continuation_of="",
+            )
+
+            self.assertNotIn("Book-TTS-Cloneable", block)
+            self.assertIn("parser_toc pendiente", block)
 
     def test_resolve_delegate_plan_maps_browser_intent_to_specialist(self) -> None:
         request = api_main._extract_delegate_request(
@@ -854,8 +2575,11 @@ class DelegateSpecialistHelpersTests(unittest.TestCase):
 
         self.assertIn("steps_reproduced", browser_contract)
         self.assertIn("no pegues transcripts crudos", browser_contract)
+        self.assertIn("eres soporte", browser_contract)
+        self.assertIn("no declares la fase principal blocked/rejected", browser_contract)
         self.assertIn("recommendation", mcp_contract)
         self.assertIn("MCP", mcp_contract)
+        self.assertIn("observed_failure", mcp_contract)
 
     def test_extract_delegate_request_from_mid_run_outputs(self) -> None:
         request = api_main._extract_delegate_request_from_outputs(
@@ -913,6 +2637,7 @@ class DelegateSpecialistHelpersTests(unittest.TestCase):
 
     def test_supporting_control_phase_accepts_delegate_prefixes(self) -> None:
         self.assertTrue(api_main._is_supporting_control_phase("lead_intake"))
+        self.assertTrue(api_main._is_supporting_control_phase("scout_context_curator"))
         self.assertTrue(
             api_main._is_supporting_control_phase(
                 "delegate_browser_repro_0_browser_operator"
@@ -1012,6 +2737,79 @@ class DelegateSpecialistHelpersTests(unittest.TestCase):
             rewired_specs = [spec for spec in specs if spec["specialist"] == "skill_worker"]
             self.assertTrue(rewired_specs)
             self.assertIn("playwright_qa_skill", list(rewired_specs[0].get("skill_targets", []) or []))
+
+    def test_structured_evidence_specs_mark_review_and_qa_as_pre_phase(self) -> None:
+        build_specs = api_main._structured_evidence_specs_for_phase(
+            "build",
+            {
+                "build": {
+                    "delegate_intents": ["delegate_test_run"],
+                    "wait_policy": "quorum",
+                    "delegate_budget": 3,
+                }
+            },
+        )
+        review_specs = api_main._structured_evidence_specs_for_phase(
+            "review",
+            {
+                "review": {
+                    "delegate_intents": ["delegate_lsp_impact"],
+                    "wait_policy": "quorum",
+                    "delegate_budget": 3,
+                }
+            },
+        )
+        qa_specs = api_main._structured_evidence_specs_for_phase(
+            "qa",
+            {
+                "qa": {
+                    "delegate_intents": ["delegate_test_run"],
+                    "wait_policy": "quorum",
+                    "delegate_budget": 3,
+                }
+            },
+        )
+        named_qa_specs = api_main._structured_evidence_specs_for_phase(
+            "qa_validate_toc",
+            {
+                "qa_validate_toc": {
+                    "delegate_intents": ["delegate_test_run"],
+                    "wait_policy": "quorum",
+                    "delegate_budget": 3,
+                }
+            },
+        )
+        validate_specs = api_main._structured_evidence_specs_for_phase(
+            "validate_cli_output",
+            {
+                "validate_cli_output": {
+                    "delegate_intents": ["delegate_test_run"],
+                    "wait_policy": "quorum",
+                    "delegate_budget": 3,
+                }
+            },
+        )
+
+        self.assertTrue(build_specs)
+        self.assertTrue(review_specs)
+        self.assertTrue(qa_specs)
+        self.assertTrue(named_qa_specs)
+        self.assertTrue(validate_specs)
+        self.assertTrue(
+            all(spec.get("evidence_position") == "post_phase" for spec in build_specs)
+        )
+        self.assertTrue(
+            all(spec.get("evidence_position") == "pre_phase" for spec in review_specs)
+        )
+        self.assertTrue(
+            all(spec.get("evidence_position") == "pre_phase" for spec in qa_specs)
+        )
+        self.assertTrue(
+            all(spec.get("evidence_position") == "pre_phase" for spec in named_qa_specs)
+        )
+        self.assertTrue(
+            all(spec.get("evidence_position") == "pre_phase" for spec in validate_specs)
+        )
 
 
 class AbortPhasesIntegrationAdapter(ModelAdapter):
@@ -1769,6 +3567,84 @@ class LeadMemoryIntegrationAdapter(ModelAdapter):
         )
 
 
+class CuratorFailureButLeadContinuesAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Scout: estado del proyecto" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "```json\n"
+                    "{\n"
+                    '  "summary": "Workspace con src/sample_cli/cli.py y tests/test_cli.py.",\n'
+                    '  "evidence": ["workspace snapshot autoritativo: src/sample_cli/cli.py", "workspace snapshot autoritativo: tests/test_cli.py"]\n'
+                    "}\n```"
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=30,
+            )
+        if "Scout: historial de sesiones" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "```json\n"
+                    "{\n"
+                    '  "summary": "Sin carryover relevante para esta prueba.",\n'
+                    '  "evidence": ["No hay sesiones previas con valor autoritativo."]\n'
+                    "}\n```"
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        if "Scout: context curator" in joined:
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "Resumen: el proyecto ya contiene src/invented/report.py y tests/test_report.py "
+                    "validados en el estado actual."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        if "Lead intake and planning" in joined or (
+            "Eres Team Lead senior." in joined and "Solicitud original:" in joined
+        ):
+            return AdapterResponse(
+                success=True,
+                content="[DIRECT_ANSWER]\nEl Lead puede continuar con scouts basicos aunque falle el curator.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=18,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Resultado generico.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=10,
+        )
+
+
 class QuorumPlanningIntegrationAdapter(ModelAdapter):
     def __init__(
         self,
@@ -1979,6 +3855,110 @@ class LeadFailureDelegateIntegrationAdapter(ModelAdapter):
         )
 
 
+class LeadIntakeRepeatedDelegateIntegrationAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review", "repo_read"},
+        )
+        self.lead_invocations = 0
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        text_parts = [str(prompt or "")]
+        if isinstance(messages, list):
+            text_parts.extend(
+                str(item.get("content", "")) for item in messages if isinstance(item, dict)
+            )
+        joined = "\n".join(text_parts)
+        if "Como Team Lead, valida si esta fase sensible debe ejecutarse ahora." in joined:
+            return AdapterResponse(
+                success=True,
+                content="Autorizado para continuar.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=10,
+            )
+        if (
+            "Lead intake and planning" in joined
+            or "TRAS TU ANALISIS, incluye un bloque [WORKFLOW_PLAN]" in joined
+            or "Eres Team Lead senior. Convierte el input" in joined
+        ):
+            self.lead_invocations += 1
+            if self.lead_invocations == 1:
+                return AdapterResponse(
+                    success=True,
+                    content=(
+                        '[DELEGATE_REPO_SCAN: "mapea el repo y resume hechos confirmados"]\n'
+                        "[WAIT_POLICY: best_effort]\n"
+                        "[DELEGATE_BUDGET: 2]"
+                    ),
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=25,
+                )
+            if self.lead_invocations == 2:
+                return AdapterResponse(
+                    success=True,
+                    content=(
+                        '[DELEGATE_REPO_SCAN: "mapea el repo y resume hechos confirmados"]\n'
+                        "[WAIT_POLICY: best_effort]\n"
+                        "[DELEGATE_BUDGET: 2]\n"
+                        "[WORKFLOW_PLAN]\n"
+                        "phase_id: build\n"
+                        "role: ENGINEER\n"
+                        "objective: implementar el modulo base confirmado\n"
+                        "[/WORKFLOW_PLAN]\n"
+                        "Plan listo."
+                    ),
+                    latency_ms=1,
+                    input_tokens=10,
+                    output_tokens=60,
+                )
+            return AdapterResponse(
+                success=True,
+                content=(
+                    "[WORKFLOW_PLAN]\n"
+                    "phase_id: build\n"
+                    "role: ENGINEER\n"
+                    "objective: implementar el modulo base confirmado\n"
+                    "[/WORKFLOW_PLAN]\n"
+                    "Plan listo."
+                ),
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=40,
+            )
+        if "implementar el modulo base confirmado" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Fase completada con evidencia compacta.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        if "Lead synthesis and response" in joined:
+            return AdapterResponse(
+                success=True,
+                content="Lead summary: se evitó repetir la misma delegación y se continuó con el plan.",
+                latency_ms=1,
+                input_tokens=10,
+                output_tokens=20,
+            )
+        return AdapterResponse(
+            success=True,
+            content="Informe delegado con hechos compactos del repo.",
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
 class LeadCloseDelegateIntegrationAdapter(ModelAdapter):
     def __init__(self) -> None:
         super().__init__(
@@ -2103,6 +4083,87 @@ class APITeamChatTests(unittest.TestCase):
 
     def test_continuation_message_accepts_spanish_continuad(self) -> None:
         self.assertTrue(api_main._is_continuation_message("continuad"))
+
+    def test_extract_chat_root_ignores_placeholder_chat_ids(self) -> None:
+        self.assertEqual(
+            api_main._extract_chat_root_from_message(
+                "Indica `Continue from CHAT-XXXXXXXX` o usa el boton Continue."
+            ),
+            "",
+        )
+        self.assertEqual(
+            api_main._extract_chat_root_from_message("Continue from CHAT-A1B2C3D4"),
+            "CHAT-A1B2C3D4",
+        )
+
+    def test_implicit_continuation_defaults_to_latest_actionable_project_run(self) -> None:
+        source = api_main._default_implicit_continuation_source(
+            [
+                {
+                    "root_id": "CHAT-11111111",
+                    "run_status": "waiting_user",
+                    "continuation_requested": True,
+                    "continuation_effective": False,
+                    "continuation_block_reason": "ambiguous_target_required",
+                },
+                {
+                    "root_id": "CHAT-A1B2C3D4",
+                    "run_status": "rejected",
+                    "continuation_requested": False,
+                    "continuation_effective": False,
+                    "continuation_block_reason": "",
+                },
+            ]
+        )
+        self.assertEqual(str(source.get("root_id", "")), "CHAT-A1B2C3D4")
+
+    def test_chat_progress_terminal_verdict_overrides_stale_waiting_user(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            task_root = "CHAT-A1B2C3D4"
+            SqliteStore(runtime_dir / "aiteam.db").save_workflow_state(
+                {
+                    task_root: {
+                        "run_status": "waiting_user",
+                        "phase_states": {"lead_intake": "waiting_user"},
+                        "run_verdict": {
+                            "state": "rejected",
+                            "reason_codes": ["review:phase_failed"],
+                        },
+                    }
+                }
+            )
+            SqliteStore(runtime_dir / "aiteam.db").save_all_tasks(
+                [
+                    {
+                        "task_id": f"{task_root}::lead_intake",
+                        "state": "waiting_user",
+                        "metadata": {"phase": "lead_intake"},
+                    }
+                ]
+            )
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-04-12T10:00:00+00:00",
+                        "event_type": "chat_plan_created",
+                        "payload": {
+                            "task_id": task_root,
+                            "chat_mode": "sprint5",
+                            "round_budget": 5,
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            progress = api_main._build_chat_progress(runtime_dir, task_root)
+
+            self.assertEqual(progress.state, "rejected")
+            self.assertEqual(progress.workflow_run_status, "waiting_user")
 
     def test_presentable_decision_text_hides_placeholder_payloads(self) -> None:
         self.assertEqual(
@@ -2584,6 +4645,69 @@ class APITeamChatTests(unittest.TestCase):
                 events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"event_type": "chat_probe_completed"', events_text)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_plan_mode_is_lead_only_without_deliverables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[PlanModeIntegrationAdapter()],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Planifica el siguiente slice, sin ejecutar nada",
+                            "mode": "plan",
+                            "max_rounds": 4,
+                        },
+                    )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertEqual(str(payload.get("chat_mode", "")), "plan")
+                self.assertFalse(bool(payload.get("probe_mode", False)))
+                self.assertEqual(str(payload.get("lead_run_mode", "")), "planning_only")
+                self.assertEqual(int(payload.get("artifact_created", 0) or 0), 0)
+                self.assertEqual(int(payload.get("artifact_modified", 0) or 0), 0)
+                self.assertEqual(payload.get("phase_task_ids", {}), {"lead_intake": payload.get("lead_task_id")})
+                self.assertEqual(payload.get("delegated_task_ids", []), [])
+                self.assertFalse(bool(payload.get("evidence_gate_applied", False)))
+                self.assertEqual(_plan_markdown_files(workspace), [])
+
+                workflow_state = _read_runtime_workflow_state(_runtime_dir_for(workspace))
+                run_state = dict(workflow_state.get(payload.get("task_id"), {}) or {})
+                self.assertEqual(str(run_state.get("run_status", "")), "completed")
+                self.assertEqual(
+                    str((run_state.get("run_verdict", {}) or {}).get("result", "")),
+                    "planificado",
+                )
+
+                tasks_text = json.dumps(
+                    _load_runtime_tasks(_runtime_dir_for(workspace)),
+                    ensure_ascii=False,
+                )
+                self.assertNotIn("::build", tasks_text)
+                self.assertNotIn("::lead_close", tasks_text)
+
+                events_file = _runtime_dir_for(workspace) / "events.jsonl"
+                events_text = events_file.read_text(encoding="utf-8")
+                self.assertIn('"event_type": "chat_plan_mode_completed"', events_text)
+                self.assertNotIn('"event_type": "chat_plan_persisted"', events_text)
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -3126,6 +5250,27 @@ class APITeamChatTests(unittest.TestCase):
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"source_phase": "lead_failure_build"', events_text)
                 self.assertIn('"intent": "delegate_repo_scan"', events_text)
+
+                tasks_data = _load_runtime_tasks(_runtime_dir_for(workspace))
+                delegate_tasks = [
+                    item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                    and str(item.get("task_id", "")).startswith(
+                        f"{payload.get('task_id')}::delegate_repo_scan_"
+                    )
+                ]
+                self.assertTrue(delegate_tasks)
+                delegate_metadata = dict((delegate_tasks[0].get("metadata", {}) or {}))
+                delegate_contract = dict(delegate_metadata.get("phase_contract", {}) or {})
+                self.assertEqual(str(delegate_metadata.get("delegation_from_role", "")), "team_lead")
+                self.assertTrue(bool(str(delegate_metadata.get("delegation_brief", "")).strip()))
+                self.assertTrue(bool(delegate_metadata.get("phase_contract_enforced")))
+                self.assertEqual(
+                    str(delegate_contract.get("phase_id", "")),
+                    str(delegate_tasks[0].get("task_id", "")).split("::", 1)[-1],
+                )
+                self.assertTrue(bool(str(delegate_contract.get("objective", "")).strip()))
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -3179,14 +5324,56 @@ class APITeamChatTests(unittest.TestCase):
                         for batch in list(payload.get("delegate_batches", []) or [])
                     )
                 )
+                lead_close_batches = [
+                    batch
+                    for batch in list(payload.get("delegate_batches", []) or [])
+                    if str(batch.get("source_phase", "")) == "lead_close"
+                ]
+                self.assertEqual(len(lead_close_batches), 1)
                 self.assertIn("lead_close", str(payload.get("phase_task_ids", {})))
 
                 events_file = _runtime_dir_for(workspace) / "events.jsonl"
                 events_text = events_file.read_text(encoding="utf-8")
                 self.assertIn('"source_phase": "lead_close"', events_text)
                 self.assertIn('"intent": "delegate_browser_repro"', events_text)
+                workflow_state = _read_runtime_workflow_state(
+                    _runtime_dir_for(workspace)
+                )
+                chat_state = dict(workflow_state.get(str(payload.get("task_id")), {}) or {})
+                self.assertTrue(
+                    list(chat_state.get("consumed_delegate_request_signatures", []) or [])
+                )
             finally:
                 api_main.set_current_workspace(previous_workspace)
+
+    def test_delegate_request_signature_is_stable_for_repeat_detection(self) -> None:
+        request = api_main._build_delegate_request(
+            "delegate_repo_scan",
+            query="Mapea el repo",
+            wait_policy="best_effort",
+            delegate_budget=2,
+        )
+
+        self.assertEqual(
+            api_main._delegate_request_signature(request),
+            ("delegate_repo_scan", "mapea el repo", "best_effort"),
+        )
+        self.assertEqual(
+            api_main._delegate_request_signature(request, source_phase="lead_intake"),
+            ("lead_intake", "delegate_repo_scan", "mapea el repo", "best_effort"),
+        )
+
+    def test_delegate_batch_has_successful_results_requires_completed_entry(self) -> None:
+        self.assertFalse(
+            api_main._delegate_batch_has_successful_results(
+                {"entries": [{"state": "failed"}, {"state": "blocked"}]}
+            )
+        )
+        self.assertTrue(
+            api_main._delegate_batch_has_successful_results(
+                {"entries": [{"state": "blocked"}, {"state": "completed"}]}
+            )
+        )
 
     def test_chat_advisory_mode_turns_policy_blocks_into_signals(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3535,6 +5722,116 @@ class APITeamChatTests(unittest.TestCase):
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
+    def test_resume_state_treats_blocked_after_lead_close_as_terminal(self) -> None:
+        self.assertEqual(
+            api_main._derive_resume_state_from_phase_states(
+                {
+                    "lead_intake": "completed",
+                    "plan_engineering": "blocked",
+                    "build": "blocked",
+                    "review": "blocked",
+                    "qa": "blocked",
+                    "lead_close": "completed",
+                }
+            ),
+            "failed",
+        )
+        self.assertEqual(
+            api_main._derive_resume_state_from_phase_states(
+                {"lead_intake": "completed", "lead_close": "waiting_user"}
+            ),
+            "waiting_user",
+        )
+        self.assertEqual(
+            api_main._derive_resume_state_from_phase_states(
+                {"lead_intake": "completed", "build": "ready", "lead_close": "blocked"}
+            ),
+            "in_progress",
+        )
+        self.assertEqual(
+            api_main._derive_resume_state_from_phase_states(
+                {"lead_intake": "completed", "build": "completed", "lead_close": "completed"}
+            ),
+            "completed",
+        )
+
+    def test_midrun_user_risk_acceptance_requires_explicit_risk_choice(self) -> None:
+        accepted = api_main._classify_midrun_user_risk_acceptance(
+            (
+                "QA está bloqueada por routing. ¿Aprobar sin QA formal, "
+                "esperar routing o replantear validación?"
+            ),
+            "aprobar sin QA formal",
+        )
+        self.assertEqual(accepted.get("kind"), "user_accepted_degraded_close")
+        self.assertEqual(accepted.get("scope"), "partial")
+
+        retry = api_main._classify_midrun_user_risk_acceptance(
+            (
+                "QA está bloqueada por routing. ¿Aprobar sin QA formal, "
+                "esperar routing o replantear validación?"
+            ),
+            "Reintenta con otra ruta antes de cerrar",
+        )
+        self.assertEqual(retry, {})
+
+    def test_phase_contract_prompt_exposes_scope_to_reviewer_as_visible_paths(self) -> None:
+        block = api_main._phase_contract_prompt_block(
+            PhaseSpec(
+                phase_id="review_test_preparation",
+                role="REVIEWER",
+                objective="Review tests",
+                depends_on=["engineer_prepare_tests"],
+            ),
+            all_contracts={
+                "review_test_preparation": {
+                    "phase_id": "review_test_preparation",
+                    "role": "REVIEWER",
+                    "objective": "Review tests",
+                    "depends_on": ["engineer_prepare_tests"],
+                    "allowed_module_path_hints": [
+                        "src/md_report/",
+                        "src/md_report/test_toc_generator.py",
+                    ],
+                },
+                "engineer_prepare_tests": {
+                    "objective": "Prepare executable evidence",
+                },
+            },
+        )
+
+        self.assertIn("visible_project_scope:", block)
+        self.assertIn("src/md_report/test_toc_generator.py", block)
+        self.assertIn("resuelvelo contra este scope", block)
+
+    def test_phase_contract_prompt_marks_delegate_support_as_non_decision_authority(self) -> None:
+        block = api_main._phase_contract_prompt_block(
+            PhaseSpec(
+                phase_id="delegate_review_test_runner_0",
+                role="QA",
+                objective="Run support smoke and report evidence.",
+                depends_on=["build"],
+            ),
+            all_contracts={
+                "delegate_review_test_runner_0": {
+                    "phase_id": "delegate_review_test_runner_0",
+                    "role": "QA",
+                    "objective": "Run support smoke and report evidence.",
+                    "depends_on": ["build"],
+                    "contract_kind": "delegate_support_pre_phase",
+                    "evidence_target_phase": "review",
+                },
+                "build": {
+                    "objective": "Implement approved slice",
+                },
+            },
+        )
+
+        self.assertIn("support_role: true", block)
+        self.assertIn("decision_authority: parent_phase_or_team_lead", block)
+        self.assertIn("no declares la fase principal blocked/rejected", block)
+        self.assertIn("observed_failure", block)
+
     def test_chat_pause_then_resume_completes_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -3721,6 +6018,106 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertIn("OPENAI_API_KEY ausente", adapter.intake_prompt)
                 self.assertIn("MCPs disponibles: filesystem", adapter.intake_prompt)
                 self.assertIn("MCPs con error: browser_mcp (timeout)", adapter.intake_prompt)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_lead_intake_receives_current_workspace_grounding_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            adapter = AgentsMdIntegrationAdapter()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[adapter],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                (workspace / "src" / "sample_cli").mkdir(parents=True, exist_ok=True)
+                (workspace / "tests").mkdir(parents=True, exist_ok=True)
+                (workspace / "pyproject.toml").write_text("[project]\nname='sample-cli'\n", encoding="utf-8")
+                (workspace / "src" / "sample_cli" / "__init__.py").write_text("", encoding="utf-8")
+                (workspace / "src" / "sample_cli" / "cli.py").write_text("def main():\n    return 0\n", encoding="utf-8")
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Planifica el siguiente slice minimo del proyecto",
+                            "mode": "sprint5",
+                            "max_rounds": 4,
+                            "allow_low_productivity_override": True,
+                            "auto_extend_weak_runs": False,
+                        },
+                    )
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("== ESTADO ACTUAL CONFIRMADO (WORKSPACE REAL) ==", adapter.intake_prompt)
+                self.assertIn("src/sample_cli/cli.py", adapter.intake_prompt)
+                self.assertIn(
+                    "Todo lo que venga del historial, lead memory o runs previas cuenta solo como contexto historico",
+                    adapter.intake_prompt,
+                )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_lead_intake_can_continue_without_waiting_on_context_curator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            adapter = CuratorFailureButLeadContinuesAdapter()
+
+            def _factory(runtime_dir: Path, browser_mode: str = "basic", environment: str = "dev"):
+                return AITeamOrchestrator(
+                    router=HybridRouter(
+                        adapters=[adapter],
+                        policy=build_default_router_policy(),
+                    ),
+                    runtime_dir=runtime_dir,
+                    project_root=workspace,
+                    browser_mode=browser_mode,
+                    environment=environment,
+                )
+
+            try:
+                (workspace / "src" / "sample_cli").mkdir(parents=True, exist_ok=True)
+                (workspace / "tests").mkdir(parents=True, exist_ok=True)
+                (workspace / "pyproject.toml").write_text("[project]\nname='sample-cli'\n", encoding="utf-8")
+                (workspace / "src" / "sample_cli" / "__init__.py").write_text("", encoding="utf-8")
+                (workspace / "src" / "sample_cli" / "cli.py").write_text("def main():\n    return 0\n", encoding="utf-8")
+                (workspace / "tests" / "test_cli.py").write_text("def test_placeholder():\n    assert True\n", encoding="utf-8")
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                with patch.object(api_main, "build_default_orchestrator", side_effect=_factory):
+                    response = client.post(
+                        "/api/aiteam/chat",
+                        json={
+                            "message": "Planifica el siguiente slice minimo del proyecto",
+                            "mode": "sprint5",
+                            "max_rounds": 4,
+                            "allow_low_productivity_override": True,
+                            "auto_extend_weak_runs": False,
+                        },
+                    )
+                self.assertEqual(response.status_code, 200)
+                tasks_data = _load_runtime_tasks(_runtime_dir_for(workspace))
+                by_phase = {
+                    str(item.get("metadata", {}).get("phase", "") or ""): item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                }
+                self.assertIn(
+                    str((by_phase.get("scout_context_curator") or {}).get("state", "")),
+                    {"completed", "failed"},
+                )
+                self.assertEqual(str((by_phase.get("lead_intake") or {}).get("state", "")), "completed")
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -4205,6 +6602,304 @@ class APITeamChatTests(unittest.TestCase):
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
+    def test_solo_lead_profile_does_not_create_delegate_evidence_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                response = client.post(
+                    "/api/aiteam/chat",
+                    json={
+                        "message": "Implement the smallest useful CLI improvement",
+                        "mode": "direct",
+                        "run_profile": "solo_lead",
+                        "max_rounds": 3,
+                        "auto_extend_weak_runs": False,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                payload = _parse_sse_result(response)
+                self.assertEqual(payload.get("run_profile"), "solo_lead")
+                self.assertEqual(payload.get("phase_evidence_plan", {}), {})
+                self.assertEqual(payload.get("delegated_task_ids", []), [])
+                self.assertIn("build", payload.get("phase_task_ids", {}))
+                self.assertIn("lead_close", payload.get("phase_task_ids", {}))
+
+                task_root = str(payload.get("task_id", "")).strip()
+                tasks_data = _load_runtime_tasks(_runtime_dir_for(workspace))
+                run_task_ids = [
+                    str(item.get("task_id", ""))
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                    and str(item.get("task_id", "")).startswith(f"{task_root}::")
+                ]
+                self.assertFalse(
+                    [task_id for task_id in run_task_ids if "::delegate_" in task_id],
+                    "solo_lead should not create delegate evidence tasks",
+                )
+
+                build_task_rows = [
+                    item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                    and item.get("task_id") == f"{task_root}::build"
+                ]
+                self.assertTrue(build_task_rows, "build phase task should exist")
+                build_task_meta = (build_task_rows[0].get("metadata", {}) or {})
+                self.assertEqual(build_task_meta.get("run_profile"), "solo_lead")
+                self.assertTrue(build_task_meta.get("direct_coding_executor"))
+                self.assertIs(build_task_meta.get("require_peer_consultation"), False)
+                self.assertIs(build_task_meta.get("skip_peer_consultation"), True)
+                self.assertIs(build_task_meta.get("skip_specialist_prefetch"), True)
+                self.assertEqual(
+                    build_task_meta.get("required_capabilities"),
+                    ["reasoning", "coding"],
+                )
+                self.assertEqual(build_task_meta.get("deferred_evidence_specs", []), [])
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_solo_lead_allows_bounded_retries_after_failed_post_build_validation(self) -> None:
+        with _safe_tempdir("solo-lead-post-build-retry") as tmp:
+            runtime_dir = tmp / "runtime"
+            workspace = tmp / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            workspace.mkdir(parents=True, exist_ok=True)
+            orch = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=workspace,
+            )
+            build = WorkTask(
+                task_id="CHAT-POST-REPAIR::build",
+                title="Build",
+                description="Original build objective\n",
+                role=Role.TEAM_LEAD,
+                state=TaskState.COMPLETED,
+                metadata={
+                    "phase": "build",
+                    "result": "previous syntax-only repair output",
+                    "phase_contract": {
+                        "phase_id": "build",
+                        "role": "TEAM_LEAD",
+                        "objective": "Repair syntax-only failure",
+                    },
+                },
+            )
+            lead_close = WorkTask(
+                task_id="CHAT-POST-REPAIR::lead_close",
+                title="Lead synthesis",
+                description="Close after build.",
+                role=Role.TEAM_LEAD,
+                dependencies=[build.task_id],
+                state=TaskState.COMPLETED,
+                metadata={"phase": "lead_close"},
+            )
+            orch.taskboard.add_task(build)
+            orch.taskboard.add_task(lead_close)
+
+            target = api_main._prepare_direct_post_build_repair_retry(
+                orch=orch,
+                task_root="CHAT-POST-REPAIR",
+                phase_task_ids={
+                    "build": build.task_id,
+                    "lead_close": lead_close.task_id,
+                },
+                result={
+                    "success": False,
+                    "target_task_id": build.task_id,
+                    "command": "python syntax smoke imports tests/test_report_generator.py",
+                    "exit_code": 1,
+                    "stdout": "ImportError: cannot import name 'generate_report'",
+                    "stderr": "",
+                },
+            )
+
+            self.assertEqual(target, build.task_id)
+            retried_build = orch.taskboard.get_task(build.task_id)
+            retried_close = orch.taskboard.get_task(lead_close.task_id)
+            assert retried_build is not None
+            assert retried_close is not None
+            self.assertEqual(retried_build.state, TaskState.READY)
+            self.assertEqual(retried_close.state, TaskState.COMPLETED)
+            self.assertTrue(retried_build.metadata.get("auto_post_build_repair_attempted"))
+            self.assertEqual(
+                retried_build.metadata.get("repair_first_origin"),
+                "auto_post_build_validation",
+            )
+            self.assertEqual(
+                retried_build.metadata.get("phase_contract", {}).get("contract_kind"),
+                "solo_lead_post_build_repair",
+            )
+            self.assertIn("generate_report", retried_build.description)
+            self.assertTrue(retried_close.metadata.get("post_build_repair_pending"))
+            self.assertTrue(
+                retried_close.metadata.get("post_build_repair_hold_until_validation")
+            )
+
+            retried_build.state = TaskState.COMPLETED
+            retried_close.state = TaskState.COMPLETED
+            second_target = api_main._prepare_direct_post_build_repair_retry(
+                orch=orch,
+                task_root="CHAT-POST-REPAIR",
+                phase_task_ids={
+                    "build": build.task_id,
+                    "lead_close": lead_close.task_id,
+                },
+                result={
+                    "success": False,
+                    "target_task_id": build.task_id,
+                    "command": "python syntax smoke imports src/md_report/toc_generator.py",
+                    "exit_code": 1,
+                    "stdout": "ImportError: cannot import name 'format_toc_as_markdown'",
+                    "stderr": "",
+                },
+                max_attempts=2,
+            )
+            self.assertEqual(second_target, build.task_id)
+            retried_build = orch.taskboard.get_task(build.task_id)
+            assert retried_build is not None
+            self.assertEqual(
+                retried_build.metadata.get("auto_post_build_repair_attempt_count"),
+                2,
+            )
+            self.assertIn("format_toc_as_markdown", retried_build.description)
+            third_target = api_main._prepare_direct_post_build_repair_retry(
+                orch=orch,
+                task_root="CHAT-POST-REPAIR",
+                phase_task_ids={
+                    "build": build.task_id,
+                    "lead_close": lead_close.task_id,
+                },
+                result={
+                    "success": False,
+                    "target_task_id": build.task_id,
+                    "command": "python syntax smoke imports src/md_report/toc_generator.py",
+                    "exit_code": 1,
+                    "stdout": "ImportError: still failing",
+                    "stderr": "",
+                },
+                max_attempts=2,
+            )
+            self.assertEqual(third_target, "")
+
+    def test_solo_lead_post_build_repair_stops_on_stagnant_import_error(self) -> None:
+        with _safe_tempdir("solo-lead-post-build-stagnation") as tmp:
+            runtime_dir = tmp / "runtime"
+            workspace = tmp / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            workspace.mkdir(parents=True, exist_ok=True)
+            orch = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=workspace,
+            )
+            build = WorkTask(
+                task_id="CHAT-POST-STAGNANT::build",
+                title="Build",
+                description="Original build objective\n",
+                role=Role.TEAM_LEAD,
+                state=TaskState.COMPLETED,
+                metadata={"phase": "build"},
+            )
+            orch.taskboard.add_task(build)
+            result = {
+                "success": False,
+                "target_task_id": build.task_id,
+                "command": "python -m pytest -q --tb=short",
+                "exit_code": 2,
+                "stdout": (
+                    "ImportError: cannot import name 'TOCGenerator' "
+                    "from 'src.md_report.toc_generator'"
+                ),
+                "stderr": "",
+            }
+            with patch.dict(
+                os.environ,
+                {"AITEAM_DIRECT_POST_BUILD_STAGNATION_LIMIT": "2"},
+                clear=False,
+            ):
+                first = api_main._prepare_direct_post_build_repair_retry(
+                    orch=orch,
+                    task_root="CHAT-POST-STAGNANT",
+                    phase_task_ids={"build": build.task_id},
+                    result=result,
+                    max_attempts=10,
+                )
+                self.assertEqual(first, build.task_id)
+                build.state = TaskState.COMPLETED
+                second = api_main._prepare_direct_post_build_repair_retry(
+                    orch=orch,
+                    task_root="CHAT-POST-STAGNANT",
+                    phase_task_ids={"build": build.task_id},
+                    result=result,
+                    max_attempts=10,
+                )
+                self.assertEqual(second, build.task_id)
+                build.state = TaskState.COMPLETED
+                third = api_main._prepare_direct_post_build_repair_retry(
+                    orch=orch,
+                    task_root="CHAT-POST-STAGNANT",
+                    phase_task_ids={"build": build.task_id},
+                    result=result,
+                    max_attempts=10,
+                )
+
+            self.assertEqual(third, "")
+            refreshed = orch.taskboard.get_task(build.task_id)
+            assert refreshed is not None
+            self.assertTrue(refreshed.metadata.get("auto_post_build_repair_stagnated"))
+
+    def test_solo_lead_resumes_lead_close_only_after_post_build_success(self) -> None:
+        with _safe_tempdir("solo-lead-post-build-close-resume") as tmp:
+            runtime_dir = tmp / "runtime"
+            workspace = tmp / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            workspace.mkdir(parents=True, exist_ok=True)
+            orch = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=workspace,
+            )
+            build = WorkTask(
+                task_id="CHAT-POST-CLOSE::build",
+                title="Build",
+                description="Build.",
+                role=Role.TEAM_LEAD,
+                state=TaskState.COMPLETED,
+                metadata={"phase": "build"},
+            )
+            lead_close = WorkTask(
+                task_id="CHAT-POST-CLOSE::lead_close",
+                title="Lead synthesis",
+                description="Close.",
+                role=Role.TEAM_LEAD,
+                dependencies=[build.task_id],
+                state=TaskState.COMPLETED,
+                metadata={
+                    "phase": "lead_close",
+                    "post_build_repair_pending": True,
+                    "post_build_repair_hold_until_validation": True,
+                },
+            )
+            orch.taskboard.add_task(build)
+            orch.taskboard.add_task(lead_close)
+
+            resumed = api_main._resume_direct_post_build_lead_close_after_success(
+                orch=orch,
+                task_root="CHAT-POST-CLOSE",
+                phase_task_ids={"build": build.task_id, "lead_close": lead_close.task_id},
+            )
+
+            self.assertTrue(resumed)
+            refreshed = orch.taskboard.get_task(lead_close.task_id)
+            assert refreshed is not None
+            self.assertEqual(refreshed.state, TaskState.READY)
+            self.assertFalse(refreshed.metadata.get("post_build_repair_pending"))
+            self.assertTrue(refreshed.metadata.get("post_build_repair_validation_passed"))
+
     def test_chat_browser_surface_delegates_to_browser_and_mcp_specialists_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -4276,6 +6971,14 @@ class APITeamChatTests(unittest.TestCase):
                     if str((spec.get("metadata", {}) or {}).get("tool_specialist", "") or "") == "browser_operator"
                 ]
                 self.assertTrue(browser_specs)
+                browser_meta = dict(browser_specs[0].get("metadata", {}) or {})
+                browser_contract = dict(browser_meta.get("phase_contract", {}) or {})
+                self.assertTrue(bool(browser_meta.get("phase_contract_enforced")))
+                self.assertEqual(
+                    str(browser_contract.get("phase_id", "")),
+                    str(browser_specs[0].get("task_id", "")).split("::", 1)[-1],
+                )
+                self.assertTrue(bool(str(browser_contract.get("objective", "")).strip()))
                 self.assertIn(
                     "steps_reproduced",
                     str(browser_specs[0].get("description", "")),
@@ -4283,6 +6986,86 @@ class APITeamChatTests(unittest.TestCase):
                 self.assertTrue(isinstance(payload.get("specialist_reports", []), list))
                 summary = dict(payload.get("specialist_report_summary", {}) or {})
                 self.assertIn("count", summary)
+
+                by_id = {
+                    item.get("task_id"): item
+                    for item in tasks_data
+                    if isinstance(item, dict)
+                }
+                review_task = by_id.get(f"{task_root}::review")
+                qa_task = by_id.get(f"{task_root}::qa")
+                self.assertIsNotNone(review_task)
+                self.assertIsNotNone(qa_task)
+                review_delegate_ids = [
+                    str(task_id)
+                    for task_id in by_id
+                    if str(task_id).startswith(f"{task_root}::delegate_review_")
+                ]
+                qa_delegate_ids = [
+                    str(task_id)
+                    for task_id in by_id
+                    if str(task_id).startswith(f"{task_root}::delegate_qa_")
+                ]
+                self.assertTrue(review_delegate_ids)
+                self.assertTrue(qa_delegate_ids)
+                self.assertTrue(
+                    any(
+                        task_id in list((review_task or {}).get("dependencies", []) or [])
+                        for task_id in review_delegate_ids
+                    )
+                )
+                self.assertTrue(
+                    any(
+                        task_id in list((qa_task or {}).get("dependencies", []) or [])
+                        for task_id in qa_delegate_ids
+                    )
+                )
+                self.assertTrue(
+                    all(
+                        f"{task_root}::review"
+                        not in list((by_id.get(task_id) or {}).get("dependencies", []) or [])
+                        for task_id in review_delegate_ids
+                    )
+                )
+                self.assertTrue(
+                    all(
+                        f"{task_root}::qa"
+                        not in list((by_id.get(task_id) or {}).get("dependencies", []) or [])
+                        for task_id in qa_delegate_ids
+                    )
+                )
+                for task_id in review_delegate_ids:
+                    delegate_contract = dict(
+                        ((by_id.get(task_id) or {}).get("metadata", {}) or {}).get(
+                            "phase_contract", {}
+                        )
+                        or {}
+                    )
+                    self.assertNotIn("review", list(delegate_contract.get("depends_on", []) or []))
+                    self.assertEqual(
+                        str(delegate_contract.get("evidence_target_phase", "")),
+                        "review",
+                    )
+                    self.assertEqual(
+                        str(delegate_contract.get("contract_kind", "")),
+                        "delegate_support_pre_phase",
+                    )
+                for task_id in qa_delegate_ids:
+                    delegate_contract = dict(
+                        ((by_id.get(task_id) or {}).get("metadata", {}) or {}).get(
+                            "phase_contract", {}
+                        )
+                        or {}
+                    )
+                    self.assertNotIn("qa", list(delegate_contract.get("depends_on", []) or []))
+                    self.assertEqual(
+                        str(delegate_contract.get("evidence_target_phase", "")),
+                        "qa",
+                    )
+                    self.assertEqual(
+                        str(delegate_contract.get("contract_kind", "")),
+                        "delegate_support_pre_phase",
+                    )
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -4572,6 +7355,23 @@ class APITeamChatTests(unittest.TestCase):
             )
         )
 
+    def test_workspace_allowed_module_scope_hints_follow_current_layout(self) -> None:
+        with tempfile.TemporaryDirectory(dir=".") as tmp:
+            workspace = Path(tmp)
+            (workspace / "src" / "acme_cli").mkdir(parents=True, exist_ok=True)
+            (workspace / "src" / "acme_cli" / "__init__.py").write_text("", encoding="utf-8")
+            (workspace / "src" / "acme_cli" / "cli.py").write_text("def main():\n    return 0\n", encoding="utf-8")
+            (workspace / "src" / "acme_cli" / "render.py").write_text("def render():\n    return ''\n", encoding="utf-8")
+            (workspace / "tests").mkdir(parents=True, exist_ok=True)
+            (workspace / "tests" / "test_cli.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+            hints = api_main._workspace_allowed_module_scope_hints(workspace)
+
+            self.assertIn("src/acme_cli/", hints)
+            self.assertIn("src/acme_cli/cli.py", hints)
+            self.assertIn("src/acme_cli/render.py", hints)
+            self.assertNotIn("tests/test_cli.py", hints)
+
     def test_chat_can_signal_live_mode_via_env_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -4713,6 +7513,57 @@ class APITeamChatTests(unittest.TestCase):
                 last_run = state.get("last_chat_run", {})
                 self.assertTrue(bool(last_run.get("continuation_requested")))
                 self.assertEqual(str(last_run.get("continuation_of", "")), first_root)
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_chat_implicit_continue_uses_latest_project_run_not_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                first = client.post(
+                    "/api/aiteam/chat",
+                    json={
+                        "message": "Create and design an original game",
+                        "mode": "sprint5",
+                        "max_rounds": 5,
+                    },
+                )
+                self.assertEqual(first.status_code, 200)
+                first_payload = _parse_sse_result(first)
+                first_root = str(first_payload.get("task_id", ""))
+                self.assertTrue(first_root.startswith("CHAT-"))
+
+                second = client.post(
+                    "/api/aiteam/chat",
+                    json={
+                        "message": (
+                            "continua completando el proyecto\n\n"
+                            "[Respuesta del usuario a tu pregunta previa: "
+                            "Indica `Continue from CHAT-XXXXXXXX`: no, continua el proyecto]"
+                        ),
+                        "mode": "sprint5",
+                        "max_rounds": 5,
+                    },
+                )
+                self.assertEqual(second.status_code, 200)
+                second_payload = _parse_sse_result(second)
+                self.assertTrue(bool(second_payload.get("continuation_requested")))
+                self.assertTrue(bool(second_payload.get("continuation_effective")))
+                self.assertEqual(
+                    str(second_payload.get("continuation_of", "")), first_root
+                )
+                self.assertNotEqual(
+                    str(second_payload.get("continuation_of", "")),
+                    "CHAT-XXXXXXXX",
+                )
+                self.assertNotEqual(str(second_payload.get("state", "")), "waiting_user")
+                self.assertNotIn(
+                    "necesito el chat exacto",
+                    str(second_payload.get("response", "")).lower(),
+                )
             finally:
                 api_main.set_current_workspace(previous_workspace)
 

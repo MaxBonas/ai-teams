@@ -145,6 +145,21 @@ class TestDetectRunType(unittest.TestCase):
         )
         self.assertEqual(result, "mixed")
 
+    def test_review_revalidation_flow_is_classified_explicitly(self):
+        result = _detect_run_type(
+            message="reanuda la revalidacion del review pendiente",
+            phase_task_ids={
+                "lead_intake": "x::lead_intake",
+                "scout_current_state": "x::scout_current_state",
+                "code_review_revalidation": "x::code_review_revalidation",
+                "qa_validation_toc": "x::qa_validation_toc",
+                "lead_close": "x::lead_close",
+            },
+            artifact_created=0,
+            artifact_modified=0,
+        )
+        self.assertEqual(result, "review_revalidation")
+
 
 class TestScoringCoherence(unittest.TestCase):
     """Verifica la lógica de thresholds por tipo de run."""

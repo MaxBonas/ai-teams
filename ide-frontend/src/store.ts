@@ -68,11 +68,14 @@ export const useIdeStore = create<IdeState>()(
 
             chatConfig: {
                 mode: 'sprint5',
-                rounds: 3,
+                runProfile: 'solo_lead',
+                rounds: 10,
                 complexity: 'medium',
-                criticality: 'medium',
-                strictMode: true,
-                allowLowProductivityOverride: false,
+                criticality: 'low',
+                strictMode: false,
+                allowLowProductivityOverride: true,
+                autoExtendWeakRuns: false,
+                repairFirstMode: false,
             },
             setChatConfig: (config) =>
                 set((state) => ({ chatConfig: { ...state.chatConfig, ...config } })),

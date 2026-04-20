@@ -47,6 +47,23 @@ def _split_compact_lines(value: str, limit: int = 6) -> list[str]:
     return [_compact_text(text, 220)]
 
 
+def _is_runtime_internal_context_line(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return False
+    runtime_markers = (
+        ".aiteam",
+        "lead_memory.md",
+        "instructions.md",
+        "events.jsonl",
+        "mailbox.jsonl",
+        "aiteam.db",
+        "pending_clarification_",
+        "runtime interno del orquestador",
+    )
+    return any(marker in normalized for marker in runtime_markers)
+
+
 def project_key_from_runtime_dir(runtime_dir: Path) -> str:
     return str(Path(runtime_dir).resolve().parent)
 
@@ -273,6 +290,69 @@ def _coerce_item_list(payload: Any) -> list[dict[str, Any]]:
     return items
 
 
+def _filter_runtime_internal_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in list(items or [])
+        if not _is_runtime_internal_context_line(str(item.get("text", "") or ""))
+    ]
+
+
+def _project_label_from_key(project_key: str) -> str:
+    normalized = str(project_key or "").strip()
+    if not normalized:
+        return ""
+    try:
+        candidate = Path(normalized)
+        name = str(candidate.name or "").strip()
+        if name:
+            return name
+    except Exception:
+        pass
+    return normalized
+
+
+def _normalize_project_label(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+_EXPLICIT_PROJECT_LABEL_RE = re.compile(r"(?i)\b(?:proyecto|project)\s*:\s*([^\n|]+)")
+
+
+def _mentions_foreign_project_context_line(value: str, *, project_key: str) -> bool:
+    text = str(value or "").strip()
+    current_label = _normalize_project_label(_project_label_from_key(project_key))
+    if not text or not current_label:
+        return False
+    for match in _EXPLICIT_PROJECT_LABEL_RE.finditer(text):
+        raw_label = str(match.group(1) or "").strip()
+        raw_label = raw_label.split("(", 1)[0].strip(" -:")
+        candidate_label = _normalize_project_label(raw_label)
+        if not candidate_label:
+            continue
+        if candidate_label == current_label:
+            continue
+        if current_label in candidate_label or candidate_label in current_label:
+            continue
+        return True
+    return False
+
+
+def _filter_foreign_project_items(
+    items: list[dict[str, Any]],
+    *,
+    project_key: str,
+) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in list(items or [])
+        if not _mentions_foreign_project_context_line(
+            str(item.get("text", "") or ""),
+            project_key=project_key,
+        )
+    ]
+
+
 def _append_unique_item(
     bucket: list[dict[str, Any]],
     *,
@@ -475,32 +555,32 @@ class ContextCuratorStore:
 
         for line in _split_compact_lines(curator_summary, limit=6):
             _append_unique_item(
-                project_ctx["durable_facts"],
+                project_ctx["historical_context"],
                 text=line,
-                confidence=0.65,
+                confidence=0.45,
                 source_task_ids=source_ids,
                 limit=20,
             )
             _append_unique_item(
-                chat_ctx["durable_facts"],
+                chat_ctx["historical_context"],
                 text=line,
-                confidence=0.75,
+                confidence=0.55,
                 source_task_ids=source_ids,
                 limit=14,
             )
 
         for line in _split_compact_lines(lead_summary, limit=4):
             _append_unique_item(
-                project_ctx["decisions"],
+                project_ctx["hypotheses"],
                 text=line,
-                confidence=0.6,
+                confidence=0.4,
                 source_task_ids=source_ids,
                 limit=12,
             )
             _append_unique_item(
-                chat_ctx["decisions"],
+                chat_ctx["hypotheses"],
                 text=line,
-                confidence=0.7,
+                confidence=0.5,
                 source_task_ids=source_ids,
                 limit=10,
             )
@@ -550,7 +630,12 @@ class ContextCuratorStore:
         summary_text = f"{normalized_phase}: " + " | ".join(lines[:3]) if lines else f"{normalized_phase}: sin datos"
 
         for line in lines:
-            target_bucket = "decisions" if normalized_phase.startswith("lead_") else "durable_facts"
+            if normalized_phase.startswith("lead_"):
+                target_bucket = "decisions"
+            elif normalized_phase.startswith("scout_") or normalized_phase.startswith("delegate_"):
+                target_bucket = "historical_context"
+            else:
+                target_bucket = "durable_facts"
             _append_unique_item(
                 project_ctx[target_bucket],
                 text=f"{normalized_phase}: {line}",
@@ -717,6 +802,8 @@ class ContextCuratorStore:
         for section_name, label in (
             ("decisions", "decisions"),
             ("durable_facts", "durable_facts"),
+            ("historical_context", "historical_context"),
+            ("hypotheses", "hypotheses"),
             ("working_set", "working_set"),
             ("next_actions", "next_actions"),
             ("open_questions", "open_questions"),
@@ -860,6 +947,8 @@ class ContextCuratorStore:
             "working_set": [],
             "durable_facts": [],
             "decisions": [],
+            "historical_context": [],
+            "hypotheses": [],
             "open_questions": [],
             "invalidations": [],
             "next_actions": [],
@@ -873,8 +962,31 @@ class ContextCuratorStore:
             return base
         base["project_key"] = str(payload.get("project_key", project_key) or project_key).strip()
         base["chat_root"] = str(payload.get("chat_root", chat_root) or chat_root).strip()
-        for section in ("working_set", "durable_facts", "decisions", "open_questions", "invalidations", "next_actions"):
-            base[section] = _coerce_item_list(payload.get(section, []))
+        for section in (
+            "working_set",
+            "durable_facts",
+            "decisions",
+            "historical_context",
+            "hypotheses",
+            "open_questions",
+            "invalidations",
+            "next_actions",
+        ):
+            normalized_items = _coerce_item_list(payload.get(section, []))
+            if section in {
+                "working_set",
+                "durable_facts",
+                "decisions",
+                "historical_context",
+                "hypotheses",
+                "open_questions",
+            }:
+                normalized_items = _filter_runtime_internal_items(normalized_items)
+                normalized_items = _filter_foreign_project_items(
+                    normalized_items,
+                    project_key=project_key,
+                )
+            base[section] = normalized_items
         base["source_task_ids"] = [
             str(item).strip()
             for item in list(payload.get("source_task_ids", []) or [])
@@ -885,8 +997,30 @@ class ContextCuratorStore:
 
     def _finalize_context(self, payload: dict[str, Any], *, project_key: str, chat_root: str) -> None:
         source_ids: set[str] = set()
-        for section in ("working_set", "durable_facts", "decisions", "open_questions", "invalidations", "next_actions"):
+        for section in (
+            "working_set",
+            "durable_facts",
+            "decisions",
+            "historical_context",
+            "hypotheses",
+            "open_questions",
+            "invalidations",
+            "next_actions",
+        ):
             normalized = _coerce_item_list(payload.get(section, []))
+            if section in {
+                "working_set",
+                "durable_facts",
+                "decisions",
+                "historical_context",
+                "hypotheses",
+                "open_questions",
+            }:
+                normalized = _filter_runtime_internal_items(normalized)
+                normalized = _filter_foreign_project_items(
+                    normalized,
+                    project_key=project_key,
+                )
             payload[section] = normalized
             for item in normalized:
                 for task_id in list(item.get("source_task_ids", []) or []):

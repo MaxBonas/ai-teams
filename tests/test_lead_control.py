@@ -240,6 +240,7 @@ class LeadControlTests(unittest.TestCase):
             ["RESEARCHER", "REVIEWER", "REVIEWER"],
         )
         self.assertEqual(result.directives.get("run_mode"), "roadmap")
+        self.assertEqual(result.plan_source, "run_mode:roadmap")
 
     def test_explicit_workflow_plan_takes_precedence_over_run_mode(self) -> None:
         result = resolve_lead_intake(
@@ -259,6 +260,18 @@ class LeadControlTests(unittest.TestCase):
 
         self.assertEqual([item.phase_id for item in result.phases], ["build"])
         self.assertEqual([item.role for item in result.phases], ["ENGINEER"])
+        self.assertEqual(result.plan_source, "explicit_workflow_plan")
+
+    def test_default_plan_source_is_explicit(self) -> None:
+        result = resolve_lead_intake(
+            lead_output="Planifica la siguiente accion sin bloque estructurado.",
+            chat_mode="classic",
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.MEDIUM,
+            round_budget=5,
+        )
+
+        self.assertEqual(result.plan_source, "default")
 
     def test_direct_answer_is_blocked_when_continuation_has_pending_work(self) -> None:
         result = resolve_lead_intake(

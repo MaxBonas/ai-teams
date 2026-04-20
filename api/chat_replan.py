@@ -220,17 +220,43 @@ def _extract_budget_adjustments_from_outputs(
 
 def _extract_delegate_request_from_outputs(
     phase_outputs: dict[str, str],
+    phase_output_history: dict[str, list[str]] | None = None,
 ) -> tuple[str, object] | None:
     """Busca una delegacion especializada emitida por un checkpoint mid-run del Lead."""
 
-    for phase_name, output, _directives in _lead_control_iter_lead_checkpoint_directives(
-        phase_outputs,
-        include_lead_intake=False,
-        reverse=True,
-    ):
-        request = _lead_control_extract_delegate_request(output)
-        if request is not None:
-            return phase_name, request
+    history_by_phase = {
+        str(phase_name or "").strip(): [
+            str(item or "").strip()
+            for item in list(outputs or [])
+            if str(item or "").strip()
+        ]
+        for phase_name, outputs in dict(phase_output_history or {}).items()
+        if str(phase_name or "").strip()
+    }
+    ordered_phases: list[str] = [
+        phase_name
+        for phase_name, _output, _directives in _lead_control_iter_lead_checkpoint_directives(
+            phase_outputs,
+            include_lead_intake=False,
+            reverse=True,
+        )
+    ]
+    for phase_name in history_by_phase.keys():
+        if phase_name not in ordered_phases:
+            ordered_phases.append(phase_name)
+
+    for phase_name in ordered_phases:
+        candidate_outputs: list[str] = []
+        history_outputs = history_by_phase.get(phase_name, [])
+        if history_outputs:
+            candidate_outputs.extend(reversed(history_outputs))
+        current_output = str((phase_outputs or {}).get(phase_name, "") or "").strip()
+        if current_output and current_output not in candidate_outputs:
+            candidate_outputs.append(current_output)
+        for output in candidate_outputs:
+            request = _lead_control_extract_delegate_request(output)
+            if request is not None:
+                return phase_name, request
     return None
 
 

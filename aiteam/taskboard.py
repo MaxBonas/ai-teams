@@ -43,10 +43,12 @@ class TaskBoard:
             before = self._snapshot_tasks()
             if task.task_id in self._tasks:
                 raise ValueError(f"Task already exists: {task.task_id}")
-            if task.dependencies:
-                task.state = TaskState.PENDING
-            else:
-                task.state = TaskState.READY
+            # Preserve explicit non-pending states for recovered/imported tasks.
+            if task.state == TaskState.PENDING:
+                if task.dependencies:
+                    task.state = TaskState.PENDING
+                else:
+                    task.state = TaskState.READY
             self._tasks[task.task_id] = task
             self._persist_task_changes(before)
 
@@ -84,18 +86,38 @@ class TaskBoard:
             if not task or task.state != TaskState.READY:
                 return False
             if task.dependencies:
+                soft_terminal_dependencies = [
+                    dep
+                    for dep in task.dependencies
+                    if dep in self._tasks
+                    and self._is_soft_support_dependency(task, self._tasks[dep])
+                    and self._tasks[dep].state
+                    in (
+                        TaskState.FAILED,
+                        TaskState.BLOCKED,
+                        TaskState.SKIPPED,
+                        TaskState.ARCHIVED,
+                    )
+                ]
                 unmet = [
                     dep
                     for dep in task.dependencies
                     if dep not in self._tasks
-                    or self._tasks[dep].state != TaskState.COMPLETED
+                    or (
+                        self._tasks[dep].state != TaskState.COMPLETED
+                        and dep not in soft_terminal_dependencies
+                    )
                 ]
+                if soft_terminal_dependencies:
+                    task.metadata["support_dependency_degraded"] = True
+                    task.metadata["soft_terminal_dependencies"] = soft_terminal_dependencies
                 if unmet:
                     failed_deps = [
                         dep
                         for dep in unmet
                         if dep in self._tasks
                         and self._tasks[dep].state in (TaskState.FAILED, TaskState.BLOCKED)
+                        and dep not in soft_terminal_dependencies
                     ]
                     if failed_deps:
                         task.state = TaskState.BLOCKED
@@ -268,16 +290,31 @@ class TaskBoard:
                 task.state = TaskState.READY
                 continue
 
+            soft_terminal_dependencies = [
+                dep
+                for dep in task.dependencies
+                if dep in self._tasks
+                and self._is_soft_support_dependency(task, self._tasks[dep])
+                and self._tasks[dep].state
+                in (TaskState.FAILED, TaskState.BLOCKED, TaskState.SKIPPED, TaskState.ARCHIVED)
+            ]
             failed_dependencies = [
                 dep
                 for dep in task.dependencies
                 if dep in self._tasks and self._tasks[dep].state in (TaskState.FAILED, TaskState.BLOCKED)
+                and dep not in soft_terminal_dependencies
             ]
             if failed_dependencies:
                 task.state = TaskState.BLOCKED
                 task.metadata["blocked_reason"] = "dependency_failed"
                 task.metadata["blocked_dependencies"] = failed_dependencies
                 continue
+            if soft_terminal_dependencies:
+                task.metadata["support_dependency_degraded"] = True
+                task.metadata["soft_terminal_dependencies"] = soft_terminal_dependencies
+            else:
+                task.metadata.pop("support_dependency_degraded", None)
+                task.metadata.pop("soft_terminal_dependencies", None)
 
             if task.metadata.get("blocked_reason") == "dependency_failed":
                 task.metadata.pop("blocked_reason", None)
@@ -287,9 +324,35 @@ class TaskBoard:
                 dep
                 for dep in task.dependencies
                 if dep not in self._tasks
-                or self._tasks[dep].state != TaskState.COMPLETED
+                or (
+                    self._tasks[dep].state != TaskState.COMPLETED
+                    and dep not in soft_terminal_dependencies
+                )
             ]
             task.state = TaskState.PENDING if unresolved else TaskState.READY
+
+    @staticmethod
+    def _is_soft_support_dependency(task: WorkTask, dependency: WorkTask) -> bool:
+        metadata = dependency.metadata if isinstance(dependency.metadata, dict) else {}
+        contract = metadata.get("phase_contract", {}) if isinstance(metadata, dict) else {}
+        if not isinstance(contract, dict):
+            contract = {}
+        contract_kind = str(contract.get("contract_kind", "") or "").strip().lower()
+        evidence_position = str(metadata.get("evidence_position", "") or "").strip().lower()
+        dependency_phase = str(metadata.get("phase", "") or dependency.task_id).strip().lower()
+        is_explicit_support = contract_kind == "delegate_support_pre_phase"
+        is_legacy_delegate_support = (
+            evidence_position == "pre_phase"
+            and bool(metadata.get("structured_evidence_task"))
+            and dependency_phase.startswith("delegate_")
+        )
+        if not is_explicit_support and not is_legacy_delegate_support:
+            return False
+        target_phase = str(contract.get("evidence_target_phase", "") or "").strip()
+        task_phase = str(task.metadata.get("phase", "") or "").strip()
+        if target_phase and task_phase and target_phase != task_phase:
+            return False
+        return bool(metadata.get("structured_evidence_task") or is_explicit_support)
 
     @staticmethod
     def _owned_files(task: WorkTask) -> list[str]:

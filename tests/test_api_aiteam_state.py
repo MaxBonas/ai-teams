@@ -10,12 +10,26 @@ from uuid import uuid4
 
 import pytest
 import api.main as api_main
+from api import chat_observability
 from fastapi.testclient import TestClient
 from api.utils import PROJECT_ROOT, resolve_runtime_dir
 from aiteam.context_curator import ContextCuratorStore
 from aiteam.sqlite_store import SqliteStore
 
 pytestmark = pytest.mark.slow
+
+
+class RunVerdictCoercionTests(unittest.TestCase):
+    def test_coerce_run_verdict_preserves_failure_origin(self) -> None:
+        verdict = chat_observability._coerce_run_verdict(
+            {
+                "state": "failed",
+                "result": "fallido",
+                "failure_origin": "preplanning_support",
+                "reason_codes": ["phase_failed:scout_context_curator"],
+            }
+        )
+        self.assertEqual(verdict.get("failure_origin"), "preplanning_support")
 
 
 class APIAIStateNotebookLMTests(unittest.TestCase):
@@ -213,6 +227,62 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                     str(artifacts.get("message", "")),
                     "Esta run no genero artefactos de producto.",
                 )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_state_last_chat_run_treats_plan_mode_completion_as_terminal_without_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "events.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "ts": "2026-04-02T11:30:00+00:00",
+                                "event_type": "chat_plan_created",
+                                "payload": {
+                                    "task_id": "CHAT-plan01",
+                                    "chat_mode": "plan",
+                                    "round_budget": 4,
+                                    "phase_count": 0,
+                                    "delegated_count": 0,
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "ts": "2026-04-02T11:30:03+00:00",
+                                "event_type": "chat_plan_mode_completed",
+                                "payload": {
+                                    "task_id": "CHAT-plan01",
+                                    "chat_mode": "plan",
+                                    "artifact_created": 0,
+                                    "artifact_modified": 0,
+                                    "artifact_files": [],
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                payload = client.get("/api/aiteam/state?environment=dev").json()
+                last_chat_run = dict(payload.get("last_chat_run", {}) or {})
+                artifacts = dict(last_chat_run.get("product_artifacts", {}) or {})
+                self.assertEqual(str(last_chat_run.get("mode", "")), "plan")
+                self.assertEqual(str(last_chat_run.get("status", "")), "completed")
+                self.assertFalse(bool(artifacts.get("has_artifacts")))
+                self.assertEqual(int(artifacts.get("created", 0)), 0)
+                self.assertEqual(int(artifacts.get("modified", 0)), 0)
+                self.assertEqual(list(artifacts.get("files", []) or []), [])
             finally:
                 api_main.set_current_workspace(previous_workspace)
 
@@ -2719,6 +2789,190 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
             self.assertEqual(progress.pending_tasks, 0)
             self.assertEqual(progress.state, "running")
 
+    def test_chat_progress_treats_blocked_after_lead_close_as_terminal_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            task_root = "CHAT-438A83A4"
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-04-11T03:34:44+00:00",
+                        "event_type": "chat_run_resumed",
+                        "payload": {
+                            "task_id": task_root,
+                            "phase": "lead_close",
+                            "final_state": "in_progress",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": f"{task_root}::lead_intake",
+                        "title": "Lead intake",
+                        "description": "desc",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"result": "planned"},
+                    },
+                    {
+                        "task_id": f"{task_root}::plan_engineering",
+                        "title": "Plan engineering",
+                        "description": "desc",
+                        "role": "researcher",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "blocked",
+                        "assignee": "researcher-1",
+                        "metadata": {"blocked_reason": "phase_self_reported_blocked"},
+                    },
+                    {
+                        "task_id": f"{task_root}::build",
+                        "title": "Build",
+                        "description": "desc",
+                        "role": "engineer",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "blocked",
+                        "assignee": "engineer-1",
+                        "metadata": {"blocked_reason": "dependency_failed"},
+                    },
+                    {
+                        "task_id": f"{task_root}::lead_close",
+                        "title": "Lead close",
+                        "description": "desc",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"result": "Terminal diagnostic."},
+                    },
+                ],
+            )
+            self._write_runtime_workflow_sqlite(
+                runtime_dir,
+                {
+                    task_root: {
+                        "run_status": "in_progress",
+                        "phase_states": {
+                            "lead_intake": "completed",
+                            "plan_engineering": "blocked",
+                            "build": "blocked",
+                            "lead_close": "completed",
+                        },
+                        "run_verdict": {},
+                    }
+                },
+            )
+
+            progress = api_main._build_chat_progress(runtime_dir, task_root)
+            self.assertEqual(progress.task_id, task_root)
+            self.assertEqual(progress.state, "failed")
+
+    def test_state_last_chat_run_masks_stale_running_after_lead_close(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            task_root = "CHAT-438A83A4"
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-04-11T03:28:13+00:00",
+                        "event_type": "chat_plan_created",
+                        "payload": {
+                            "task_id": task_root,
+                            "chat_mode": "sprint5",
+                            "round_budget": 8,
+                            "phase_count": 8,
+                            "delegated_count": 1,
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self._write_runtime_workflow_sqlite(
+                runtime_dir,
+                {
+                    task_root: {
+                        "run_status": "in_progress",
+                        "phase_states": {},
+                        "run_verdict": {},
+                    }
+                },
+            )
+            self._write_runtime_tasks_sqlite(
+                runtime_dir,
+                [
+                    {
+                        "task_id": f"{task_root}::lead_intake",
+                        "title": "Lead intake",
+                        "description": "desc",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"phase": "lead_intake"},
+                    },
+                    {
+                        "task_id": f"{task_root}::plan_engineering",
+                        "title": "Plan engineering",
+                        "description": "desc",
+                        "role": "researcher",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "blocked",
+                        "assignee": "researcher-1",
+                        "metadata": {"phase": "plan_engineering"},
+                    },
+                    {
+                        "task_id": f"{task_root}::lead_close",
+                        "title": "Lead close",
+                        "description": "desc",
+                        "role": "team_lead",
+                        "complexity": "medium",
+                        "criticality": "medium",
+                        "dependencies": [],
+                        "state": "completed",
+                        "assignee": "lead-1",
+                        "metadata": {"phase": "lead_close"},
+                    },
+                ],
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                payload = client.get("/api/aiteam/state?environment=dev").json()
+                last_chat_run = dict(payload.get("last_chat_run", {}) or {})
+                self.assertEqual(str(last_chat_run.get("status", "")), "failed")
+                self.assertEqual(
+                    str(last_chat_run.get("workflow_run_status", "")),
+                    "in_progress",
+                )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
     def test_state_last_chat_run_prefers_workflow_run_status_over_completed_or_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -2905,6 +3159,63 @@ class APIAIStateNotebookLMTests(unittest.TestCase):
                     str(last_chat_run.get("continuation_block_reason", "")),
                     "prior_run_rejected",
                 )
+            finally:
+                api_main.set_current_workspace(previous_workspace)
+
+    def test_state_sanitizes_invalid_continuation_placeholder_from_old_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            root_id = "CHAT-A1B2C3D4"
+            (runtime_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-04-12T10:00:00+00:00",
+                        "event_type": "chat_plan_created",
+                        "payload": {
+                            "task_id": root_id,
+                            "chat_mode": "sprint5",
+                            "round_budget": 5,
+                            "phase_count": 2,
+                            "delegated_count": 0,
+                            "continuation_requested": True,
+                            "continuation_of": "CHAT-XXXXXXXX",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self._write_runtime_workflow_sqlite(
+                runtime_dir,
+                {
+                    root_id: {
+                        "run_status": "rejected",
+                        "continuation_requested": True,
+                        "continuation_effective": True,
+                        "continuation_of": "CHAT-XXXXXXXX",
+                        "run_verdict": {
+                            "state": "rejected",
+                            "reason_codes": ["review:phase_failed"],
+                        },
+                    }
+                },
+            )
+
+            previous_workspace = api_main.get_current_workspace()
+            try:
+                api_main.set_current_workspace(workspace)
+                client = TestClient(api_main.app)
+                state_payload = client.get("/api/aiteam/state?environment=dev").json()
+                last_chat_run = dict(state_payload.get("last_chat_run", {}) or {})
+                self.assertTrue(bool(last_chat_run.get("continuation_requested", False)))
+                self.assertEqual(str(last_chat_run.get("continuation_of", "")), "")
+                self.assertFalse(bool(last_chat_run.get("continuation_effective", True)))
+
+                progress = api_main._build_chat_progress(runtime_dir, root_id)
+                self.assertEqual(progress.continuation_of, "")
+                self.assertFalse(progress.continuation_effective)
             finally:
                 api_main.set_current_workspace(previous_workspace)
 

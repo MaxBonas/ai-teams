@@ -1,3 +1,5 @@
+import re
+
 from pathlib import Path
 
 from aiteam.chat_runtime import ChatRunState
@@ -19,29 +21,49 @@ def _message_suggests_browser_surface(message: str) -> bool:
     normalized = str(message or "").strip().lower()
     if not normalized:
         return False
-    browser_terms = (
+    strong_browser_patterns = (
+        r"\bfrontend\b",
+        r"\bui\b",
+        r"\bux\b",
+        r"\bbrowser\b",
+        r"\bplaywright\b",
+        r"\bdom\b",
+        r"\bselector\b",
+        r"\bscreenshot\b",
+        r"\bscrape\b",
+        r"\bscraping\b",
+        r"\bscreen\b",
+        r"\bform\b",
+        r"\breact\b",
+        r"\bvite\b",
+        r"\bcomponent\b",
+        r"\bwebapp\b",
+        r"\bwebsite\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in strong_browser_patterns):
+        return True
+
+    weak_visual_patterns = (r"\bcss\b", r"\bhtml\b", r"\bpage\b", r"\bweb\b")
+    if not any(re.search(pattern, normalized) for pattern in weak_visual_patterns):
+        return False
+
+    browser_context_terms = (
+        "browser flow",
+        "browser repro",
+        "visual",
+        "render",
+        "interactive",
         "frontend",
         "ui",
         "ux",
-        "browser",
-        "playwright",
         "dom",
-        "selector",
-        "screenshot",
-        "scrape",
-        "scraping",
-        "mcp",
-        "page",
-        "screen",
-        "form",
+        "playwright",
         "react",
         "vite",
-        "css",
-        "html",
-        "component",
-        "web",
+        "website",
+        "webapp",
     )
-    return any(term in normalized for term in browser_terms)
+    return any(term in normalized for term in browser_context_terms)
 
 
 def _message_suggests_security_surface(message: str) -> bool:
@@ -271,6 +293,9 @@ def _build_context_curator_prompt(
         f"Superficies detectadas: {surfaces}\n\n"
         "Prioriza solo lo relevante para decidir el plan inicial: hechos, archivos/areas "
         "probables, riesgos y senales utiles. Sin teoria y sin transcripts crudos.\n"
+        "Separa explicitamente en tu resumen: (1) estado actual confirmado del workspace, "
+        "(2) contexto historico util, (3) huecos que requieren revalidacion.\n"
+        "NO promociones historial, lead memory o runs previas a hechos confirmados del estado actual.\n"
         "Si existe CONTINUATION TARGET PRIORITARIO, ese target manda sobre objetivos historicos mas antiguos.\n\n"
         f"{continuation_block}"
         "[PROJECT_STATE]\n"
@@ -317,32 +342,74 @@ def _build_curated_context_block(
 ) -> str:
     store = ContextCuratorStore(runtime_dir)
     parts: list[str] = []
-    def _filter_summary(summary: str, *, drop_working_set: bool) -> str:
+    def _summary_for_sections(
+        payload: dict[str, object],
+        *,
+        sections: set[str],
+        drop_working_set: bool,
+    ) -> str:
+        filtered_payload = {
+            key: value
+            for key, value in payload.items()
+        }
+        for section_name in (
+            "working_set",
+            "durable_facts",
+            "decisions",
+            "historical_context",
+            "hypotheses",
+            "open_questions",
+            "invalidations",
+            "next_actions",
+        ):
+            if section_name not in sections:
+                filtered_payload[section_name] = []
+        summary = store.build_summary(filtered_payload)
+        if not drop_working_set:
+            return summary
         lines = []
         for line in str(summary or "").splitlines():
             normalized = str(line).strip()
-            if not normalized:
-                continue
-            if drop_working_set and normalized.startswith("working_set:"):
+            if not normalized or normalized.startswith("working_set:"):
                 continue
             lines.append(line)
         return "\n".join(lines).strip()
 
-    project_summary = store.build_summary(
-        store.load_project_context(_context_project_key(workspace))
+    project_payload = store.load_project_context(_context_project_key(workspace))
+    project_summary = _summary_for_sections(
+        project_payload,
+        sections={"durable_facts", "decisions", "working_set", "next_actions", "open_questions"},
+        drop_working_set=False,
+    )
+    project_historical_summary = _summary_for_sections(
+        project_payload,
+        sections={"historical_context", "hypotheses"},
+        drop_working_set=True,
     )
     continuation_root = str(continuation_of or "").strip()
     chat_summary = ""
+    chat_historical_summary = ""
     if continuation_root:
-        chat_summary = store.build_summary(
-            store.load_chat_context(
-                continuation_root,
-                project_key=_context_project_key(workspace),
-            )
+        chat_payload = store.load_chat_context(
+            continuation_root,
+            project_key=_context_project_key(workspace),
+        )
+        chat_summary = _summary_for_sections(
+            chat_payload,
+            sections={"durable_facts", "decisions", "working_set", "next_actions", "open_questions"},
+            drop_working_set=True,
+        )
+        chat_historical_summary = _summary_for_sections(
+            chat_payload,
+            sections={"historical_context", "hypotheses"},
+            drop_working_set=True,
         )
     if continuation_root:
-        project_summary = _filter_summary(project_summary, drop_working_set=True)
-        chat_summary = _filter_summary(chat_summary, drop_working_set=True)
+        project_summary = _summary_for_sections(
+            project_payload,
+            sections={"durable_facts", "decisions", "working_set", "next_actions", "open_questions"},
+            drop_working_set=True,
+        )
     if not project_summary and chat_summary:
         filtered_lines = [
             line
@@ -351,11 +418,17 @@ def _build_curated_context_block(
         ]
         project_summary = "\n".join(filtered_lines[:3]).strip()
     if project_summary:
-        parts.append("Contexto curado del proyecto:")
+        parts.append("Contexto curado del proyecto (actual y operativo):")
         parts.extend(f"- {line}" for line in project_summary.splitlines())
+    if project_historical_summary:
+        parts.append("Contexto historico del proyecto (no confirmado; revalidar antes de usar):")
+        parts.extend(f"- {line}" for line in project_historical_summary.splitlines())
     if continuation_root and chat_summary:
-        parts.append(f"Contexto curado de {continuation_root}:")
+        parts.append(f"Contexto curado de {continuation_root} (actual y operativo):")
         parts.extend(f"- {line}" for line in chat_summary.splitlines())
+    if continuation_root and chat_historical_summary:
+        parts.append(f"Contexto historico de {continuation_root} (no confirmado; revalidar antes de usar):")
+        parts.extend(f"- {line}" for line in chat_historical_summary.splitlines())
     return ("\n" + "\n".join(parts)) if parts else ""
 
 

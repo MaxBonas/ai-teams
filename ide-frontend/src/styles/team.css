@@ -914,6 +914,24 @@
   cursor: not-allowed;
 }
 
+.team-chat-abort {
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  color: #ffb4ae;
+  border-radius: 8px;
+  padding: 7px 11px;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.team-chat-abort:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .team-chat-continue-modal {
   display: flex;
   flex-direction: column;

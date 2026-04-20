@@ -8,6 +8,7 @@ from aiteam.context_curator import (
     estimate_context_compaction_value,
     estimate_context_pressure,
 )
+from api.chat_preplan import _build_curated_context_block
 from api.utils import (
     _build_continuation_target_context,
     _build_project_continuity_context,
@@ -55,8 +56,10 @@ class ContextCuratorTests(unittest.TestCase):
         self.assertEqual(chat_ctx["version"], PROJECT_CONTEXT_VERSION)
         self.assertTrue((self.runtime_dir / "context" / "projects").exists())
         self.assertTrue((self.runtime_dir / "context" / "chats").exists())
-        self.assertTrue(project_ctx["durable_facts"])
-        self.assertTrue(chat_ctx["decisions"])
+        self.assertTrue(project_ctx["historical_context"])
+        self.assertTrue(chat_ctx["hypotheses"])
+        self.assertFalse(project_ctx["durable_facts"])
+        self.assertFalse(chat_ctx["decisions"])
         self.assertIn("delegate:delegate_mcp_probe", [row["text"] for row in chat_ctx["next_actions"]])
 
         loaded_project = store.load_project_context(str(self.workspace.resolve()))
@@ -80,7 +83,7 @@ class ContextCuratorTests(unittest.TestCase):
         continuity = _build_project_continuity_context(self.runtime_dir)
 
         self.assertIn("Context curator:", continuity)
-        self.assertIn("durable_facts:", continuity)
+        self.assertIn("historical_context:", continuity)
         self.assertIn("auth.py concentra riesgo", continuity)
 
     def test_remember_invalidation_records_replan_or_force_gate(self) -> None:
@@ -145,7 +148,7 @@ class ContextCuratorTests(unittest.TestCase):
         self.assertIn("context_savings_material", value["signals"])
 
     def test_remember_preplan_continuation_deduplicates_existing_facts(self) -> None:
-        """Llamar dos veces con los mismos datos no debe doblar los items en durable_facts."""
+        """Llamar dos veces con los mismos datos no debe doblar el contexto historico persistido."""
         store = ContextCuratorStore(self.runtime_dir)
         kwargs = dict(
             project_key=str(self.workspace.resolve()),
@@ -158,17 +161,17 @@ class ContextCuratorTests(unittest.TestCase):
         )
         store.remember_preplan(**kwargs)
         first_ctx = store.load_chat_context("CHAT-dedup01", project_key=str(self.workspace.resolve()))
-        first_fact_count = len(first_ctx["durable_facts"])
+        first_fact_count = len(first_ctx["historical_context"])
 
         # Segunda llamada con los mismos datos (simulando continuation que reprocesa el mismo estado)
         store.remember_preplan(**kwargs)
         second_ctx = store.load_chat_context("CHAT-dedup01", project_key=str(self.workspace.resolve()))
-        second_fact_count = len(second_ctx["durable_facts"])
+        second_fact_count = len(second_ctx["historical_context"])
 
         self.assertEqual(
             first_fact_count,
             second_fact_count,
-            "Llamadas repetidas con mismos datos no deben duplicar durable_facts",
+            "Llamadas repetidas con mismos datos no deben duplicar historical_context",
         )
         self.assertGreater(first_fact_count, 0)
 
@@ -202,7 +205,7 @@ class ContextCuratorTests(unittest.TestCase):
         self.assertEqual(len(working_set_entries), 1)
         self.assertIn("target=CHAT-7908C4BA", str(working_set_entries[0]))
         self.assertNotIn("CHAT-AAAA1111", str(working_set_entries[0]))
-        self.assertTrue(summary.splitlines()[0].startswith("decisions:"))
+        self.assertTrue(summary.splitlines()[0].startswith("historical_context:"))
         self.assertNotIn("Continue from CHAT-AAAA1111", summary)
 
     def test_remember_preplan_prunes_legacy_request_entries_before_summarizing(self) -> None:
@@ -271,11 +274,13 @@ class ContextCuratorTests(unittest.TestCase):
 
         final_ctx = store.load_project_context(project_key)
 
-        # El contexto debe tener entradas en al menos durable_facts y working_set
+        # El contexto debe tener entradas persistidas tras varias fases
         total_items = (
             len(final_ctx["durable_facts"])
             + len(final_ctx["working_set"])
             + len(final_ctx["decisions"])
+            + len(final_ctx["historical_context"])
+            + len(final_ctx["hypotheses"])
         )
         self.assertGreater(total_items, 0, "project_context_v1 debe tener items tras 4 fases")
 
@@ -304,7 +309,8 @@ class ContextCuratorTests(unittest.TestCase):
 
         # El bloque curado debe aparecer en el output
         self.assertIn("Context curator:", continuity_text)
-        self.assertIn("durable_facts:", continuity_text)
+        self.assertIn("historical_context:", continuity_text)
+        self.assertIn("hypotheses:", continuity_text)
 
         # El contenido curado debe aparecer antes que cualquier raw history marker
         curator_pos = continuity_text.find("Context curator:")
@@ -312,6 +318,85 @@ class ContextCuratorTests(unittest.TestCase):
 
         # Verificar que el contenido semántico real está presente
         self.assertIn("N+1", continuity_text)
+
+    def test_remember_preplan_does_not_promote_historical_summary_to_current_facts(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        project_ctx, chat_ctx = store.remember_preplan(
+            project_key=str(self.workspace.resolve()),
+            chat_root="CHAT-hist01",
+            user_message="Clean retry desde estado validado",
+            surface_hints={"surfaces": ["general"]},
+            curator_summary="- src/acme_cli/report.py existe y ya esta validado",
+            lead_summary="Implementar siguiente slice sobre report.py ya estable",
+            source_task_ids=["CHAT-hist01::lead_intake"],
+        )
+
+        self.assertEqual(project_ctx["durable_facts"], [])
+        self.assertEqual(project_ctx["decisions"], [])
+        self.assertEqual(chat_ctx["durable_facts"], [])
+        self.assertEqual(chat_ctx["decisions"], [])
+        self.assertEqual(len(project_ctx["historical_context"]), 1)
+        self.assertEqual(len(chat_ctx["hypotheses"]), 1)
+
+        project_summary = store.build_summary(project_ctx)
+        self.assertIn("historical_context:", project_summary)
+        self.assertIn("hypotheses:", project_summary)
+        self.assertNotIn("durable_facts:", project_summary)
+
+    def test_curated_context_block_separates_operational_and_historical_context(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        project_key = str(self.workspace.resolve())
+        project_ctx = store.load_project_context(project_key)
+        project_ctx["durable_facts"] = [{"text": "workspace actual: solo pyproject.toml", "confidence": 0.9}]
+        project_ctx["historical_context"] = [{"text": "src/acme_cli/report.py existia en una run anterior", "confidence": 0.5}]
+        project_ctx["hypotheses"] = [{"text": "retomar slice de report.py podria ser util", "confidence": 0.4}]
+        store._write_project_context(project_key, project_ctx)
+
+        block = _build_curated_context_block(
+            runtime_dir=self.runtime_dir,
+            workspace=self.workspace.resolve(),
+            continuation_of="",
+        )
+
+        self.assertIn("Contexto curado del proyecto (actual y operativo):", block)
+        self.assertIn("durable_facts: workspace actual: solo pyproject.toml", block)
+        self.assertIn("Contexto historico del proyecto (no confirmado; revalidar antes de usar):", block)
+        self.assertIn("historical_context: src/acme_cli/report.py existia en una run anterior", block)
+        self.assertIn("hypotheses: retomar slice de report.py podria ser util", block)
+
+    def test_scout_phase_summary_is_not_promoted_to_durable_facts(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        project_ctx, chat_ctx, summary = store.remember_phase_summary(
+            project_key=str(self.workspace.resolve()),
+            chat_root="CHAT-scout001",
+            phase="scout_project_state",
+            output="- pyproject.toml\n- .aiteam/events.jsonl\n- src/app.py",
+            source_task_ids=["CHAT-scout001::scout_project_state"],
+        )
+
+        self.assertEqual(project_ctx["durable_facts"], [])
+        self.assertTrue(project_ctx["historical_context"])
+        self.assertIn("scout_project_state:", summary)
+        self.assertTrue(chat_ctx["working_set"])
+
+    def test_normalize_context_drops_runtime_internal_lines(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        normalized = store._normalize_context(
+            {
+                "project_key": str(self.workspace.resolve()),
+                "durable_facts": [{"text": "scout_project_state: .aiteam/events.jsonl presente", "confidence": 0.8}],
+                "historical_context": [{"text": "lead_memory.md indicaba un slice previo", "confidence": 0.5}],
+                "working_set": [{"text": "runtime interno del orquestador detectado", "confidence": 0.7}],
+                "next_actions": [{"text": "delegate:delegate_repo_scan", "confidence": 0.6}],
+            },
+            project_key=str(self.workspace.resolve()),
+            chat_root="CHAT-sanitize001",
+        )
+
+        self.assertEqual(normalized["durable_facts"], [])
+        self.assertEqual(normalized["historical_context"], [])
+        self.assertEqual(normalized["working_set"], [])
+        self.assertTrue(normalized["next_actions"])
 
     def test_project_continuity_collapses_old_infra_only_runs(self) -> None:
         tasks = [
@@ -575,6 +660,37 @@ class ContextCuratorTests(unittest.TestCase):
         self.assertIn("engineer_tests_p0 [failed]", context)
         self.assertIn("Implementar tests P0 para CLI, CSS y sintaxis", context)
         self.assertIn("review_quality_and_coherence [blocked]", context)
+        self.assertIn("NO confirma por si solo el estado actual del workspace", context)
+
+    def test_session_history_context_marks_historical_claims_as_not_current_state(self) -> None:
+        tasks = [
+            {
+                "task_id": "CHAT-HIST01::lead_intake",
+                "title": "Lead intake",
+                "description": "Solicitud original:\nContinuar proyecto\nEntrega: plan",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {"phase": "lead_intake"},
+            },
+            {
+                "task_id": "CHAT-HIST01::lead_close",
+                "title": "Lead close",
+                "description": "",
+                "state": "completed",
+                "role": "team_lead",
+                "metadata": {
+                    "result": "Antes existian src/acme_cli/report.py y tests/test_report.py como parte del slice previo."
+                },
+            },
+        ]
+        self._write_runtime_tasks(tasks)
+
+        history_text = _build_scout_session_history_context(self.runtime_dir)
+
+        self.assertIn(
+            "CONTEXTO HISTORICO: no lo trates como estado actual confirmado del workspace",
+            history_text,
+        )
 
     def test_context_curator_isolates_by_project_root(self) -> None:
         store = ContextCuratorStore(self.runtime_dir)
@@ -609,6 +725,39 @@ class ContextCuratorTests(unittest.TestCase):
         self.assertNotIn("billing_b.py", store.build_summary(chat_a))
         self.assertIn("billing_b.py", store.build_summary(chat_b))
         self.assertNotIn("auth_a.py", store.build_summary(chat_b))
+
+    def test_context_curator_filters_explicit_foreign_project_lines(self) -> None:
+        store = ContextCuratorStore(self.runtime_dir)
+        project_key = str(self.workspace.resolve())
+        current_project_name = self.workspace.resolve().name
+
+        store._write_project_context(
+            project_key,
+            {
+                "project_key": project_key,
+                "historical_context": [
+                    {
+                        "text": "Proyecto: Book-TTS-Cloneable (pipeline multi-libro) | run previa bloqueada en planning",
+                        "confidence": 0.5,
+                    },
+                    {
+                        "text": f"Proyecto: {current_project_name} | run previa con parser_toc",
+                        "confidence": 0.6,
+                    },
+                    {
+                        "text": "run previa con parser_toc sin etiqueta de proyecto explicita",
+                        "confidence": 0.6,
+                    },
+                ],
+            },
+        )
+
+        loaded = store.load_project_context(project_key)
+        summary = store.build_summary(loaded)
+
+        self.assertNotIn("Book-TTS-Cloneable", summary)
+        self.assertIn(current_project_name, summary)
+        self.assertIn("parser_toc sin etiqueta", summary)
 
     def test_chat_context_insights_survive_external_runtime_migration(self) -> None:
         store = ContextCuratorStore(self.runtime_dir)

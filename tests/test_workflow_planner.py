@@ -149,6 +149,35 @@ PLAN_MULTILINE_OBJECTIVE = """
 [/WORKFLOW_PLAN]
 """
 
+PLAN_YAML_SECTION_WITHOUT_EXPLICIT_CLOSE = """
+```yaml
+[RUN_MODE]
+mode: orchestrated_workflow
+
+[WORKFLOW_PLAN]
+- phase_id: research_toc_risks
+  role: RESEARCHER
+  objective: |
+    Consolidar estrategia de slugify para anclas MD.
+    Definir limites de performance.
+  deliverables:
+    - Algoritmo slugify validado
+  depends_on: []
+
+- phase_id: engineer_toc_feature
+  role: ENGINEER
+  objective: |
+    Implementar generacion de TOC en generator.py.
+    Integrar flags CLI --toc y --toc-depth.
+  deliverables:
+    - Codigo produccion
+  depends_on: [research_toc_risks]
+
+[DEFINITION_OF_DONE]
+- [ ] Tests pasan
+```
+"""
+
 
 # ---------------------------------------------------------------------------
 # parse_workflow_plan — casos validos
@@ -212,6 +241,17 @@ class TestParseWorkflowPlanValid:
         assert "Validar estado actual del repositorio" in result[0].objective
         assert "Confirmar imports en tests" in result[0].objective
         assert "Corregir imports en test_cli.py" in result[1].objective
+
+    def test_yaml_section_without_explicit_close_is_parsed(self):
+        result = parse_workflow_plan(PLAN_YAML_SECTION_WITHOUT_EXPLICIT_CLOSE)
+        assert result is not None
+        assert [phase.phase_id for phase in result] == [
+            "research_toc_risks",
+            "engineer_toc_feature",
+        ]
+        assert result[1].role == "ENGINEER"
+        assert result[1].depends_on == ["research_toc_risks"]
+        assert "flags CLI --toc" in result[1].objective
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +390,11 @@ class TestDefaultPhases:
 
     def test_sprint5_build_depends_on_all_plans(self):
         phases = default_phases("sprint5")
+        plan_engineering = next(p for p in phases if p.phase_id == "plan_engineering")
+        plan_risks = next(p for p in phases if p.phase_id == "plan_risks")
         build = next(p for p in phases if p.phase_id == "build")
+        assert plan_engineering.depends_on == []
+        assert plan_risks.depends_on == ["plan_engineering"]
         assert set(build.depends_on) == {"plan_engineering", "plan_risks"}
 
     def test_sprint5_build_objective_forbids_slice_drift(self):

@@ -70,6 +70,7 @@ class RoutingRequest:
     skill_targets: set[str] = field(default_factory=set)
     lsp_targets: set[str] = field(default_factory=set)
     approved_adapters: set[str] = field(default_factory=set)
+    preferred_adapters: set[str] = field(default_factory=set)
     excluded_adapters: set[str] = field(default_factory=set)
     excluded_providers: set[str] = field(default_factory=set)
     sensitive_approval: bool = False

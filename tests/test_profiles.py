@@ -48,6 +48,34 @@ class ProfileGovernanceTests(unittest.TestCase):
         self.assertIn("CONTROL OPERATIVO MID-RUN", prompt)
         self.assertIn("PAUSE_FOR_USER", prompt)
 
+    def test_team_lead_direct_coding_prompt_allows_path_blocks(self) -> None:
+        prompt = build_prompt(
+            Role.TEAM_LEAD,
+            "Build",
+            "Implement directly",
+            task_metadata={"direct_coding_executor": True},
+        )
+
+        self.assertIn("IMPLEMENTACION DIRECTA DEL TEAM LEAD", prompt)
+        self.assertIn("path=", prompt)
+        self.assertIn("No delegues", prompt)
+
+    def test_team_lead_direct_coding_system_prompt_disables_roles(self) -> None:
+        prompt = build_system_prompt(
+            Role.TEAM_LEAD,
+            task_metadata={"direct_coding_executor": True},
+        )
+
+        self.assertIn("MODO DIRECT CODING SOLO_LEAD", prompt)
+        self.assertIn("scouts", prompt)
+        self.assertIn("PROHIBIDO", prompt)
+
+    def test_team_lead_lead_close_system_prompt_requires_current_run_root_cause_only(self) -> None:
+        prompt = build_system_prompt(Role.TEAM_LEAD, task_metadata={"phase": "lead_close"})
+        self.assertIn("MODO ESTRICTO LEAD_CLOSE", prompt)
+        self.assertIn("causa raiz actual", prompt.lower())
+        self.assertIn("failure_origin actual", prompt)
+
     def test_team_lead_charter_covers_replan_quorum_and_capabilities(self) -> None:
         charter = role_charter_for(Role.TEAM_LEAD)
         scope = "\n".join(charter.decision_scope)
@@ -65,6 +93,32 @@ class ProfileGovernanceTests(unittest.TestCase):
         self.assertIn("artefactos", prompt.lower())
         self.assertIn("upstream_context", prompt)
 
+    def test_reviewer_plan_risks_system_prompt_adds_planning_guardrails(self) -> None:
+        prompt = build_system_prompt(Role.REVIEWER, task_metadata={"phase": "plan_risks"})
+        self.assertIn("MODO ESTRICTO PLAN_RISKS", prompt)
+        self.assertIn("quality gates", prompt)
+        self.assertIn("Prohibido emitir codigo", prompt)
+        self.assertIn("state=completed", prompt)
+        self.assertIn("riesgo residual", prompt)
+        self.assertIn("bullets cortos y operativos", prompt)
+        self.assertIn("modulo CLI existente", prompt)
+        self.assertIn("mini plan de implementacion", prompt)
+        self.assertIn("decision/gate", prompt)
+        self.assertIn("Maximo 2 bullets por seccion", prompt)
+
+    def test_reviewer_execution_prompt_prefers_compact_review_without_regex_literals(self) -> None:
+        prompt = build_system_prompt(Role.REVIEWER, task_metadata={"phase": "review_implementation"})
+        self.assertIn("MODO ESTRICTO REVIEW", prompt)
+        self.assertIn("Hallazgos, Evidencia, Riesgos Residuales, Veredicto", prompt)
+        self.assertIn("regex literales", prompt)
+        self.assertIn("solicitud original", prompt)
+
+    def test_engineer_plan_engineering_prompt_prefers_single_artifact_and_low_narrative(self) -> None:
+        prompt = build_system_prompt(Role.ENGINEER, task_metadata={"phase": "plan_engineering"})
+        self.assertIn("MODO ESTRICTO PLAN_ENGINEERING", prompt)
+        self.assertIn("unico bloque [PLANNING_ARTIFACT]", prompt)
+        self.assertIn("evita narrativa larga", prompt)
+
     def test_reviewer_charter_mentions_blocking_and_contractual_coherence(self) -> None:
         charter = role_charter_for(Role.REVIEWER)
         scope = "\n".join(charter.decision_scope).lower()
@@ -81,6 +135,8 @@ class ProfileGovernanceTests(unittest.TestCase):
         self.assertIn("coverage", prompt.lower())
         self.assertIn("tests", prompt.lower())
         self.assertIn("criterios de salida", prompt.lower())
+        self.assertIn("recovery=...", prompt)
+        self.assertIn("bloqueos historicos ya resueltos", prompt)
 
     def test_qa_charter_mentions_exit_criteria_and_validation_signals(self) -> None:
         charter = role_charter_for(Role.QA)
@@ -97,6 +153,12 @@ class ProfileGovernanceTests(unittest.TestCase):
         self.assertIn("plan_*", prompt)
         self.assertIn("path=", prompt)
 
+    def test_engineer_plan_engineering_system_prompt_adds_strict_planning_suffix(self) -> None:
+        prompt = build_system_prompt(Role.ENGINEER, task_metadata={"phase": "plan_engineering"})
+        self.assertIn("MODO ESTRICTO PLAN_ENGINEERING", prompt)
+        self.assertIn("[PLANNING_ARTIFACT]", prompt)
+        self.assertIn("Prohibido emitir codigo", prompt)
+
     def test_engineer_charter_mentions_contract_drift_and_material_artifacts(self) -> None:
         charter = role_charter_for(Role.ENGINEER)
         scope = "\n".join(charter.decision_scope).lower()
@@ -111,6 +173,8 @@ class ProfileGovernanceTests(unittest.TestCase):
         self.assertIn("recomendacion", prompt.lower())
         self.assertIn("repo", prompt.lower())
         self.assertIn("NO bloquear", prompt)
+        self.assertIn("team_lead/lead-2", prompt)
+        self.assertIn("IDs de thread", prompt)
 
     def test_researcher_charter_mentions_uncertainty_and_contradictions(self) -> None:
         charter = role_charter_for(Role.RESEARCHER)

@@ -116,6 +116,7 @@ def _auditor_prompt(
 
     return (
         f"{base_prompt}\n\n"
+        "Modo quorum: consultor independiente.\n"
         f"## Quorum de planificacion — {position_label}\n"
         "Eres un consultor senior independiente convocado para auditar la propuesta del Lead ejecutivo.\n"
         "Recibiras el contexto completo del proyecto y el plan inicial del Lead.\n"
@@ -156,6 +157,7 @@ def _consolidation_prompt(
 
     return (
         "Eres Team Lead ejecutivo. El quorum de auditores ha concluido.\n"
+        "Modo quorum: consolidacion final del Lead.\n"
         "Has escuchado a tus consultores seniors. Ahora tomas la decision final.\n\n"
         "Instrucciones:\n"
         "1. Revisa tu plan inicial y los aportes de cada auditor.\n"

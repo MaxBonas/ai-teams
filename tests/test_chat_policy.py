@@ -22,6 +22,7 @@ class ChatPolicyTests(unittest.TestCase):
             "continuation_requested": False,
             "allow_low_productivity_override": False,
             "lead_advisory_mode": False,
+            "lead_degraded_delivery": False,
             "live_mode_required": False,
             "execution_mode": "text_only",
             "execution_steps": 0,
@@ -40,6 +41,12 @@ class ChatPolicyTests(unittest.TestCase):
         self.assertEqual(policy.productivity_threshold, 0)
         self.assertTrue(policy.passes_by_reasoning)
         self.assertTrue(policy.is_context_query)
+
+    def test_resolve_run_type_policy_for_review_revalidation(self) -> None:
+        policy = resolve_run_type_policy("review_revalidation", reasoning_score=20)
+        self.assertEqual(policy.productivity_threshold, 0)
+        self.assertFalse(policy.passes_by_reasoning)
+        self.assertFalse(policy.is_context_query)
 
     def test_build_chat_validation_contract_exports_explicit_owner(self) -> None:
         contract = build_chat_validation_contract(require_execution_plan=True)
@@ -114,6 +121,57 @@ class ChatPolicyTests(unittest.TestCase):
                 for event in outcome.events
             )
         )
+
+    def test_missing_build_validation_rejects_completed_run_without_explicit_risk_close(self) -> None:
+        policy_input = self._base_input(
+            evidence_gate_failures=["build:missing_test_or_build_check"],
+            productivity_score=90,
+            execution_mode="live",
+            execution_steps=2,
+            artifact_modified=1,
+        )
+        outcome = evaluate_chat_policy(
+            policy_input,
+            resolve_run_type_policy(policy_input.run_type, policy_input.reasoning_score),
+        )
+        self.assertTrue(outcome.evidence_gate_applied)
+        self.assertEqual(outcome.final_state, "rejected")
+        self.assertTrue(outcome.policy_review_required)
+        self.assertIn("evidence_gate_failed", outcome.policy_signals)
+
+    def test_failed_auto_post_build_validation_is_hard_evidence_failure(self) -> None:
+        policy_input = self._base_input(
+            evidence_gate_failures=["build:auto_post_build_validation_failed"],
+            productivity_score=90,
+            execution_mode="live",
+            execution_steps=2,
+            artifact_modified=1,
+        )
+        outcome = evaluate_chat_policy(
+            policy_input,
+            resolve_run_type_policy(policy_input.run_type, policy_input.reasoning_score),
+        )
+        self.assertTrue(outcome.evidence_gate_applied)
+        self.assertEqual(outcome.final_state, "rejected")
+        self.assertTrue(outcome.policy_review_required)
+        self.assertIn("evidence_gate_failed", outcome.policy_signals)
+
+    def test_missing_build_validation_stays_completed_for_degraded_delivery(self) -> None:
+        policy_input = self._base_input(
+            lead_degraded_delivery=True,
+            evidence_gate_failures=["build:missing_test_or_build_check"],
+            productivity_score=90,
+            execution_mode="live",
+            execution_steps=2,
+            artifact_modified=1,
+        )
+        outcome = evaluate_chat_policy(
+            policy_input,
+            resolve_run_type_policy(policy_input.run_type, policy_input.reasoning_score),
+        )
+        self.assertTrue(outcome.evidence_gate_applied)
+        self.assertEqual(outcome.final_state, "completed")
+        self.assertIn("evidence_gate_failed", outcome.policy_signals)
 
     def test_semantic_gate_rejects_completed_run_without_advisory(self) -> None:
         policy_input = self._base_input(

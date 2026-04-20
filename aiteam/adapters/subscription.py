@@ -8,6 +8,8 @@ import urllib.request
 from typing import Iterator
 
 from aiteam.adapters.base import ModelAdapter, messages_to_prompt, normalize_messages
+from aiteam.adapters.http_errors import is_non_retryable_quota_error
+from aiteam.adapters.openai_payload import build_openai_compatible_body
 from aiteam.sim_mode import sim_mode_enabled
 from aiteam.types import AdapterResponse, ChannelType, StreamChunk
 
@@ -346,12 +348,11 @@ class SubscriptionAdapter(ModelAdapter):
         api_key = os.getenv(api_key_env, "").strip()
         if not api_key:
             return
-        body = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": 0.2,
-            "stream": True,
-        }
+        body = build_openai_compatible_body(
+            model=self.model,
+            messages=messages,
+            stream=True,
+        )
         payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
@@ -454,11 +455,10 @@ class SubscriptionAdapter(ModelAdapter):
         tools=None,
     ) -> AdapterResponse:
         """Invoca API compatible con OpenAI (OpenAI, Groq, etc.)."""
-        body = {
-            "model": self.model,
-            "messages": normalize_messages(messages, prompt),
-            "temperature": 0.2,
-        }
+        body = build_openai_compatible_body(
+            model=self.model,
+            messages=normalize_messages(messages, prompt),
+        )
         if tools:
             body["tools"] = [
                 {
@@ -794,8 +794,13 @@ class SubscriptionAdapter(ModelAdapter):
                     raw = resp.text
                     if status_code < 200 or status_code >= 300:
                         error_body = raw[:500]
+                        non_retryable_quota = (
+                            status_code == 429
+                            and is_non_retryable_quota_error(error_body)
+                        )
                         if (
-                            attempt_index < max_retries
+                            not non_retryable_quota
+                            and attempt_index < max_retries
                             and self._is_retryable_http_status(status_code)
                         ):
                             retry_after = resp.headers.get("Retry-After")
@@ -828,8 +833,14 @@ class SubscriptionAdapter(ModelAdapter):
                     error_body = exc.read().decode("utf-8", errors="replace")[:500]
                 except Exception:
                     pass
-                if attempt_index < max_retries and self._is_retryable_http_status(
-                    int(exc.code or 0)
+                non_retryable_quota = (
+                    int(exc.code or 0) == 429
+                    and is_non_retryable_quota_error(error_body)
+                )
+                if (
+                    not non_retryable_quota
+                    and attempt_index < max_retries
+                    and self._is_retryable_http_status(int(exc.code or 0))
                 ):
                     retry_after = None
                     headers_obj = getattr(exc, "headers", None)

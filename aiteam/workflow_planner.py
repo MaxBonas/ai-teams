@@ -107,6 +107,27 @@ def default_phases(mode: str) -> list[PhaseSpec]:
     Fases por defecto identicas al comportamiento hardcodeado anterior.
     Usado como fallback cuando parse_workflow_plan retorna None.
     """
+    if mode == "plan":
+        return [
+            PhaseSpec(
+                phase_id="discovery",
+                role="RESEARCHER",
+                objective=(
+                    "Recopila contexto, restricciones, dependencias y supuestos "
+                    "necesarios para planificar sin ejecutar cambios."
+                ),
+                depends_on=[],
+            ),
+            PhaseSpec(
+                phase_id="plan",
+                role="REVIEWER",
+                objective=(
+                    "Entrega un plan concreto con alcance, pasos, riesgos, criterios "
+                    "de aceptacion y decision recomendada, sin generar artefactos de producto."
+                ),
+                depends_on=["discovery"],
+            ),
+        ]
     if mode == "classic":
         return [
             PhaseSpec(
@@ -134,6 +155,18 @@ def default_phases(mode: str) -> list[PhaseSpec]:
                 depends_on=["review"],
             ),
         ]
+    if mode == "direct":
+        return [
+            PhaseSpec(
+                phase_id="build",
+                role="ENGINEER",
+                objective=(
+                    "Implementa directamente el cambio minimo solicitado en el workspace, "
+                    "respetando instrucciones del proyecto, rutas reales y checks disponibles."
+                ),
+                depends_on=[],
+            ),
+        ]
     else:  # sprint5 (default)
         return [
             PhaseSpec(
@@ -146,18 +179,18 @@ def default_phases(mode: str) -> list[PhaseSpec]:
                 phase_id="plan_engineering",
                 role="ENGINEER",
                 objective="Define corte de implementacion: tareas secuenciadas y criterios de aceptacion.",
-                depends_on=["plan_research"],
+                depends_on=[],
             ),
             PhaseSpec(
                 phase_id="plan_risks",
                 role="REVIEWER",
                 objective=(
                     "Documenta riesgos tecnicos, quality gates y pruebas minimas que el build debe satisfacer. "
-                    "IMPORTANTE: Esta fase es de evaluacion de riesgos, NO una decision go/no-go. "
+                    "IMPORTANTE: Esta fase es de evaluacion de riesgos, NO una decision de aprobacion o rechazo del build. "
                     "Nunca emitas 'RECHAZADO' ni bloquees el build — el Reviewer aqui actua como auditor de riesgos, "
                     "no como gate. Lista los criterios de aceptacion y los riesgos a mitigar en el build."
                 ),
-                depends_on=["plan_research"],
+                depends_on=["plan_engineering"],
             ),
             PhaseSpec(
                 phase_id="build",
@@ -231,9 +264,18 @@ def _extract_plan_block(text: str) -> Optional[str]:
         text,
         re.DOTALL | re.IGNORECASE,
     )
-    if not match:
+    if match:
+        return match.group(1).strip()
+    start = re.search(r'\[WORKFLOW_PLAN\]', text, re.IGNORECASE)
+    if not start:
         return None
-    return match.group(1).strip()
+    tail = text[start.end():]
+    end = re.search(
+        r'(?im)^\s*(?:\[[A-Z][A-Z0-9_ -]{2,}\]|```)\s*$',
+        tail,
+    )
+    block = tail[: end.start()] if end else tail
+    return block.strip() or None
 
 
 # ---------------------------------------------------------------------------

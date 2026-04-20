@@ -1,5 +1,5 @@
 import { apiFetch } from '../lib/api';
-import type { ChatMode, ChatLevel } from '../types';
+import type { ChatMode, ChatLevel, RunProfile } from '../types';
 
 /** Parameters for sending a chat message to the AI Team backend. */
 export interface SendMessageParams {
@@ -8,10 +8,15 @@ export interface SendMessageParams {
   complexity?: ChatLevel;
   criticality?: ChatLevel;
   mode?: ChatMode;
+  run_profile?: RunProfile;
   max_rounds?: number;
   client_task_id?: string;
   strict_mode?: boolean;
   allow_low_productivity_override?: boolean;
+  auto_extend_weak_runs?: boolean;
+  repair_first_mode?: boolean;
+  continuation_policy?: 'auto' | 'clean_retry' | 'force_continue';
+  continuation_target?: string;
   workspacePath?: string;
 }
 
@@ -26,10 +31,15 @@ export async function sendChatMessage(params: SendMessageParams): Promise<unknow
     complexity,
     criticality,
     mode,
+    run_profile,
     max_rounds,
     client_task_id,
     strict_mode,
     allow_low_productivity_override,
+    auto_extend_weak_runs,
+    repair_first_mode,
+    continuation_policy,
+    continuation_target,
     workspacePath,
   } = params;
 
@@ -49,10 +59,15 @@ export async function sendChatMessage(params: SendMessageParams): Promise<unknow
       complexity,
       criticality,
       mode,
+      run_profile,
       max_rounds,
       client_task_id,
       strict_mode,
       allow_low_productivity_override,
+      auto_extend_weak_runs,
+      repair_first_mode,
+      continuation_policy,
+      continuation_target,
     }),
   });
 

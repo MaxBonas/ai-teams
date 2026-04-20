@@ -438,6 +438,8 @@ def _layer_counts(payload: object) -> dict[str, int]:
             "working_set": 0,
             "durable_facts": 0,
             "decisions": 0,
+            "historical_context": 0,
+            "hypotheses": 0,
             "open_questions": 0,
             "invalidations": 0,
             "next_actions": 0,
@@ -446,6 +448,8 @@ def _layer_counts(payload: object) -> dict[str, int]:
         "working_set": len(list(payload.get("working_set", []) or [])),
         "durable_facts": len(list(payload.get("durable_facts", []) or [])),
         "decisions": len(list(payload.get("decisions", []) or [])),
+        "historical_context": len(list(payload.get("historical_context", []) or [])),
+        "hypotheses": len(list(payload.get("hypotheses", []) or [])),
         "open_questions": len(list(payload.get("open_questions", []) or [])),
         "invalidations": len(list(payload.get("invalidations", []) or [])),
         "next_actions": len(list(payload.get("next_actions", []) or [])),
@@ -1164,6 +1168,9 @@ def _build_continuation_target_context(
         "- regla: prioriza primero el pedido actual del usuario y las fases pendientes de esta run objetivo."
     )
     lines.append(
+        "- alcance: este continuation target sirve para retomar pendientes y contratos previos; NO confirma por si solo el estado actual del workspace ni la existencia actual de archivos/artefactos."
+    )
+    lines.append(
         "- prohibido: sustituir este objetivo por un objetivo historico mas antiguo o abrir otro slice antes de cerrar lo pendiente."
     )
     if pending_rows:
@@ -1171,6 +1178,94 @@ def _build_continuation_target_context(
         lines.extend(f"  {row}" for row in pending_rows[:8])
     else:
         lines.append("- fases_pendientes_objetivo: ninguna visible")
+    return "\n".join(lines)
+
+
+def _workspace_snapshot_paths(
+    workspace: Path,
+    *,
+    max_items: int = 120,
+    include_runtime_dir: bool = False,
+) -> list[str]:
+    _excluded = {
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".git",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".aiteam_snapshots",
+    }
+    _top_files = {
+        "README.md",
+        "PROJECT_PLAN.md",
+        "pyproject.toml",
+        "package.json",
+        "requirements.txt",
+        "AITEAM_TEST_LOG.md",
+        "setup.py",
+        "setup.cfg",
+        "Makefile",
+    }
+    actual_paths: list[str] = []
+    for child in sorted(workspace.iterdir(), key=lambda p: (p.is_dir(), p.name)):
+        if child.name.startswith(".") and (child.name != ".aiteam" or not include_runtime_dir):
+            continue
+        if child.name in _excluded:
+            continue
+        if child.is_file():
+            if child.name in _top_files:
+                actual_paths.append(child.name)
+        elif child.is_dir():
+            actual_paths.append(f"{child.name}/")
+            for nested in sorted(
+                child.rglob("*"),
+                key=lambda p: str(p.relative_to(workspace)).lower(),
+            ):
+                if any(part in _excluded for part in nested.parts):
+                    continue
+                rel = str(nested.relative_to(workspace)).replace("\\", "/")
+                if nested.is_dir():
+                    actual_paths.append(f"{rel}/")
+                else:
+                    actual_paths.append(rel)
+                if len(actual_paths) >= max_items:
+                    break
+            if len(actual_paths) >= max_items:
+                actual_paths.append("... (truncado)")
+                break
+    return actual_paths
+
+
+def _build_current_workspace_grounding_context(
+    workspace: Path,
+    *,
+    max_items: int = 24,
+) -> str:
+    lines = [
+        "== ESTADO ACTUAL CONFIRMADO (WORKSPACE REAL) ==",
+        "Usa SOLO este bloque como estado actual confirmado del proyecto.",
+        "Todo lo que venga del historial, lead memory o runs previas cuenta solo como contexto historico hasta revalidarlo contra el workspace actual.",
+    ]
+    try:
+        paths = _workspace_snapshot_paths(
+            workspace,
+            max_items=max_items,
+            include_runtime_dir=False,
+        )
+    except Exception:
+        paths = []
+    if paths:
+        lines.append("Rutas/artefactos confirmados ahora:")
+        lines.extend(f"- {item}" for item in paths[:max_items])
+    else:
+        lines.append("Rutas/artefactos confirmados ahora: ningun artefacto de producto visible en el workspace actual.")
+    if (workspace / ".aiteam").exists():
+        lines.append("Runtime operativo detectado: `.aiteam/` presente (contexto interno del orquestador; NO cuenta como arbol del producto).")
+    lines.append(
+        "Regla: no presentes como 'completado', 'validado' o 'existente' ningun modulo, test o slice que no se vea confirmado aqui o en evidencia autoritativa fresca de esta run."
+    )
+    lines.append("== FIN ESTADO ACTUAL CONFIRMADO ==")
     return "\n".join(lines)
 
 
@@ -1186,6 +1281,7 @@ def _build_scout_project_state_context(workspace: Path) -> str:
         "=== ESTADO DEL PROYECTO ===",
         "REGLA AUTORITATIVA: solo considera confirmados los archivos y rutas listados abajo.",
         "Si un archivo, clase o modulo no aparece en este snapshot del workspace, tratalo como NO CONFIRMADO y no lo presentes como hecho.",
+        "IMPORTANTE: `.aiteam/` es runtime interno del orquestador. No lo trates como estructura del producto ni como evidencia de modulos/funcionalidad del proyecto externo.",
     ]
 
     is_git_repo = False
@@ -1247,35 +1343,17 @@ def _build_scout_project_state_context(workspace: Path) -> str:
     # Incluye TODOS los directorios no excluidos (no solo un set hardcodeado),
     # mostrando subdirectorios y archivos hasta 2 niveles o hasta el cap.
     try:
-        _excluded = {"venv", "node_modules", "__pycache__", ".git", ".pytest_cache", ".mypy_cache", ".aiteam_snapshots"}
-        _top_files = {"README.md", "PROJECT_PLAN.md", "pyproject.toml", "package.json", "requirements.txt", "AITEAM_TEST_LOG.md", "setup.py", "setup.cfg", "Makefile"}
-        actual_paths: list[str] = []
-        for child in sorted(workspace.iterdir(), key=lambda p: (p.is_dir(), p.name)):
-            if child.name.startswith(".") and child.name != ".aiteam":
-                continue
-            if child.name in _excluded:
-                continue
-            if child.is_file():
-                if child.name in _top_files:
-                    actual_paths.append(child.name)
-            elif child.is_dir():
-                actual_paths.append(f"{child.name}/")
-                for nested in sorted(child.rglob("*"), key=lambda p: str(p.relative_to(workspace)).lower()):
-                    if any(part in _excluded for part in nested.parts):
-                        continue
-                    rel = str(nested.relative_to(workspace)).replace("\\", "/")
-                    if nested.is_dir():
-                        actual_paths.append(f"{rel}/")
-                    else:
-                        actual_paths.append(rel)
-                    if len(actual_paths) >= 120:
-                        break
-                if len(actual_paths) >= 120:
-                    actual_paths.append("... (truncado)")
-                    break
+        actual_paths = _workspace_snapshot_paths(
+            workspace,
+            max_items=120,
+            include_runtime_dir=False,
+        )
         if actual_paths:
             lines.append("workspace snapshot autoritativo:")
             lines.extend(f"- {item}" for item in actual_paths)
+        elif (workspace / ".aiteam").exists():
+            lines.append("workspace snapshot autoritativo:")
+            lines.append("- (sin artefactos de producto visibles; solo runtime `.aiteam/` presente)")
     except Exception:
         pass
 
@@ -1347,6 +1425,7 @@ def _build_scout_session_history_context(
         "=== HISTORIAL DE SESIONES ===",
         "Prioriza la run mas reciente y cualquier run con evidencia semantica del mismo objetivo.",
         "Colapsa como historicos los bloqueos viejos debidos solo a infraestructura/routing.",
+        "Cualquier archivo, modulo, test o estado citado aqui desde runs previas es CONTEXTO HISTORICO: no lo trates como estado actual confirmado del workspace hasta revalidarlo.",
     ]
     continuation_target_context = _build_continuation_target_context(
         runtime_dir,

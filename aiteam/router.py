@@ -8,6 +8,7 @@ import threading
 import time
 
 from aiteam.adapters.base import ModelAdapter
+from aiteam.adapters.http_errors import compact_provider_error
 from aiteam.config import RouterPolicy
 from aiteam.finops import BudgetManager
 from aiteam.model_catalog import load_model_catalog
@@ -307,7 +308,7 @@ class HybridRouter:
 
     def _prefer_tool_economy(self, request: RoutingRequest) -> bool:
         if request.role == Role.TEAM_LEAD:
-            return False
+            return bool(self._preferred_tool_tier(request))
         if bool(getattr(request, "prefer_economic_routing", False)):
             return True
         return bool(
@@ -443,12 +444,20 @@ class HybridRouter:
             )
             if str(provider).strip()
         }
+        preferred_adapters = {
+            str(name).strip()
+            for name in set(getattr(request, "preferred_adapters", set()) or set())
+            if str(name).strip()
+        }
         primary_provider = str(
             self.policy.role_primary_provider.get(role_key, "") or ""
         ).strip().lower()
 
         def key(adapter: ModelAdapter):
             provider_key = adapter.provider.strip().lower()
+            preferred_adapter_rank = (
+                0 if preferred_adapters and adapter.name in preferred_adapters else 1
+            )
             if adapter.channel == ChannelType.SUBSCRIPTION:
                 provider_rank = provider_priority_sub.get(adapter.provider, 99)
                 channel_rank = 0 if self.policy.pro_first else 1
@@ -464,9 +473,10 @@ class HybridRouter:
             role_provider_rank = role_provider_priority.get(provider_key, 999)
             if self._prefer_tool_economy(request):
                 return (
-                    primary_provider_rank,
                     self._tier_rank(adapter, request),
+                    preferred_adapter_rank,
                     channel_rank,
+                    primary_provider_rank,
                     self._role_rank(adapter, role_key),
                     role_model_rank,
                     role_provider_rank,
@@ -479,6 +489,7 @@ class HybridRouter:
                 primary_provider_rank,
                 channel_rank,
                 self._tier_rank(adapter, request),
+                preferred_adapter_rank,
                 self._role_rank(adapter, role_key),
                 role_model_rank,
                 role_provider_rank,
@@ -492,12 +503,7 @@ class HybridRouter:
 
     @staticmethod
     def _attempt_error_hint(error: str | None) -> str:
-        text = str(error or "").strip()
-        if not text:
-            return ""
-        compact = text.splitlines()[0].strip()
-        compact = compact.replace(" ", "_")
-        return compact[:96]
+        return compact_provider_error(error, limit=160)
 
     def _record_routing_failure(
         self,

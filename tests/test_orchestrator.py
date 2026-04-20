@@ -16,7 +16,8 @@ from aiteam.adapters import (
 )
 from aiteam.adapters.base import ModelAdapter
 from aiteam.config import build_default_router_policy
-from aiteam.orchestrator import AITeamOrchestrator
+from aiteam.orchestrator import AITeamOrchestrator, PeerConsultationReport
+from aiteam.phase_verdicts import extract_path_candidates
 from aiteam.router import HybridRouter
 from aiteam.types import (
     AdapterResponse,
@@ -254,6 +255,61 @@ class UnstructuredPlanningArtifactAdapter(ModelAdapter):
             content=(
                 "Propongo seguir una aproximacion prudente y revisar el codigo existente "
                 "antes de construir la implementacion final."
+            ),
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class InlinePlanningArtifactAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        return AdapterResponse(
+            success=True,
+            content=(
+                "objective: Implementar el siguiente slice sin salir del scope permitido.\n"
+                "steps:\n"
+                "1. Revisar el código existente.\n"
+                "2. Integrar la lógica del slice en los módulos aprobados.\n"
+                "acceptance_criteria: El cambio respeta el contrato vigente y deja el slice listo para review.\n"
+            ),
+            latency_ms=1,
+            input_tokens=10,
+            output_tokens=20,
+        )
+
+
+class NarrativePlanningArtifactAdapter(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-pro",
+            channel=ChannelType.SUBSCRIPTION,
+            capabilities={"coding", "reasoning", "analysis", "review"},
+        )
+
+    def available(self) -> bool:
+        return True
+
+    def invoke(self, prompt, messages=None, tools=None):
+        return AdapterResponse(
+            success=True,
+            content=(
+                "Primero revisar el código existente antes de integrar la lógica del slice. "
+                "Después validar que la implementación respete el scope permitido."
             ),
             latency_ms=1,
             input_tokens=10,
@@ -1717,6 +1773,121 @@ class OrchestratorTests(unittest.TestCase):
             diagnostics = dict(task.metadata.get("execution_plan_derivation", {}) or {})
             self.assertIn("plan_engineering", list(diagnostics.get("dependency_phases", []) or []))
 
+    def test_execution_plan_is_not_derived_from_lead_narrative_without_explicit_contract_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            project_root = runtime_dir / "workspace"
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[SubscriptionAdapter(name="openai_pro")],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            lead_task = WorkTask(
+                task_id="CHAT-LEAD-NARRATIVE::lead_intake",
+                title="Lead Intake",
+                description="Planifica la corrida.",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "lead_intake",
+                    "result": (
+                        "Decisión del Lead: construir el CLI y validar con tests. "
+                        "Comandos sugeridos a alto nivel: `pytest`, `pytest -v`."
+                    ),
+                },
+            )
+            orchestrator.submit_task(lead_task)
+            orchestrator.taskboard.mark_completed(
+                lead_task.task_id,
+                details=str(lead_task.metadata.get("result", "")),
+            )
+
+            task = WorkTask(
+                task_id="CHAT-LEAD-NARRATIVE::engineer_core_cli",
+                title="Engineer core cli",
+                description="Implementa el CLI md-report y la conversión Markdown a HTML.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[lead_task.task_id],
+                metadata={
+                    "interactive_chat": True,
+                    "phase": "engineer_core_cli",
+                    "chat_parent": "CHAT-LEAD-NARRATIVE",
+                    "phase_contract": {
+                        "phase_id": "engineer_core_cli",
+                        "role": "ENGINEER",
+                        "objective": "Implementa el CLI md-report y la conversión Markdown a HTML.",
+                    },
+                },
+            )
+
+            plan = orchestrator._materialize_execution_plan_if_possible(
+                task=task,
+                assignee="eng-1",
+                persist=False,
+            )
+
+            self.assertEqual(plan, [])
+            diagnostics = dict(task.metadata.get("execution_plan_derivation", {}) or {})
+            checked_sources = [
+                str(item.get("source", "") or "")
+                for item in list(diagnostics.get("checked_sources", []) or [])
+            ]
+            self.assertNotIn("dependency.lead_intake.result", checked_sources)
+
+    def test_execution_plan_is_not_derived_from_vague_test_mentions_in_objective(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            project_root = runtime_dir / "workspace"
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[SubscriptionAdapter(name="openai_pro")],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-VAGUE-PLAN::engineer_css_embed",
+                title="Engineer css embed",
+                description="Integra CSS embebido y deja los tests listos.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "interactive_chat": True,
+                    "phase": "engineer_css_embed",
+                    "chat_parent": "CHAT-VAGUE-PLAN",
+                    "phase_contract": {
+                        "phase_id": "engineer_css_embed",
+                        "role": "ENGINEER",
+                        "objective": (
+                            "Integrar CSS embebido y dejar lista la suite pytest "
+                            "para la siguiente fase sin ejecutar comandos ahora."
+                        ),
+                    },
+                },
+            )
+
+            plan = orchestrator._materialize_execution_plan_if_possible(
+                task=task,
+                assignee="eng-1",
+                persist=False,
+            )
+
+            self.assertEqual(plan, [])
+
     def test_lead_preflight_checkpoint_includes_execution_plan_preview(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
@@ -1936,6 +2107,403 @@ class OrchestratorTests(unittest.TestCase):
             assert stored is not None
             self.assertEqual(stored.state, TaskState.FAILED)
             self.assertEqual(str(stored.metadata.get("error", "")), "missing_phase_contract_objective")
+
+    def test_reviewer_block_fails_when_dependency_state_claim_is_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            project_root = runtime_dir / "workspace"
+            (project_root / "src" / "sample").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample" / "cli.py").write_text(
+                "print('ok')\n",
+                encoding="utf-8",
+            )
+            router = HybridRouter(
+                adapters=[SubscriptionAdapter(name="openai_pro")],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-STALE::engineer_tests",
+                title="Engineer tests",
+                description="Completa pruebas.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={"artifact_paths": ["src/sample/cli.py"], "result": "done"},
+            )
+            orchestrator.submit_task(dep)
+            orchestrator.taskboard.mark_completed(dep.task_id, details="done")
+
+            review = WorkTask(
+                task_id="CHAT-STALE::review_code",
+                title="Review code",
+                description="Revisa el build.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[dep.task_id],
+                metadata={"phase": "review_code"},
+            )
+
+            issue = orchestrator._detect_ungrounded_phase_block_issue(
+                task=review,
+                safe_content="La fase review_code está BLOCKED porque engineer_tests sigue pending en upstream.",
+                workspace=project_root,
+            )
+
+            self.assertEqual(str(issue.get("reason", "")), "stale_dependency_block")
+
+    def test_path_hint_matching_accepts_extensionless_relative_hint_against_visible_file(self) -> None:
+        self.assertTrue(
+            AITeamOrchestrator._path_hint_matches_grounding_hints(
+                "tests/test_md_report",
+                visible_files=["tests/test_md_report.py", "src/md_report/md_report.py"],
+                dependency_artifacts=[],
+            )
+        )
+
+    def test_bare_filename_path_hint_exists_when_nested_in_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "workspace"
+            (project_root / "src" / "md_report").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report" / "test_toc_generator.py").write_text(
+                "def test_ok():\n    assert True\n",
+                encoding="utf-8",
+            )
+
+            self.assertTrue(
+                AITeamOrchestrator._path_hint_exists_in_workspace(
+                    "test_toc_generator.py",
+                    project_workspace=project_root,
+                    task_workspace=project_root,
+                )
+            )
+
+    def test_review_missing_artifact_claim_is_ungrounded_when_dependency_artifacts_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report").mkdir(parents=True, exist_ok=True)
+            (project_root / "tests").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report" / "md_report.py").write_text(
+                "def x():\n    return 1\n",
+                encoding="utf-8",
+            )
+            (project_root / "tests" / "test_md_report.py").write_text(
+                "def test_x():\n    assert True\n",
+                encoding="utf-8",
+            )
+            router = HybridRouter(
+                adapters=[SensitivePreflightCheckpointAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-REALART::implement_parser_toc",
+                title="Implement parser toc",
+                description="Entrega artefactos reales.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "artifact_paths": [
+                        "src/md_report/md_report.py",
+                        "tests/test_md_report.py",
+                    ],
+                    "result": "Artefactos entregados.",
+                },
+            )
+            orchestrator.submit_task(dep)
+            orchestrator.taskboard.mark_completed(dep.task_id, details="done")
+
+            review = WorkTask(
+                task_id="CHAT-REALART::code_review",
+                title="Code review",
+                description="Revisa artefactos ya entregados.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[dep.task_id],
+                metadata={"phase": "code_review"},
+            )
+
+            issue = orchestrator._detect_ungrounded_phase_block_issue(
+                task=review,
+                safe_content=(
+                    "La fase `code_review` está BLOCKED. No se ha proporcionado el código fuente "
+                    "y sin acceso a los artefactos no puedo revisar."
+                ),
+                workspace=project_root,
+            )
+
+            self.assertEqual(str(issue.get("reason", "")), "ungrounded_phase_block")
+            self.assertIn(
+                "src/md_report/md_report.py",
+                list(issue.get("dependency_artifacts", []) or []),
+            )
+
+    def test_review_dependency_artifact_hints_fallback_to_workspace_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report").mkdir(parents=True, exist_ok=True)
+            (project_root / "tests").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report" / "md_report.py").write_text(
+                "def build_toc():\n    return []\n",
+                encoding="utf-8",
+            )
+            (project_root / "tests" / "test_md_report.py").write_text(
+                "def test_build_toc():\n    assert True\n",
+                encoding="utf-8",
+            )
+            router = HybridRouter(
+                adapters=[SubscriptionAdapter(name="openai_pro")],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            review = WorkTask(
+                task_id="CHAT-REVAL::code_review_revalidation",
+                title="Code review revalidation",
+                description="Revisa artefactos existentes del workspace.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-REVAL::lead_intake", "CHAT-REVAL::scout_current_state"],
+                metadata={
+                    "phase": "code_review_revalidation",
+                    "workspace_artifact_hints": [
+                        "src/md_report/md_report.py",
+                        "tests/test_md_report.py",
+                    ],
+                    "review_revalidation_flow": True,
+                },
+            )
+
+            hints = orchestrator._dependency_artifact_hints(review)
+            self.assertIn("src/md_report/md_report.py", hints)
+            self.assertIn("tests/test_md_report.py", hints)
+
+    def test_reviewer_dependency_hints_fallback_to_allowed_module_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            review = WorkTask(
+                task_id="CHAT-SCOPE-HINTS::review_tests",
+                title="Review tests",
+                description="Revisa tests visibles.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "review_tests",
+                    "phase_contract": {
+                        "allowed_module_path_hints": [
+                            "src/md_report/",
+                            "src/md_report/test_toc_generator.py",
+                        ]
+                    },
+                },
+            )
+
+            hints = orchestrator._dependency_artifact_hints(review)
+            self.assertIn("src/md_report/test_toc_generator.py", hints)
+
+    def test_review_ungrounded_phase_block_retries_once_when_scope_hints_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-UNGROUNDED-RETRY::review_tests",
+                title="Review tests",
+                description="Revisa.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={"phase": "review_tests", "phase_contract_enforced": True},
+            )
+            orchestrator.taskboard.add_task(task)
+            session = orchestrator.session_store.create_session(
+                agent_id="review-1",
+                role=Role.REVIEWER.value,
+                task_id=task.task_id,
+            )
+
+            retried = orchestrator._retry_executor_on_recoverable_ungrounded_phase_block(
+                task=task,
+                assignee="review-1",
+                safe_content="BLOCKED: no se han proporcionado artefactos revisables.",
+                issue={
+                    "reason": "ungrounded_phase_block",
+                    "visible_files": ["src/md_report/test_toc_generator.py"],
+                    "dependency_artifacts": [],
+                },
+                session=session,
+            )
+
+            refreshed = orchestrator.taskboard.get_task(task.task_id)
+            assert refreshed is not None
+            self.assertTrue(retried)
+            self.assertEqual(refreshed.state, TaskState.READY)
+            self.assertEqual(int(refreshed.metadata.get("ungrounded_phase_block_retry_count")), 1)
+            self.assertIn(
+                "src/md_report/test_toc_generator.py",
+                str(refreshed.metadata.get("review_feedback", "")),
+            )
+
+    def test_research_self_reported_block_completes_as_degraded_support(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-RESEARCH-DEGRADED::research_test_evidence",
+                title="Research test evidence",
+                description="Recopila evidencia de tests.",
+                role=Role.RESEARCHER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "research_test_evidence",
+                    "phase_contract_enforced": True,
+                    "chat_parent": "CHAT-RESEARCH-DEGRADED",
+                },
+            )
+            orchestrator.taskboard.add_task(task)
+            session = orchestrator.session_store.create_session(
+                agent_id="research-1",
+                role=Role.RESEARCHER.value,
+                task_id=task.task_id,
+            )
+            safe_content = (
+                "[PHASE_VERDICT]\n"
+                "phase_id: research_test_evidence\n"
+                "status: blocked\n"
+                "summary: No pude confirmar el archivo exacto, pero hay evidencia parcial.\n"
+                "[/PHASE_VERDICT]\n"
+                "Evidencia parcial: se menciona test_toc_generator.py en el scope."
+            )
+
+            orchestrator._complete_research_phase_as_degraded(
+                task=task,
+                assignee="research-1",
+                safe_content=safe_content,
+                verdict_status="blocked",
+                session=session,
+            )
+
+            refreshed = orchestrator.taskboard.get_task(task.task_id)
+            assert refreshed is not None
+            self.assertEqual(refreshed.state, TaskState.COMPLETED)
+            self.assertTrue(bool(refreshed.metadata.get("research_degraded")))
+            self.assertEqual(
+                str(refreshed.metadata.get("research_self_reported_status", "")),
+                "blocked",
+            )
+            self.assertIn("Evidencia parcial", str(refreshed.metadata.get("result", "")))
+            workflow_state = orchestrator._get_workflow_state("CHAT-RESEARCH-DEGRADED")
+            phase_outputs = dict(workflow_state.get("phase_outputs", {}) or {})
+            self.assertIn("Evidencia parcial", str(phase_outputs.get("research_test_evidence", "")))
+
+    def test_validation_visibility_block_can_degrade_after_retry_exhausted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-VALIDATION-DEGRADED::review_tests",
+                title="Review tests",
+                description="Revisa tests.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "review_tests",
+                    "phase_contract_enforced": True,
+                    "ungrounded_phase_block_retry_count": 1,
+                    "max_ungrounded_phase_block_retries": 1,
+                },
+            )
+            orchestrator.taskboard.add_task(task)
+            session = orchestrator.session_store.create_session(
+                agent_id="review-1",
+                role=Role.REVIEWER.value,
+                task_id=task.task_id,
+            )
+            original_output = "BLOCKED: no se han proporcionado artefactos revisables."
+
+            degraded = orchestrator._complete_validation_visibility_issue_as_degraded(
+                task=task,
+                assignee="review-1",
+                safe_content=original_output,
+                issue={
+                    "reason": "ungrounded_phase_block",
+                    "visible_files": ["src/md_report/test_toc_generator.py"],
+                    "dependency_artifacts": ["pyproject.toml"],
+                },
+                session=session,
+            )
+
+            refreshed = orchestrator.taskboard.get_task(task.task_id)
+            assert refreshed is not None
+            self.assertTrue(degraded)
+            self.assertEqual(refreshed.state, TaskState.COMPLETED)
+            self.assertTrue(bool(refreshed.metadata.get("validation_degraded")))
+            result = str(refreshed.metadata.get("result", ""))
+            self.assertIn("status: completed", result)
+            self.assertIn("validation_visibility_degraded", result)
+            self.assertNotIn("BLOCKED:", result)
+            self.assertIn(
+                "BLOCKED:",
+                str(refreshed.metadata.get("validation_original_output_preview", "")),
+            )
+            workflow_state = orchestrator._get_workflow_state("CHAT-VALIDATION-DEGRADED")
+            phase_outputs = dict(workflow_state.get("phase_outputs", {}) or {})
+            self.assertIn("status: completed", str(phase_outputs.get("review_tests", "")))
+            self.assertNotIn("BLOCKED:", str(phase_outputs.get("review_tests", "")))
 
     def test_non_sensitive_chat_phase_does_not_spawn_lead_preflight_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2189,6 +2757,215 @@ class OrchestratorTests(unittest.TestCase):
                 orchestrator.taskboard.get_task("NONCHAT-FAIL-1::lead_failure_engineer")
             )
 
+    def test_lead_close_waits_on_retry_route_from_lead_failure_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[SubscriptionAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            lead_close = WorkTask(
+                task_id="CHAT-RETRY-HOLD::lead_close",
+                title="Lead close",
+                description="Cierre",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-RETRY-HOLD::lead_failure_build"],
+                metadata={
+                    "phase": "lead_close",
+                    "chat_parent": "CHAT-RETRY-HOLD",
+                    "required_capabilities": ["reasoning"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                },
+            )
+            orchestrator.submit_task(lead_close)
+            orchestrator.workflow_state["CHAT-RETRY-HOLD"] = {
+                "phase_outputs": {
+                    "lead_failure_build": '[RETRY_ROUTE: "build"]',
+                },
+                "phase_verdicts": {},
+                "facts": [],
+                "ledger": [],
+                "review_feedback": [],
+            }
+
+            current = orchestrator.taskboard.get_task("CHAT-RETRY-HOLD::lead_close")
+            assert current is not None
+            self.assertTrue(orchestrator._has_pending_chat_directive_checkpoint(current))
+
+    def test_lead_failure_checkpoint_gates_pending_downstream_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            build = WorkTask(
+                task_id="CHAT-GATE::build",
+                title="Build",
+                description="Construir slice",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={"phase": "build", "chat_parent": "CHAT-GATE"},
+            )
+            review = WorkTask(
+                task_id="CHAT-GATE::review",
+                title="Review",
+                description="Revisar",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-GATE::build"],
+                metadata={"phase": "review", "chat_parent": "CHAT-GATE"},
+            )
+            qa = WorkTask(
+                task_id="CHAT-GATE::qa",
+                title="QA",
+                description="Validar",
+                role=Role.QA,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-GATE::review"],
+                metadata={"phase": "qa", "chat_parent": "CHAT-GATE"},
+            )
+            lead_close = WorkTask(
+                task_id="CHAT-GATE::lead_close",
+                title="Lead close",
+                description="Cerrar",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-GATE::qa"],
+                metadata={"phase": "lead_close", "chat_parent": "CHAT-GATE"},
+            )
+            for task in (build, review, qa, lead_close):
+                orchestrator.submit_task(task)
+
+            checkpoint_id = orchestrator._maybe_spawn_lead_failure_checkpoint(
+                build,
+                "recoverable evidence failure",
+            )
+
+            self.assertEqual(checkpoint_id, "CHAT-GATE::lead_failure_build")
+            review_current = orchestrator.taskboard.get_task("CHAT-GATE::review")
+            qa_current = orchestrator.taskboard.get_task("CHAT-GATE::qa")
+            close_current = orchestrator.taskboard.get_task("CHAT-GATE::lead_close")
+            assert review_current is not None
+            assert qa_current is not None
+            assert close_current is not None
+            self.assertIn(checkpoint_id, review_current.dependencies)
+            self.assertIn(checkpoint_id, qa_current.dependencies)
+            self.assertIn(checkpoint_id, close_current.dependencies)
+
+    def test_dependency_output_context_includes_compact_recovery_signal_for_qa(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            build = WorkTask(
+                task_id="CHAT-RECOVERY::build",
+                title="Build",
+                description="Construir slice",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                state=TaskState.COMPLETED,
+                metadata={
+                    "phase": "build",
+                    "chat_parent": "CHAT-RECOVERY",
+                    "result": "Build completo con artefactos.",
+                    "retry_route_requested": True,
+                    "artifact_paths": ["src/pkg/module.py"],
+                },
+            )
+            qa = WorkTask(
+                task_id="CHAT-RECOVERY::qa",
+                title="QA",
+                description="Validar release",
+                role=Role.QA,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-RECOVERY::build"],
+                metadata={"phase": "qa", "chat_parent": "CHAT-RECOVERY"},
+            )
+            for task in (build, qa):
+                orchestrator.submit_task(task)
+
+            context = orchestrator._build_dependency_output_context(qa)
+            self.assertIn("[System] recovery=applied; retried_phases=build", context)
+
+    def test_new_downstream_task_inherits_existing_failure_checkpoint_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            build = WorkTask(
+                task_id="CHAT-LATE::build",
+                title="Build",
+                description="Construir slice",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={"phase": "build", "chat_parent": "CHAT-LATE"},
+            )
+            orchestrator.submit_task(build)
+            checkpoint_id = orchestrator._maybe_spawn_lead_failure_checkpoint(
+                build,
+                "recoverable build failure",
+            )
+
+            review = WorkTask(
+                task_id="CHAT-LATE::review",
+                title="Review",
+                description="Revisar entrega",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={"phase": "review", "chat_parent": "CHAT-LATE"},
+            )
+            orchestrator.submit_task(review)
+
+            review_current = orchestrator.taskboard.get_task("CHAT-LATE::review")
+            assert review_current is not None
+            self.assertEqual(checkpoint_id, "CHAT-LATE::lead_failure_build")
+            self.assertIn("CHAT-LATE::lead_failure_build", review_current.dependencies)
+            self.assertIn(
+                "CHAT-LATE::lead_failure_build",
+                list(review_current.metadata.get("lead_failure_gate_dependencies", [])),
+            )
+            self.assertTrue(orchestrator._has_pending_chat_directive_checkpoint(review_current))
+
     def test_workflow_state_updates_phase_context_summaries_for_chat_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -2344,6 +3121,231 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("Resumen build:", context)
             self.assertNotIn("RAW OUTPUT MUY LARGO RAW OUTPUT MUY LARGO RAW OUTPUT MUY LARGO", context)
 
+    def test_dependency_output_context_includes_degraded_pre_phase_support(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            support = WorkTask(
+                task_id="CHAT-SUPPORT-CONTEXT::delegate_review_test_runner_0",
+                title="Support evidence",
+                description="Ejecuta evidencia auxiliar.",
+                role=Role.QA,
+                metadata={
+                    "phase": "delegate_review_test_runner_0",
+                    "structured_evidence_task": True,
+                    "evidence_position": "pre_phase",
+                    "phase_contract": {
+                        "contract_kind": "delegate_support_pre_phase",
+                        "evidence_target_phase": "review",
+                    },
+                },
+            )
+            orchestrator.taskboard.add_task(support)
+            orchestrator.taskboard.mark_failed(
+                support.task_id,
+                error="No pude ejecutar el smoke auxiliar por visibilidad insuficiente.",
+            )
+
+            review = WorkTask(
+                task_id="CHAT-SUPPORT-CONTEXT::review",
+                title="Review",
+                description="Revisa con la evidencia disponible.",
+                role=Role.REVIEWER,
+                dependencies=[support.task_id],
+                metadata={"phase": "review"},
+            )
+
+            context = orchestrator._build_dependency_output_context(review)
+
+            self.assertIn("support_dependency=degraded", context)
+            self.assertIn("delegate_review_test_runner_0", context)
+            self.assertIn("decision_authority=parent_phase", context)
+            self.assertIn("visibilidad insuficiente", context)
+
+    def test_review_context_includes_contract_scoped_file_snippets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            src_dir = project_root / "src" / "pkg"
+            tests_dir = project_root / "tests"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            src_dir.mkdir(parents=True, exist_ok=True)
+            tests_dir.mkdir(parents=True, exist_ok=True)
+            (src_dir / "toc_generator.py").write_text(
+                "def generate_toc(markdown):\n    return []\n",
+                encoding="utf-8",
+            )
+            (tests_dir / "test_toc_generator.py").write_text(
+                "def test_generate_toc():\n    assert generate_toc('# A') == []\n",
+                encoding="utf-8",
+            )
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            build = WorkTask(
+                task_id="CHAT-REVIEW-CONTEXT::build",
+                title="Build TOC",
+                description="Implementa el modulo TOC.",
+                role=Role.ENGINEER,
+                metadata={"phase": "build", "result": "Build completado."},
+            )
+            orchestrator.taskboard.add_task(build)
+            orchestrator.taskboard.mark_completed(build.task_id, "Build completado.")
+            review = WorkTask(
+                task_id="CHAT-REVIEW-CONTEXT::review_toc_module",
+                title="Review TOC module",
+                description="Revisa el modulo TOC y sus tests.",
+                role=Role.REVIEWER,
+                dependencies=[build.task_id],
+                metadata={
+                    "phase": "review_toc_module",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "review_toc_module",
+                        "objective": "Review TOC implementation and tests.",
+                        "allowed_module_path_hints": [
+                            "src/pkg/toc_generator.py",
+                            "tests/test_toc_generator.py",
+                        ],
+                    },
+                },
+            )
+
+            context = orchestrator._build_dependency_output_context(review)
+
+            self.assertIn("Reviewable artifact snippets:", context)
+            self.assertIn("src/pkg/toc_generator.py", context)
+            self.assertIn("def generate_toc", context)
+            self.assertIn("tests/test_toc_generator.py", context)
+
+    def test_dependency_output_context_includes_structured_planning_artifact_for_downstream_planning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-PLAN-CONTEXT::plan_engineering",
+                title="Planning engineering",
+                description="Define el slice implementable.",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": {
+                        "objective": "Implementar el parser TOC incremental.",
+                        "steps": [
+                            "Ajustar el parser actual para reconocer encabezados TOC.",
+                            "Actualizar la CLI para exponer la nueva opcion.",
+                            "Preparar regresion minima.",
+                        ],
+                        "acceptance_criteria": [
+                            "La CLI genera la salida esperada con TOC.",
+                            "Las pruebas relevantes pasan.",
+                        ],
+                        "constraints": [
+                            "No abrir un slice nuevo fuera de src/md_report.",
+                        ],
+                    },
+                    "result": "Resumen breve que no deberia ocultar el artifact.",
+                },
+            )
+            orchestrator.taskboard.add_task(dep)
+            orchestrator.taskboard.mark_completed(dep.task_id, "Planning listo.")
+            orchestrator.workflow_state["CHAT-PLAN-CONTEXT"] = {
+                "planning_artifacts": {"plan_engineering": dict(dep.metadata.get("planning_artifact", {}) or {})},
+                "phase_context_summaries": {"plan_engineering": "Resumen demasiado corto."},
+            }
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-CONTEXT::plan_risks",
+                title="Planning risks",
+                description="Define riesgos y quality gates.",
+                role=Role.REVIEWER,
+                dependencies=[dep.task_id],
+                metadata={"phase": "plan_risks"},
+            )
+
+            context = orchestrator._build_dependency_output_context(task)
+
+            self.assertIn("planning_artifact:", context)
+            self.assertIn("objective=Implementar el parser TOC incremental.", context)
+            self.assertIn("acceptance=La CLI genera la salida esperada con TOC.", context)
+            self.assertIn("constraints=No abrir un slice nuevo fuera de src/md_report.", context)
+
+    def test_build_context_receives_detailed_upstream_planning_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-BUILD-CONTEXT::plan_engineering",
+                title="Planning engineering",
+                description="Define el slice implementable.",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": {
+                        "objective": "Implementar TOC navegable sin cambiar de slice.",
+                        "steps": [
+                            "Actualizar el generador existente para recolectar headings.",
+                            "Generar anchors Markdown estables para headings duplicados.",
+                            "Exponer profundidad configurable en el CLI.",
+                        ],
+                        "acceptance_criteria": [
+                            "La salida incluye una Tabla de Contenidos navegable.",
+                            "La profundidad configurable limita los headings incluidos.",
+                        ],
+                    },
+                },
+            )
+            orchestrator.taskboard.add_task(dep)
+            orchestrator.taskboard.mark_completed(dep.task_id, "Planning listo.")
+            orchestrator.workflow_state["CHAT-BUILD-CONTEXT"] = {
+                "planning_artifacts": {
+                    "plan_engineering": dict(dep.metadata.get("planning_artifact", {}) or {})
+                },
+                "phase_context_summaries": {"plan_engineering": "Resumen corto."},
+            }
+
+            task = WorkTask(
+                task_id="CHAT-BUILD-CONTEXT::build",
+                title="Build",
+                description="Ejecuta exactamente el slice aprobado.",
+                role=Role.ENGINEER,
+                dependencies=[dep.task_id],
+                metadata={"phase": "build"},
+            )
+
+            context = orchestrator._build_dependency_output_context(task)
+
+            self.assertIn("planning_artifact:", context)
+            self.assertIn("Implementar TOC navegable sin cambiar de slice", context)
+            self.assertIn("Generar anchors Markdown estables", context)
+            self.assertIn("profundidad configurable", context)
+
     def test_runtime_phase_contract_block_includes_dependency_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -2363,7 +3365,11 @@ class OrchestratorTests(unittest.TestCase):
                 role=Role.ENGINEER,
                 complexity=Complexity.MEDIUM,
                 criticality=Criticality.MEDIUM,
-                metadata={"phase": "build", "result": "RAW BUILD OUTPUT " * 80},
+                metadata={
+                    "phase": "build",
+                    "result": "RAW BUILD OUTPUT " * 80,
+                    "artifact_paths": ["src/auth.py"],
+                },
             )
             dep.state = TaskState.COMPLETED
             orchestrator.taskboard.add_task(dep)
@@ -2413,7 +3419,91 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("[PHASE_CONTRACT]", block)
             self.assertIn("phase_id: review", block)
             self.assertIn("upstream_context:", block)
-            self.assertIn("- build: Resumen build: auth.py actualizado y smoke pendiente.", block)
+            self.assertIn(
+                "- build: state=completed; artifacts=src/auth.py; Resumen build: auth.py actualizado y smoke pendiente.",
+                block,
+            )
+
+    def test_runtime_phase_contract_prefers_structured_planning_artifact_for_build(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            planning_artifact = {
+                "objective": "Robustecer el CLI con validaciones de entrada.",
+                "steps": [
+                    "Actualizar el parser de argumentos existente.",
+                    "Validar que el archivo de entrada exista antes de leerlo.",
+                    "Mantener intacta la generacion exitosa actual.",
+                ],
+                "acceptance_criteria": [
+                    "El CLI falla con mensaje claro si el input no existe.",
+                    "El flujo exitoso existente sigue pasando.",
+                ],
+            }
+            dep = WorkTask(
+                task_id="CHAT-CONTRACT-PLAN::plan_engineering",
+                title="Plan Engineering",
+                description="Planifica el slice.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": planning_artifact,
+                },
+            )
+            dep.state = TaskState.COMPLETED
+            orchestrator.taskboard.add_task(dep)
+
+            ws = orchestrator._get_workflow_state("CHAT-CONTRACT-PLAN")
+            ws["planning_artifacts"] = {"plan_engineering": planning_artifact}
+            ws["phase_context_summaries"] = {
+                "plan_engineering": "steps: Actualizar el parser (...)"
+            }
+            ws["phase_contracts"] = {
+                "build": {
+                    "phase_id": "build",
+                    "role": "ENGINEER",
+                    "objective": "Ejecuta el slice aprobado.",
+                    "depends_on": ["plan_engineering"],
+                }
+            }
+
+            task = WorkTask(
+                task_id="CHAT-CONTRACT-PLAN::build",
+                title="Build",
+                description="Ejecuta el slice aprobado.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-CONTRACT-PLAN::plan_engineering"],
+                metadata={
+                    "phase": "build",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "build",
+                        "role": "ENGINEER",
+                        "objective": "Ejecuta el slice aprobado.",
+                        "depends_on": ["plan_engineering"],
+                    },
+                },
+            )
+
+            block = orchestrator._build_runtime_phase_contract_block(task)
+
+            self.assertIn("planning_artifact:", block)
+            self.assertIn("Robustecer el CLI con validaciones de entrada", block)
+            self.assertIn("Validar que el archivo de entrada exista", block)
+            self.assertIn("acceptance=El CLI falla con mensaje claro", block)
+            self.assertNotIn("steps: Actualizar el parser (...)", block)
 
     def test_dependency_preflight_blocks_downstream_without_usable_delivery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2485,6 +3575,323 @@ class OrchestratorTests(unittest.TestCase):
                 and (item.get("payload", {}) or {}).get("task_id") == "CHAT-DEP-ART-1::review"
             ]
             self.assertEqual(len(blocked_events), 1)
+
+    def test_delegate_evidence_fails_when_it_claims_missing_project_paths_as_existing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample_cli").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample_cli" / "cli.py").write_text(
+                "print('ok')\n",
+                encoding="utf-8",
+            )
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        response_content=(
+                            "La navegación semántica confirma la estructura y las interdependencias "
+                            "de `src/sample_cli/cli.py` y `src/sample_cli/converter.py`. "
+                            "`converter.py` encapsula la conversión principal."
+                        ),
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-UNGROUNDED-EVIDENCE::delegate_build_lsp_navigator_0",
+                title="Evidencia build",
+                description="Confirma la estructura del repo tras el build.",
+                role=Role.RESEARCHER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "skip_peer_consultation": True,
+                    "phase": "delegate_build_lsp_navigator_0",
+                    "chat_parent": "CHAT-UNGROUNDED-EVIDENCE",
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            failed = orchestrator.taskboard.get_task(task.task_id)
+            assert failed is not None
+            self.assertEqual(failed.state, TaskState.FAILED)
+            self.assertIn(
+                "ungrounded_evidence_output_detected",
+                str(failed.metadata.get("error", "")),
+            )
+
+    def test_scout_context_curator_grounding_uses_project_workspace_not_task_sandbox(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            (project_root / ".aiteam").mkdir(parents=True, exist_ok=True)
+            (project_root / "src").mkdir(parents=True, exist_ok=True)
+            (project_root / ".aiteam" / "lead_memory.md").write_text(
+                "memoria\n",
+                encoding="utf-8",
+            )
+            (project_root / "pyproject.toml").write_text(
+                "[project]\nname='sample'\n",
+                encoding="utf-8",
+            )
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-CURATOR-GROUND::scout_context_curator",
+                title="Scout: context curator",
+                description="Compacta contexto del proyecto.",
+                role=Role.SCOUT,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "skip_peer_consultation": True,
+                    "phase": "scout_context_curator",
+                    "chat_parent": "CHAT-CURATOR-GROUND",
+                },
+            )
+
+            sandbox_workspace = orchestrator.sandboxes.task_workspace(
+                agent_id="lead-1",
+                task_id=task.task_id,
+            )
+            issue = orchestrator._detect_ungrounded_evidence_issue(
+                task=task,
+                safe_content=(
+                    "Estado actual confirmado: `pyproject.toml` presente, `lead_memory.md` disponible, "
+                    "`.aiteam/context/` accesible y `src/` creado. "
+                    "Contexto historico: clean retry de una run previa."
+                ),
+                workspace=sandbox_workspace,
+            )
+            self.assertEqual(issue, {})
+
+    def test_extract_path_candidates_ignores_noisy_non_path_tokens(self) -> None:
+        candidates = extract_path_candidates(
+            "Errores previos 429/403 y version 3.x o 1.0. "
+            "Confirmado `pyproject.toml` y `src/sample_cli/cli.py`. "
+            "No usar entrada/salida como path."
+        )
+
+        self.assertIn("pyproject.toml", candidates)
+        self.assertIn("src/sample_cli/cli.py", candidates)
+        self.assertNotIn("429/403", candidates)
+        self.assertNotIn("3.x", candidates)
+        self.assertNotIn("1.0", candidates)
+        self.assertNotIn("entrada/salida", candidates)
+
+    def test_workspace_grounding_path_aliases_cover_internal_project_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "workspace"
+            task_workspace = Path(tmp) / "sandbox"
+            (project_root / ".aiteam" / "context").mkdir(parents=True, exist_ok=True)
+            (project_root / ".aiteam" / "lead_memory.md").write_text(
+                "memoria\n",
+                encoding="utf-8",
+            )
+            (project_root / "src").mkdir(parents=True, exist_ok=True)
+            task_workspace.mkdir(parents=True, exist_ok=True)
+
+            self.assertTrue(
+                AITeamOrchestrator._path_hint_exists_in_workspace(
+                    ".aiteam",
+                    project_workspace=project_root,
+                    task_workspace=task_workspace,
+                )
+            )
+            self.assertTrue(
+                AITeamOrchestrator._path_hint_exists_in_workspace(
+                    "lead_memory.md",
+                    project_workspace=project_root,
+                    task_workspace=task_workspace,
+                )
+            )
+            self.assertTrue(
+                AITeamOrchestrator._path_hint_exists_in_workspace(
+                    ".aiteam/context/",
+                    project_workspace=project_root,
+                    task_workspace=task_workspace,
+                )
+            )
+            self.assertTrue(
+                AITeamOrchestrator._path_hint_exists_in_workspace(
+                    "src",
+                    project_workspace=project_root,
+                    task_workspace=task_workspace,
+                )
+            )
+
+    def test_workspace_grounding_matches_visible_file_basenames(self) -> None:
+        matched = AITeamOrchestrator._path_hint_matches_grounding_hints(
+            "cli.py",
+            visible_files=["src/sample_cli/cli.py", "tests/test_cli.py"],
+            dependency_artifacts=[],
+        )
+        self.assertTrue(matched)
+
+        unmatched = AITeamOrchestrator._path_hint_matches_grounding_hints(
+            "converter.py",
+            visible_files=["src/sample_cli/cli.py", "tests/test_cli.py"],
+            dependency_artifacts=[],
+        )
+        self.assertFalse(unmatched)
+
+    def test_workspace_grounding_matches_truncated_directory_prefix_against_visible_artifact(self) -> None:
+        matched = AITeamOrchestrator._path_hint_matches_grounding_hints(
+            "src/md_r",
+            visible_files=["src/md_report/generator.py", "tests/test_generator.py"],
+            dependency_artifacts=["src/md_report/generator.py"],
+        )
+        self.assertTrue(matched)
+
+    def test_workspace_grounding_does_not_overmatch_unrelated_partial_directory_prefix(self) -> None:
+        matched = AITeamOrchestrator._path_hint_matches_grounding_hints(
+            "src/feat",
+            visible_files=["src/other/generator.py", "tests/test_generator.py"],
+            dependency_artifacts=["src/other/generator.py"],
+        )
+        self.assertFalse(matched)
+
+    def test_plan_research_grounding_ignores_noise_and_accepts_real_workspace_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample_cli").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample_cli" / "cli.py").write_text(
+                "print('ok')\n",
+                encoding="utf-8",
+            )
+            (project_root / "pyproject.toml").write_text(
+                "[project]\nname='sample'\n",
+                encoding="utf-8",
+            )
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-RESEARCH-GROUND::plan_research",
+                title="Plan Research",
+                description="Reune hechos confirmados para planning.",
+                role=Role.RESEARCHER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "skip_peer_consultation": True,
+                    "phase": "plan_research",
+                    "chat_parent": "CHAT-PLAN-RESEARCH-GROUND",
+                },
+            )
+
+            sandbox_workspace = orchestrator.sandboxes.task_workspace(
+                agent_id="research-1",
+                task_id=task.task_id,
+            )
+            issue = orchestrator._detect_ungrounded_evidence_issue(
+                task=task,
+                safe_content=(
+                    "**Hechos Confirmados:** `pyproject.toml` y `src/sample_cli/cli.py` presentes. "
+                    "Errores previos 429/403 y version 3.x fueron historicos."
+                ),
+                workspace=sandbox_workspace,
+            )
+
+            self.assertEqual(issue, {})
+
+    def test_review_grounding_ignores_truncated_prefix_when_artifact_is_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report").mkdir(parents=True, exist_ok=True)
+            (project_root / "tests").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report" / "generator.py").write_text(
+                "def generate_report():\n    return 'ok'\n",
+                encoding="utf-8",
+            )
+            (project_root / "tests" / "test_generator.py").write_text(
+                "def test_generate_report():\n    assert True\n",
+                encoding="utf-8",
+            )
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-REVIEW-GROUND::implement_generator_mvp",
+                title="Implement generator",
+                description="Implementa el generador.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "implement_generator_mvp",
+                    "artifact_paths": [
+                        "src/md_report/generator.py",
+                        "tests/test_generator.py",
+                    ],
+                },
+            )
+            orchestrator.taskboard.add_task(dep)
+            orchestrator.taskboard.mark_completed(dep.task_id, "ok")
+
+            review = WorkTask(
+                task_id="CHAT-REVIEW-GROUND::review_generator_implementation",
+                title="Review generator",
+                description="Revisa implementación del generador.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[dep.task_id],
+                metadata={"phase": "review_generator_implementation"},
+            )
+
+            sandbox_workspace = orchestrator.sandboxes.task_workspace(
+                agent_id="review-1",
+                task_id=review.task_id,
+            )
+            issue = orchestrator._detect_ungrounded_evidence_issue(
+                task=review,
+                safe_content=(
+                    "confirmed revisión bloqueada sin código fuente de `src/md_r` "
+                    "aunque upstream lista `src/md_report/generator.py` y `tests/test_generator.py`."
+                ),
+                workspace=sandbox_workspace,
+            )
+
+            self.assertEqual(issue, {})
 
     def test_dependency_preflight_allows_downstream_with_phase_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3128,6 +4535,69 @@ class OrchestratorTests(unittest.TestCase):
                 )
             )
 
+    def test_repair_first_import_traceback_allows_source_path_for_continuation(self) -> None:
+        traceback_context = (
+            "Auto pre-build validation failed.\n"
+            "Command: python -m pytest -q --tb=short\n"
+            "tests/test_cli.py:5: in <module>\n"
+            "    from src.md_report.cli import app\n"
+            "src\\md_report\\cli.py:8: in <module>\n"
+            "    from src.md_report.report_generator import ReportGenerator\n"
+            "src\\md_report\\report_generator.py:12: in <module>\n"
+            "    from src.md_report.toc_generator import generate_toc, format_toc_as_markdown\n"
+            "ImportError: cannot import name 'format_toc_as_markdown' from "
+            "'src.md_report.toc_generator' "
+            "(C:\\Users\\Max\\Antigravity Projects\\md-report-cli\\src\\md_report\\toc_generator.py)"
+        )
+        task = WorkTask(
+            task_id="CHAT-REPAIR-SOURCE::build",
+            title="Build",
+            description=traceback_context,
+            role=Role.ENGINEER,
+            metadata={
+                "phase": "build",
+                "repair_first_required": True,
+                "repair_first_origin": "auto_pre_phase_validation",
+                "repair_first_command": "python -m pytest -q --tb=short",
+                "phase_contract": {
+                    "phase_id": "build",
+                    "objective": (
+                        "Repair the failed pre-build validation before opening any "
+                        "new slice. Command: python -m pytest -q --tb=short"
+                    ),
+                },
+            },
+        )
+
+        self.assertTrue(
+            AITeamOrchestrator._repair_first_context_allows_continuation_paths(
+                task,
+                ["src/md_report/toc_generator.py"],
+            )
+        )
+
+    def test_non_repair_first_import_traceback_keeps_continuation_drift_strict(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-REPAIR-SOURCE::build",
+            title="Build",
+            description=(
+                "ImportError: cannot import name 'format_toc_as_markdown' "
+                "from 'src.md_report.toc_generator'"
+            ),
+            role=Role.ENGINEER,
+            metadata={
+                "phase": "build",
+                "repair_first_origin": "auto_pre_phase_validation",
+            },
+        )
+
+        self.assertFalse(
+            AITeamOrchestrator._repair_first_context_allows_continuation_paths(
+                task,
+                ["src/md_report/toc_generator.py"],
+            )
+        )
+
     def test_build_contract_path_drift_blocks_forbidden_module_scope_before_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -3244,6 +4714,8 @@ class OrchestratorTests(unittest.TestCase):
                 "planning_phase_scope_drift_detected",
                 str(failed.metadata.get("error", "")),
             )
+            self.assertIn("path=src/sample_cli/cli.py", str(failed.metadata.get("_last_agent_output", "")))
+            self.assertIn("path=src/sample_cli/cli.py", str(failed.metadata.get("result", "")))
 
     def test_planning_phase_requires_structured_planning_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3298,6 +4770,8 @@ class OrchestratorTests(unittest.TestCase):
                 "missing_planning_artifact_required",
                 str(failed.metadata.get("error", "")),
             )
+            self.assertTrue(str(failed.metadata.get("_last_agent_output", "")).strip())
+            self.assertTrue(str(failed.metadata.get("result", "")).strip())
 
     def test_planning_phase_persists_structured_planning_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3358,13 +4832,830 @@ class OrchestratorTests(unittest.TestCase):
                 len(list(artifact.get("acceptance_criteria", []) or [])),
                 1,
             )
+
+    def test_planning_phase_accepts_inline_labeled_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[InlinePlanningArtifactAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-ARTIFACT-INLINE::plan_engineering",
+                title="Plan Engineering",
+                description="Define el planning con artefacto estructurado.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "plan_engineering",
+                    "chat_parent": "CHAT-PLAN-ARTIFACT-INLINE",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "plan_engineering",
+                        "role": "ENGINEER",
+                        "objective": "Definir corte de implementacion con pasos y criterios.",
+                        "depends_on": [],
+                    },
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            completed = orchestrator.taskboard.get_task(
+                "CHAT-PLAN-ARTIFACT-INLINE::plan_engineering"
+            )
+            assert completed is not None
+            self.assertEqual(completed.state, TaskState.COMPLETED)
+            artifact = dict(completed.metadata.get("planning_artifact", {}) or {})
+            self.assertTrue(str(artifact.get("objective", "")).strip())
+            self.assertGreaterEqual(len(list(artifact.get("steps", []) or [])), 2)
+            self.assertGreaterEqual(
+                len(list(artifact.get("acceptance_criteria", []) or [])),
+                1,
+            )
+
+    def test_planning_phase_derives_minimal_artifact_from_actionable_narrative(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[NarrativePlanningArtifactAdapter()],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-ARTIFACT-NARRATIVE::plan_engineering",
+                title="Plan Engineering",
+                description="Define el planning con artefacto estructurado.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "plan_engineering",
+                    "chat_parent": "CHAT-PLAN-ARTIFACT-NARRATIVE",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "plan_engineering",
+                        "role": "ENGINEER",
+                        "objective": "Definir corte de implementacion con pasos y criterios.",
+                        "depends_on": [],
+                    },
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            completed = orchestrator.taskboard.get_task(
+                "CHAT-PLAN-ARTIFACT-NARRATIVE::plan_engineering"
+            )
+            assert completed is not None
+            self.assertEqual(completed.state, TaskState.COMPLETED)
+            artifact = dict(completed.metadata.get("planning_artifact", {}) or {})
+            self.assertEqual(
+                artifact.get("objective"),
+                "Definir corte de implementacion con pasos y criterios.",
+            )
+            self.assertGreaterEqual(len(list(artifact.get("steps", []) or [])), 2)
+            self.assertGreaterEqual(
+                len(list(artifact.get("acceptance_criteria", []) or [])),
+                1,
+            )
             workflow_artifacts = dict(
-                orchestrator._get_workflow_state("CHAT-PLAN-ARTIFACT-OK").get(
+                orchestrator._get_workflow_state("CHAT-PLAN-ARTIFACT-NARRATIVE").get(
                     "planning_artifacts", {}
                 )
                 or {}
             )
             self.assertIn("plan_engineering", workflow_artifacts)
+
+    def test_planning_artifact_parser_accepts_sequenced_tasks_and_quality_gates_aliases(self) -> None:
+        artifact = AITeamOrchestrator._extract_planning_artifact(
+            """
+            [PLANNING_ARTIFACT]
+            objetivo:
+            - Implementar el slice aprobado sin abrir uno nuevo.
+            tareas secuenciadas:
+            - Confirmar layout actual del paquete.
+            - Definir cambios minimos para el parser.
+            quality gates:
+            - Debe pasar python -m pytest tests/test_md_report.py -q.
+            riesgos:
+            - Evitar tocar modulos fuera de src/md_report.
+            [/PLANNING_ARTIFACT]
+            """
+        )
+        self.assertEqual(
+            artifact.get("objective"),
+            "Implementar el slice aprobado sin abrir uno nuevo.",
+        )
+        self.assertGreaterEqual(len(list(artifact.get("steps", []) or [])), 2)
+        self.assertGreaterEqual(
+            len(list(artifact.get("acceptance_criteria", []) or [])),
+            1,
+        )
+        self.assertIn(
+            "Evitar tocar modulos fuera de src/md_report.",
+            list(artifact.get("constraints", []) or []),
+        )
+
+    def test_plan_risks_fails_when_it_derives_into_commands_or_file_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"analysis", "review"},
+                        response_content=(
+                            "Riesgos detectados.\n"
+                            "1. Crear archivo src/md_report/toc.py para aislar la logica.\n"
+                            "2. Ejecutar python -m pytest tests/test_md_report.py -q.\n"
+                            "[PHASE_VERDICT]\n"
+                            "phase_id: plan_risks\n"
+                            "status: completed\n"
+                            "reason_codes: aligned\n"
+                            "contract_status: aligned\n"
+                            "summary: Riesgos y quality gates definidos.\n"
+                            "[/PHASE_VERDICT]\n"
+                        ),
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-RISKS-DRIFT::plan_risks",
+                title="Plan Risks",
+                description="Define riesgos y quality gates, sin implementar.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "plan_risks",
+                    "chat_parent": "CHAT-PLAN-RISKS-DRIFT",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "plan_risks",
+                        "role": "REVIEWER",
+                        "objective": "Definir riesgos, gates y pruebas minimas sin implementar.",
+                        "depends_on": [],
+                    },
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            failed = orchestrator.taskboard.get_task("CHAT-PLAN-RISKS-DRIFT::plan_risks")
+            assert failed is not None
+            self.assertEqual(failed.state, TaskState.FAILED)
+            self.assertIn(
+                "planning_phase_scope_drift_detected",
+                str(failed.metadata.get("error", "")),
+            )
+
+    def test_plan_risks_repairs_upstream_relitigation_when_dependency_planning_is_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"analysis", "review"},
+                        response_content=(
+                            "No puede iniciarse con integridad porque la dependencia critica esta truncada.\n"
+                            "El planning_artifact upstream es insuficiente.\n"
+                            "[PHASE_VERDICT]\n"
+                            "phase_id: plan_risks\n"
+                            "status: blocked\n"
+                            "reason_codes: dependency_incomplete\n"
+                            "contract_status: unknown\n"
+                            "summary: Upstream incompleto.\n"
+                            "[/PHASE_VERDICT]\n"
+                        ),
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-PLAN-RISKS-REPAIR::plan_engineering",
+                title="Planning engineering",
+                description="Define el slice.",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": {
+                        "objective": "Implementar soporte TOC incremental.",
+                        "steps": [
+                            "Ajustar parser actual.",
+                            "Actualizar CLI.",
+                        ],
+                        "acceptance_criteria": [
+                            "La CLI soporta TOC sin romper el flujo actual.",
+                        ],
+                        "constraints": [
+                            "No abrir un nuevo paquete fuera de src/md_report.",
+                        ],
+                    },
+                    "result": "Planning completado.",
+                },
+            )
+            orchestrator.taskboard.add_task(dep)
+            orchestrator.taskboard.mark_completed(dep.task_id, "Planning listo.")
+            ws = orchestrator._get_workflow_state("CHAT-PLAN-RISKS-REPAIR")
+            ws["planning_artifacts"] = {
+                "plan_engineering": dict(dep.metadata.get("planning_artifact", {}) or {})
+            }
+            ws["phase_context_summaries"] = {"plan_engineering": "Resumen corto."}
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-RISKS-REPAIR::plan_risks",
+                title="Plan Risks",
+                description="Define riesgos y gates sin relitigar el upstream.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[dep.task_id],
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "plan_risks",
+                    "chat_parent": "CHAT-PLAN-RISKS-REPAIR",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "plan_risks",
+                        "role": "REVIEWER",
+                        "objective": "Definir riesgos, quality gates y pruebas minimas.",
+                        "depends_on": ["plan_engineering"],
+                    },
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            completed = orchestrator.taskboard.get_task("CHAT-PLAN-RISKS-REPAIR::plan_risks")
+            assert completed is not None
+            self.assertEqual(completed.state, TaskState.COMPLETED)
+            self.assertTrue(bool(completed.metadata.get("plan_risks_repaired_from_output")))
+
+    def test_plan_risks_sanitizes_residual_operational_lines_when_verdict_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"analysis", "review"},
+                        response_content=(
+                            "Riesgos:\n"
+                            "- Riesgo de regresion en el generador markdown.\n"
+                            "- Ejecutar python -m pytest tests/test_md_report.py -q.\n"
+                            "Quality Gates:\n"
+                            "- Mantener el contrato del planning upstream.\n"
+                            "[PHASE_VERDICT]\n"
+                            "phase_id: plan_risks\n"
+                            "status: completed\n"
+                            "reason_codes: aligned\n"
+                            "contract_status: aligned\n"
+                            "summary: Riesgos y quality gates definidos.\n"
+                            "[/PHASE_VERDICT]\n"
+                        ),
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-PLAN-RISKS-SANITIZE::plan_engineering",
+                title="Planning engineering",
+                description="Define el slice.",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": {
+                        "objective": "Implementar soporte TOC incremental.",
+                        "steps": ["Actualizar generador markdown.", "Añadir pruebas minimas."],
+                        "acceptance_criteria": ["Debe mantener el contrato esperado."],
+                    },
+                },
+            )
+            dep.state = TaskState.COMPLETED
+            orchestrator.submit_task(dep)
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-RISKS-SANITIZE::plan_risks",
+                title="Plan Risks",
+                description="Define riesgos y quality gates, sin implementar.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-PLAN-RISKS-SANITIZE::plan_engineering"],
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "plan_risks",
+                    "chat_parent": "CHAT-PLAN-RISKS-SANITIZE",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "plan_risks",
+                        "role": "REVIEWER",
+                        "objective": "Definir riesgos, gates y pruebas minimas sin implementar.",
+                        "depends_on": ["plan_engineering"],
+                    },
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            completed = orchestrator.taskboard.get_task("CHAT-PLAN-RISKS-SANITIZE::plan_risks")
+            assert completed is not None
+            self.assertEqual(completed.state, TaskState.COMPLETED)
+            self.assertTrue(bool(completed.metadata.get("plan_risks_output_sanitized")))
+            self.assertNotIn(
+                "python -m pytest",
+                str(completed.metadata.get("result", "")),
+            )
+            self.assertNotIn(
+                "go/no-go",
+                str(completed.metadata.get("result", "")),
+            )
+
+    def test_plan_risks_sanitizes_non_path_slash_labels_when_verdict_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="openai_pro",
+                        provider="openai",
+                        model="gpt-pro",
+                        capabilities={"analysis", "review"},
+                        response_content=(
+                            "Riesgos:\n"
+                            "- Definir decision gate claro y evitar lenguaje go/no-go.\n"
+                            "- Documentar escenarios fail/overwrite/append como modos de fallo.\n"
+                            "Quality Gates:\n"
+                            "- Mantener compatibilidad con el modulo actual.\n"
+                            "[PHASE_VERDICT]\n"
+                            "phase_id: plan_risks\n"
+                            "status: completed\n"
+                            "reason_codes: aligned\n"
+                            "contract_status: aligned\n"
+                            "summary: Riesgos y quality gates definidos.\n"
+                            "[/PHASE_VERDICT]\n"
+                        ),
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-PLAN-RISKS-SLASH::plan_engineering",
+                title="Planning engineering",
+                description="Define el slice.",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": {
+                        "objective": "Añadir una mejora incremental.",
+                        "steps": ["Actualizar modulo actual.", "Añadir cobertura minima."],
+                        "acceptance_criteria": ["Debe conservar la salida esperada."],
+                    },
+                },
+            )
+            dep.state = TaskState.COMPLETED
+            orchestrator.submit_task(dep)
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-RISKS-SLASH::plan_risks",
+                title="Plan Risks",
+                description="Define riesgos y quality gates, sin implementar.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-PLAN-RISKS-SLASH::plan_engineering"],
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "phase": "plan_risks",
+                    "chat_parent": "CHAT-PLAN-RISKS-SLASH",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "plan_risks",
+                        "role": "REVIEWER",
+                        "objective": "Definir riesgos, gates y pruebas minimas sin implementar.",
+                        "depends_on": ["plan_engineering"],
+                    },
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            completed = orchestrator.taskboard.get_task("CHAT-PLAN-RISKS-SLASH::plan_risks")
+            assert completed is not None
+            self.assertEqual(completed.state, TaskState.COMPLETED)
+            result = str(completed.metadata.get("result", ""))
+            self.assertTrue(bool(completed.metadata.get("plan_risks_output_sanitized")))
+            self.assertNotIn("go/no-go", result)
+            self.assertNotIn("fail/overwrite/append", result)
+            self.assertIn("go or no-go", result)
+
+    def test_review_output_sanitizes_regex_like_literals_when_verdict_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample_cli").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample_cli" / "report.py").write_text(
+                "def build_report():\n    return 'ok'\n",
+                encoding="utf-8",
+            )
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="google_review",
+                        provider="google",
+                        model="gemini-2.5-flash",
+                        capabilities={"review"},
+                        response_content=(
+                            "Hallazgos:\n"
+                            "- El parser de headings usa `r'^(#+)\\s*(.*)$'`.\n"
+                            "Evidencia:\n"
+                            "- Artefacto observado en src/sample_cli/report.py.\n"
+                            "[PHASE_VERDICT]\n"
+                            "phase_id: review_implementation\n"
+                            "status: completed\n"
+                            "reason_codes: aligned\n"
+                            "contract_status: aligned\n"
+                            "summary: Review completada con evidencia suficiente.\n"
+                            "[/PHASE_VERDICT]\n"
+                        ),
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-REVIEW-SANITIZE::implement_feature",
+                title="Implement feature",
+                description="Entrega artefacto base.",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "implement_feature",
+                    "artifact_paths": ["src/sample_cli/report.py"],
+                },
+            )
+            dep.state = TaskState.COMPLETED
+            orchestrator.submit_task(dep)
+
+            task = WorkTask(
+                task_id="CHAT-REVIEW-SANITIZE::review_implementation",
+                title="Review implementation",
+                description="Revisa artefactos actuales de forma compacta.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=["CHAT-REVIEW-SANITIZE::implement_feature"],
+                metadata={
+                    "required_capabilities": ["review"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "skip_peer_consultation": True,
+                    "phase": "review_implementation",
+                    "chat_parent": "CHAT-REVIEW-SANITIZE",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "review_implementation",
+                        "role": "REVIEWER",
+                        "objective": "Revisar la implementacion actual con evidencia suficiente.",
+                        "depends_on": ["implement_feature"],
+                    },
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            completed = orchestrator.taskboard.get_task("CHAT-REVIEW-SANITIZE::review_implementation")
+            assert completed is not None
+            self.assertEqual(completed.state, TaskState.COMPLETED)
+            result = str(completed.metadata.get("result", ""))
+            self.assertTrue(bool(completed.metadata.get("review_output_sanitized")))
+            self.assertNotIn("r'^(#+)\\s*(.*)$'", result)
+            self.assertIn("patron tecnico", result)
+
+    def test_lead_close_output_sanitizes_soft_placeholder_markers(self) -> None:
+        sanitized, changed = AITeamOrchestrator._sanitize_lead_close_output(
+            "Resumen final:\n- todo: confirmar seguimiento manual\n- fixme: pulir wording"
+        )
+        self.assertTrue(changed)
+        self.assertNotIn("todo:", sanitized.lower())
+        self.assertNotIn("fixme:", sanitized.lower())
+        self.assertIn("pendiente editorial", sanitized.lower())
+        self.assertIn("nota editorial", sanitized.lower())
+
+    def test_lead_close_output_sanitizes_broader_editorial_markers(self) -> None:
+        sanitized, changed = AITeamOrchestrator._sanitize_lead_close_output(
+            "Cierre:\n- TBD: resumir decision final\n- pending: validar rollout\n- follow-up: revisar telemetry"
+        )
+        self.assertTrue(changed)
+        self.assertNotIn("tbd:", sanitized.lower())
+        self.assertNotIn("pending:", sanitized.lower())
+        self.assertNotIn("follow-up:", sanitized.lower())
+        self.assertIn("seguimiento", sanitized.lower())
+
+    def test_effective_placeholder_labels_ignores_soft_markers_for_lead_close(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-CLOSE::lead_close",
+                title="Lead close",
+                description="Cerrar corrida",
+                role=Role.TEAM_LEAD,
+                metadata={"phase": "lead_close", "chat_parent": "CHAT-CLOSE"},
+            )
+            filtered = orchestrator._effective_placeholder_labels(task, ["todo:", "fixme:", "placeholder marker"])
+            self.assertEqual(filtered, ["placeholder marker"])
+
+    def test_test_runner_output_sanitizes_non_visible_test_filenames(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "tests").mkdir(parents=True, exist_ok=True)
+            (project_root / "tests" / "test_generator.py").write_text(
+                "def test_ok():\n    pass\n",
+                encoding="utf-8",
+            )
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-TEST-RUNNER::delegate_qa_test_runner_0",
+                title="Delegate QA test runner",
+                description="Ejecuta tests relevantes",
+                role=Role.QA,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "delegate_qa_test_runner_0",
+                    "chat_parent": "CHAT-TEST-RUNNER",
+                    "tool_specialist": "test_runner",
+                },
+            )
+            sanitized, changed = orchestrator._sanitize_test_runner_output(
+                task=task,
+                content=(
+                    "Se requiere validar test_generator_functionality.py y luego revisar "
+                    "tests/test_generator.py."
+                ),
+                workspace=project_root,
+            )
+            self.assertTrue(changed)
+            self.assertNotIn("test_generator_functionality.py", sanitized)
+            self.assertIn("tests visibles del workspace", sanitized)
+            self.assertIn("tests/test_generator.py", sanitized)
+
+    def test_test_runner_output_sanitizes_suffix_style_non_visible_test_filenames(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "tests").mkdir(parents=True, exist_ok=True)
+            (project_root / "tests" / "generator_test.py").write_text(
+                "def test_ok():\n    pass\n",
+                encoding="utf-8",
+            )
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-TEST-RUNNER-2::delegate_qa_test_runner_0",
+                title="Delegate QA test runner",
+                description="Ejecuta tests relevantes",
+                role=Role.QA,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "delegate_qa_test_runner_0",
+                    "chat_parent": "CHAT-TEST-RUNNER-2",
+                    "tool_specialist": "test_runner",
+                },
+            )
+            sanitized, changed = orchestrator._sanitize_test_runner_output(
+                task=task,
+                content="Comparar generator_test.py con generator_functionality_test.py antes de cerrar.",
+                workspace=project_root,
+            )
+            self.assertTrue(changed)
+            self.assertIn("generator_test.py", sanitized)
+            self.assertNotIn("generator_functionality_test.py", sanitized)
+            self.assertIn("tests visibles del workspace", sanitized)
+
+    def test_plan_risks_allows_generic_risk_audit_with_technical_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            router = HybridRouter(
+                adapters=[
+                    SubscriptionAdapter(
+                        name="anthropic_review",
+                        provider="anthropic",
+                        model="claude-haiku",
+                        capabilities={"analysis", "review"},
+                        response_content=(
+                            "Riesgos:\n"
+                            "- Riesgo de integracion entre el modulo CLI existente y el modulo md_report actual.\n"
+                            "- Riesgo de regresion en tests actuales si cambia el flujo de salida.\n"
+                            "Quality Gates:\n"
+                            "- Validar salida Markdown legible por stdout.\n"
+                            "- Validar que la integracion no rompa tests existentes.\n"
+                            "Pruebas Minimas:\n"
+                            "- Cubrir el flujo CLI principal con una prueba automatizada.\n"
+                            "- Cubrir la generacion basica del reporte.\n"
+                            "Supuestos/Huecos:\n"
+                            "- El modulo CLI y los tests actuales del proyecto siguen siendo la base del slice.\n"
+                            "[PHASE_VERDICT]\n"
+                            "phase_id: plan_risks\n"
+                            "status: completed\n"
+                            "reason_codes: aligned\n"
+                            "contract_status: aligned\n"
+                            "summary: Riesgos y gates definidos sin proponer implementacion concreta.\n"
+                            "[/PHASE_VERDICT]\n"
+                        ),
+                    )
+                ],
+                policy=build_default_router_policy(),
+            )
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-PLAN-RISKS-GENERIC::plan_engineering",
+                title="Planning engineering",
+                description="Define el slice.",
+                role=Role.ENGINEER,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": {
+                        "objective": "Implementar generacion Markdown minima desde CLI.",
+                        "steps": ["Ajustar CLI.", "Conectar generacion Markdown."],
+                        "acceptance_criteria": ["La CLI emite Markdown por stdout."],
+                        "constraints": ["No abrir nuevos paquetes."],
+                    },
+                    "result": "Planning completado.",
+                },
+            )
+            orchestrator.taskboard.add_task(dep)
+            orchestrator.taskboard.mark_completed(dep.task_id, "Planning listo.")
+
+            task = WorkTask(
+                task_id="CHAT-PLAN-RISKS-GENERIC::plan_risks",
+                title="Plan Risks",
+                description="Define riesgos y gates sin implementar.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[dep.task_id],
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "interactive_chat": True,
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "skip_peer_consultation": True,
+                    "phase": "plan_risks",
+                    "chat_parent": "CHAT-PLAN-RISKS-GENERIC",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "plan_risks",
+                        "role": "REVIEWER",
+                        "objective": "Definir riesgos, quality gates y pruebas minimas.",
+                        "depends_on": ["plan_engineering"],
+                    },
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            completed = orchestrator.taskboard.get_task("CHAT-PLAN-RISKS-GENERIC::plan_risks")
+            assert completed is not None
+            self.assertEqual(completed.state, TaskState.COMPLETED)
+            self.assertNotIn(
+                "planning_phase_scope_drift_detected",
+                str(completed.metadata.get("error", "")),
+            )
 
     def test_qa_blocking_verdict_marks_task_blocked_instead_of_completed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3422,6 +5713,120 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(str(blocked.metadata.get("blocked_reason", "")), "phase_self_reported_blocked")
             self.assertIn("QA bloqueada", str(blocked.metadata.get("result", "")))
 
+    def test_review_blocked_prefix_marks_task_blocked_instead_of_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="google_pro",
+                    provider="google",
+                    model="gemini-2.5-flash",
+                    capabilities={"analysis", "review", "reasoning"},
+                    response_content=(
+                        "BLOCKED: Falta de artefactos para revision.\n"
+                        "No se han proporcionado diffs revisables."
+                    ),
+                )
+            ]
+            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-REVIEW-BLOCK-1::review_core_changes",
+                title="Review Core Changes",
+                description="Revisa artefactos del build",
+                role=Role.REVIEWER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "skip_peer_consultation": True,
+                    "phase": "review_core_changes",
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            blocked = orchestrator.taskboard.get_task("CHAT-REVIEW-BLOCK-1::review_core_changes")
+            assert blocked is not None
+            self.assertEqual(blocked.state, TaskState.BLOCKED)
+            self.assertEqual(
+                str(blocked.metadata.get("blocked_reason", "")),
+                "phase_self_reported_blocked",
+            )
+            self.assertIn("Falta de artefactos", str(blocked.metadata.get("result", "")))
+
+    def test_partial_phase_verdict_marks_task_blocked_instead_of_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="google_pro",
+                    provider="google",
+                    model="gemini-2.5-flash",
+                    capabilities={"analysis", "reasoning"},
+                    response_content=(
+                        "[PHASE_VERDICT]\n"
+                        "phase_id: validate_core_logic\n"
+                        "status: partial\n"
+                        "reason_codes: missing_workspace_evidence, requires_command_execution\n"
+                        "summary: No se pudo validar la fase con evidencia suficiente.\n"
+                        "[/PHASE_VERDICT]\n"
+                        "Se requiere evidencia del workspace antes de continuar."
+                    ),
+                )
+            ]
+            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-PARTIAL-1::validate_core_logic",
+                title="Validate Core Logic",
+                description="Valida la logica antes de implementar",
+                role=Role.RESEARCHER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "required_capabilities": ["analysis"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "skip_peer_consultation": True,
+                    "phase": "validate_core_logic",
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            completed = orchestrator.taskboard.get_task("CHAT-PARTIAL-1::validate_core_logic")
+            assert completed is not None
+            self.assertEqual(completed.state, TaskState.COMPLETED)
+            self.assertTrue(bool(completed.metadata.get("research_degraded")))
+            self.assertEqual(
+                str(completed.metadata.get("research_self_reported_status", "")),
+                "partial",
+            )
+            self.assertIn("status: partial", str(completed.metadata.get("result", "")))
+
     def test_build_blocking_verdict_marks_task_blocked_instead_of_completed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -3478,6 +5883,601 @@ class OrchestratorTests(unittest.TestCase):
                 "dependencia obligatoria rechazada",
                 str(blocked.metadata.get("result", "")),
             )
+
+    def test_engineer_blocking_verdict_fails_when_it_denies_visible_upstream_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample_cli").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "sample_cli" / "cli.py").write_text(
+                "print('ok')\n",
+                encoding="utf-8",
+            )
+            adapters: list[ModelAdapter] = [
+                SubscriptionAdapter(
+                    name="google_pro",
+                    provider="google",
+                    model="gemini-2.5-flash",
+                    capabilities={"coding", "reasoning"},
+                    response_content=(
+                        "BLOQUEADA: no hay artefactos y el workspace vacío impide continuar."
+                    ),
+                )
+            ]
+            router = HybridRouter(adapters=adapters, policy=build_default_router_policy())
+            orchestrator = AITeamOrchestrator(
+                router=router,
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            upstream = WorkTask(
+                task_id="CHAT-BUILD-BLOCK-ART::engineer_core",
+                title="Engineer Core",
+                description="Entrega inicial",
+                role=Role.ENGINEER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "phase": "engineer_core",
+                    "artifact_paths": ["src/sample_cli/cli.py"],
+                    "result": "Entrega inicial lista.",
+                },
+            )
+            upstream.state = TaskState.COMPLETED
+            orchestrator.taskboard.add_task(upstream)
+
+            task = WorkTask(
+                task_id="CHAT-BUILD-BLOCK-ART::engineer_css_embed",
+                title="Engineer Css Embed",
+                description="Continua sobre los artefactos ya creados.",
+                role=Role.ENGINEER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                dependencies=["CHAT-BUILD-BLOCK-ART::engineer_core"],
+                metadata={
+                    "required_capabilities": ["coding"],
+                    "skip_quality_gates": True,
+                    "skip_evidence_gate": True,
+                    "skip_placeholder_check": True,
+                    "skip_peer_consultation": True,
+                    "phase": "engineer_css_embed",
+                },
+            )
+
+            orchestrator.submit_task(task)
+            orchestrator.run_until_idle(max_rounds=3)
+
+            failed = orchestrator.taskboard.get_task("CHAT-BUILD-BLOCK-ART::engineer_css_embed")
+            assert failed is not None
+            self.assertEqual(failed.state, TaskState.FAILED)
+            self.assertIn(
+                "ungrounded_phase_block_detected",
+                str(failed.metadata.get("error", "")),
+            )
+
+    def test_stale_dependency_block_retries_once_when_planning_artifact_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            planning_artifact = {
+                "objective": "Actualizar validaciones del CLI.",
+                "steps": [
+                    "Inspeccionar el entrypoint actual.",
+                    "Añadir validacion de input inexistente.",
+                ],
+                "acceptance_criteria": ["El CLI informa el error y mantiene el flujo exitoso."],
+            }
+            dep = WorkTask(
+                task_id="CHAT-STALE-RETRY::plan_engineering",
+                title="Plan Engineering",
+                description="Planifica.",
+                role=Role.ENGINEER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": planning_artifact,
+                    "result": "[PLANNING_ARTIFACT]...",
+                },
+            )
+            dep.state = TaskState.COMPLETED
+            orchestrator.taskboard.add_task(dep)
+            orchestrator.workflow_state["CHAT-STALE-RETRY"] = {
+                "planning_artifacts": {"plan_engineering": planning_artifact}
+            }
+            task = WorkTask(
+                task_id="CHAT-STALE-RETRY::build",
+                title="Build",
+                description="Ejecuta.",
+                role=Role.ENGINEER,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                dependencies=["CHAT-STALE-RETRY::plan_engineering"],
+                metadata={"phase": "build", "phase_contract_enforced": True},
+            )
+            orchestrator.taskboard.add_task(task)
+            session = orchestrator.session_store.create_session(
+                agent_id="eng-1",
+                role=Role.ENGINEER.value,
+                task_id=task.task_id,
+            )
+
+            retried = orchestrator._retry_executor_on_stale_dependency_block(
+                task=task,
+                assignee="eng-1",
+                safe_content="BLOQUEADA: upstream incompleto.",
+                issue={"reason": "stale_dependency_block", "visible_files": ["src/app.py"]},
+                session=session,
+            )
+
+            refreshed = orchestrator.taskboard.get_task(task.task_id)
+            assert refreshed is not None
+            self.assertTrue(retried)
+            self.assertEqual(refreshed.state, TaskState.READY)
+            self.assertEqual(int(refreshed.metadata.get("stale_dependency_block_retry_count")), 1)
+            self.assertIn("planning_artifact", str(refreshed.metadata.get("review_feedback", "")))
+
+    def test_peer_context_filter_drops_workspace_empty_claims_when_files_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report").mkdir(parents=True, exist_ok=True)
+            (project_root / "tests").mkdir(parents=True, exist_ok=True)
+            (project_root / "src" / "md_report" / "md_report.py").write_text(
+                "def build_report():\n    return 'ok'\n",
+                encoding="utf-8",
+            )
+            (project_root / "tests" / "test_md_report.py").write_text(
+                "def test_build_report():\n    assert True\n",
+                encoding="utf-8",
+            )
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            dep = WorkTask(
+                task_id="CHAT-PEER-FILTER::scout_current_state",
+                title="Scout current state",
+                description="Estado factual del repo.",
+                role=Role.SCOUT,
+                complexity=Complexity.LOW,
+                criticality=Criticality.LOW,
+                metadata={
+                    "phase": "scout_current_state",
+                    "artifact_paths": [
+                        "src/md_report/md_report.py",
+                        "tests/test_md_report.py",
+                    ],
+                    "result": "Workspace con src y tests visibles.",
+                },
+            )
+            orchestrator.taskboard.add_task(dep)
+            orchestrator.taskboard.mark_completed(dep.task_id, "ok")
+
+            task = WorkTask(
+                task_id="CHAT-PEER-FILTER::plan_engineering",
+                title="Plan engineering",
+                description="Define el siguiente slice implementable.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[dep.task_id],
+                metadata={"phase": "plan_engineering"},
+            )
+
+            report = PeerConsultationReport(
+                text="\n".join(
+                    [
+                        "- researcher: workspace vacío y no hay repositorio Git; no existen los archivos del allowed_module_scope.",
+                        "- reviewer: el upstream sigue pending y está bloqueado por upstream.",
+                        "- qa: conviene validar src/md_report/md_report.py y tests/test_md_report.py.",
+                    ]
+                ),
+                consulted_roles=["researcher", "reviewer", "qa"],
+                unavailable_roles=[],
+                consulted_providers=["google"],
+            )
+
+            sanitized = orchestrator._sanitize_peer_consultation_report(
+                task=task,
+                report=report,
+            )
+
+            self.assertNotIn("workspace vacío", sanitized.text)
+            self.assertNotIn("repositorio git", sanitized.text.lower())
+            self.assertNotIn("upstream sigue pending", sanitized.text.lower())
+            self.assertIn("tests/test_md_report.py", sanitized.text)
+            self.assertIn("estado autoritativo actual", sanitized.text)
+
+    def test_peer_context_filter_preserves_non_contradictory_peer_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            task = WorkTask(
+                task_id="CHAT-PEER-KEEP::lead_close",
+                title="Lead close",
+                description="Cierra la run actual.",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={"phase": "lead_close"},
+            )
+            report = PeerConsultationReport(
+                text="- qa: quedan riesgos residuales en parseo TOC y conviene dejar siguiente accion clara.",
+                consulted_roles=["qa"],
+                unavailable_roles=[],
+                consulted_providers=["anthropic"],
+            )
+
+            sanitized = orchestrator._sanitize_peer_consultation_report(
+                task=task,
+                report=report,
+            )
+
+            self.assertEqual(sanitized.text.strip(), report.text.strip())
+
+    def test_needs_peer_consultation_defaults_off_for_planning_phase(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-PLAN-PEER::plan_engineering",
+            title="Plan engineering",
+            description="Define el siguiente slice.",
+            role=Role.ENGINEER,
+            complexity=Complexity.HIGH,
+            criticality=Criticality.HIGH,
+            metadata={"phase": "plan_engineering"},
+        )
+        self.assertFalse(AITeamOrchestrator._needs_peer_consultation(task))
+        task.metadata["require_peer_consultation"] = True
+        self.assertTrue(AITeamOrchestrator._needs_peer_consultation(task))
+
+    def test_needs_peer_consultation_defaults_off_for_execution_phase(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-BUILD-PEER::build",
+            title="Build",
+            description="Implementa el slice aprobado.",
+            role=Role.ENGINEER,
+            complexity=Complexity.HIGH,
+            criticality=Criticality.HIGH,
+            metadata={
+                "phase": "build",
+                "phase_contract_enforced": True,
+            },
+        )
+        self.assertFalse(AITeamOrchestrator._needs_peer_consultation(task))
+        task.metadata["require_peer_consultation"] = True
+        self.assertTrue(AITeamOrchestrator._needs_peer_consultation(task))
+
+    def test_needs_peer_consultation_solo_lead_overrides_required_flag(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-SOLO-PEER::build",
+            title="Build",
+            description="Implementa el slice directo.",
+            role=Role.TEAM_LEAD,
+            complexity=Complexity.HIGH,
+            criticality=Criticality.HIGH,
+            metadata={
+                "phase": "build",
+                "run_profile": "solo_lead",
+                "direct_coding_executor": True,
+                "require_peer_consultation": True,
+            },
+        )
+
+        self.assertFalse(AITeamOrchestrator._needs_peer_consultation(task))
+
+    def test_solo_lead_routing_strips_runtime_capabilities(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-SOLO-CAPS::build",
+            title="Build",
+            description="Repara el fallo material actual.",
+            role=Role.TEAM_LEAD,
+            complexity=Complexity.HIGH,
+            criticality=Criticality.HIGH,
+            metadata={
+                "phase": "build",
+                "run_profile": "solo_lead",
+                "direct_coding_executor": True,
+                "required_capabilities": [
+                    "reasoning",
+                    "coding",
+                    "repo_read",
+                    "test_execute",
+                    "build_execute",
+                ],
+            },
+        )
+
+        self.assertEqual(
+            AITeamOrchestrator._routing_capabilities_for_task(task),
+            {"reasoning", "coding"},
+        )
+
+    def test_solo_lead_repair_first_suppresses_midrun_clarify(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-SOLO-CLARIFY::build",
+            title="Build",
+            description="Repara el fallo material actual.",
+            role=Role.TEAM_LEAD,
+            complexity=Complexity.HIGH,
+            criticality=Criticality.HIGH,
+            metadata={
+                "phase": "build",
+                "run_profile": "solo_lead",
+                "direct_coding_executor": True,
+                "repair_first_required": True,
+            },
+        )
+
+        self.assertTrue(
+            AITeamOrchestrator._direct_profile_should_suppress_midrun_clarify(task)
+        )
+
+    def test_solo_lead_suppresses_vague_build_clarify_but_keeps_safety_question(self) -> None:
+        task = WorkTask(
+            task_id="CHAT-SOLO-VAGUE::lead_close",
+            title="Close",
+            description="Resume autonomously.",
+            role=Role.TEAM_LEAD,
+            complexity=Complexity.MEDIUM,
+            criticality=Criticality.LOW,
+            metadata={"phase": "lead_close", "run_profile": "solo_lead"},
+        )
+
+        self.assertTrue(
+            AITeamOrchestrator._direct_profile_should_suppress_midrun_clarify(
+                task,
+                "integrar ahora?",
+            )
+        )
+        self.assertFalse(
+            AITeamOrchestrator._direct_profile_should_suppress_midrun_clarify(
+                task,
+                "¿Autorizas borrar datos de production?",
+            )
+        )
+
+    def test_execution_phase_message_is_compact_and_omits_peer_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-COMPACT::build",
+                title="Build",
+                description="Solicitud original: start the next highest-impact slice.",
+                role=Role.ENGINEER,
+                complexity=Complexity.HIGH,
+                criticality=Criticality.HIGH,
+                metadata={
+                    "phase": "build",
+                    "phase_contract_enforced": True,
+                    "phase_contract": {
+                        "phase_id": "build",
+                        "role": "ENGINEER",
+                        "objective": "Implementa el slice aprobado en el paquete actual.",
+                    },
+                },
+            )
+
+            message = orchestrator._build_current_task_message(
+                task,
+                context="Dependencias completadas: build autorizado.",
+                peer_context="- qa: bloqueado por ambiguedad.",
+                decision_governance="",
+                skill_mcp_context="",
+                execution_context="workspace visible con src/ y tests/.",
+                review_feedback="",
+                gate_iteration=0,
+                prev_summary="",
+                run_health_report="",
+                lead_close_policy="",
+            )
+
+            self.assertNotIn("Solicitud original:", message)
+            self.assertNotIn("Consulta entre pares", message)
+            self.assertIn("Contrato de fase vigente", message)
+            self.assertIn("No reinterpretes la solicitud inicial", message)
+
+    def test_dependency_output_context_compacts_lead_preflight_for_execution_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            preflight = WorkTask(
+                task_id="CHAT-PREFLIGHT-CONTEXT::lead_preflight_build",
+                title="Lead preflight build",
+                description="Autoriza o deniega build.",
+                role=Role.TEAM_LEAD,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "lead_preflight_build",
+                    "result": "PREFLIGHT BUILD - AUTORIZACION DENEGADA por ambiguedad narrativa antigua.",
+                },
+            )
+            orchestrator.taskboard.add_task(preflight)
+            orchestrator.taskboard.mark_completed(preflight.task_id, "ok")
+
+            build_task = WorkTask(
+                task_id="CHAT-PREFLIGHT-CONTEXT::build",
+                title="Build",
+                description="Implementa el slice aprobado.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[preflight.task_id],
+                metadata={
+                    "phase": "build",
+                    "phase_contract_enforced": True,
+                },
+            )
+
+            context = orchestrator._build_dependency_output_context(build_task)
+
+            self.assertIn("preflight=approved", context)
+            self.assertIn("phase=build", context)
+            self.assertNotIn("AUTORIZACION DENEGADA", context)
+
+    def test_dependency_output_context_ignores_advisory_phase_for_execution_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+
+            advisory = WorkTask(
+                task_id="CHAT-ADVISORY-CONTEXT::research_current_state",
+                title="Research current state",
+                description="Audita el estado actual.",
+                role=Role.RESEARCHER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "research_current_state",
+                    "advisory_context_phase": True,
+                    "result": "Narrativa advisory del repo actual.",
+                },
+            )
+            orchestrator.taskboard.add_task(advisory)
+            orchestrator.taskboard.mark_completed(advisory.task_id, "ok")
+
+            planning = WorkTask(
+                task_id="CHAT-ADVISORY-CONTEXT::plan_engineering",
+                title="Plan engineering",
+                description="Define el slice.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "plan_engineering",
+                    "planning_artifact": {
+                        "objective": "Implementar el slice aprobado.",
+                        "steps": ["Actualizar modulo principal."],
+                        "acceptance_criteria": ["Cambio funcional visible."],
+                        "constraints": ["No salir del paquete actual."],
+                    },
+                },
+            )
+            orchestrator.taskboard.add_task(planning)
+            orchestrator.taskboard.mark_completed(planning.task_id, "ok")
+
+            build_task = WorkTask(
+                task_id="CHAT-ADVISORY-CONTEXT::build",
+                title="Build",
+                description="Implementa.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                dependencies=[advisory.task_id, planning.task_id],
+                metadata={
+                    "phase": "build",
+                    "phase_contract_enforced": True,
+                },
+            )
+
+            context = orchestrator._build_dependency_output_context(build_task)
+
+            self.assertNotIn("research_current_state", context)
+            self.assertNotIn("Narrativa advisory", context)
+            self.assertIn("planning_artifact:", context)
+
+    def test_planning_phase_skips_specialist_prefetch_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-PLAN-PREFETCH::plan_risks",
+                title="Plan Risks",
+                description="Define riesgos y gates.",
+                role=Role.REVIEWER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "plan_risks",
+                    "required_capabilities": ["analysis"],
+                },
+            )
+
+            context = orchestrator._collect_specialist_prefetch_context(task)
+
+            self.assertEqual(context, "")
+            self.assertTrue(bool(task.metadata.get("_specialist_prefetch_done")))
+
+    def test_execution_phase_skips_specialist_prefetch_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            project_root = Path(tmp) / "workspace"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            project_root.mkdir(parents=True, exist_ok=True)
+            orchestrator = AITeamOrchestrator(
+                router=HybridRouter(adapters=[], policy=build_default_router_policy()),
+                runtime_dir=runtime_dir,
+                project_root=project_root,
+            )
+            task = WorkTask(
+                task_id="CHAT-BUILD-PREFETCH::build",
+                title="Build",
+                description="Implementa el slice aprobado.",
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                metadata={
+                    "phase": "build",
+                    "required_capabilities": ["coding"],
+                    "phase_contract_enforced": True,
+                },
+            )
+
+            context = orchestrator._collect_specialist_prefetch_context(task)
+
+            self.assertEqual(context, "")
+            self.assertTrue(bool(task.metadata.get("_specialist_prefetch_done")))
 
     def test_verify_task_evidence_accepts_non_empty_output_in_mock_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6558,6 +9558,33 @@ class CodeBlockExtractionTests(unittest.TestCase):
             self.assertEqual(written, 1)
             self.assertTrue((workspace / "src" / "quoted.py").exists())
 
+    def test_iter_blocks_accepts_standalone_path_line_before_fence(self) -> None:
+        """Soporta el formato que emite a veces el Lead: path=... antes del fence."""
+        content = (
+            "Archivo modificado:\n"
+            "path=src/from_lead.py\n"
+            "```python\n"
+            "VALUE = 'written'\n"
+            "```\n"
+        )
+
+        blocks = AITeamOrchestrator._iter_path_code_blocks(AITeamOrchestrator, content)  # type: ignore[arg-type]
+
+        self.assertEqual(blocks, [("src/from_lead.py", "VALUE = 'written'\n")])
+
+    def test_iter_blocks_accepts_bulleted_standalone_path_line_before_fence(self) -> None:
+        """Soporta listas tipo '- path=...' antes del fence."""
+        content = (
+            "- path=src/from_bullet.py\n"
+            "```python\n"
+            "VALUE = 'bullet'\n"
+            "```\n"
+        )
+
+        blocks = AITeamOrchestrator._iter_path_code_blocks(AITeamOrchestrator, content)  # type: ignore[arg-type]
+
+        self.assertEqual(blocks, [("src/from_bullet.py", "VALUE = 'bullet'\n")])
+
     # ── Fix E4: _CODE_BLOCK_RE regex robustez ───────────────────────────────
 
     def test_no_language_tag_with_space(self) -> None:
@@ -6614,6 +9641,31 @@ class CodeBlockExtractionTests(unittest.TestCase):
             self.assertEqual(written, 1)
             written_content = (workspace / "src" / "main.py").read_text()
             self.assertIn("{'key': 'value'", written_content)
+
+    def test_file_content_with_inline_markdown_fences_is_not_truncated(self) -> None:
+        """Backticks dentro de strings de codigo no deben cerrar el bloque path=."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "project"
+            workspace.mkdir()
+            runtime_dir = workspace / ".aiteam"
+            runtime_dir.mkdir()
+            orch = self._build_orchestrator(runtime_dir)
+            orch.execution.executor.workspace_root = workspace
+
+            content = (
+                "```python path=src/report.py\n"
+                "def render(content):\n"
+                "    parts = []\n"
+                "    parts.append(f\"```text\\n{content}\\n```\\n\")\n"
+                "    return ''.join(parts)\n"
+                "```\n"
+            )
+            written = orch._extract_and_write_code_blocks(self._make_task(), content)
+
+            self.assertEqual(written, 1)
+            written_content = (workspace / "src" / "report.py").read_text(encoding="utf-8")
+            self.assertIn('parts.append(f"```text\\n{content}\\n```\\n")', written_content)
+            self.assertIn("return ''.join(parts)", written_content)
 
 
 class FilesystemMcpWorkspaceInjectionTests(unittest.TestCase):

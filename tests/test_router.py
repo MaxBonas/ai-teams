@@ -135,6 +135,50 @@ class RouterTests(unittest.TestCase):
         self.assertFalse(decision.success)
         self.assertIn("http_error:429:rate_limited", " ".join(decision.attempts))
 
+    def test_failed_attempts_compact_multiline_openai_error_body(self) -> None:
+        class FailAdapter(SubscriptionAdapter):
+            def invoke(self, prompt: str, messages: list[dict[str, str]] | None = None):
+                return AdapterResponse(
+                    success=False,
+                    content="",
+                    latency_ms=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    error=(
+                        'http_error:429:{\n  "error": {\n'
+                        '    "message": "You exceeded your current quota.",\n'
+                        '    "type": "insufficient_quota",\n'
+                        '    "code": "insufficient_quota"\n  }\n}'
+                    ),
+                )
+
+        router = HybridRouter(
+            adapters=[
+                FailAdapter(
+                    name="openai_pro",
+                    provider="openai",
+                    model="gpt-pro",
+                    capabilities={"coding"},
+                )
+            ],
+            policy=build_default_router_policy(),
+        )
+        decision = router.route_and_invoke(
+            request=RoutingRequest(
+                role=Role.ENGINEER,
+                complexity=Complexity.MEDIUM,
+                criticality=Criticality.MEDIUM,
+                required_capabilities={"coding"},
+            ),
+            prompt="simple prompt",
+        )
+
+        attempts = " ".join(decision.attempts)
+        self.assertIn("http_error:429", attempts)
+        self.assertIn("type=insufficient_quota", attempts)
+        self.assertIn("code=insufficient_quota", attempts)
+        self.assertNotIn("http_error:429:{", attempts)
+
     def test_route_and_invoke_forwards_messages_history(self) -> None:
         captured: dict[str, object] = {}
 

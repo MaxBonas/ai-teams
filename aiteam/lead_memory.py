@@ -48,7 +48,12 @@ def load_lead_memory(runtime_dir: Path) -> str:
         return ""
 
 
-def build_memory_prompt_block(*, runtime_dir: Path, project_root: Path) -> str:
+def build_memory_prompt_block(
+    *,
+    runtime_dir: Path,
+    project_root: Path,
+    direct_profile: bool = False,
+) -> str:
     instructions_text = _load_project_instructions(project_root)
     memory_text = load_lead_memory(runtime_dir)
     if not memory_text:
@@ -59,6 +64,15 @@ def build_memory_prompt_block(*, runtime_dir: Path, project_root: Path) -> str:
             entries=[],
             capabilities={},
             instructions_text=instructions_text,
+        )
+    if direct_profile:
+        memory_text = (
+            f"{memory_text}\n\n"
+            "## Override perfil solo_lead/direct\n"
+            "En este perfil, cualquier identidad legacy de Team Lead como coordinador "
+            "multi-rol queda subordinada al contrato directo: el Lead puede leer, editar "
+            "y validar codigo directamente, sin scouts/reviewer/QA/delegates por defecto. "
+            "Usa el historial solo como contexto, no como prohibicion de ejecutar."
         )
     return f"== LEAD MEMORY ==\n{memory_text}\n== FIN LEAD MEMORY =="
 

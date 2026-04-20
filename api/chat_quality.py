@@ -115,6 +115,16 @@ def _classify_check_from_command(command: str) -> str:
     text = str(command or "").strip().lower()
     if not text:
         return ""
+    if "test import smoke" in text:
+        return "test"
+    if "syntax smoke" in text:
+        return "build"
+    if re.search(r"\b(?:python|py)\s+-m\s+compileall\b", text):
+        return "build"
+    if re.search(r"\b(?:python|py)\s+-c\s+['\"]?\s*import\s+[a-zA-Z_]", text):
+        return "import"
+    if re.search(r"\bnode\s+-e\s+['\"]?\s*(?:require|import)\b", text):
+        return "import"
     test_tokens = [
         "pytest",
         "npm test",
@@ -218,6 +228,7 @@ def _evaluate_phase_evidence_gate(
     artifact_created: int,
     artifact_modified: int,
     require_test_or_build_check: bool,
+    require_review_qa: bool = True,
 ) -> list[str]:
     def _select_gate_task(gate_kind: str) -> WorkTask | None:
         normalized_gate = str(gate_kind or "").strip().lower()
@@ -239,14 +250,52 @@ def _evaluate_phase_evidence_gate(
         return None
 
     failures: list[str] = []
-    target_phases = ["build", "review", "qa"]
+    build_task = _select_gate_task("build")
+    review_task = _select_gate_task("review")
+    qa_task = _select_gate_task("qa")
+    review_validation_only = require_review_qa and build_task is None and (
+        review_task is not None or qa_task is not None
+    )
+    if review_validation_only:
+        target_phases = []
+        if review_task is not None:
+            target_phases.append("review")
+        if qa_task is not None:
+            target_phases.append("qa")
+    elif not require_review_qa:
+        target_phases = ["build"]
+    else:
+        target_phases = ["build", "review", "qa"]
     for phase in target_phases:
-        task = _select_gate_task(phase)
+        task = {
+            "build": build_task,
+            "review": review_task,
+            "qa": qa_task,
+        }.get(phase)
         if task is None:
             failures.append(f"{phase}:missing_task")
             continue
         if task.state.value != "completed":
-            failures.append(f"{phase}:not_completed")
+            if (
+                phase == "build"
+                and bool(task.metadata.get("require_execution_plan", False))
+                and not bool(task.metadata.get("execution_plan_requirement_waived", False))
+            ):
+                raw_plan = task.metadata.get("execution_plan", [])
+                if not isinstance(raw_plan, list) or not raw_plan:
+                    failures.append("build:missing_execution_plan")
+            task_error = str(task.metadata.get("error") or "").strip().lower()
+            if task.state.value == "failed":
+                if "ungrounded_phase_block_detected" in task_error:
+                    failures.append(f"{phase}:ungrounded_phase_block")
+                elif "ungrounded_evidence_output_detected" in task_error:
+                    failures.append(f"{phase}:ungrounded_evidence")
+                else:
+                    failures.append(f"{phase}:phase_failed")
+            elif task.state.value == "blocked":
+                failures.append(f"{phase}:blocked")
+            else:
+                failures.append(f"{phase}:not_completed")
             continue
         result_text = str(task.metadata.get("result") or task.metadata.get("error") or "").strip()
         if not result_text:
@@ -264,16 +313,17 @@ def _evaluate_phase_evidence_gate(
             if not isinstance(raw_plan, list) or not raw_plan:
                 failures.append("build:missing_execution_plan")
 
-    build_has_output = all(not row.startswith("build:") for row in failures)
-    if build_has_output and execution_steps <= 0 and (artifact_created + artifact_modified) <= 0:
-        failures.append("build:no_execution_evidence")
-    if execution_steps_success <= 0:
-        failures.append("build:no_successful_execution_steps")
-    if execution_steps_success > 0 and not successful_checks:
-        failures.append("build:no_successful_post_build_checks")
-    if require_test_or_build_check and execution_steps_success > 0:
-        if not any(check in {"test", "build", "file_delivery"} for check in successful_checks):
-            failures.append("build:missing_test_or_build_check")
+    if not review_validation_only:
+        build_has_output = all(not row.startswith("build:") for row in failures)
+        if build_has_output and execution_steps <= 0 and (artifact_created + artifact_modified) <= 0:
+            failures.append("build:no_execution_evidence")
+        if execution_steps_success <= 0:
+            failures.append("build:no_successful_execution_steps")
+        if execution_steps_success > 0 and not successful_checks:
+            failures.append("build:no_successful_post_build_checks")
+        if require_test_or_build_check and execution_steps_success > 0:
+            if not any(check in {"test", "build", "import"} for check in successful_checks):
+                failures.append("build:missing_test_or_build_check")
     return failures
 
 

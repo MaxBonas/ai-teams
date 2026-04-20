@@ -43,6 +43,7 @@ from aiteam.routing_overrides import (
     save_overrides,
     validate_overrides,
 )
+from api.chat_logic import _normalize_task_root, _recent_chat_roots
 from aiteam.types import Complexity, Criticality, Role, RoutingRequest
 from api.chat_observability import (
     _build_task_operational_summary,
@@ -154,8 +155,27 @@ def _state_cache_snapshot(
         "age_ms": max(0, int(age_seconds * 1000)),
         "ttl_ms": int(_STATE_PAYLOAD_CACHE_TTL_SECONDS * 1000),
     }
+    last_chat_run = snapshot.get("last_chat_run", {})
+    if isinstance(last_chat_run, dict):
+        snapshot["last_chat_run"] = _sanitize_continuation_fields(last_chat_run)
     snapshot["startup_diagnostics"] = startup
     return snapshot
+
+
+def _sanitize_continuation_fields(row: dict[str, object]) -> dict[str, object]:
+    sanitized = dict(row)
+    raw_continuation_of = str(sanitized.get("continuation_of", "") or "").strip()
+    normalized_continuation_of = _normalize_task_root(raw_continuation_of)
+    if raw_continuation_of and not normalized_continuation_of:
+        sanitized["continuation_of"] = ""
+        sanitized["continuation_effective"] = False
+        if bool(sanitized.get("continuation_requested", False)) and not str(
+            sanitized.get("continuation_block_reason", "") or ""
+        ).strip():
+            sanitized["continuation_block_reason"] = "invalid_continuation_target"
+    elif normalized_continuation_of:
+        sanitized["continuation_of"] = normalized_continuation_of
+    return sanitized
 
 
 def _get_cached_routing_catalog(
@@ -368,7 +388,7 @@ def _load_chat_workflow_insights(
             run_verdict=run_verdict,
         )
     )
-    return {
+    return _sanitize_continuation_fields({
         "workflow_run_status": str(entry.get("run_status", "") or "").strip().lower(),
         "phase_contracts": _coerce_phase_contracts(entry.get("phase_contracts", {})),
         "phase_verdicts": phase_verdicts,
@@ -379,6 +399,7 @@ def _load_chat_workflow_insights(
         "run_verdict": run_verdict,
         "lead_close_policy": lead_close_policy,
         "continuation_requested": bool(entry.get("continuation_requested", False)),
+        "continuation_of": str(entry.get("continuation_of", "") or "").strip(),
         "continuation_effective": bool(entry.get("continuation_effective", False)),
         "continuation_block_reason": str(entry.get("continuation_block_reason", "") or ""),
         "lead_run_mode": str(entry.get("lead_run_mode", "") or ""),
@@ -386,7 +407,7 @@ def _load_chat_workflow_insights(
         **_peer_consultation_summary_fields(runtime_dir, normalized_task_id),
         **_load_chat_rewiring_insights(runtime_dir, normalized_task_id),
         **_load_chat_specialist_insights(runtime_dir, normalized_task_id),
-    }
+    })
 
 
 def _load_tool_catalog_index(workspace: Path) -> dict[str, dict[str, object]]:
@@ -853,6 +874,7 @@ def _load_mcp_overview(request: Request) -> dict[str, object]:
 def _latest_chat_run_summary(
     recent_events: list[dict],
     workflow_state: dict[str, object] | None = None,
+    task_records: list[object] | None = None,
 ) -> dict[str, object]:
     def _safe_int(value: object, default: int = 0) -> int:
         if isinstance(value, bool):
@@ -886,14 +908,18 @@ def _latest_chat_run_summary(
 
     task_id = str(latest_plan_payload.get("task_id", "") or "")
     mode = str(latest_plan_payload.get("chat_mode", "") or "")
+    run_profile = str(latest_plan_payload.get("run_profile", "") or "team_advanced")
     round_budget = _safe_int(latest_plan_payload.get("round_budget", 0), 0)
     phase_count = _safe_int(latest_plan_payload.get("phase_count", 0), 0)
     delegated_count = _safe_int(latest_plan_payload.get("delegated_count", 0), 0)
+    if run_profile == "solo_lead":
+        delegated_count = 0
     continuation_requested = bool(latest_plan_payload.get("continuation_requested", False))
     continuation_of = str(latest_plan_payload.get("continuation_of", "") or "")
 
     rounds_used = 0
     exhausted = False
+    terminal_completion_seen = False
     for record in reversed(recent_events):
         if str(record.get("event_type", "")) != "chat_window_exhausted":
             continue
@@ -904,6 +930,20 @@ def _latest_chat_run_summary(
             continue
         exhausted = True
         rounds_used = _safe_int(payload.get("rounds_used", 0), 0)
+        break
+
+    for record in reversed(recent_events):
+        if str(record.get("event_type", "")) not in {
+            "chat_probe_completed",
+            "chat_plan_mode_completed",
+        }:
+            continue
+        payload = record.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("task_id", "") or "") != task_id:
+            continue
+        terminal_completion_seen = True
         break
 
     if rounds_used <= 0 and task_id:
@@ -1079,9 +1119,16 @@ def _latest_chat_run_summary(
     pending_phases: list[str] = []
     next_action_hint = ""
     policy_review_required = False
+    repair_first_mode = False
+    repair_first_required = False
+    repair_first_failures: list[str] = []
     for record in reversed(recent_events):
         event_type = str(record.get("event_type", "") or "")
-        if event_type not in {"chat_artifacts_detected", "chat_probe_completed"}:
+        if event_type not in {
+            "chat_artifacts_detected",
+            "chat_probe_completed",
+            "chat_plan_mode_completed",
+        }:
             continue
         payload = record.get("payload", {})
         if not isinstance(payload, dict):
@@ -1136,6 +1183,13 @@ def _latest_chat_run_summary(
         ][:12]
         next_action_hint = str(payload.get("next_action_hint", "") or "").strip()
         policy_review_required = bool(payload.get("policy_review_required", False))
+        repair_first_mode = bool(payload.get("repair_first_mode", False))
+        repair_first_required = bool(payload.get("repair_first_required", False))
+        repair_first_failures = [
+            str(item or "").strip()
+            for item in list(payload.get("repair_first_failures", []) or [])
+            if str(item or "").strip()
+        ][:12]
         break
 
     workflow_entry = {}
@@ -1146,11 +1200,54 @@ def _latest_chat_run_summary(
     workflow_run_status = str(
         workflow_entry.get("run_status", "") if isinstance(workflow_entry, dict) else ""
     ).strip().lower()
+    workflow_phase_states = (
+        workflow_entry.get("phase_states", {}) if isinstance(workflow_entry, dict) else {}
+    )
+    if not isinstance(workflow_phase_states, dict):
+        workflow_phase_states = {}
+    normalized_workflow_phase_states = {
+        str(key or "").strip().lower(): str(value or "").strip().lower()
+        for key, value in workflow_phase_states.items()
+        if str(key or "").strip()
+    }
+    for task_record in list(task_records or []):
+        if isinstance(task_record, dict):
+            record_task_id = str(task_record.get("task_id", "") or "").strip()
+            record_state = str(task_record.get("state", "") or "").strip().lower()
+            raw_metadata = task_record.get("metadata", {})
+            record_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        else:
+            record_task_id = str(getattr(task_record, "task_id", "") or "").strip()
+            state_value = getattr(task_record, "state", "")
+            record_state = str(getattr(state_value, "value", state_value) or "").strip().lower()
+            raw_metadata = getattr(task_record, "metadata", {})
+            record_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        if not record_task_id or not record_state:
+            continue
+        if record_task_id != task_id and not record_task_id.startswith(f"{task_id}::"):
+            continue
+        phase_name = str(record_metadata.get("phase", "") or "").strip().lower()
+        if not phase_name and "::" in record_task_id:
+            phase_name = record_task_id.split("::", 1)[1].strip().lower()
+        if phase_name:
+            normalized_workflow_phase_states[phase_name] = record_state
+    terminal_blocked_after_close = (
+        workflow_run_status in {"running", "in_progress"}
+        and normalized_workflow_phase_states.get("lead_close") == "completed"
+        and "blocked" in set(normalized_workflow_phase_states.values())
+        and not set(normalized_workflow_phase_states.values()).intersection(
+            {"pending", "ready", "claimed", "waiting_user"}
+        )
+    )
 
     status = workflow_run_status
+    if terminal_blocked_after_close:
+        status = "failed"
     if not status:
         if authoritative_state in {"completed", "failed", "rejected", "waiting_user"}:
             status = authoritative_state
+        elif terminal_completion_seen:
+            status = "completed"
         elif exhausted:
             status = "window_exhausted"
         else:
@@ -1162,9 +1259,10 @@ def _latest_chat_run_summary(
         )
     else:
         artifact_message = "Esta run no genero artefactos de producto."
-    return {
+    return _sanitize_continuation_fields({
         "task_id": task_id,
         "mode": mode,
+        "run_profile": run_profile,
         "round_budget": round_budget,
         "rounds_used": rounds_used,
         "phase_count": phase_count,
@@ -1178,6 +1276,9 @@ def _latest_chat_run_summary(
         "pending_phases": pending_phases,
         "next_action_hint": next_action_hint,
         "policy_review_required": policy_review_required,
+        "repair_first_mode": repair_first_mode,
+        "repair_first_required": repair_first_required,
+        "repair_first_failures": repair_first_failures,
         "execution_mode": execution_mode,
         "placeholder_outputs": placeholder_outputs,
         "successful_checks": successful_checks,
@@ -1218,7 +1319,7 @@ def _latest_chat_run_summary(
             "internal_runtime_excluded": True,
         },
         "ts": _display_ts_local(latest_plan.get("ts", "")),
-    }
+    })
 
 
 def _latest_lead_user_summary(runtime_dir: Path, task_id: str) -> dict[str, object]:
@@ -1416,9 +1517,37 @@ async def get_aiteam_state(request: Request, environment: str = "dev"):
                 lambda: _latest_chat_run_summary(
                     all_events if isinstance(all_events, list) else [],
                     workflow_state_payload if isinstance(workflow_state_payload, dict) else None,
+                    tasks,
                 ),
             )
+            latest_workflow_root = ""
+            if isinstance(workflow_state_payload, dict) and workflow_state_payload:
+                for key in reversed(list(workflow_state_payload.keys())):
+                    normalized_key = str(key or "").strip()
+                    if normalized_key.startswith("CHAT-"):
+                        latest_workflow_root = normalized_key
+                        break
+            recent_roots = _timed_call(
+                timings,
+                "recent_chat_roots_ms",
+                lambda: _recent_chat_roots(runtime_dir, max_chats=1),
+            )
+            recent_root_id = ""
+            if isinstance(recent_roots, list) and recent_roots:
+                recent_root_id = str((recent_roots[0] or {}).get("root_id", "") or "").strip()
             latest_task_root = str(latest_chat_run.get("task_id", "") or "")
+            if latest_workflow_root and latest_workflow_root != latest_task_root:
+                latest_task_root = latest_workflow_root
+                latest_chat_run = {
+                    **latest_chat_run,
+                    "task_id": latest_task_root,
+                }
+            if recent_root_id and not latest_workflow_root and recent_root_id != latest_task_root:
+                latest_task_root = recent_root_id
+                latest_chat_run = {
+                    **latest_chat_run,
+                    "task_id": latest_task_root,
+                }
             tasks_payload = _timed_call(
                 timings,
                 "runtime_tasks_read_ms",
@@ -1661,6 +1790,7 @@ async def get_aiteam_conversations(request: Request, limit: int = 80):
         latest_chat_run = _latest_chat_run_summary(
             events if isinstance(events, list) else [],
             workflow_state_payload if isinstance(workflow_state_payload, dict) else None,
+            tasks_payload if isinstance(tasks_payload, list) else None,
         )
         latest_task_root = str(latest_chat_run.get("task_id", "") or "")
         workflow_insights = _load_chat_workflow_insights(

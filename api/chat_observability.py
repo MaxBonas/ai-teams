@@ -56,6 +56,34 @@ def _operational_reason_label(code: str) -> str:
     return _OPERATIONAL_REASON_LABELS.get(normalized, normalized or "motivo no clasificado")
 
 
+def _is_terminal_blocked_after_lead_close(
+    *,
+    phase_states: dict[str, str],
+    task_summary_states: set[str],
+    waiting_user: bool,
+) -> bool:
+    if waiting_user:
+        return False
+    lead_state = str(phase_states.get("lead_close", "") or "").strip().lower()
+    if lead_state != "completed":
+        return False
+    normalized_task_states = {
+        str(state or "").strip().lower()
+        for state in task_summary_states
+        if str(state or "").strip()
+    }
+    normalized_task_states.update(
+        str(state or "").strip().lower()
+        for state in phase_states.values()
+        if str(state or "").strip()
+    )
+    if "blocked" not in normalized_task_states:
+        return False
+    return not normalized_task_states.intersection(
+        {"pending", "ready", "claimed", "waiting_user"}
+    )
+
+
 def _classify_operational_bucket(
     task: dict[str, object],
     *,
@@ -680,6 +708,10 @@ def _coerce_run_verdict(payload: object) -> dict[str, object]:
     if result:
         verdict["result"] = result
 
+    failure_origin = str(payload.get("failure_origin", "") or "").strip().lower()
+    if failure_origin:
+        verdict["failure_origin"] = failure_origin
+
     reason_codes = [
         str(item).strip()
         for item in list(payload.get("reason_codes", []) or [])
@@ -724,6 +756,22 @@ def _coerce_run_verdict(payload: object) -> dict[str, object]:
     verdict["policy_review_required"] = bool(payload.get("policy_review_required", False))
     verdict["advisory_mode"] = bool(payload.get("advisory_mode", False))
     verdict["degraded_delivery"] = bool(payload.get("degraded_delivery", False))
+    verdict["repair_first_mode"] = bool(payload.get("repair_first_mode", False))
+    verdict["repair_first_required"] = bool(payload.get("repair_first_required", False))
+    repair_first_failures = [
+        str(item).strip()
+        for item in list(payload.get("repair_first_failures", []) or [])
+        if str(item).strip()
+    ]
+    if repair_first_failures:
+        verdict["repair_first_failures"] = repair_first_failures[:12]
+    auto_post_validation = payload.get("auto_post_build_validation", {})
+    if isinstance(auto_post_validation, dict) and auto_post_validation:
+        verdict["auto_post_build_validation"] = {
+            str(key): value
+            for key, value in auto_post_validation.items()
+            if str(key) not in {"stdout", "stderr"}
+        }
     verdict["reconstructed_from_phase_verdicts"] = bool(
         payload.get("reconstructed_from_phase_verdicts", False)
     )
@@ -818,6 +866,7 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
     phase_verdicts: dict[str, dict[str, object]] = {}
     run_verdict: dict[str, object] = {}
     continuation_requested = False
+    continuation_of = ""
     continuation_effective = False
     continuation_block_reason = ""
     semantic_gate_applied = False
@@ -854,12 +903,20 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
             continuation_requested = bool(
                 workflow_entry.get("continuation_requested", False)
             )
+            raw_continuation_of = str(
+                workflow_entry.get("continuation_of", "") or ""
+            ).strip()
+            continuation_of = _normalize_task_root(raw_continuation_of)
             continuation_effective = bool(
                 workflow_entry.get("continuation_effective", False)
             )
             continuation_block_reason = str(
                 workflow_entry.get("continuation_block_reason", "") or ""
             ).strip()
+            if raw_continuation_of and not continuation_of:
+                continuation_effective = False
+                if not continuation_block_reason:
+                    continuation_block_reason = "invalid_continuation_target"
             semantic_gate_applied = bool(run_verdict.get("semantic_gate_applied", False))
             semantic_gate_failures = [
                 str(item).strip()
@@ -1054,6 +1111,7 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
         task_id=normalized_root,
         workflow_run_status=workflow_run_status,
         continuation_requested=continuation_requested,
+        continuation_of=continuation_of,
         continuation_effective=continuation_effective,
         continuation_block_reason=continuation_block_reason,
         run_verdict_reconstructed=bool(
@@ -1114,12 +1172,20 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
     has_non_terminal_task_states = bool(
         task_summary_states.intersection({"pending", "ready", "claimed", "blocked", "waiting_user"})
     )
-    if workflow_run_status == "waiting_user" or waiting_user:
-        progress_state = "waiting_user"
-    elif verdict_state in {"rejected", "failed", "completed"} and not waiting_user:
+    terminal_blocked_after_close = _is_terminal_blocked_after_lead_close(
+        phase_states=phase_states,
+        task_summary_states=task_summary_states,
+        waiting_user=waiting_user,
+    )
+    terminal_verdict_states = {"rejected", "failed", "completed", "not_completed", "cancelled", "aborted"}
+    if verdict_state in terminal_verdict_states:
         progress_state = verdict_state
-    elif workflow_run_status in {"rejected", "failed", "completed"} and not waiting_user:
+    elif workflow_run_status in terminal_verdict_states and not waiting_user:
         progress_state = workflow_run_status
+    elif workflow_run_status == "waiting_user" or waiting_user:
+        progress_state = "waiting_user"
+    elif terminal_blocked_after_close:
+        progress_state = "failed"
     elif evidence_gate_rejected:
         progress_state = "rejected"
     elif failed_tasks > 0 or lead_state == "failed":
@@ -1150,8 +1216,12 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
         workflow_run_status in {"running", "in_progress"}
         and progress_state == "completed"
         and not waiting_user
+        and verdict_state not in terminal_verdict_states
     ):
         progress_state = "running"
+
+    if terminal_blocked_after_close and progress_state in {"running", "in_progress"}:
+        progress_state = "failed"
 
     progress_phase_task_ids = {
         name: f"{normalized_root}::{name}" for name in phase_states

@@ -17,6 +17,10 @@ from api.utils import (
 
 def _normalize_chat_mode(raw_mode: str) -> str:
     normalized = str(raw_mode or "").strip().lower()
+    if normalized in {"plan", "planning", "planning_only", "plan_only"}:
+        return "plan"
+    if normalized in {"direct", "basic", "single", "single_agent", "opencode"}:
+        return "direct"
     if normalized in {"classic", "legacy", "pipeline", "phased"}:
         return "classic"
     return "sprint5"
@@ -30,7 +34,9 @@ def _resolve_chat_round_budget(
 ) -> int:
     if isinstance(requested_rounds, int):
         return max(3, min(requested_rounds, 80))
-    if chat_mode == "sprint5":
+    if chat_mode == "plan":
+        return 4
+    if chat_mode in {"sprint5", "direct"}:
         return 5
     return _chat_round_budget(complexity=complexity, criticality=criticality)
 
@@ -47,6 +53,13 @@ def _recent_chat_roots(
         for root_id, item in roots.items():
             workflow_entry = workflow_state.get(root_id, {})
             if isinstance(workflow_entry, dict):
+                item["run_status"] = str(workflow_entry.get("run_status", "") or "").strip().lower()
+                item["continuation_requested"] = bool(workflow_entry.get("continuation_requested", False))
+                item["continuation_effective"] = bool(workflow_entry.get("continuation_effective", False))
+                item["continuation_of"] = str(workflow_entry.get("continuation_of", "") or "").strip()
+                item["continuation_block_reason"] = str(
+                    workflow_entry.get("continuation_block_reason", "") or ""
+                ).strip().lower()
                 run_verdict = workflow_entry.get("run_verdict", {})
                 if isinstance(run_verdict, dict):
                     if run_verdict:
@@ -95,6 +108,42 @@ def _recent_chat_roots(
     return ordered[: max(1, max_chats)]
 
 
+def _is_actionable_continuation_source(item: dict[str, object]) -> bool:
+    root_id = str(item.get("root_id", "") or "").strip().upper()
+    if not re.match(r"^CHAT-[0-9A-F]{8}$", root_id):
+        return False
+
+    run_status = str(item.get("run_status", "") or "").strip().lower()
+    block_reason = str(item.get("continuation_block_reason", "") or "").strip().lower()
+    continuation_requested = bool(item.get("continuation_requested", False))
+    continuation_effective = bool(item.get("continuation_effective", False))
+    if (
+        continuation_requested
+        and not continuation_effective
+        and block_reason
+        in {
+            "ambiguous_target_required",
+            "target_not_found_in_current_project",
+        }
+    ):
+        return False
+    if run_status == "waiting_user" and block_reason in {
+        "ambiguous_target_required",
+        "target_not_found_in_current_project",
+    }:
+        return False
+    return True
+
+
+def _default_implicit_continuation_source(
+    previous_runs: list[dict[str, object]],
+) -> dict[str, object]:
+    for item in previous_runs:
+        if isinstance(item, dict) and _is_actionable_continuation_source(item):
+            return item
+    return {}
+
+
 def _is_continuation_message(message: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(message or "")).strip().lower()
     normalized = normalized.strip(".!? ")
@@ -131,7 +180,11 @@ def _extract_chat_root_from_message(message: str) -> str:
     match = re.search(r"\bCHAT-([0-9A-Za-z]{8})\b", text)
     if not match:
         return ""
-    return f"CHAT-{match.group(1).upper()}"
+    candidate = match.group(1)
+    # Exclude placeholder patterns where all characters are the same (e.g. XXXXXXXX)
+    if len(set(candidate)) == 1:
+        return ""
+    return f"CHAT-{candidate.upper()}"
 
 
 def _resolve_task_root(client_task_id: str) -> str:
@@ -233,6 +286,116 @@ def _is_context_only_query(message: str) -> bool:
     return False
 
 
+def _is_review_like_phase_name(phase_name: str) -> bool:
+    normalized = str(phase_name or "").strip().lower()
+    if not normalized:
+        return False
+    return (
+        normalized == "review"
+        or normalized.startswith("review_")
+        or "review_" in normalized
+        or "revalidation" in normalized
+        or normalized.startswith("audit")
+        or "_audit" in normalized
+    )
+
+
+def _is_qa_like_phase_name(phase_name: str) -> bool:
+    normalized = str(phase_name or "").strip().lower()
+    if not normalized:
+        return False
+    return (
+        normalized == "qa"
+        or normalized.startswith("qa_")
+        or normalized.endswith("_qa")
+        or "_qa_" in normalized
+        or "validation" in normalized
+        or normalized.startswith("verify")
+        or "_verify" in normalized
+        or "acceptance" in normalized
+    )
+
+
+def _is_build_like_phase_name(phase_name: str) -> bool:
+    normalized = str(phase_name or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith(("lead_", "delegate_", "plan_", "scout_")):
+        return False
+    if _is_review_like_phase_name(normalized) or _is_qa_like_phase_name(normalized):
+        return False
+    if normalized in {"build", "implement", "develop", "code", "fix", "refactor"}:
+        return True
+    return (
+        normalized.startswith("engineer")
+        or normalized.startswith("eng_")
+        or normalized.startswith("build_")
+        or normalized.startswith("implement_")
+        or normalized.startswith("fix_")
+        or normalized.startswith("refactor_")
+    )
+
+
+def _is_context_audit_phase_name(phase_name: str) -> bool:
+    normalized = str(phase_name or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith(("lead_", "delegate_", "plan_")):
+        return False
+    if normalized in {
+        "current_state",
+        "existing_state",
+        "repo_state",
+        "workspace_state",
+        "codebase_state",
+        "scout_current_state",
+        "research_current_state",
+    }:
+        return True
+
+    has_current_marker = any(
+        marker in normalized for marker in ("current", "existing", "baseline", "snapshot")
+    )
+    has_state_marker = any(
+        marker in normalized
+        for marker in (
+            "state",
+            "workspace",
+            "repo",
+            "codebase",
+            "layout",
+            "tree",
+            "inventory",
+            "structure",
+        )
+    )
+    return has_current_marker and has_state_marker
+
+
+def _is_advisory_context_phase_name(phase_name: str, role_hint: str = "") -> bool:
+    normalized_role = str(role_hint or "").strip().lower()
+    if normalized_role and normalized_role not in {"researcher", "scout"}:
+        return False
+    return _is_context_audit_phase_name(phase_name)
+
+
+def _is_advisory_planning_phase_name(phase_name: str, role_hint: str = "") -> bool:
+    normalized_phase = str(phase_name or "").strip().lower()
+    normalized_role = str(role_hint or "").strip().lower()
+    if not normalized_phase:
+        return False
+    if normalized_phase.startswith(("lead_", "delegate_")):
+        return False
+    if normalized_role and normalized_role != "researcher":
+        return False
+    if not normalized_phase.startswith("plan_"):
+        return False
+    return any(
+        marker in normalized_phase
+        for marker in ("research", "discovery", "analysis", "constraints", "context")
+    )
+
+
 def _detect_run_type(
     message: str,
     phase_task_ids: dict[str, str],
@@ -241,15 +404,19 @@ def _detect_run_type(
 ) -> str:
     """Clasifica el tipo de run para aplicar el threshold de scoring correcto."""
     phase_names = set(phase_task_ids.keys()) - {"lead_intake", "lead_close"}
-    has_build = any(
-        key in phase_names
-        for key in ("build", "implement", "develop", "code", "fix", "refactor")
-    ) or any(
-        key.startswith("engineer") or key.startswith("eng_") for key in phase_names
-    )
+    has_build = any(_is_build_like_phase_name(key) for key in phase_names)
     has_artifacts = (artifact_created + artifact_modified) > 0
+    has_review_validation = any(
+        _is_review_like_phase_name(key) or _is_qa_like_phase_name(key)
+        for key in phase_names
+    )
 
-    if _is_context_only_query(message) and not has_build and not has_artifacts:
+    if (
+        _is_context_only_query(message)
+        and not has_build
+        and not has_artifacts
+        and not has_review_validation
+    ):
         return "context_recovery"
 
     if has_build or has_artifacts:
@@ -261,5 +428,25 @@ def _detect_run_type(
     non_build = researcher_phases | review_phases | qa_phases
     if phase_names and phase_names.issubset(non_build):
         return "planning"
+
+    support_phases = {
+        "scout_current_state",
+        "scout_project_state",
+        "scout_session_history",
+        "scout_context_curator",
+        "current_state",
+        "discovery",
+        "research",
+        "analysis",
+        "investigate",
+    }
+    if phase_names and has_review_validation:
+        if all(
+            name in support_phases
+            or _is_review_like_phase_name(name)
+            or _is_qa_like_phase_name(name)
+            for name in phase_names
+        ):
+            return "review_revalidation"
 
     return "mixed"

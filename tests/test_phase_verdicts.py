@@ -4,6 +4,8 @@ from __future__ import annotations
 import pytest
 
 from aiteam.phase_verdicts import (
+    _looks_like_noise_path_hint,
+    _normalize_path_hint,
     build_phase_verdict_prompt_block,
     coerce_phase_verdicts,
     detect_contract_path_drift,
@@ -87,6 +89,14 @@ class TestEngineerHeuristic:
         v = extract_phase_verdict("No se puede ejecutar: evidencegate fallo.", phase_id="build")
         assert v.get("status") == "blocked"
 
+    def test_contractual_block_phrase(self):
+        v = extract_phase_verdict(
+            "Bloqueo Contractual:\nNo puedo cumplir el objetivo sin la lista de correcciones.",
+            phase_id="implement_core_fixes",
+        )
+        assert v.get("status") == "blocked"
+        assert "engineer_blocked" in v.get("reason_codes", [])
+
     def test_contextual_bloqueada_no_colon_not_blocked(self):
         # "bloqueada" without colon is contextual prose — must NOT block
         v = extract_phase_verdict(
@@ -124,6 +134,70 @@ class TestReviewQaHeuristic:
         assert v.get("status") == "rejected"
         assert "review_rejected" in v.get("reason_codes", [])
 
+    def test_review_json_recommendation_changes_requested_is_rejected(self):
+        v = extract_phase_verdict(
+            '{"summary":"unicode anchor issue","recommendation":"CHANGES_REQUESTED"}',
+            phase_id="review_toc_implementation",
+        )
+        assert v.get("status") == "rejected"
+        assert "review_rejected" in v.get("reason_codes", [])
+
+    def test_review_json_result_changes_requested_is_rejected(self):
+        v = extract_phase_verdict(
+            '{"result":"CHANGES_REQUESTED","summary":"edge case still fails"}',
+            phase_id="review_toc_implementation",
+        )
+        assert v.get("status") == "rejected"
+        assert "review_rejected" in v.get("reason_codes", [])
+
+    def test_review_json_status_blocked_is_blocking(self):
+        v = extract_phase_verdict(
+            '{"status":"BLOCKED","summary":"missing artifacts"}',
+            phase_id="review_toc_implementation",
+        )
+        assert v.get("status") == "blocked"
+        assert "review_blocked" in v.get("reason_codes", [])
+
+    def test_qa_json_recommendation_failed_is_blocking(self):
+        v = extract_phase_verdict(
+            '{"summary":"missing executable validation","recommendation":"FAILED"}',
+            phase_id="qa_toc_functionality",
+        )
+        assert v.get("status") == "blocked"
+        assert "qa_blocked" in v.get("reason_codes", [])
+
+    def test_qa_json_result_blocked_is_blocking(self):
+        v = extract_phase_verdict(
+            '{"result":"BLOCKED","missing":"tests are not visible"}',
+            phase_id="qa_toc_functionality",
+        )
+        assert v.get("status") == "blocked"
+        assert "qa_blocked" in v.get("reason_codes", [])
+
+    def test_review_blocked_when_evidence_is_insufficient(self):
+        v = extract_phase_verdict(
+            "La evidencia es insuficiente para revisar la implementacion. Recommendation: BLOCKED.",
+            phase_id="review",
+        )
+        assert v.get("status") == "blocked"
+        assert "review_blocked" in v.get("reason_codes", [])
+
+    def test_review_blocked_via_direct_prefix(self):
+        v = extract_phase_verdict(
+            "BLOCKED: Falta de artefactos para revision.",
+            phase_id="review_core_changes",
+        )
+        assert v.get("status") == "blocked"
+        assert "review_blocked" in v.get("reason_codes", [])
+
+    def test_qa_blocked_via_direct_prefix(self):
+        v = extract_phase_verdict(
+            "BLOCKED: No se puede validar sin dependencias resueltas.",
+            phase_id="qa_core_functionality",
+        )
+        assert v.get("status") == "blocked"
+        assert "qa_blocked" in v.get("reason_codes", [])
+
     def test_qa_blocked_via_estado(self):
         v = extract_phase_verdict(
             "Estado: bloqueado - no hay codigo que validar.",
@@ -143,6 +217,14 @@ class TestReviewQaHeuristic:
     def test_qa_failed_via_decision_label_is_treated_as_blocking(self):
         v = extract_phase_verdict(
             "Decision: FAILED — regresion abierta en checks criticos.",
+            phase_id="qa",
+        )
+        assert v.get("status") == "blocked"
+        assert "qa_blocked" in v.get("reason_codes", [])
+
+    def test_qa_blocked_when_validation_cannot_proceed(self):
+        v = extract_phase_verdict(
+            "No puedo validar el comportamiento: faltan checks y criterios de aceptacion claros.",
             phase_id="qa",
         )
         assert v.get("status") == "blocked"
@@ -238,6 +320,140 @@ class TestContinuationDrift:
         assert "forbidden_module_scope" in drift["reason_codes"]
         assert "src/acme_cli/report_builder.py" in drift["proposed_paths"]
 
+    def test_detect_contract_path_drift_allows_new_module_inside_allowed_package(self):
+        drift = detect_contract_path_drift(
+            proposed_paths=["src/acme_cli/report_builder.py"],
+            allowed_module_path_hints=["src/acme_cli/", "src/acme_cli/cli.py"],
+        )
+        assert drift == {}
+
+
+class TestNoisePathHints:
+    def test_noise_filter_rejects_model_identifiers(self):
+        assert _looks_like_noise_path_hint("gpt-4.1") is True
+        assert _looks_like_noise_path_hint("gpt-4.1-mini") is True
+        assert _looks_like_noise_path_hint("claude-3.5") is True
+        assert _looks_like_noise_path_hint("claude-3.5-sonnet") is True
+        assert _looks_like_noise_path_hint("python-3.12") is True
+        assert _looks_like_noise_path_hint("v2.0") is True
+        assert _looks_like_noise_path_hint("node-20.1") is True
+        assert _looks_like_noise_path_hint("visible=src/main.py") is True
+        assert _looks_like_noise_path_hint(".py") is True
+        assert _looks_like_noise_path_hint("project.scripts") is True
+
+    def test_noise_filter_allows_real_files(self):
+        assert _looks_like_noise_path_hint("config.json") is False
+        assert _looks_like_noise_path_hint("readme.md") is False
+        assert _looks_like_noise_path_hint("src/main.py") is False
+        assert _looks_like_noise_path_hint("api.ts") is False
+        assert _looks_like_noise_path_hint("cli.py") is False
+
+    def test_extract_path_candidates_ignores_model_versions(self):
+        text = "El sistema usa gpt-4.1-mini para routing y claude-3.5-sonnet para review"
+        candidates = extract_path_candidates(text)
+        assert "gpt-4.1-mini" not in candidates
+        assert "claude-3.5" not in candidates
+
+    def test_extract_paths_from_scout_output_with_model_references(self):
+        text = (
+            "Analisis del workspace:\n"
+            "- provider: openai (gpt-4.1)\n"
+            "- archivos: src/main.py, config/settings.json\n"
+            "- confirmed estructura estandar"
+        )
+        paths = extract_path_candidates(text)
+        assert "src/main.py" in paths
+        assert "config/settings.json" in paths
+        assert "gpt-4.1" not in paths
+
+    def test_extract_path_candidates_ignores_semistructured_non_paths(self):
+        text = (
+            "Diagnostico: visible=src/main.py, tests/test_cli.py; "
+            "clave project.scripts detectada; extension .py mencionada; "
+            "basename cli.py referenciado."
+        )
+        candidates = extract_path_candidates(text)
+        assert "visible=src/main.py" not in candidates
+        assert "project.scripts" not in candidates
+        assert ".py" not in candidates
+        assert "cli.py" in candidates
+
+    def test_extract_path_candidates_strips_trailing_sentence_punctuation(self):
+        text = "Restricciones confirmadas en `README.md.` y riesgo narrativo restricciones/riesgos."
+        candidates = extract_path_candidates(text)
+        assert "readme.md" in candidates
+        assert "restricciones/riesgos" not in candidates
+
+    def test_extract_path_candidates_ignores_slash_delimited_process_labels(self):
+        text = (
+            "Decision gate: evitar texto tipo go/no-go y fail/overwrite/append. "
+            "Evidencia real en src/sample_cli/report.py y tests/test_report.py."
+        )
+        candidates = extract_path_candidates(text)
+        assert "go/no-go" not in candidates
+        assert "fail/overwrite/append" not in candidates
+        assert "src/sample_cli/report.py" in candidates
+        assert "tests/test_report.py" in candidates
+
+    def test_extract_path_candidates_ignores_regex_like_technical_literals(self):
+        text = (
+            "Review tecnico: patron `r'^(#+)\\s*(.*)$'` para headings markdown. "
+            "Artefactos reales en src/sample_cli/report.py y tests/test_report.py."
+        )
+        candidates = extract_path_candidates(text)
+        assert "r'^(#+)/s*(.*)$" not in candidates
+        assert "src/sample_cli/report.py" in candidates
+        assert "tests/test_report.py" in candidates
+
+    def test_extract_path_candidates_normalizes_escaped_newline_prefixed_paths(self):
+        text = r"Artifacts: \ntests/test_md_report.py and src/md_report/md_report.py"
+        candidates = extract_path_candidates(text)
+        assert "tests/test_md_report.py" in candidates
+        assert "ntests/test_md_report.py" not in candidates
+
+    def test_extract_path_candidates_ignores_truncated_ellipsis_paths(self):
+        text = "Estructura confirmada: `src/m...` y `tests/test_md_report.py`."
+        candidates = extract_path_candidates(text)
+        assert "src/m" not in candidates
+        assert "src/m..." not in candidates
+        assert "tests/test_md_report.py" in candidates
+
+    def test_extract_path_candidates_ignores_internal_role_assignee_tags(self):
+        text = (
+            "Peers consultados: team_lead/lead-2, scout/lead-1, "
+            "con archivos reales en src/md_report/md_report.py"
+        )
+        candidates = extract_path_candidates(text)
+        assert "team_lead/lead-2" not in candidates
+        assert "scout/lead-1" not in candidates
+        assert "src/md_report/md_report.py" in candidates
+
+    def test_extract_path_candidates_ignores_internal_provider_thread_tags(self):
+        text = (
+            "Routing: google/subscription/gemini-2.5-flash/g1 y "
+            "anthropic/api/claude-sonnet-4-5; evidencia en tests/test_md_report.py"
+        )
+        candidates = extract_path_candidates(text)
+        assert "google/subscription/gemini-2.5-flash/g1" not in candidates
+        assert "anthropic/api/claude-sonnet-4-5" not in candidates
+        assert "tests/test_md_report.py" in candidates
+
+    def test_extract_path_candidates_ignores_escaped_newline_prefixed_basenames(self):
+        text = (
+            '{"output":"src/md_report/:\\ncli.py\\ngenerator.py\\nmd_report.py\\n__init__.py\\n\\n'
+            'tests/:\\ntest_generator.py\\ntest_md_report.py"}'
+        )
+        candidates = extract_path_candidates(text)
+        assert "ncli.py" not in candidates
+        assert "ngenerator.py" not in candidates
+        assert "nmd_report.py" not in candidates
+        assert "n__init__.py" not in candidates
+        assert "ntest_generator.py" not in candidates
+        assert "ntest_md_report.py" not in candidates
+
+    def test_normalize_path_hint_keeps_legitimate_names_starting_with_n(self):
+        assert _normalize_path_hint("nsrc/tool.py") == "nsrc/tool.py"
+
 
 # ── empty / degenerate inputs ────────────────────────────────────────────────
 
@@ -309,6 +525,19 @@ class TestDeriveRunVerdict:
         assert "review:rejected_decision" in result["semantic_gate_failures"]
         assert "qa:blocked_status" in result["semantic_gate_failures"]
 
+    def test_review_blocked_gate_verdict_triggers_semantic_rejection(self):
+        result = derive_run_verdict_from_phase_verdicts(
+            {
+                "review_slice2_code": {
+                    "status": "blocked",
+                    "role_hint": "reviewer",
+                    "reason_codes": ["review_blocked"],
+                },
+            }
+        )
+        assert result["state"] == "rejected"
+        assert "review:blocked_status" in result["semantic_gate_failures"]
+
     def test_custom_engineer_gate_drift_triggers_build_slice_drift(self):
         result = derive_run_verdict_from_phase_verdicts(
             {
@@ -349,6 +578,49 @@ class TestDeriveRunVerdict:
 
     def test_empty_verdicts_returns_empty(self):
         assert derive_run_verdict_from_phase_verdicts({}) == {}
+
+    def test_advisory_plan_research_failed_alone_does_not_reconstruct_rejected_run(self):
+        result = derive_run_verdict_from_phase_verdicts(
+            {
+                "plan_research": {
+                    "phase_id": "plan_research",
+                    "status": "failed",
+                    "role_hint": "researcher",
+                }
+            }
+        )
+        assert result == {}
+
+    def test_invalid_explicit_qa_alias_does_not_override_real_custom_review_gate(self):
+        result = derive_run_verdict_from_phase_verdicts(
+            {
+                "qa": {
+                    "phase_id": "engineer_tests",
+                    "status": "completed",
+                    "role_hint": "engineer",
+                },
+                "review_code": {
+                    "phase_id": "review_code",
+                    "status": "blocked",
+                    "role_hint": "reviewer",
+                },
+            }
+        )
+        assert result["state"] == "rejected"
+        assert "review:blocked_status" in result["semantic_gate_failures"]
+
+    def test_custom_validation_phase_is_treated_as_qa_gate(self):
+        result = derive_run_verdict_from_phase_verdicts(
+            {
+                "qa_validation": {
+                    "phase_id": "qa_validation",
+                    "status": "blocked",
+                    "role_hint": "",
+                }
+            }
+        )
+        assert result["state"] == "rejected"
+        assert "qa:blocked_status" in result["semantic_gate_failures"]
 
 
 # ── build_phase_verdict_prompt_block ─────────────────────────────────────────

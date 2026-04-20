@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import uuid
 import threading
+from copy import deepcopy
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -461,10 +462,12 @@ class ThreadStore:
         channel: str = "",
         model_family: str = "",
     ) -> ConversationThread:
-        normalized_role = self._slug(role)
-        normalized_provider = self._slug(provider)
-        normalized_channel = self._slug(channel)
-        normalized_model_family = self._slug(model_family)
+        normalized_role = self._slug(role) if str(role or "").strip() else ""
+        normalized_provider = self._slug(provider) if str(provider or "").strip() else ""
+        normalized_channel = self._slug(channel) if str(channel or "").strip() else ""
+        normalized_model_family = (
+            self._slug(model_family) if str(model_family or "").strip() else ""
+        )
         with self._lock:
             thread = None
             if (
@@ -489,8 +492,31 @@ class ThreadStore:
                 )
 
             if thread is None:
-                legacy = self._load_thread(self._legacy_path_for(agent_id=agent_id, project_key=project_key))
-                if legacy is not None:
+                seed_thread = None
+                if normalized_role or normalized_provider or normalized_channel or normalized_model_family:
+                    seed_thread = self._find_latest_v2_thread(
+                        agent_id=agent_id,
+                        project_key=project_key,
+                        role=normalized_role,
+                    )
+                    if seed_thread is None:
+                        seed_thread = self._find_latest_v2_thread(
+                            agent_id=agent_id,
+                            project_key=project_key,
+                            role="",
+                        )
+                legacy = self._load_thread(
+                    self._legacy_path_for(agent_id=agent_id, project_key=project_key)
+                )
+                if seed_thread is not None:
+                    thread = self._clone_thread_binding(
+                        seed_thread,
+                        role=normalized_role or seed_thread.role,
+                        provider=normalized_provider,
+                        channel=normalized_channel,
+                        model_family=normalized_model_family,
+                    )
+                elif legacy is not None:
                     thread = legacy
 
             if thread is None:
@@ -623,6 +649,36 @@ class ThreadStore:
         )
         self._persist_thread(self._path_for_thread(next_thread), next_thread)
         return next_thread
+
+    def _clone_thread_binding(
+        self,
+        seed: ConversationThread,
+        *,
+        role: str,
+        provider: str,
+        channel: str,
+        model_family: str,
+    ) -> ConversationThread:
+        cloned = self._create_thread(
+            agent_id=seed.agent_id,
+            project_key=seed.project_key,
+            role=role or seed.role,
+            provider=provider,
+            channel=channel,
+            model_family=model_family,
+            generation=max(1, int(seed.generation or 1)),
+            parent_thread_id=seed.thread_id,
+            last_rotation_reason="provider_rebind",
+        )
+        cloned.turns = deepcopy(list(seed.turns or []))
+        cloned.consumed_message_ids = list(seed.consumed_message_ids or [])
+        cloned.turn_count_total = int(seed.turn_count_total or 0)
+        cloned.char_count_total = int(seed.char_count_total or 0)
+        cloned.last_provider = str(seed.last_provider or "")
+        cloned.last_model = str(seed.last_model or "")
+        cloned.last_channel = str(seed.last_channel or "")
+        cloned.last_updated = datetime.now(timezone.utc).isoformat()
+        return cloned
 
     def _find_latest_v2_thread(
         self,

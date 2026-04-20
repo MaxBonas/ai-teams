@@ -15,14 +15,19 @@ class TeamChatRequest(BaseModel):
     message: str
     role: str = "engineer"
     complexity: str = "medium"
-    criticality: str = "medium"
+    criticality: str = "low"
     mode: str = "sprint5"
+    # Perfil de ejecucion de la run.
+    # "solo_lead": un Team Lead planifica y ejecuta directamente.
+    # "team_advanced": conserva el workflow multi-rol actual.
+    run_profile: Literal["solo_lead", "team_advanced"] = "team_advanced"
     quorum: bool = False
     max_rounds: int | None = None
     client_task_id: str = ""
     strict_mode: bool = False
-    auto_extend_weak_runs: bool = True
-    allow_low_productivity_override: bool = False
+    auto_extend_weak_runs: bool = False
+    repair_first_mode: bool = False
+    allow_low_productivity_override: bool = True
     continuation_target: str = ""
     # C2: explicit continuation policy between runs
     # "auto"           — current behavior (no archiving)
@@ -42,12 +47,15 @@ class TeamChatResponse(BaseModel):
     delegated_task_ids: list[str]
     phase_task_ids: dict[str, str]
     chat_mode: str = "sprint5"
+    run_profile: str = "team_advanced"
     round_budget: int = 0
     rounds_used: int = 0
     completed_tasks: int = 0
     pending_tasks: int = 0
     continuation_requested: bool = False
     continuation_of: str = ""
+    continuation_effective: bool = False
+    continuation_block_reason: str = ""
     artifact_created: int = 0
     artifact_modified: int = 0
     artifact_files: list[str] = []
@@ -60,6 +68,7 @@ class TeamChatResponse(BaseModel):
     next_action_hint: str = ""
     strict_mode: bool = False
     strict_mode_applied: bool = False
+    repair_first_mode: bool = False
     auto_extended_rounds: int = 0
     productivity_threshold: int = 35
     low_productivity_rejected: bool = False
@@ -112,6 +121,7 @@ class TeamChatProgressResponse(BaseModel):
     state: str = "queued"
     workflow_run_status: str = ""
     continuation_requested: bool = False
+    continuation_of: str = ""
     continuation_effective: bool = False
     continuation_block_reason: str = ""
     run_verdict_reconstructed: bool = False

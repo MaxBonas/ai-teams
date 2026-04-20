@@ -100,6 +100,15 @@ def build_default_orchestrator(
             role_targets={"team_lead"},
         ),
         ApiAdapter(
+            name="openai_codex_mini",
+            provider="openai",
+            model="gpt-5-mini",          # OpenAI API barato para Team Lead en perfil Solo Lead
+            capabilities={"reasoning", "coding", "analysis", "review"},
+            cost_tier=1,
+            require_key=True,
+            role_targets={"team_lead"},
+        ),
+        ApiAdapter(
             name="groq_gpt120b",
             provider="groq",
             model="openai/gpt-oss-120b",          # Groq GRATIS — GPT OSS 120B, TL fallback

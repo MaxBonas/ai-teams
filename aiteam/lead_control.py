@@ -61,6 +61,7 @@ class LeadIntakeResolution:
     round_budget: int
     early_exit: LeadEarlyExit | None = None
     events: list[LeadDirectiveEvent] = field(default_factory=list)
+    plan_source: str = "none"
 
 
 _SELECTIVE_LCP_PATTERNS: dict[str, str] = {
@@ -260,7 +261,7 @@ def iter_lead_checkpoint_directives(
     collected: list[tuple[str, str, dict]] = []
     for phase_name, output in items:
         normalized_phase = str(phase_name or "").strip()
-        if not normalized_phase.startswith("lead_"):
+        if normalized_phase != "lead_close" and not normalized_phase.startswith("lead_"):
             continue
         if not include_lead_intake and normalized_phase == "lead_intake":
             continue
@@ -655,8 +656,10 @@ def resolve_lead_intake(
     run_mode = directives.get("run_mode", "")
     if explicit_plan is not None:
         phases = explicit_plan
+        plan_source = "explicit_workflow_plan"
     elif run_mode:
         phases = _preset_phases_for_run_mode(run_mode) or default_phases(chat_mode)
+        plan_source = f"run_mode:{run_mode}"
         events.append(
             LeadDirectiveEvent(
                 directive="run_mode",
@@ -665,6 +668,7 @@ def resolve_lead_intake(
         )
     else:
         phases = default_phases(chat_mode)
+        plan_source = "default"
 
     if directives.get("skip"):
         skip_set = set(directives["skip"])
@@ -735,4 +739,5 @@ def resolve_lead_intake(
         round_budget=round_budget,
         early_exit=None,
         events=events,
+        plan_source=plan_source,
     )

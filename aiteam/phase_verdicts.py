@@ -12,10 +12,16 @@ _PHASE_VERDICT_INLINE_RE = re.compile(
 )
 _KEY_VALUE_RE = re.compile(r"(?im)^\s*([a-zA-Z_]+)\s*:\s*(.+?)\s*$")
 _REVIEW_REJECTED_RE = re.compile(
-    r"(?im)^\s*(?:\*\*)?(?:decisi[oó]n|decision|veredicto|verdict|estado)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(?:rechazad[oa]|rejected|changes_requested|cambios\s+solicitados?|solicita\s+cambios)\b"
+    r"(?is)(?:^\s*(?:\*\*)?[\"']?(?:decisi[oó]n|decision|recomendaci[oó]n|recommendation|veredicto|verdict|estado|status|result|resultado)[\"']?(?:\*\*)?\s*:\s*(?:\*\*)?[\"']?(?:rechazad[oa]|rejected|changes_requested|cambios\s+solicitados?|solicita\s+cambios)\b|\b[\"']?(?:recomendaci[oó]n|recommendation|status|result|resultado|veredicto|verdict)[\"']?\s*:\s*[\"']?(?:rechazad[oa]|rejected|changes_requested|cambios\s+solicitados?|solicita\s+cambios)\b)"
+)
+_REVIEW_BLOCKED_RE = re.compile(
+    r"(?is)(?:^\s*(?:\*\*)?[\"']?(?:decisi[oó]n|decision|recomendaci[oó]n|recommendation|veredicto|verdict|estado|status|result|resultado)[\"']?(?:\*\*)?\s*:\s*(?:\*\*)?[\"']?(?:bloquead[oa]|blocked)\b|\b[\"']?(?:recomendaci[oó]n|recommendation|status|result|resultado|veredicto|verdict)[\"']?\s*:\s*[\"']?(?:bloquead[oa]|blocked)\b|\b(?:no\s+(?:puedo|puede|pude|se\s+puede)|cannot|can't|could\s+not)\s+(?:revisar|review|validar|validate|verificar|verify)\b|\b(?:insufficient|missing|lack(?:ing)?)\s+(?:review\s+)?evidence\b|\bevidencia\b.{0,40}\binsuficiente\b|\b(?:falta\s+evidencia|no\s+hay\s+evidencia)\b)"
 )
 _QA_BLOCKED_RE = re.compile(
-    r"(?is)(?:^\s*(?:\*\*)?(?:summary|resumen|estado|decisi[oó]n|decision|veredicto|verdict)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(?:bloquead[oa]|blocked|failed|fallid[oa])\b|\b(?:summary|resumen|estado)\b.{0,240}\b(?:bloquead[oa]|blocked|failed|fallid[oa])\b)"
+    r"(?is)(?:^\s*(?:\*\*)?[\"']?(?:summary|resumen|estado|status|result|resultado|decisi[oó]n|decision|recomendaci[oó]n|recommendation|veredicto|verdict)[\"']?(?:\*\*)?\s*:\s*(?:\*\*)?[\"']?(?:bloquead[oa]|blocked|failed|fallid[oa])\b|\b[\"']?(?:summary|resumen|estado|status|result|resultado|recomendaci[oó]n|recommendation|veredicto|verdict)[\"']?\s*:\s*[\"']?(?:bloquead[oa]|blocked|failed|fallid[oa])\b|\b(?:summary|resumen|estado)\b.{0,240}\b(?:bloquead[oa]|blocked|failed|fallid[oa])\b|\b(?:no\s+(?:puedo|puede|pude|se\s+puede)|cannot|can't|could\s+not)\s+(?:validar|validate|verificar|verify|probar|test)\b|\b(?:insufficient|missing|lack(?:ing)?)\s+(?:qa\s+|validation\s+)?evidence\b|\b(?:evidencia\s+insuficiente|falta\s+evidencia|no\s+hay\s+evidencia|faltan?\s+(?:tests?|checks?|validaciones?|criterios\s+de\s+aceptaci[oó]n)|no\s+(?:hay|existen?)\s+(?:tests?|checks?|validaciones?|criterios\s+de\s+aceptaci[oó]n))\b)"
+)
+_GENERIC_BLOCKED_PREFIX_RE = re.compile(
+    r"(?im)^\s*(?:\*\*)?(?:blocked|bloquead[oa]|bloqueo(?:\s+contractual)?)(?:\*\*)?\s*[:—-]"
 )
 _SLICE_ID_RE = re.compile(r"(?i)\bslice\s+(\d+)\b")
 _BUILD_SLICE_DRIFT_RE = re.compile(
@@ -30,14 +36,17 @@ _ENGINEER_BLOCKED_LABEL_RE = re.compile(
     r"(?im)^\s*(?:bloqueada|bloqueado)\s*:"
 )
 _ENGINEER_BLOCKED_PHRASE_RE = re.compile(
-    r"(?i)\b(?:evidencegate|evidence\s+gate|no\s+hay\s+evidencia|missing\s+evidence)\b"
+    r"(?i)\b(?:evidencegate|evidence\s+gate|no\s+hay\s+evidencia|missing\s+evidence|bloqueo\s+contractual|no\s+puedo\s+(?:proceder|cumplir|implementar)|cannot\s+(?:proceed|comply|implement))\b"
 )
 _CODE_PATH_RE = re.compile(
     r"```(?:\w+\s+|\s*)path=[\"']?([^\"'\n\s`]+)[\"']?",
     re.IGNORECASE,
 )
 _PATH_TOKEN_RE = re.compile(
-    r"(?i)(?:`([^`\n]+)`|(?<![:\w])([a-z0-9_.-]+(?:/[a-z0-9_.-]+)+|readme(?:\.md)?|[a-z0-9_.-]+\.[a-z0-9]{1,8})(?![\w:]))"
+    r"(?i)(?:`([^`\n]+)`|(?<![:\w\\])([a-z0-9_.-]+(?:/[a-z0-9_.-]+)+|readme(?:\.md)?|[a-z0-9_.-]+\.[a-z0-9]{1,8})(?![\w:]))"
+)
+_ESCAPED_NEWLINE_PATH_RE = re.compile(
+    r"(?i)\\[nrt]([a-z0-9_.-]+(?:/[a-z0-9_.-]+)+)"
 )
 # Phase name fragments that indicate an engineer role
 _ENGINEER_PHASE_HINTS = ("engineer", "build", "implement", "develop", "code")
@@ -63,12 +72,163 @@ _INVALID_CONTRACT_OBJECTIVE_VALUES = {
     "no especificada",
 }
 
+_COMMON_PROJECT_ROOT_HINTS = (
+    ".aiteam",
+    ".git",
+    "src",
+    "tests",
+    "docs",
+    "api",
+    "config",
+    "scripts",
+    "runtime",
+    "ide-frontend",
+)
+
+_COMMON_FILE_EXTENSIONS = {
+    "bat",
+    "c",
+    "cc",
+    "cfg",
+    "cmd",
+    "cpp",
+    "cs",
+    "css",
+    "csv",
+    "go",
+    "h",
+    "hpp",
+    "html",
+    "ini",
+    "java",
+    "js",
+    "json",
+    "jsx",
+    "kt",
+    "lock",
+    "md",
+    "php",
+    "ps1",
+    "py",
+    "pyi",
+    "rb",
+    "rs",
+    "sass",
+    "scss",
+    "sh",
+    "sql",
+    "svelte",
+    "swift",
+    "toml",
+    "ts",
+    "tsx",
+    "txt",
+    "vue",
+    "xml",
+    "yaml",
+    "yml",
+}
+
+_INTERNAL_ROLE_PATH_PREFIXES = {
+    "team_lead",
+    "lead",
+    "engineer",
+    "eng",
+    "reviewer",
+    "review",
+    "qa",
+    "researcher",
+    "research",
+    "scout",
+}
+
+_INTERNAL_PROVIDER_PATH_PREFIXES = {
+    "anthropic",
+    "openai",
+    "google",
+    "groq",
+    "gemini",
+    "claude",
+}
+
+
+def _looks_like_noise_path_hint(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return True
+    if normalized.startswith(("r'", 'r"', "rf'", 'rf"', "fr'", 'fr"', "f'", 'f"')):
+        return True
+    if any(marker in normalized for marker in ("=", ",")) or any(ch.isspace() for ch in normalized):
+        return True
+    if any(ch in normalized for ch in ("^", "$", "[", "]", "(", ")", "{", "}", "*", "+", "?", "|", "'", '"')):
+        return True
+    if normalized in {"e.g", "i.e"}:
+        return True
+    if re.fullmatch(r"\d+(?:\.\d+)+", normalized):
+        return True
+    if re.fullmatch(r"\d+\.[xX]", normalized):
+        return True
+    parts = normalized.rsplit(".", 1)
+    if len(parts) == 2 and "/" not in normalized:
+        ext = parts[1]
+        if re.fullmatch(r"\d{1,4}", ext):
+            return True
+    if "/" not in normalized and re.fullmatch(r"[a-z][\w-]*\d+\.\d[\w.-]*", normalized):
+        return True
+    if re.fullmatch(r"\d+(?:\.\d+)?/\d+(?:\.\d+)?", normalized):
+        return True
+    if "/" not in normalized and re.fullmatch(r"\.[a-z0-9]{1,8}", normalized):
+        return True
+    if "/" not in normalized and normalized.count(".") >= 1:
+        parts = [part for part in normalized.split(".") if part]
+        if len(parts) >= 2:
+            ext = parts[-1]
+            if ext not in _COMMON_FILE_EXTENSIONS:
+                return True
+    if normalized.endswith("/"):
+        normalized = normalized.rstrip("/")
+    if (
+        "/" in normalized
+        and "." not in normalized
+        and not normalized.startswith(_COMMON_PROJECT_ROOT_HINTS)
+        and re.fullmatch(r"[a-z][a-z0-9_-]*(?:/[a-z][a-z0-9_-]*)+", normalized)
+    ):
+        return True
+    if "/" in normalized and "." not in normalized:
+        left, _, right = normalized.partition("/")
+        if (
+            left in _INTERNAL_ROLE_PATH_PREFIXES
+            and re.fullmatch(r"[a-z_]+-\d+", right)
+        ):
+            return True
+    if any(marker in normalized for marker in ("/subscription/", "/api/", "/thread/")):
+        return True
+    if "/" in normalized:
+        left = normalized.split("/", 1)[0]
+        if left in _INTERNAL_PROVIDER_PATH_PREFIXES:
+            return True
+    return False
+
 
 def _is_non_gate_phase_id(phase_id: str) -> bool:
     normalized = str(phase_id or "").strip().lower()
     if not normalized:
         return True
     return normalized.startswith(("lead_", "delegate_", "plan_"))
+
+
+def _is_support_phase_id(phase_id: str) -> bool:
+    normalized = str(phase_id or "").strip().lower()
+    if not normalized:
+        return True
+    if normalized.startswith("plan_") and any(
+        marker in normalized
+        for marker in ("research", "discovery", "analysis", "constraints", "context")
+    ):
+        return True
+    return normalized.startswith(
+        ("lead_", "delegate_", "scout_", "lead_preflight_", "lead_report_")
+    )
 
 
 def _gate_kind_for_phase(phase_id: str, role_hint: str = "") -> str:
@@ -82,6 +242,10 @@ def _gate_kind_for_phase(phase_id: str, role_hint: str = "") -> str:
         return "review"
     if normalized_phase == "qa":
         return "qa"
+    if "review" in normalized_phase:
+        return "review"
+    if "qa" in normalized_phase or "validation" in normalized_phase or normalized_phase.startswith("validate"):
+        return "qa"
     if normalized_role == "engineer":
         return "build"
     if normalized_role == "reviewer":
@@ -89,6 +253,17 @@ def _gate_kind_for_phase(phase_id: str, role_hint: str = "") -> str:
     if normalized_role == "qa":
         return "qa"
     return ""
+
+
+def _verdict_matches_gate(entry: dict[str, Any], gate_kind: str) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    normalized_gate = str(gate_kind or "").strip().lower()
+    if not normalized_gate:
+        return False
+    entry_phase = str(entry.get("phase_id", "") or "").strip().lower()
+    entry_role = str(entry.get("role_hint", "") or "").strip().lower()
+    return _gate_kind_for_phase(entry_phase, entry_role) == normalized_gate
 
 
 def _select_primary_gate_verdict(
@@ -99,7 +274,7 @@ def _select_primary_gate_verdict(
     if not normalized_gate:
         return {}
     explicit = dict(verdicts.get(normalized_gate, {}) or {})
-    if explicit:
+    if explicit and _verdict_matches_gate(explicit, normalized_gate):
         return explicit
     for phase_id, entry in verdicts.items():
         if not isinstance(entry, dict):
@@ -125,6 +300,8 @@ def _select_approved_slice_from_verdicts(
     if explicit_slice:
         return explicit_slice
     for phase_id, entry in verdicts.items():
+        if _is_support_phase_id(phase_id):
+            continue
         if not _is_slice_source_phase(phase_id):
             continue
         if not isinstance(entry, dict):
@@ -203,6 +380,10 @@ def _phase_role_hint(phase_id: str) -> str:
         return "team_lead"
     if normalized.startswith("plan_"):
         return "planner"
+    if "review" in normalized:
+        return "reviewer"
+    if "qa" in normalized or "validation" in normalized or normalized.startswith("validate"):
+        return "qa"
     # Custom phase names that embed an engineer hint (e.g. "engineer_toc_implementation",
     # "implement_auth", "code_review_backend").
     if any(h in normalized for h in _ENGINEER_PHASE_HINTS):
@@ -214,6 +395,15 @@ def _normalize_path_hint(value: object) -> str:
     raw = str(value or "").strip().strip("`\"'")
     if not raw:
         return ""
+    if "..." in raw or "…" in raw:
+        return ""
+    while raw.startswith("\\n") or raw.startswith("\\r") or raw.startswith("\\t"):
+        raw = raw[2:].lstrip()
+    raw = (
+        raw.replace("\\n", " ")
+        .replace("\\r", " ")
+        .replace("\\t", " ")
+    )
     normalized = raw.replace("\\", "/").lower()
     if "://" in normalized:
         return ""
@@ -221,7 +411,8 @@ def _normalize_path_hint(value: object) -> str:
         normalized = normalized[2:]
     while "//" in normalized:
         normalized = normalized.replace("//", "/")
-    return normalized.strip("/")
+    normalized = normalized.strip("/").rstrip(".,;:!?)]}")
+    return normalized
 
 
 def is_missing_contract_objective(value: object) -> bool:
@@ -243,15 +434,22 @@ def extract_path_candidates(text: str) -> list[str]:
         return []
 
     candidates: list[str] = []
+    for match in _ESCAPED_NEWLINE_PATH_RE.finditer(raw_text):
+        normalized = _normalize_path_hint(match.group(1))
+        if normalized and not _looks_like_noise_path_hint(normalized):
+            candidates.append(normalized)
+
     for match in _CODE_PATH_RE.finditer(raw_text):
         normalized = _normalize_path_hint(match.group(1))
-        if normalized:
+        if normalized and not _looks_like_noise_path_hint(normalized):
             candidates.append(normalized)
 
     for match in _PATH_TOKEN_RE.finditer(raw_text):
         token = match.group(1) or match.group(2) or ""
         normalized = _normalize_path_hint(token)
         if not normalized:
+            continue
+        if _looks_like_noise_path_hint(normalized):
             continue
         if "/" not in normalized and "." not in normalized and normalized != "readme":
             continue
@@ -312,6 +510,13 @@ def _path_matches_hint(path: str, hint: str) -> bool:
         return normalized_path.startswith(normalized_hint)
     if normalized_hint in {"test_", "_test.", ".spec.", ".test."}:
         return normalized_hint in normalized_path
+    if (
+        "/" in normalized_hint
+        and "." not in normalized_hint.rsplit("/", 1)[-1]
+    ):
+        return normalized_path == normalized_hint or normalized_path.startswith(
+            normalized_hint + "/"
+        )
     if "/" in normalized_hint:
         return normalized_path == normalized_hint or normalized_path.endswith("/" + normalized_hint)
     return normalized_hint in normalized_path
@@ -490,7 +695,16 @@ def extract_phase_verdict(text: str, *, phase_id: str) -> dict[str, Any]:
     if gate_kind == "review" and _REVIEW_REJECTED_RE.search(raw_text):
         verdict["status"] = "rejected"
         reason_codes.append("review_rejected")
-    elif gate_kind == "qa" and _QA_BLOCKED_RE.search(raw_text):
+    elif gate_kind == "review" and (
+        _GENERIC_BLOCKED_PREFIX_RE.search(raw_text)
+        or _REVIEW_BLOCKED_RE.search(raw_text)
+    ):
+        verdict["status"] = "blocked"
+        reason_codes.append("review_blocked")
+    elif gate_kind == "qa" and (
+        _GENERIC_BLOCKED_PREFIX_RE.search(raw_text)
+        or _QA_BLOCKED_RE.search(raw_text)
+    ):
         verdict["status"] = "blocked"
         reason_codes.append("qa_blocked")
     elif gate_kind == "build":
@@ -502,14 +716,22 @@ def extract_phase_verdict(text: str, *, phase_id: str) -> dict[str, Any]:
             reason_codes.append("slice_drift")
         # Detect engineer/build self-reported blocking for any build-like gate.
         _sample = raw_text[:300]
-        if _ENGINEER_BLOCKED_LABEL_RE.search(_sample) or _ENGINEER_BLOCKED_PHRASE_RE.search(_sample):
+        if (
+            _GENERIC_BLOCKED_PREFIX_RE.search(_sample)
+            or _ENGINEER_BLOCKED_LABEL_RE.search(_sample)
+            or _ENGINEER_BLOCKED_PHRASE_RE.search(raw_text)
+        ):
             verdict["status"] = "blocked"
             reason_codes.append("engineer_blocked")
     elif any(h in normalized_phase for h in _ENGINEER_PHASE_HINTS):
         # Custom engineer phase names (e.g. "engineer_toc_implementation"):
         # detect self-reported blocking using structural keywords only.
         _sample = raw_text[:300]
-        if _ENGINEER_BLOCKED_LABEL_RE.search(_sample) or _ENGINEER_BLOCKED_PHRASE_RE.search(_sample):
+        if (
+            _GENERIC_BLOCKED_PREFIX_RE.search(_sample)
+            or _ENGINEER_BLOCKED_LABEL_RE.search(_sample)
+            or _ENGINEER_BLOCKED_PHRASE_RE.search(raw_text)
+        ):
             verdict["status"] = "blocked"
             reason_codes.append("engineer_blocked")
 
@@ -572,6 +794,8 @@ def derive_run_verdict_from_phase_verdicts(payload: object) -> dict[str, Any]:
     review_reason_codes = _parse_reason_codes(review_verdict.get("reason_codes", []))
     if review_status in {"rejected", "failed"} or "review_rejected" in review_reason_codes:
         failures.append("review:rejected_decision")
+    elif review_status == "blocked" or "review_blocked" in review_reason_codes:
+        failures.append("review:blocked_status")
 
     qa_verdict = _select_primary_gate_verdict(verdicts, "qa")
     qa_status = str(qa_verdict.get("status", "") or "").strip().lower()
@@ -614,9 +838,18 @@ def build_phase_verdict_prompt_block(*, phase_id: str, role: str) -> str:
     if normalized_role == "REVIEWER":
         status_help = "approved|rejected|blocked|unknown"
     elif normalized_role == "QA":
-        status_help = "approved|blocked|rejected|unknown"
+        status_help = "approved|blocked|rejected|failed|unknown"
     else:
         status_help = "completed|approved|blocked|rejected|partial|unknown"
+    decision_mapping = ""
+    if normalized_role == "REVIEWER":
+        decision_mapping = (
+            "Mapa de decision: APPROVED=>approved; CHANGES_REQUESTED o REJECTED=>rejected; BLOCKED=>blocked.\n"
+        )
+    elif normalized_role == "QA":
+        decision_mapping = (
+            "Mapa de decision: PASSED=>approved; CONDITIONAL_PASS=>approved si no bloquea, si no blocked; FAILED=>failed; BLOCKED=>blocked.\n"
+        )
     return (
         "\n\n[PHASE_VERDICT_CONTRACT]\n"
         "Incluye al final un bloque estructurado exactamente con este formato:\n"
@@ -628,6 +861,7 @@ def build_phase_verdict_prompt_block(*, phase_id: str, role: str) -> str:
         "slice_id: <numero o vacio>\n"
         "summary: una linea breve\n"
         "[/PHASE_VERDICT]\n"
+        f"{decision_mapping}"
         "Si no aplica un campo, dejalo vacio o usa unknown. No cambies los nombres de clave.\n"
         "[/PHASE_VERDICT_CONTRACT]"
     )

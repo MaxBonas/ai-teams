@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from aiteam.adapters import ApiAdapter
+from aiteam.adapters.openai_payload import build_openai_compatible_body
 from aiteam.types import StreamChunk
 
 pytestmark = pytest.mark.slow
@@ -27,6 +28,24 @@ class _MockHttpResponse:
 
 
 class ApiAdapterLiveTests(unittest.TestCase):
+    def test_openai_payload_omits_temperature_for_default_temperature_models(self) -> None:
+        body = build_openai_compatible_body(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": "hello"}],
+            stream=True,
+        )
+
+        self.assertNotIn("temperature", body)
+        self.assertTrue(body.get("stream"))
+
+    def test_openai_payload_keeps_temperature_for_legacy_chat_models(self) -> None:
+        body = build_openai_compatible_body(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+        self.assertEqual(body.get("temperature"), 0.2)
+
     def test_api_adapter_fails_when_live_mode_disabled(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
         with patch.dict("os.environ", {"AITEAM_ENABLE_LIVE_API": "0"}, clear=False):
@@ -119,6 +138,34 @@ class ApiAdapterLiveTests(unittest.TestCase):
         self.assertTrue(response.success)
         body = captured.get("body", {})
         self.assertEqual(body.get("messages"), messages)
+
+    def test_api_adapter_omits_temperature_for_gpt5_mini(self) -> None:
+        adapter = ApiAdapter(name="openai_codex_mini", provider="openai", model="gpt-5-mini")
+        payload = {
+            "choices": [{"message": {"content": "real response"}}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 6},
+        }
+        captured: dict[str, object] = {}
+
+        def _capture_urlopen(request, timeout=0):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return _MockHttpResponse(payload)
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "AITEAM_ENABLE_LIVE_API": "1",
+                    "OPENAI_API_KEY": "test-key",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=_capture_urlopen),
+        ):
+            response = adapter.invoke("hello")
+
+        self.assertTrue(response.success)
+        self.assertNotIn("temperature", captured.get("body", {}))
 
     def test_live_mode_fails_without_required_key(self) -> None:
         adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
@@ -217,6 +264,43 @@ class ApiAdapterLiveTests(unittest.TestCase):
 
         self.assertFalse(response.success)
         self.assertIn("http_error:429", str(response.error))
+
+    def test_api_adapter_does_not_retry_non_retryable_quota_error(self) -> None:
+        adapter = ApiAdapter(name="openai_api", provider="openai", model="gpt-4.1-mini")
+        calls = {"count": 0}
+        body = (
+            b'{"error":{"message":"You exceeded your current quota.",'
+            b'"type":"insufficient_quota","code":"insufficient_quota"}}'
+        )
+
+        def _quota_exhausted(request, timeout=0):
+            calls["count"] += 1
+            raise urllib.error.HTTPError(
+                request.full_url,
+                429,
+                "rate limited",
+                {"Retry-After": "0"},
+                io.BytesIO(body),
+            )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "AITEAM_ENABLE_LIVE_API": "1",
+                    "OPENAI_API_KEY": "test-key",
+                    "AITEAM_LIVE_API_RETRY_ATTEMPTS": "2",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=_quota_exhausted),
+            patch("time.sleep", return_value=None),
+        ):
+            response = adapter.invoke("hello")
+
+        self.assertFalse(response.success)
+        self.assertIn("insufficient_quota", str(response.error))
+        self.assertEqual(calls["count"], 1)
 
 
 class GeminiConversationalTests(unittest.TestCase):
@@ -408,6 +492,40 @@ class GeminiConversationalTests(unittest.TestCase):
         self.assertEqual(response.content, "subscription response")
         self.assertEqual(calls["count"], 2)
 
+    def test_subscription_adapter_omits_temperature_for_gpt5_mini(self) -> None:
+        from aiteam.adapters import SubscriptionAdapter
+
+        adapter = SubscriptionAdapter(
+            name="openai_codex_mini",
+            provider="openai",
+            model="gpt-5-mini",
+        )
+        payload = {
+            "choices": [{"message": {"content": "subscription response"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 4},
+        }
+        captured: dict[str, object] = {}
+
+        def _capture_urlopen(request, timeout=0):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return _MockHttpResponse(payload)
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "AITEAM_ENABLE_LIVE_API": "1",
+                    "OPENAI_API_KEY": "test-key",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=_capture_urlopen),
+        ):
+            response = adapter.invoke("hello")
+
+        self.assertTrue(response.success)
+        self.assertNotIn("temperature", captured.get("body", {}))
+
     def test_subscription_adapter_fails_on_quota_exhaustion_without_simulated_fallback(
         self,
     ) -> None:
@@ -442,6 +560,51 @@ class GeminiConversationalTests(unittest.TestCase):
 
         self.assertFalse(response.success)
         self.assertIn("http_error:429", str(response.error))
+
+    def test_subscription_adapter_does_not_retry_non_retryable_quota_error(
+        self,
+    ) -> None:
+        from aiteam.adapters import SubscriptionAdapter
+
+        adapter = SubscriptionAdapter(
+            name="openai_pro",
+            provider="openai",
+            model="gpt-4.1",
+        )
+        calls = {"count": 0}
+        body = (
+            b'{"error":{"message":"You exceeded your current quota.",'
+            b'"type":"insufficient_quota","code":"insufficient_quota"}}'
+        )
+
+        def _quota_exhausted(request, timeout=0):
+            calls["count"] += 1
+            raise urllib.error.HTTPError(
+                request.full_url,
+                429,
+                "rate limited",
+                {"Retry-After": "0"},
+                io.BytesIO(body),
+            )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "AITEAM_ENABLE_LIVE_API": "1",
+                    "OPENAI_API_KEY": "test-key",
+                    "AITEAM_LIVE_API_RETRY_ATTEMPTS": "2",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=_quota_exhausted),
+            patch("time.sleep", return_value=None),
+        ):
+            response = adapter.invoke("hello")
+
+        self.assertFalse(response.success)
+        self.assertIn("insufficient_quota", str(response.error))
+        self.assertEqual(calls["count"], 1)
 
 
 class ThreadCompactionTests(unittest.TestCase):

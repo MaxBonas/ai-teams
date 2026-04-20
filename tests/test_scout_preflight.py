@@ -267,6 +267,20 @@ class TestScoutContextBuilders(unittest.TestCase):
         self.assertIn("- README.md", result)
         self.assertIn("- src/app.py", result)
 
+    def test_scout_project_state_ignores_runtime_aiteam_tree(self):
+        from api.utils import _build_scout_project_state_context
+
+        (self.workspace / ".aiteam").mkdir(exist_ok=True)
+        (self.workspace / ".aiteam" / "events.jsonl").write_text("{}\n", encoding="utf-8")
+        (self.workspace / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+
+        result = _build_scout_project_state_context(self.workspace)
+
+        self.assertIn("`.aiteam/` es runtime interno del orquestador", result)
+        self.assertIn("- pyproject.toml", result)
+        self.assertNotIn("- .aiteam/", result)
+        self.assertNotIn("- .aiteam/events.jsonl", result)
+
     def test_scout_session_history_no_sessions(self):
         from api.utils import _build_scout_session_history_context
         result = _build_scout_session_history_context(self.runtime)

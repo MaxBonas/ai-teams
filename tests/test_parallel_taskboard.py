@@ -1,8 +1,10 @@
 import tempfile
 import threading
 import unittest
+import shutil
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from aiteam.adapters import FakeSuccessAdapter, SubscriptionAdapter
 from aiteam.adapters.base import ModelAdapter
@@ -65,6 +67,29 @@ class ParallelTaskBoardTests(unittest.TestCase):
                 (state.get("CHAT-B1C2D3E4", {}) or {}).get("phase_outputs", {}).get("review"),
                 "B",
             )
+
+    def test_workflow_entry_payload_includes_task_root(self) -> None:
+        tmp_root = Path.cwd() / ".tmp-tests"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        tmp = tmp_root / f"sqlite-store-{uuid4().hex}"
+        tmp.mkdir(parents=True, exist_ok=True)
+        try:
+            store = SqliteStore(tmp / "aiteam.db")
+            store.save_workflow_entry(
+                "CHAT-A1B2C3D4",
+                {"phase_outputs": {"build": "A"}},
+            )
+
+            entry = store.load_workflow_entry("CHAT-A1B2C3D4")
+            self.assertEqual(str(entry.get("task_root", "")), "CHAT-A1B2C3D4")
+
+            state = store.load_workflow_state()
+            self.assertEqual(
+                str((state.get("CHAT-A1B2C3D4", {}) or {}).get("task_root", "")),
+                "CHAT-A1B2C3D4",
+            )
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_parallel_claim_is_safe_with_shared_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

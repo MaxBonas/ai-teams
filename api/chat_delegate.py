@@ -4,6 +4,7 @@ from aiteam.autotools import AutoToolIntegrator
 from aiteam.lead_control import (
     extract_delegate_request as _lead_control_extract_delegate_request,
     extract_evidence_plan as _lead_control_extract_evidence_plan,
+    strip_selected_lcp_directives as _lead_control_strip_selected_lcp_directives,
 )
 from aiteam.tool_specialists import (
     build_tool_specialist_metadata,
@@ -20,6 +21,17 @@ from api.utils import (
     _build_scout_session_history_context,
     resolve_runtime_dir,
 )
+
+_DELEGATE_DIRECTIVE_NAMES = [
+    "DELEGATE",
+    "DELEGATE_REPO_SCAN",
+    "DELEGATE_BROWSER_REPRO",
+    "DELEGATE_LSP_IMPACT",
+    "DELEGATE_TEST_RUN",
+    "DELEGATE_MCP_PROBE",
+    "WAIT_POLICY",
+    "DELEGATE_BUDGET",
+]
 
 
 def _extract_delegate_request(text: str):
@@ -102,7 +114,13 @@ def _is_delegate_phase_name(phase_name: str) -> bool:
 
 def _is_supporting_control_phase(phase_name: str) -> bool:
     normalized = str(phase_name or "").strip().lower()
-    return normalized == "lead_intake" or _is_delegate_phase_name(normalized)
+    return (
+        normalized == "lead_intake"
+        or normalized.startswith("scout_")
+        or normalized.startswith("lead_preflight_")
+        or normalized.startswith("lead_report_")
+        or _is_delegate_phase_name(normalized)
+    )
 
 
 def _delegate_specialist_plan(specialist: str) -> dict[str, object]:
@@ -172,17 +190,27 @@ def _delegate_report_contract(
 ) -> str:
     normalized_intent = str(intent or "").strip().lower()
     normalized_specialist = str(specialist or "").strip().lower()
+    support_rule = (
+        " Regla de autoridad: eres soporte; no declares la fase principal blocked/rejected. "
+        "Si no puedes inspeccionar o un check falla, reporta result=degraded u observed_failure "
+        "con evidencia y deja la decision al Team Lead/parent phase."
+    )
     if normalized_specialist == "browser_operator" or normalized_intent == "delegate_browser_repro":
         return (
             "Formato obligatorio: summary, steps_reproduced, result, evidence, artifacts, risks, recommendation. "
             "Si usas navegador, Playwright o MCP UI, devuelve solo pasos reproducidos y evidencia compacta; no pegues transcripts crudos."
+            + support_rule
         )
     if normalized_specialist == "mcp_operator" or normalized_intent == "delegate_mcp_probe":
         return (
             "Formato obligatorio: summary, result, evidence, artifacts, risks, recommendation. "
             "Si operas un MCP de UI, incluye tambien steps_reproduced compactos; no pegues transcripts crudos."
+            + support_rule
         )
-    return "Formato obligatorio: summary, evidence, artifacts, risks, recommendation compactos."
+    return (
+        "Formato obligatorio: summary, evidence, artifacts, risks, recommendation compactos."
+        + support_rule
+    )
 
 
 def _delegate_catalog_capabilities(
@@ -302,6 +330,35 @@ def _build_delegate_request(intent: str, *, query: str, wait_policy: str, delega
         wait_policy=str(wait_policy or "all").strip().lower(),
         delegate_budget=max(1, int(delegate_budget or 3)),
     )
+
+
+def _build_delegate_phase_contract(
+    *,
+    phase_id: str,
+    source_phase: str,
+    delegate_query: str,
+    assignment: dict[str, object],
+) -> dict[str, object]:
+    delegate_objective = str(delegate_query or "").strip()
+    if not delegate_objective:
+        delegate_objective = "Responder a la delegacion del Team Lead con evidencia compacta."
+
+    instruction = str(
+        assignment.get("instruction") or "Responder a la delegacion del Team Lead con hechos concretos."
+    ).strip()
+    role = assignment.get("role", Role.SCOUT)
+    role_name = role.name if isinstance(role, Role) else str(role or "SCOUT").strip().upper()
+    if instruction:
+        delegate_objective = f"{instruction} Foco: {delegate_objective}".strip()
+
+    depends_on = [source_phase] if str(source_phase or "").strip() else []
+    return {
+        "phase_id": str(phase_id or "").strip(),
+        "role": role_name,
+        "objective": delegate_objective,
+        "depends_on": depends_on,
+        "contract_kind": "delegate_support",
+    }
 
 
 def _resolve_delegate_assignments(
@@ -455,6 +512,36 @@ def _execute_delegate_request(
     delegate_cycle: int,
     rerun_budget: int,
 ) -> dict[str, object]:
+    run_state = orch._get_workflow_state(task_root) or {}
+    source_task = orch.taskboard.get_task(source_task_id)
+    source_metadata = dict(source_task.metadata if source_task is not None else {})
+    run_profile = str(
+        run_state.get("run_profile") or source_metadata.get("run_profile") or ""
+    ).strip().lower()
+    execution_profile = str(
+        run_state.get("execution_profile") or source_metadata.get("execution_profile") or ""
+    ).strip().lower()
+    if run_profile in {"solo_lead", "direct"} or execution_profile == "direct":
+        phase_outputs = run_state.setdefault("phase_outputs", {})
+        source_output = str(phase_outputs.get(source_phase, "") or "")
+        if source_output:
+            phase_outputs[source_phase] = _lead_control_strip_selected_lcp_directives(
+                source_output,
+                _DELEGATE_DIRECTIVE_NAMES,
+            )
+            orch._save_workflow_state()
+        orch.event_logger.emit(
+            "lcp_directive_skipped",
+            {
+                "task_id": task_root,
+                "directive": "delegate",
+                "source_phase": source_phase,
+                "reason": "solo_lead_profile_disallows_delegation",
+                "intent": str(getattr(delegate_request, "intent", "") or "").strip(),
+            },
+        )
+        return {}
+
     delegate_plan = _resolve_delegate_plan(delegate_request)
     delegate_assignments = _resolve_delegate_assignments(delegate_request, workspace=workspace)
     delegate_round_budget = _resolve_delegate_round_budget(delegate_request)
@@ -494,6 +581,12 @@ def _execute_delegate_request(
         )
         delegate_phase = f"{delegate_phase_prefix}_{delegate_cycle}_{delegate_specialist}"
         delegate_task_id = f"{task_root}::{delegate_phase}"
+        delegate_phase_contract = _build_delegate_phase_contract(
+            phase_id=delegate_phase,
+            source_phase=source_phase,
+            delegate_query=delegate_query,
+            assignment=assignment,
+        )
         delegate_entries.append(
             {
                 "task_id": delegate_task_id,
@@ -525,7 +618,11 @@ def _execute_delegate_request(
                     "skip_quality_gates": True,
                     "phase": delegate_phase,
                     "chat_parent": task_root,
+                    "phase_contract_enforced": True,
+                    "phase_contract": delegate_phase_contract,
                     "required_capabilities": delegate_caps,
+                    "delegation_brief": delegate_query,
+                    "delegation_from_role": "team_lead",
                     "delegated_by": "team_lead",
                     "delegate_intent": delegate_request.intent,
                     "delegate_wait_policy": delegate_wait_policy,
@@ -665,6 +762,21 @@ def _structured_evidence_specs_for_phase(
     *,
     workspace: Path | None = None,
 ) -> list[dict[str, object]]:
+    normalized_phase = str(phase_id or "").strip().lower()
+    evidence_position = (
+        "pre_phase"
+        if (
+            normalized_phase == "review"
+            or normalized_phase == "qa"
+            or normalized_phase.startswith("qa_")
+            or "_qa_" in normalized_phase
+            or "review" in normalized_phase
+            or "validate" in normalized_phase
+            or "validation" in normalized_phase
+            or normalized_phase.startswith("validate")
+        )
+        else "post_phase"
+    )
     entry = dict(phase_evidence_plan.get(phase_id) or {})
     intents = [
         str(item).strip().lower()
@@ -724,6 +836,7 @@ def _structured_evidence_specs_for_phase(
                     "wait_policy": wait_policy,
                     "delegate_budget": delegate_budget,
                     "source_phase": phase_id,
+                    "evidence_position": evidence_position,
                 }
             )
     return specs

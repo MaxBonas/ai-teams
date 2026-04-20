@@ -35,9 +35,10 @@ def default_model_catalog() -> dict[str, ModelProfile]:
     #    7. gemini3_pro     → gemini-3-pro-preview    (Google)
     #    8. gemini3_flash   → gemini-3-flash-preview  (Google, rapido)
     #
-    #  API advanced_api con api_allowed_for_team_lead=True (ultimo recurso TL):
-    #    9. groq_gpt120b    → openai/gpt-oss-120b    (Groq GRATIS, 120B params)
-    #   10. groq_kimi_k2    → kimi-k2-instruct        (Groq GRATIS, frontier)
+    #  API advanced_api con api_allowed_for_team_lead=True:
+    #    9. openai_codex_mini → gpt-5-mini           (OpenAI API, barato para Solo Lead)
+    #   10. groq_gpt120b      → openai/gpt-oss-120b  (Groq GRATIS, 120B params)
+    #   11. groq_kimi_k2      → kimi-k2-instruct     (Groq GRATIS, frontier)
     #
     #  WORKER (budget_api — Engineer, Reviewer, QA, Researcher):
     #    claude_haiku_api, gemini_flash, gemini_flash_lite,
@@ -158,7 +159,16 @@ def default_model_catalog() -> dict[str, ModelProfile]:
             "Gemini 2.5 Pro — solido pero lento (11991ms), usar solo si Gemini 3 falla",
         ),
 
-        # ── API ADVANCED — TL fallback de ultimo recurso (gratis via Groq) ─
+        # ── API ADVANCED — TL fallback y Solo Lead barato ─────────────────
+        ModelProfile(
+            "openai_codex_mini",
+            "openai",
+            "gpt-5-mini",
+            "advanced_api",
+            90, 91, 90, 90,
+            False, True,
+            "OpenAI gpt-5-mini — API barata para perfil Solo Lead estilo Codex",
+        ),
         ModelProfile(
             "groq_gpt120b",
             "groq",
