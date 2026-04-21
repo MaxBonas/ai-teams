@@ -18,9 +18,14 @@ class TeamChatRequest(BaseModel):
     criticality: str = "low"
     mode: str = "sprint5"
     # Perfil de ejecucion de la run.
-    # "solo_lead": un Team Lead planifica y ejecuta directamente.
-    # "team_advanced": conserva el workflow multi-rol actual.
-    run_profile: Literal["solo_lead", "team_advanced"] = "team_advanced"
+    # "solo_lead":      Team Lead unico, estilo Codex/OpenCode.
+    # "lead_quorum":    solo_lead + quorum deliberativo sobre el plan.
+    # "ai_team_basic":  Lead + Engineer + QA (sin Reviewer, 1 ciclo de delegacion).
+    # "ai_teams_full":  Lead + quorum + Engineer + Reviewer + QA (pipeline completo).
+    # "team_advanced":  alias de ai_teams_full, el modo equipo avanzado.
+    run_profile: Literal[
+        "solo_lead", "lead_quorum", "ai_team_basic", "ai_teams_full", "team_advanced"
+    ] = "team_advanced"
     quorum: bool = False
     max_rounds: int | None = None
     client_task_id: str = ""

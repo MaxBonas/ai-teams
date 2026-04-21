@@ -931,6 +931,15 @@ def _normalize_run_profile(raw_profile: str, *, chat_mode: str = "") -> str:
         return "solo_lead"
     if normalized_mode == "direct":
         return "solo_lead"
+    # lead_quorum: solo_lead + quorum deliberativo sobre el plan antes de ejecutar
+    if normalized in {"lead_quorum", "quorum"}:
+        return "lead_quorum"
+    # ai_team_basic: Lead planifica + Engineer ejecuta + QA valida (sin Reviewer)
+    if normalized in {"ai_team_basic", "team_basic", "basic_team"}:
+        return "ai_team_basic"
+    # ai_teams_full: pipeline completo Lead+Engineer+Reviewer+QA con quorum en plan
+    if normalized in {"ai_teams_full", "teams_full", "full_team", "full"}:
+        return "ai_teams_full"
     if normalized in {"team_advanced", "advanced", "team", "multi_agent", "multiagent"}:
         return "team_advanced"
     return "team_advanced"
@@ -3404,7 +3413,13 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             str(getattr(payload, "run_profile", "") or ""),
             chat_mode=chat_mode,
         )
-        direct_profile_mode = run_profile == "solo_lead"
+        direct_profile_mode = run_profile in {"solo_lead", "lead_quorum"}
+        # lead_quorum ejecuta como solo_lead (el Lead escribe codigo directamente)
+        # pero activa el quorum deliberativo sobre el plan antes de ejecutar.
+        # lead_quorum y ai_teams_full activan quorum deliberativo en el plan
+        _profile_forces_quorum = run_profile in {"lead_quorum", "ai_teams_full"}
+        # ai_team_basic usa team mode pero con un solo ciclo de delegacion
+        _profile_basic_team = run_profile == "ai_team_basic"
         response_mode = "probe" if probe_mode else ("plan" if plan_only_mode else chat_mode)
         round_budget = _resolve_chat_round_budget(
             requested_rounds=payload.max_rounds,
@@ -4253,7 +4268,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
         # El Lead puede solicitar que un scout busque info adicional antes de
         # planificar. El scout responde con el contexto disponible y el Lead
         # replanifica con esa info. Máximo _MAX_DELEGATE_CYCLES ciclos.
-        _MAX_DELEGATE_CYCLES = 2
+        # ai_team_basic usa 1 ciclo (más ligero); full team usa 2.
+        _MAX_DELEGATE_CYCLES = 1 if _profile_basic_team else 2
         _delegate_directive_names = [
             "DELEGATE",
             "DELEGATE_REPO_SCAN",
@@ -4508,12 +4524,13 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             "yes",
             "on",
         }
-        _quorum_requested = bool(payload.quorum)
+        _quorum_requested = bool(payload.quorum) or _profile_forces_quorum
         _apply_planning_quorum = should_apply_planning_quorum(
             requested=_quorum_requested,
             run_mode=_lead_run_mode,
         )
-        if direct_profile_mode:
+        # lead_quorum activa el quorum aunque sea direct_profile_mode
+        if direct_profile_mode and not _profile_forces_quorum:
             _apply_planning_quorum = False
         if not _quorum_requested and not _auto_quorum:
             _apply_planning_quorum = False
