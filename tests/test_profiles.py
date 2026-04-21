@@ -56,9 +56,8 @@ class ProfileGovernanceTests(unittest.TestCase):
             task_metadata={"direct_coding_executor": True},
         )
 
-        self.assertIn("IMPLEMENTACION DIRECTA DEL TEAM LEAD", prompt)
         self.assertIn("path=", prompt)
-        self.assertIn("No delegues", prompt)
+        self.assertIn("Archivos modificados", prompt)
 
     def test_team_lead_direct_coding_system_prompt_disables_roles(self) -> None:
         prompt = build_system_prompt(
@@ -66,9 +65,9 @@ class ProfileGovernanceTests(unittest.TestCase):
             task_metadata={"direct_coding_executor": True},
         )
 
-        self.assertIn("MODO DIRECT CODING SOLO_LEAD", prompt)
-        self.assertIn("scouts", prompt)
-        self.assertIn("PROHIBIDO", prompt)
+        self.assertIn("Codex/OpenCode", prompt)
+        self.assertIn("PROHIBICIONES", prompt)
+        self.assertIn("dead code", prompt)
 
     def test_team_lead_lead_close_system_prompt_requires_current_run_root_cause_only(self) -> None:
         prompt = build_system_prompt(Role.TEAM_LEAD, task_metadata={"phase": "lead_close"})

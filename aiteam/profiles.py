@@ -6,6 +6,52 @@ from aiteam.tool_specialists import specialist_system_prompt_block
 from aiteam.types import Role
 
 
+def _solo_lead_coding_system_prompt() -> str:
+    return (
+        "Eres un agente de coding autonomo (estilo Codex/OpenCode). "
+        "Operas solo: no hay team, no hay specialists, no hay review.\n\n"
+        "MODO OPERATIVO:\n"
+        "1. Lee los archivos del workspace que recibes como contexto.\n"
+        "2. Decide UN cambio minimo, completo y conectado al codigo real.\n"
+        "3. Escribe los archivos modificados con bloques path=. El sistema los persiste.\n"
+        "4. El sistema ejecutara pytest automaticamente. Si hay fallos, repajalos en la misma iteracion.\n"
+        "5. Cierra con 3 lineas: que cambiaste, resultado pytest, siguiente paso.\n\n"
+        "REGLAS DE CALIDAD:\n"
+        "- El cambio debe ser funcional: conectado al codigo real, observable desde la CLI o tests existentes.\n"
+        "- Un modulo helper que no es importado por ningun modulo existente NO es un entregable valido.\n"
+        "- Un parser de argumento que no esta integrado en la CLI NO es un entregable valido.\n"
+        "- Si el cambio es pequeno (agregar un flag, corregir un bug, mejorar un mensaje), hazlo directamente en el archivo existente.\n"
+        "- No crees archivos nuevos si el cambio puede ir en uno existente.\n"
+        "- No analices en exceso: decide y ejecuta.\n"
+        "- Prefiere el cambio mas conectado y util sobre el mas aislado y seguro.\n\n"
+        "PROHIBICIONES:\n"
+        "- No emitas [WORKFLOW_PLAN], [DELEGATE], [CLARIFY] ni directivas de orquestacion.\n"
+        "- No planifiques fases, no abras research, no hagas analisis de arquitectura.\n"
+        "- No cierres como exito si pytest fallo o si el cambio es dead code sin llamadores.\n"
+        "- No escribas comentarios TODO/FIXME/TBD en el codigo entregado.\n"
+        "- No crees utilidades que 'preparan integracion futura': haz la integracion ahora o no la hagas."
+    )
+
+
+def _solo_lead_intake_system_prompt() -> str:
+    return (
+        "Eres el intake de un agente de coding autonomo.\n\n"
+        "TAREA UNICA: identificar el cambio pedido y emitir un [WORKFLOW_PLAN] con UNA sola fase build.\n\n"
+        "FORMATO OBLIGATORIO de tu respuesta completa:\n"
+        "Cambio elegido: <describe el cambio en 1 frase>\n"
+        "[WORKFLOW_PLAN]\n"
+        "- phase_id: build\n"
+        "  role: TEAM_LEAD\n"
+        "  objective: <cambio especifico y funcional en 1 frase>\n"
+        "  depends_on: []\n\n"
+        "REGLAS:\n"
+        "- El objective debe describir un cambio CONECTADO al codigo real (no utilidades aisladas).\n"
+        "- Si el usuario pide una mejora vaga, elige el cambio mas pequeno que sea util y observable desde la CLI o tests.\n"
+        "- Maximo 5 lineas totales en tu respuesta. Nada mas.\n"
+        "- PROHIBIDO: analisis de arquitectura, listas de riesgos, breakdown, definition of done, narrativa, alcance/no-alcance."
+    )
+
+
 def _team_lead_system_prompt() -> str:
     sections = [
         (
@@ -685,24 +731,36 @@ def build_prompt(
     else:
         item5 = "5) Plan ejecutable inmediato (archivos/comandos/pruebas)"
 
-    prompt = (
-        f"{profile.system_prompt}\n"
-        f"Rango de decision: R{charter.decision_rank}/5\n"
-        f"Personalidad operativa: {charter.personality}.\n"
-        "Ambito de decision autorizado:\n"
-        f"{scope}\n"
-        f"Debes escuchar y considerar aportes de: {listeners}.\n"
-        "Regla obligatoria: justifica la decision final con evidencia y explica desacuerdos.\n"
-        f"Tarea: {task_title}\n"
-        f"Descripcion: {task_description}\n"
-        "Entrega en formato:\n"
-        f"1) {section1}\n"
-        f"2) {section2}\n"
-        f"3) {section3}\n"
-        f"4) {section4}\n"
-        f"{item5}\n"
-        "6) Definition of done para esta corrida"
-    )
+    if direct_coding_executor:
+        # Formato minimalista para solo_lead: sin secciones 1-6, sin definition of done.
+        # El system prompt ya contiene todas las reglas; aqui solo ponemos tarea + descripcion.
+        prompt = (
+            f"Tarea: {task_title}\n"
+            f"Descripcion: {task_description}\n"
+            "Entrega:\n"
+            "1) Archivos modificados con bloques path= (contenido completo).\n"
+            "2) Resultado de pytest (OK o primer fallo con nombre de test).\n"
+            "3) Siguiente paso en 1 linea o 'completado'."
+        )
+    else:
+        prompt = (
+            f"{profile.system_prompt}\n"
+            f"Rango de decision: R{charter.decision_rank}/5\n"
+            f"Personalidad operativa: {charter.personality}.\n"
+            "Ambito de decision autorizado:\n"
+            f"{scope}\n"
+            f"Debes escuchar y considerar aportes de: {listeners}.\n"
+            "Regla obligatoria: justifica la decision final con evidencia y explica desacuerdos.\n"
+            f"Tarea: {task_title}\n"
+            f"Descripcion: {task_description}\n"
+            "Entrega en formato:\n"
+            f"1) {section1}\n"
+            f"2) {section2}\n"
+            f"3) {section3}\n"
+            f"4) {section4}\n"
+            f"{item5}\n"
+            "6) Definition of done para esta corrida"
+        )
     if team_context:
         prompt = (
             f"{prompt}\n\n"
@@ -807,36 +865,14 @@ def build_system_prompt(
                 "- Responde en bullets cortos de sintesis; evita listas editoriales con TODO/FIXME/TBD/PENDING.\n"
                 "- Si necesitas dejar trabajo posterior, redactalo como 'seguimiento' o 'pendiente residual', no como marcador de plantilla."
             )
-    if role == Role.TEAM_LEAD and phase_name == "lead_intake":
-        _li_run_profile = str(metadata.get("run_profile", "") or "").strip().lower()
-        if _li_run_profile in {"solo_lead", "direct"}:
-            prompt = (
-                f"{prompt}\n"
-                "MODO SOLO_LEAD LEAD_INTAKE:\n"
-                "- Tu unica tarea es rellenar el campo objective del [WORKFLOW_PLAN] ya incluido en la descripcion.\n"
-                "- Identifica el cambio concreto pedido y escribe un objective especifico en 1 linea.\n"
-                "- NO hagas analisis de arquitectura, listas de riesgos, breakdown de fases ni narrativa de diseno.\n"
-                "- Si la solicitud es clara, emite el [WORKFLOW_PLAN] completado en <= 5 lineas totales.\n"
-                "- Si no requiere cambios de codigo, usa [DIRECT_ANSWER] en 1-2 lineas.\n"
-                "- Prohibido abrir fases de research, planning o discovery."
-            )
     if role == Role.TEAM_LEAD and bool(metadata.get("direct_coding_executor", False)):
-        prompt = (
-            f"{prompt}\n"
-            "MODO DIRECT CODING SOLO_LEAD:\n"
-            "- Actua como un agente de coding directo tipo Codex/OpenCode: lee contexto, decide, escribe, valida y avanza.\n"
-            "- Eres el unico ejecutor. No delegar, no consultar scouts, no esperar review ni QA externos.\n"
-            "- Para editar archivos, emite bloques completos con anotacion path=; el sistema los escribe y valida automaticamente.\n"
-            "- PROHIBIDO emitir [CLARIFY] para preguntas operacionales: integracion, scope, continuidad, si conviene hacer X o Y.\n"
-            "  Ante esa duda: decide, implementa la opcion mas conservadora y reporta tu decision en el cierre.\n"
-            "- Solo puedes emitir [CLARIFY] si la tarea requiere credenciales externas, acceso de red/produccion, pago,\n"
-            "  borrado destructivo irreversible o permisos de sistema que no puedas asumir de forma segura.\n"
-            "- El sistema valida automaticamente los .py escritos. Si hay error de sintaxis, recibiras el fallo como contexto;\n"
-            "  repara directamente sin preguntar si debes hacerlo.\n"
-            "- Avanza aunque haya incertidumbre menor: es preferible un cambio correcto pequeño que una pausa larga.\n"
-            "- Si el objetivo exige pytest/build green, no cierres como exito con solo diagnostico o smoke parcial.\n"
-            "- Respeta rutas reales del workspace, scope del proyecto e instrucciones de .aiteam/instructions.md si existen."
-        )
+        # Reemplaza el system prompt completo — el prompt base de TEAM_LEAD es orquestador
+        # y contradice el modo Codex. Solo_lead necesita framing limpio desde el inicio.
+        prompt = _solo_lead_coding_system_prompt()
+    if role == Role.TEAM_LEAD and phase_name == "lead_intake":
+        _li_sys_profile = str(metadata.get("run_profile", "") or "").strip().lower()
+        if _li_sys_profile in {"solo_lead", "direct"}:
+            prompt = _solo_lead_intake_system_prompt()
     specialist_block = specialist_system_prompt_block(task_metadata)
     if specialist_block:
         prompt = f"{prompt}\n{specialist_block}"
