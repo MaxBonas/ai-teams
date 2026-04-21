@@ -5100,7 +5100,7 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         # to drift from — disable the drift detector to avoid false positives
                         # (e.g. objective mentions "ejecuta pytest" → detector infers test paths).
                         "skip_continuation_drift": bool(_is_direct_lead_executor) and not bool(continuation_effective),
-                        "skip_quality_gates": bool(_is_direct_lead_executor),
+                        "skip_quality_gates": bool(_is_direct_lead_executor) or bool(_profile_basic_team),
                         "tool_specialist_economic_routing": bool(_is_direct_lead_executor),
                         "tool_specialist_default_tier": "advanced_api" if _is_direct_lead_executor else "",
                         "preferred_adapters": ["openai_codex_mini"] if _is_direct_lead_executor else [],

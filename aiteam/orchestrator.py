@@ -7914,6 +7914,9 @@ class AITeamOrchestrator:
             return False
         if task.metadata.get("skip_quality_gates") or uses_chat_policy(task.metadata):
             return False
+        # Global disable via env var (for demo/dev purposes)
+        if os.getenv("AITEAM_DISABLE_QA", "0").strip().lower() in {"1", "true", "yes", "on"}:
+            return False
         return True
 
     def _build_gate_evidence_context(self, task: WorkTask) -> str:
