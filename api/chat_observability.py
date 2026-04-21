@@ -992,6 +992,9 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
     # Inject quorum phases as visible completed entries so the UI renders them as agent lanes.
     # These tasks never go through the taskboard (they run inside run_planning_quorum), so we
     # synthesize them from the lead_quorum metadata stored in workflow state.
+    # NOTE: _quorum_injected_summaries is appended to task_summaries at the end of this block.
+    _quorum_injected_summaries: list[dict[str, object]] = []
+    _quorum_inject_into_summaries = True  # flag so we can append after building
     if isinstance(workflow_state_payload, dict):
         _wf_entry = workflow_state_payload.get(normalized_root, {})
         _quorum_meta = _wf_entry.get("lead_quorum", {}) if isinstance(_wf_entry, dict) else {}
@@ -999,10 +1002,66 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
             _consultant_plans = list(_quorum_meta.get("consultant_plans", []) or [])
             for _qi, _cp in enumerate(_consultant_plans, start=1):
                 _qname = f"lead_quorum_auditor_{_qi}"
+                _cp_output = str(_cp.get("output", "") or "").strip()
                 if _qname not in phase_states:
                     phase_states[_qname] = "completed"
+                _quorum_injected_summaries.append({
+                    "task_id": f"{normalized_root}::{_qname}",
+                    "short_id": _qname,
+                    "title": f"Quorum Auditor {_qi}",
+                    "role": "team_lead",
+                    "state": "completed",
+                    "assignee": f"quorum-{_qi}",
+                    "category": "phase",
+                    "phase": _qname,
+                    "provider": str(_cp.get("provider", "") or ""),
+                    "model": str(_cp.get("model", "") or ""),
+                    "channel": str(_cp.get("channel", "subscription") or "subscription"),
+                    "thread_id": "",
+                    "thread_provider": str(_cp.get("provider", "") or ""),
+                    "thread_channel": "subscription",
+                    "thread_model_family": "",
+                    "thread_generation": 0,
+                    "blocked_reason": "",
+                    "blocked_dependencies": [],
+                    "preview": _truncate_text(_cp_output, limit=420),
+                    "full_text": _cp_output,
+                    "error": "",
+                })
+            # Final quorum synthesis
+            _final_plan = str(_quorum_meta.get("final_plan", "") or "").strip()
             if "lead_quorum_final" not in phase_states:
                 phase_states["lead_quorum_final"] = "completed"
+            _quorum_injected_summaries.append({
+                "task_id": f"{normalized_root}::lead_quorum_final",
+                "short_id": "lead_quorum_final",
+                "title": "Quorum Final",
+                "role": "team_lead",
+                "state": "completed",
+                "assignee": "quorum-final",
+                "category": "phase",
+                "phase": "lead_quorum_final",
+                "provider": str(_quorum_meta.get("final_provider", "") or ""),
+                "model": str(_quorum_meta.get("final_model", "") or ""),
+                "channel": "subscription",
+                "thread_id": "",
+                "thread_provider": str(_quorum_meta.get("final_provider", "") or ""),
+                "thread_channel": "subscription",
+                "thread_model_family": "",
+                "thread_generation": 0,
+                "blocked_reason": "",
+                "blocked_dependencies": [],
+                "preview": _truncate_text(_final_plan, limit=420),
+                "full_text": _final_plan,
+                "error": "",
+            })
+
+    # Append synthetic quorum summaries into task_summaries now that the list is populated.
+    if _quorum_injected_summaries:
+        _existing_quorum_ids = {str(s.get("task_id", "")) for s in task_summaries}
+        for _qs in _quorum_injected_summaries:
+            if str(_qs["task_id"]) not in _existing_quorum_ids:
+                task_summaries.append(_qs)
 
     last_event = ""
     last_event_ts = ""
