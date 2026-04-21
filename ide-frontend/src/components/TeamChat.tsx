@@ -22,7 +22,7 @@ interface ChatMessage {
 }
 
 type ChatMode = 'sprint5' | 'plan' | 'classic';
-type RunProfile = 'solo_lead' | 'team_advanced';
+type RunProfile = 'solo_lead' | 'lead_quorum' | 'ai_team_basic' | 'ai_teams_full' | 'team_advanced';
 type ChatLevel = 'low' | 'medium' | 'high';
 
 interface StoredChatConfig {
@@ -55,7 +55,8 @@ const TEAM_CHAT_WORKSPACE_KEY_PREFIX = 'aiteam.team_chat.config.';
 const clampRounds = (value: number): number => Math.max(3, Math.min(value, 80));
 
 const isChatMode = (value: string): value is ChatMode => value === 'sprint5' || value === 'plan' || value === 'classic';
-const isRunProfile = (value: string): value is RunProfile => value === 'solo_lead' || value === 'team_advanced';
+const isRunProfile = (value: string): value is RunProfile =>
+  value === 'solo_lead' || value === 'lead_quorum' || value === 'ai_team_basic' || value === 'ai_teams_full' || value === 'team_advanced';
 const isChatLevel = (value: string): value is ChatLevel => value === 'low' || value === 'medium' || value === 'high';
 
 const isLegacyDefaultConfig = (row: Record<string, unknown>): boolean => {
@@ -2722,6 +2723,9 @@ export default function TeamChat({ workspacePath, minimized = false, onToggleMin
                     disabled={loading}
                   >
                     <option value="solo_lead">Solo Lead</option>
+                    <option value="lead_quorum">Lead + Quorum</option>
+                    <option value="ai_team_basic">AI Team Basic</option>
+                    <option value="ai_teams_full">AI Teams Full</option>
                     <option value="team_advanced">Team Advanced</option>
                   </select>
                 </label>

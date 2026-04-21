@@ -5077,6 +5077,10 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                         "lead_run_mode": _lead_run_mode,
                         "run_profile": run_profile,
                         "direct_coding_executor": _is_direct_lead_executor,
+                        # For solo_lead fresh tasks there is no prior continuation slice
+                        # to drift from — disable the drift detector to avoid false positives
+                        # (e.g. objective mentions "ejecuta pytest" → detector infers test paths).
+                        "skip_continuation_drift": bool(_is_direct_lead_executor) and not bool(continuation_effective),
                         "skip_quality_gates": bool(_is_direct_lead_executor),
                         "tool_specialist_economic_routing": bool(_is_direct_lead_executor),
                         "tool_specialist_default_tier": "advanced_api" if _is_direct_lead_executor else "",

@@ -3882,6 +3882,10 @@ class AITeamOrchestrator:
             and not bool(task.metadata.get("direct_coding_executor", False))
         ) or phase_name != "build":
             return False
+        # Skip drift detection for direct coding executors (solo_lead) without an
+        # active continuation — there is no prior slice to drift from.
+        if bool(task.metadata.get("skip_continuation_drift", False)):
+            return False
 
         objective = self._resolved_phase_objective_for_task(task)
         drift = detect_continuation_drift(
