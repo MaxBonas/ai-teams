@@ -4505,7 +4505,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             criticality=criticality,
             round_budget=round_budget,
             forbid_direct_answer=bool(
-                continuation_effective and _continuation_close_pending_mandate
+                (continuation_effective and _continuation_close_pending_mandate)
+                or _profile_forces_quorum  # lead_quorum/ai_teams_full must always plan, never direct_answer
             ),
         )
         _lcp = _lcp_resolution.directives
@@ -4572,7 +4573,8 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
                     criticality=criticality,
                     round_budget=round_budget,
                     forbid_direct_answer=bool(
-                        continuation_effective and _continuation_close_pending_mandate
+                        (continuation_effective and _continuation_close_pending_mandate)
+                        or _profile_forces_quorum  # quorum output must resolve to phases, never direct_answer
                     ),
                 )
                 _lcp = _lcp_resolution.directives
@@ -4725,8 +4727,25 @@ async def post_aiteam_chat(payload: TeamChatRequest, request: Request):
             )
 
         if _lcp_resolution.early_exit is not None:
+            # Persist terminal run_status so the progress endpoint resolves correctly.
+            # Without this, workflow_run_status stays "running" (set during preplan) and
+            # _build_chat_progress overrides progress_state back to "running" indefinitely.
+            _early_ws = orch._get_workflow_state(task_root)
+            _early_exit_state = str(_lcp_resolution.early_exit.state or "completed")
+            _early_ws["run_status"] = _early_exit_state
+            _early_ws["run_verdict"] = {
+                "state": _early_exit_state,
+                "result": "directo",
+                "failure_origin": "none",
+                "reason_codes": [],
+                "policy_signals": [],
+                "policy_review_required": False,
+                "semantic_gate_applied": False,
+                "semantic_gate_failures": [],
+            }
+            orch._save_workflow_state()
             return _lcp_base_response(
-                state=_lcp_resolution.early_exit.state,
+                state=_early_exit_state,
                 justification=_lcp_resolution.early_exit.justification,
             )
 
