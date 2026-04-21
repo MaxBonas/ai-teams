@@ -989,6 +989,21 @@ def _build_chat_progress(runtime_dir: Path, task_root: str) -> TeamChatProgressR
                     rounds_used, _safe_int_value(metadata.get("execution_round", 0), 0)
                 )
 
+    # Inject quorum phases as visible completed entries so the UI renders them as agent lanes.
+    # These tasks never go through the taskboard (they run inside run_planning_quorum), so we
+    # synthesize them from the lead_quorum metadata stored in workflow state.
+    if isinstance(workflow_state_payload, dict):
+        _wf_entry = workflow_state_payload.get(normalized_root, {})
+        _quorum_meta = _wf_entry.get("lead_quorum", {}) if isinstance(_wf_entry, dict) else {}
+        if isinstance(_quorum_meta, dict) and bool(_quorum_meta.get("applied", False)):
+            _consultant_plans = list(_quorum_meta.get("consultant_plans", []) or [])
+            for _qi, _cp in enumerate(_consultant_plans, start=1):
+                _qname = f"lead_quorum_auditor_{_qi}"
+                if _qname not in phase_states:
+                    phase_states[_qname] = "completed"
+            if "lead_quorum_final" not in phase_states:
+                phase_states["lead_quorum_final"] = "completed"
+
     last_event = ""
     last_event_ts = ""
     exhausted = False
