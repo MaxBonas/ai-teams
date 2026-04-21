@@ -18,7 +18,7 @@
 5. Tener este guión en otra pantalla
 
 ### Verificación rápida
-- El selector de perfil muestra: Solo Lead / Lead + Quorum / AI Team Basic / AI Teams Full / Team Advanced
+- El selector de perfil muestra: Solo Lead / Lead + Quorum / AI Team Basic / …
 - El checkbox "Remember" es visible (fondo oscuro, tilde visible)
 - El workspace `md-report-cli` aparece en el selector de proyecto
 
@@ -32,177 +32,172 @@
 
 ---
 
-## Bloque 2 — Demo: `solo_lead` (5 min)
+## Test 1 — `solo_lead`: feature concreta + pytest (5 min)
 
 ### Qué muestra
-El modo más directo: **un único agente que lee, decide, escribe y valida**. Como Codex o Claude Code, pero con protocolo de calidad y memoria de proyecto integrados.
+El agente más directo: lee el proyecto real, implementa un cambio específico, ejecuta pytest y reporta. Como Codex, pero con memoria de proyecto y protocolo de calidad integrados.
 
-### Perfil a seleccionar
+### Perfil
 `Solo Lead`
 
-### Input exacto
+### Input
 ```
-Elige una mejora pequeña pero útil para este CLI de Python.
-Hazla, ejecuta pytest, y dime el resultado.
+Añade la opción --version al CLI. Cuando el usuario ejecute md-report --version
+debe mostrar "md-report, version 0.1.0". Escríbela, ejecuta pytest, y dime el resultado.
 ```
 
 ### Flujo esperado (60–90 segundos)
-| Fase | Qué ocurre | Tiempo |
-|---|---|---|
-| `lead_intake` | El Lead lee el proyecto, elige el cambio, escribe WORKFLOW_PLAN | ~15s |
-| `build` | Escribe el archivo modificado, recibe resultado de pytest | ~40s |
-| `lead_close` | 3 líneas: qué cambió / pytest OK / pendiente ninguno | ~5s |
+| Fase | Qué ocurre |
+|---|---|
+| `lead_intake` | Lee `cli.py` y `pyproject.toml`, escribe WORKFLOW_PLAN con el cambio concreto |
+| `build` | Añade `@click.version_option(version="0.1.0", prog_name="md-report")` en el entry point, ejecuta pytest |
+| `lead_close` | Confirma: opción añadida / pytest OK / sin pendientes |
 
 ### Output esperado
-- Estado de la run: `completed` (no `running`)
-- 3 fases visibles en agent lanes
-- lead_close con formato limpio: cambio realizado, pytest OK, nada pendiente
-- Sin rol QA, sin quorum, sin delegación — un único lane activo
+- Estado: `completed`
+- 3 lanes: lead_intake, build, lead_close
+- `lead_close` menciona el comando `--version` y el resultado de pytest
+- Sin QA, sin quorum, sin delegación
 
 ### Lo que dices mientras pasa
-> "Ven que el agente lee los archivos reales del proyecto — no trabaja sobre una descripción. Elige el cambio más pequeño que sea funcional. Escribe el archivo completo. El sistema ejecuta pytest automáticamente y el resultado aparece en el cierre."
-
-> "Esto es lo que hace Codex: leer → decidir → escribir → validar. Solo que con memoria de proyecto y un protocolo de calidad debajo."
-
-### Métricas a señalar
-- Tiempo total: ~60 segundos
-- Coste: ~0.001€ (gpt-mini)
-- Fases: 3
+> "Le doy una tarea exacta y comprobable. El agente abre los archivos reales del proyecto, localiza el entry point del CLI, escribe el cambio y ejecuta los tests automáticamente. No simula nada — el pytest se ejecuta de verdad en el workspace."
 
 ---
 
-## Bloque 3 — Demo: `lead_quorum` (6 min)
+## Test 2 — `solo_lead`: consulta de contexto / memoria (2 min)
 
 ### Qué muestra
-Antes de ejecutar, **un panel de IAs senior debate el enfoque**. El Lead adopta o rechaza el consejo. Ideal para cambios con riesgo arquitectónico o de diseño.
+El sistema distingue entre una pregunta de contexto y una petición de trabajo. Responde sin abrir ninguna fase de build.
 
-### Perfil a seleccionar
-`Lead + Quorum`
+### Perfil
+`Solo Lead` (nueva run, no continuation de la anterior)
 
-### Input exacto
+### Input
 ```
-Quiero refactorizar el generador de TOC para separar la lógica de markdown
-del formato de salida. ¿Es buen momento para hacerlo? Hazlo si procede.
+en que punto del proyecto estamos?
+```
+
+### Flujo esperado (10–20 segundos)
+→ El Lead responde directamente con el estado del proyecto a partir de su memoria.
+→ No hay fase `build`. No hay WORKFLOW_PLAN.
+→ Estado: `completed` en segundos.
+
+### Output esperado
+- Resumen de lo que se hizo en la run anterior (la opción `--version`)
+- Estado general del proyecto según la memoria acumulada
+- Sin código, sin fases de ejecución
+
+### Lo que dices
+> "El sistema distingue. Si le preguntas dónde estás, te dice dónde estás. Si pides trabajo, lo ejecuta. Y recuerda la sesión anterior — sabe que acabamos de añadir `--version`."
+
+---
+
+## Test 3 — `lead_quorum`: decisión arquitectónica antes de implementar (6 min)
+
+### Qué muestra
+Antes de ejecutar, un panel de IAs senior evalúa el enfoque. El Lead adopta o descarta el consejo. Para cambios donde el *cómo* importa tanto como el *qué*.
+
+### Perfil
+`Lead + Quorum` (nueva run)
+
+### Input
+```
+Quiero añadir --toc-title al CLI para que el usuario pueda personalizar el título
+del TOC. Antes de implementarlo, ¿tiene sentido hacerlo así o hay algo en la
+arquitectura actual que deba considerar?
 ```
 
 ### Flujo esperado (90–150 segundos)
 | Fase | Qué ocurre |
 |---|---|
-| `lead_intake` | El Lead formula su plan de refactor |
-| `lead_quorum_auditor_1` | Auditor 1 evalúa el plan (riesgos, timing, approach) |
-| `lead_quorum_auditor_2` | Auditor 2 evalúa independientemente — puede discrepar |
-| `lead_quorum_final` | Síntesis: el Lead decide si adopta algún cambio de plan |
-| `build` | Ejecuta el plan (posiblemente modificado por el quorum) |
-| `lead_close` | Resumen 3 líneas |
+| `lead_intake` | El Lead lee `cli.py` y `toc_generator.py`, formula su plan de implementación |
+| `lead_quorum_auditor_1` | Evalúa: ¿dónde se inyecta el parámetro? ¿Capa CLI o capa generador? |
+| `lead_quorum_auditor_2` | Evalúa independientemente — puede identificar riesgos distintos |
+| `lead_quorum_final` | El Lead sintetiza: adopta o descarta sugerencias, justifica la decisión |
+| `build` | Implementa con el enfoque decidido |
+| `lead_close` | Confirma: opción añadida, pytest, pendientes |
 
 ### Output esperado
-- **6 lanes visibles** en agent lanes: lead_intake, quorum_auditor_1, quorum_auditor_2, quorum_final, build, lead_close
-- Cada auditor con su provider/modelo visible (p.ej. auditor_1 = GPT, auditor_2 = Claude)
-- En conversation history: los textos de los auditores son expandibles (preview + full_text)
-- El `lead_quorum_final` muestra si adoptó o descartó sugerencias — el Lead debe justificar
-- Estado de la run: `completed`
+- **6 lanes visibles**: intake, auditor_1, auditor_2, quorum_final, build, lead_close
+- Cada auditor con su modelo visible (auditor_1 ≠ auditor_2)
+- Los textos de los auditores son expandibles en conversation history
+- `lead_quorum_final` justifica qué adoptó y por qué
+- Estado: `completed`
 
 ### Lo que señalas
-> "Aquí ven dos auditores evaluando el enfoque en paralelo — no el código, la estrategia. Cada uno usa un modelo diferente deliberadamente: diversidad de criterio. El Lead después decide qué adopta y qué descarta, y lo justifica."
+> "Le hago una pregunta de diseño, no solo de implementación. Los dos auditores evalúan el plan en paralelo — cada uno con un modelo diferente, deliberadamente. Diversidad de criterio."
 
-> "En el ensayo, el auditor 2 identificó que el punto de inyección no estaba confirmado y que faltaba especificar el valor por defecto. El Lead adoptó ese plan por encima del suyo. Eso es lo que hace un senior: escuchar antes de comprometerse."
+> "En nuestro ensayo, uno de los auditores identificó que el parámetro debía pasarse a través de la capa generadora, no solo al CLI. El Lead adoptó ese enfoque. Eso es lo que hace un senior antes de comprometerse con una arquitectura."
 
 ### Métricas a señalar
-- Tiempo total: ~2 minutos
 - Fases: 6
+- Tiempo: ~2 min
 - Coste: ~0.005€
 
 ---
 
-## Bloque 4 — Demo: `ai_team_basic` (6 min)
+## Test 4 — `ai_team_basic`: equipo coordinado, tarea dividida (5 min)
 
 ### Qué muestra
-El Lead no escribe código: **planifica y delega a scouts especializados**. Los scouts exploran el proyecto en paralelo y reportan. Sin QA gate — ciclo rápido de exploración y análisis.
+El Lead no escribe código: planifica y delega a scouts. Cada scout recibe una subtarea específica y reporta. El Lead sintetiza.
 
-### Perfil a seleccionar
-`AI Team Basic`
+### Perfil
+`AI Team Basic` (nueva run)
 
-### Input exacto *(el que vamos a probar ahora)*
+### Input
 ```
-Traza el flujo completo que ocurre cuando un usuario ejecuta el CLI de este proyecto:
-desde el entry point hasta la salida al terminal. Incluye qué clases y funciones
-se invocan, en qué orden, y dónde se generan el TOC y el contenido del reporte.
-```
-
-### Input alternativo (si el anterior ya se usó en demo anterior)
-```
-Analiza la arquitectura de este proyecto Python. Quiero entender: qué responsabilidad
-tiene cada módulo, cómo se conectan cli.py, generator.py, toc_generator.py y
-report_generator.py entre sí, y si hay duplicación de responsabilidades.
+Revisa si el CLI maneja correctamente el caso en que el archivo de entrada no existe.
+Si no lo hace, implementa el error handling y añade un test para ese caso.
 ```
 
 ### Flujo esperado (2–4 minutos)
 | Fase | Agente | Qué ocurre |
 |---|---|---|
-| `lead_intake` | Team Lead | Lee el proyecto, diseña el plan de exploración, escribe WORKFLOW_PLAN |
-| `build_1` / `build_2` | Engineer (scout) | Explora módulos asignados, traza flujos, reporta hallazgos |
-| `lead_close` | Team Lead | Sintetiza los reportes de los scouts en un output cohesionado |
+| `lead_intake` | Team Lead | Lee el proyecto, divide la tarea: un scout revisa el handling actual, otro prepara el fix y el test |
+| `build_1` | Engineer (scout 1) | Revisa `cli.py` y `cli_utils.py`, identifica si hay manejo del caso |
+| `build_2` | Engineer (scout 2) | Implementa el error handling y escribe el test |
+| `lead_close` | Team Lead | Sintetiza: qué había, qué se añadió, pytest OK |
 
 ### Output esperado
-- **Agent lanes**: Lead + 1-2 Engineers visibles, **sin rol QA**
-- El lead_close produce una descripción técnica ordenada del flujo del CLI
-- El output hace referencia a archivos y funciones reales del proyecto (`cli.py`, `toc_generator.py`, etc.)
-- Estado de la run: `completed`
+- **Agent lanes**: Lead + 2 Engineers, **sin rol QA**
+- `lead_close` menciona el archivo modificado, el test añadido y el resultado de pytest
+- El output hace referencia a código real del proyecto (`cli.py`, `FileNotFoundError`, etc.)
+- Estado: `completed`
 
 ### Lo que dices
-> "Ahora el Lead no escribe código — planifica y delega. Los scouts exploran el proyecto en paralelo: uno traza el entry point, otro sigue el flujo hasta la salida. El Lead sintetiza."
+> "Ahora el Lead no toca un archivo — planifica y delega. Un scout revisa qué había, otro implementa el fix. El Lead coordina y sintetiza."
 
-> "En proyectos reales esto escala: cinco módulos, cinco scouts, exploración paralela. El Lead nunca toca un archivo directamente — coordina."
+> "En proyectos reales esto escala: diez módulos, diez scouts, exploración paralela. El Lead actúa como un tech lead real: divide, asigna, integra."
 
 ### Métricas a señalar
 - Fases: 4–5
-- Sin gate de QA (perfil de exploración/análisis)
-- Coste: ~0.003–0.008€
+- Sin QA (perfil de equipo básico)
+- Coste: ~0.005–0.010€
 
 ---
 
-## Bloque 5 — El IDE (3 min, sin escribir nada)
+## Bloque final — El IDE (3 min, sin escribir nada)
 
 ### Mostrar en pantalla
-1. **Panel de fases** → cada agente tiene su lane, estado en tiempo real, provider y modelo visibles
+1. **Panel de fases** → cada agente tiene su lane, estado en tiempo real, provider y modelo
 2. **Conversation history** → outputs expandibles, preview + texto completo
-3. **Cost ledger** → cuánto costó cada run, desglosado por agente
-4. **Memoria de proyecto** → `runtime/lead_memory.md` — el sistema recuerda entre sesiones
+3. **Cost ledger** → coste por run, desglosado por agente
+4. **Memoria de proyecto** → el sistema recuerda entre sesiones
 
 ### Lo que dices
 > "Todo está instrumentado. Ven qué modelo tomó cada decisión, por qué canal, con qué coste. Esto no es una caja negra."
 
-> "Y aquí la memoria de proyecto: el sistema recuerda qué se hizo en sesiones anteriores. La próxima vez que le pidas continuar, sabe exactamente dónde estaba."
+> "Y aquí la memoria: el sistema recuerda que añadimos `--version` y `--toc-title`, y que el CLI ahora maneja archivos inexistentes. La próxima sesión empieza sabiendo todo eso."
 
 ---
 
-## Bloque 6 — Continuidad y memoria (2 min)
+## Tabla de perfiles
 
-### Perfil a seleccionar
-`Solo Lead`
-
-### Input exacto
-```
-en que punto del proyecto estamos?
-```
-
-### Flujo esperado
-→ El agente responde con un resumen del estado actual sin abrir ninguna fase de build.
-→ Estado: `completed` en segundos.
-→ Sin output de código, sin WORKFLOW_PLAN — solo contexto.
-
-### Lo que dices
-> "El sistema distingue entre una pregunta de contexto y una petición de trabajo. Si preguntas dónde estás, te dice dónde estás. Si pides un cambio, lo ejecuta. Y lo hace con la memoria acumulada de runs anteriores."
-
----
-
-## Tabla de perfiles — para mostrar en pantalla
-
-| Perfil | Agentes activos | Gates | Tiempo aprox | Para qué |
+| Perfil | Agentes | Gates | Tiempo | Para qué |
 |---|---|---|---|---|
-| `solo_lead` | 1 (Lead) | ninguno | ~60s | fixes, mejoras pequeñas, contexto |
-| `lead_quorum` | Lead + 2 auditores | ninguno | ~2min | refactors con riesgo de enfoque |
-| `ai_team_basic` | Lead + scouts | ninguno | ~3min | análisis, exploración, features |
+| `solo_lead` | 1 (Lead) | ninguno | ~60s | fixes, features pequeñas, contexto |
+| `lead_quorum` | Lead + 2 auditores | ninguno | ~2min | decisiones arquitectónicas con riesgo |
+| `ai_team_basic` | Lead + scouts | ninguno | ~3min | tareas divisibles, exploración paralela |
 | `ai_teams_full` | Equipo completo + quorum | Review + QA | ~8min | entregas de alta criticidad |
 
 ---
@@ -219,10 +214,10 @@ en que punto del proyecto estamos?
 > El sistema se desarrolla a sí mismo: cada feature nueva se implementa con AI Teams. 776 tests pasando. En uso activo desde hace meses.
 
 **"¿Qué pasa si el modelo falla o alucina?"**
-> Hay quality gates: evidence gate (¿escribió archivos reales?), semantic gate (¿el output tiene sentido?), pytest automático. Si falla, el sistema registra el fallo y puede reintentar o escalar a revisión humana.
+> Hay quality gates: evidence gate (¿escribió archivos reales?), semantic gate (¿el output tiene sentido?), pytest automático. Si falla, el sistema registra el fallo y puede reintentar o escalar.
 
 **"¿Cómo monetizáis?"**
-> Tres vías: SaaS por equipo (suscripción mensual basada en runs), licencia on-premise para empresas con datos sensibles, y consulting de integración. El pricing por run escala con el valor entregado.
+> Tres vías: SaaS por equipo (suscripción mensual basada en runs), licencia on-premise para empresas con datos sensibles, y consulting de integración.
 
 ---
 
@@ -240,23 +235,22 @@ en que punto del proyecto estamos?
 |---|---|
 | Timeout o error de API | Mostrar una run guardada en el historial del IDE |
 | Conexión lenta | `AITEAM_SIM_MODE=1` genera respuestas simuladas instantáneas |
-| Run queda en "running" | F5 en el navegador — el estado se recarga desde el backend |
-| Preguntan por el código | Repo en GitHub, tests públicos, CLAUDE.md como onboarding |
-| Quorum no aparece en lanes | Confirmar que el perfil es `lead_quorum`, no `solo_lead` |
+| Run queda en "running" | F5 — el estado se recarga desde el backend |
+| Quorum no aparece en lanes | Verificar que el perfil es `lead_quorum`, no `solo_lead` |
 | Proyecto externo sucio | `git reset --hard demo-baseline` en `md-report-cli/` |
 
 ---
 
-## Orden recomendado
+## Orden y tiempos
 
 ```
-Bloque 1 — Pitch (2 min)
-Bloque 2 — solo_lead live (5 min)        ← impacto inmediato
-Bloque 3 — lead_quorum live (6 min)      ← "deliberación estratégica"
-Bloque 4 — ai_team_basic live (6 min)    ← "equipo coordinado"
-Bloque 5 — IDE walkthrough (3 min)       ← "instrumen tación total"
-Bloque 6 — memoria/contexto (2 min)      ← "no empieza de cero"
-Cierre (2 min)
-─────────────────────────────
-Total: ~26 min + preguntas
+Bloque 1   — Pitch verbal                    2 min
+Test 1     — solo_lead: --version            5 min   ← impacto inmediato, resultado comprobable
+Test 2     — solo_lead: contexto/memoria     2 min   ← "no empieza de cero"
+Test 3     — lead_quorum: --toc-title        6 min   ← "deliberación antes de actuar"
+Test 4     — ai_team_basic: error handling   5 min   ← "equipo coordinado"
+IDE walk   — instrumentación                 3 min   ← transparencia total
+Cierre                                       2 min
+──────────────────────────────────────────────────
+Total: ~25 min + preguntas
 ```
