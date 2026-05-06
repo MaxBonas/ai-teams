@@ -1,0 +1,454 @@
+"""Tests for subscription_cli_adapter — Codex path, helpers, and reconcile upgrade."""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from aiteam.adapters.subscription_cli_adapter import (
+    CODEX_OUTPUT_SCHEMA,
+    ClaudeSubscriptionCliRuntime,
+    _parse_codex_output,
+    _resolve_cli_cmd,
+)
+from aiteam.adapters.registry import AdapterDescriptor
+from aiteam.db.migration import SCHEMA_PATH
+from aiteam.project_adapters import reconcile_project_agent_policy
+
+
+# ---------------------------------------------------------------------------
+# _resolve_cli_cmd
+# ---------------------------------------------------------------------------
+
+
+class TestResolveCLICmd:
+    def test_returns_cmd_shim_on_windows(self, monkeypatch):
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(
+            "aiteam.adapters.subscription_cli_adapter.shutil.which",
+            lambda name: f"C:/npm/{name}" if name.endswith(".cmd") else None,
+        )
+        result = _resolve_cli_cmd("codex")
+        assert result == "C:/npm/codex.cmd"
+
+    def test_falls_back_to_plain_which_on_windows(self, monkeypatch):
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(
+            "aiteam.adapters.subscription_cli_adapter.shutil.which",
+            lambda name: "C:/bin/codex" if name == "codex" else None,
+        )
+        result = _resolve_cli_cmd("codex")
+        assert result == "C:/bin/codex"
+
+    def test_returns_plain_which_on_posix(self, monkeypatch):
+        monkeypatch.setattr(os, "name", "posix")
+        monkeypatch.setattr(
+            "aiteam.adapters.subscription_cli_adapter.shutil.which",
+            lambda name: f"/usr/bin/{name}" if name == "codex" else None,
+        )
+        result = _resolve_cli_cmd("codex")
+        assert result == "/usr/bin/codex"
+
+    def test_returns_name_itself_when_not_found(self, monkeypatch):
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr("aiteam.adapters.subscription_cli_adapter.shutil.which", lambda _: None)
+        result = _resolve_cli_cmd("codex")
+        assert result == "codex"
+
+    def test_already_resolved_exe_not_re_resolved(self, monkeypatch):
+        """A name that already ends with .cmd is not double-resolved."""
+        monkeypatch.setattr(os, "name", "nt")
+        calls: list[str] = []
+        def fake_which(name: str) -> str | None:
+            calls.append(name)
+            return f"C:/npm/{name}"
+        monkeypatch.setattr("aiteam.adapters.subscription_cli_adapter.shutil.which", fake_which)
+        result = _resolve_cli_cmd("codex.cmd")
+        # Should not try codex.cmd.cmd or codex.cmd.exe
+        assert result == "C:/npm/codex.cmd"
+        assert all(".cmd.cmd" not in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# _parse_codex_output
+# ---------------------------------------------------------------------------
+
+
+class TestParseCodexOutput:
+    def test_parses_flat_json_string(self):
+        raw = json.dumps({"status": "completed", "summary": "done", "add_comment": ""})
+        result = _parse_codex_output(raw)
+        assert result["status"] == "completed"
+        assert result["summary"] == "done"
+
+    def test_parses_dict_directly(self):
+        d = {"status": "failed", "summary": "error", "add_comment": "details"}
+        result = _parse_codex_output(d)
+        assert result["status"] == "failed"
+
+    def test_extracts_json_from_mixed_output(self):
+        raw = 'some noise\n{"status":"skipped","summary":"nothing to do","add_comment":""}\nmore noise'
+        result = _parse_codex_output(raw)
+        assert result["status"] == "skipped"
+
+    def test_accepts_full_submit_work_schema(self):
+        """Full ops-based schema is also accepted (forward compat)."""
+        d = {
+            "status": "completed",
+            "summary": "wrote file",
+            "ops": [{"type": "add_comment", "body": "done"}],
+        }
+        result = _parse_codex_output(d)
+        assert result["status"] == "completed"
+        assert isinstance(result["ops"], list)
+
+    def test_raises_on_empty_string(self):
+        with pytest.raises(ValueError, match="empty codex output"):
+            _parse_codex_output("")
+
+    def test_raises_on_invalid_json(self):
+        with pytest.raises(ValueError):
+            _parse_codex_output("not json at all, no braces")
+
+    def test_raises_on_dict_missing_status(self):
+        with pytest.raises(ValueError):
+            _parse_codex_output({"foo": "bar"})
+
+    def test_unwraps_nested_result_key(self):
+        d = {"result": {"status": "completed", "summary": "ok", "add_comment": ""}}
+        result = _parse_codex_output(d)
+        assert result["status"] == "completed"
+
+
+# ---------------------------------------------------------------------------
+# _build_codex_command — flag correctness
+# ---------------------------------------------------------------------------
+
+
+def _make_runtime(*, model: str | None = None, oss: bool = False, local_provider: str | None = None, cwd: Path | None = None) -> ClaudeSubscriptionCliRuntime:
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+    return ClaudeSubscriptionCliRuntime(
+        descriptor=descriptor,
+        cli_kind="codex",
+        command=["codex"],
+        model=model,
+        oss=oss,
+        local_provider=local_provider,
+        cwd=cwd,
+    )
+
+
+class TestBuildCodexCommand:
+    def test_no_ask_for_approval_flag(self):
+        rt = _make_runtime()
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert "--ask-for-approval" not in cmd
+
+    def test_model_not_passed_for_subscription_mode(self):
+        """Subscription mode: -m must NOT be passed (breaks ChatGPT auth)."""
+        rt = _make_runtime(model="gpt-4.1")
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert "--model" not in cmd
+        assert "-m" not in cmd
+
+    def test_model_passed_for_oss_mode(self):
+        rt = _make_runtime(model="qwen2.5-coder:14b", oss=True)
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert "--model" in cmd
+        assert "qwen2.5-coder:14b" in cmd
+
+    def test_model_passed_for_local_provider_mode(self):
+        rt = _make_runtime(model="gemma-3-4b-it", local_provider="lmstudio")
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert "--model" in cmd
+
+    def test_cd_passed_when_effective_cwd_set(self, tmp_path):
+        rt = _make_runtime()
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=str(tmp_path))
+        assert "--cd" in cmd
+        assert str(tmp_path) in cmd
+
+    def test_cd_not_passed_when_no_effective_cwd(self):
+        rt = _make_runtime()
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert "--cd" not in cmd
+
+    def test_cd_uses_effective_cwd_not_self_cwd(self, tmp_path):
+        """effective_cwd from env should override self.cwd=None."""
+        effective = str(tmp_path / "workspace")
+        rt = _make_runtime()  # self.cwd is None
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=effective)
+        assert "--cd" in cmd
+        idx = cmd.index("--cd")
+        assert cmd[idx + 1] == effective
+
+    def test_ephemeral_and_skip_git_flags_present(self):
+        rt = _make_runtime()
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert "--ephemeral" in cmd
+        assert "--skip-git-repo-check" in cmd
+
+    def test_output_schema_and_last_message_flags(self):
+        rt = _make_runtime()
+        cmd = rt._build_codex_command("task", schema_path="/my/schema.json", output_path="/my/out.json", effective_cwd=None)
+        assert "--output-schema" in cmd
+        assert "/my/schema.json" in cmd
+        assert "--output-last-message" in cmd
+        assert "/my/out.json" in cmd
+
+
+# ---------------------------------------------------------------------------
+# execute — codex path (subprocess mocked)
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteCodexPath:
+    def _make_runtime(self) -> ClaudeSubscriptionCliRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+        return ClaudeSubscriptionCliRuntime(
+            descriptor=descriptor,
+            cli_kind="codex",
+            command=["codex"],
+        )
+
+    def _make_env(self, workspace: str = "") -> dict[str, str]:
+        return {
+            "AITEAM_RUN_ID": "run-test",
+            "AITEAM_TASK_ID": "issue-1",
+            "AITEAM_WAKE_REASON": "child_report",
+            "AITEAM_AGENT_ROLE": "engineer",
+            "AITEAM_WAKE_PAYLOAD_JSON": '{"issue_id": "issue-1", "task": "write hello.txt"}',
+            "AITEAM_WORKSPACE_ROOT": workspace,
+        }
+
+    def test_successful_run_returns_completed(self, tmp_path):
+        output = json.dumps({"status": "completed", "summary": "wrote file", "add_comment": "done"})
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = output
+        mock_proc.stderr = ""
+
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc) as mock_run:
+            # Also patch _command_context's read_output to return the output
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={
+                    "command": ["codex.cmd", "exec", "..."],
+                    "read_output": lambda proc: output,
+                },
+            ):
+                result = rt.execute({"issue_id": "issue-1"}, env)
+
+        assert result.status == "completed"
+        assert result.output == "wrote file"
+
+    def test_nonzero_exit_returns_failed(self, tmp_path):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stdout = "some error output"
+        mock_proc.stderr = ""
+
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc):
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={
+                    "command": ["codex.cmd", "exec"],
+                    "read_output": lambda proc: proc.stdout,
+                },
+            ):
+                result = rt.execute({"issue_id": "issue-1"}, env)
+
+        assert result.status == "failed"
+        assert result.error_code == "subscription_cli_nonzero_exit"
+
+    def test_add_comment_synthesised_as_op(self, tmp_path):
+        output = json.dumps({"status": "completed", "summary": "ok", "add_comment": "check the tests"})
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = output
+        mock_proc.stderr = ""
+
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc):
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={
+                    "command": ["codex.cmd"],
+                    "read_output": lambda proc: output,
+                },
+            ):
+                result = rt.execute({"issue_id": "issue-1"}, env)
+
+        assert result.actions is not None
+        comments = result.actions.get("add_comments", [])
+        assert any("check the tests" in c for c in comments)
+
+    def test_command_not_found_returns_failed(self, tmp_path):
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+
+        with patch(
+            "aiteam.adapters.subscription_cli_adapter.subprocess.run",
+            side_effect=FileNotFoundError("codex not found"),
+        ):
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={
+                    "command": ["codex"],
+                    "read_output": lambda proc: "",
+                },
+            ):
+                result = rt.execute({"issue_id": "issue-1"}, env)
+
+        assert result.status == "failed"
+        assert result.error_code == "subscription_cli_not_found"
+
+    def test_stdin_devnull_passed_to_subprocess(self, tmp_path):
+        """Verify subprocess.DEVNULL is always passed to prevent stdin hang."""
+        import subprocess as _subprocess
+        output = json.dumps({"status": "completed", "summary": "ok", "add_comment": ""})
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+
+        captured_kwargs: dict[str, Any] = {}
+
+        def fake_run(*args: Any, **kwargs: Any) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_proc
+
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={"command": ["codex"], "read_output": lambda proc: output},
+            ):
+                rt.execute({"issue_id": "issue-1"}, env)
+
+        assert captured_kwargs.get("stdin") == _subprocess.DEVNULL
+
+    def test_effective_cwd_passed_to_subprocess(self, tmp_path):
+        """subprocess.run must receive the resolved workspace as cwd."""
+        output = json.dumps({"status": "completed", "summary": "ok", "add_comment": ""})
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+
+        captured_kwargs: dict[str, Any] = {}
+
+        def fake_run(*args: Any, **kwargs: Any) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_proc
+
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={"command": ["codex"], "read_output": lambda proc: output},
+            ):
+                rt.execute({"issue_id": "issue-1"}, env)
+
+        assert captured_kwargs.get("cwd") == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# reconcile upgrades API-only junior to CLI
+# ---------------------------------------------------------------------------
+
+
+def _init_db_with_agents(db_path: Path, agents: list[tuple]) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executemany(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, adapter_config_json, capabilities_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            agents,
+        )
+        conn.commit()
+
+
+class TestReconcileUpgradesApiOnlyJunior:
+    def test_engineer_on_openai_api_upgraded_to_codex_when_available(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "aiteam.db"
+        _init_db_with_agents(db_path, [
+            ("role:lead", "lead", "Lead", "lead", "openai_api", '{"profile_id":"openai_api"}', "[]"),
+            ("role:engineer", "engineer", "Engineer", "standard", "openai_api", '{"profile_id":"openai_api"}', "[]"),
+        ])
+        # Project now includes codex_subscription
+        (tmp_path / "project_config.json").write_text(
+            json.dumps({"version": 1, "adapter_profile_ids": ["codex_subscription", "openai_api"]}),
+            encoding="utf-8",
+        )
+
+        repaired = reconcile_project_agent_policy(db_path)
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = {r["id"]: dict(r) for r in conn.execute(
+                "SELECT id, adapter_type, adapter_config_json FROM agents"
+            )}
+
+        assert "role:engineer" in repaired
+        assert rows["role:engineer"]["adapter_type"] == "subscription_cli"
+        cfg = json.loads(rows["role:engineer"]["adapter_config_json"])
+        assert cfg["profile_id"] == "codex_subscription"
+
+    def test_lead_on_openai_api_not_upgraded_to_codex(self, tmp_path: Path) -> None:
+        """Senior roles should keep openai_api even when codex_subscription is available."""
+        db_path = tmp_path / "aiteam.db"
+        _init_db_with_agents(db_path, [
+            ("role:lead", "lead", "Lead", "lead", "openai_api", '{"profile_id":"openai_api"}', "[]"),
+        ])
+        (tmp_path / "project_config.json").write_text(
+            json.dumps({"version": 1, "adapter_profile_ids": ["codex_subscription", "openai_api"]}),
+            encoding="utf-8",
+        )
+
+        reconcile_project_agent_policy(db_path)
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT adapter_type FROM agents WHERE id='role:lead'").fetchone()
+
+        # Lead should stay on openai_api — it was explicitly set, not a placeholder
+        assert row["adapter_type"] == "openai_api"
+
+    def test_engineer_with_explicit_cli_not_overwritten(self, tmp_path: Path) -> None:
+        """If engineer is already on subscription_cli, reconcile should not change it."""
+        cfg = json.dumps({"profile_id": "codex_subscription", "cli_kind": "codex"})
+        db_path = tmp_path / "aiteam.db"
+        _init_db_with_agents(db_path, [
+            ("role:lead", "lead", "Lead", "lead", "openai_api", '{"profile_id":"openai_api"}', "[]"),
+            ("role:engineer", "engineer", "Engineer", "standard", "subscription_cli", cfg, '["repo_write"]'),
+        ])
+        (tmp_path / "project_config.json").write_text(
+            json.dumps({"version": 1, "adapter_profile_ids": ["codex_subscription", "openai_api"]}),
+            encoding="utf-8",
+        )
+
+        repaired = reconcile_project_agent_policy(db_path)
+
+        # Engineer already has subscription_cli — nothing to repair for capabilities (they're set)
+        # adapter_type is already correct, supervisor may be wired
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT adapter_type, adapter_config_json FROM agents WHERE id='role:engineer'").fetchone()
+
+        assert row["adapter_type"] == "subscription_cli"
+        assert json.loads(row["adapter_config_json"])["profile_id"] == "codex_subscription"

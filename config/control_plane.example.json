@@ -1,0 +1,20 @@
+{
+  "database_path": ".aiteam/aiteam.db",
+  "heartbeat_interval_ms": 2000,
+  "stalled_run_after_sec": 300,
+  "wakeup_reasons": [
+    "timer",
+    "assignment",
+    "comment",
+    "interaction_resolved",
+    "approval_decided",
+    "liveness_continuation",
+    "dependency",
+    "manual"
+  ],
+  "noise_policy": {
+    "default_gate_strength": "light",
+    "prefer_inline_activity": true,
+    "escalate_only_when_blocked": true
+  }
+}

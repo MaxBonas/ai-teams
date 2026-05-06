@@ -30,9 +30,9 @@ Comandos ejecutados:
 - [ ] Toca flujo entre maquinas
 - [ ] Toca runtime/config local
 
-## Checklist entre maquinas
+## Checklist de portabilidad
 
-- [ ] Este cambio deberia sobrevivir a `git pull` en `MAX-GAMINGPC`
-- [ ] Este cambio deberia sobrevivir a `git pull` en `ORCH-01`
+- [ ] Este cambio funciona en cualquier maquina sin rutas hardcodeadas
 - [ ] No requiere commitear `venv/`, `runtime/` ni `node_modules/`
-- [ ] Si requiere config compartida, la deje en `config/*.example.json`
+- [ ] Si requiere config compartida, la deje en `config/*.example.json` o `.env.example`
+- [ ] Cualquier ruta de maquina se configura via env var o la UI de ajustes

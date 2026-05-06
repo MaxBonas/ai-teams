@@ -1,6 +1,3 @@
-"""AI Team Hybrid Orchestrator package."""
+"""AI Teams control-plane package."""
 
-from .config import build_default_router_policy
-from .orchestrator import AITeamOrchestrator
-
-__all__ = ["AITeamOrchestrator", "build_default_router_policy"]
+__all__: list[str] = []

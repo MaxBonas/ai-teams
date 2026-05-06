@@ -28,12 +28,16 @@ build/
 
 # Pytest
 .pytest_cache/
+.pytest-*/
 .coverage
 htmlcov/
 pytest_out.txt
 .tmp/
 .tmp_*/
+.tmp-*/
 tmp_*/
+tmp*/
+pytest_tmp*/
 .ruff_cache/
 
 # Node / frontend

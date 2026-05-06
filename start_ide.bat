@@ -1,6 +1,15 @@
 @echo off
 setlocal EnableExtensions
 
+rem ── AI Team IDE launcher ──────────────────────────────────────────────────
+rem  Backend  : Python uvicorn  → http://localhost:8010  (api.main:app --reload)
+rem  Frontend : Vite dev server → http://localhost:9490  (ide-frontend)
+rem  Logs     : runtime\ide_logs\  (backend.log / frontend.log)
+rem  Stop     : stop_ide.bat
+rem  Note     : --reload restarts the heartbeat on file changes; stale runs are
+rem             recovered automatically via reconcile_stale_runs() on startup.
+rem ─────────────────────────────────────────────────────────────────────────
+
 set "ROOT_DIR=%~dp0"
 set "BACKEND_PORT=8010"
 set "FRONTEND_PORT=9490"

@@ -1,0 +1,515 @@
+from __future__ import annotations
+
+import contextlib
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+from aiteam.db.dependencies import sync_default_child_dependencies
+from aiteam.db.wakeups import enqueue_wakeup
+from aiteam.project_adapters import apply_adapter_policy_to_member
+from aiteam.user_config import ROLE_CAPABILITY_PROFILES
+from aiteam.run_profiles import (
+    FULL_TEAM,
+    LEAD_QUORUM,
+    SOLO_LEAD,
+    AgentBlueprint,
+    normalize_run_profile,
+    profile_config,
+    build_default_team_blueprint,
+)
+
+
+def _issue_profile(issue: dict[str, Any]) -> str:
+    """Extract the run profile from issue metadata, defaulting to full_team."""
+    metadata: dict[str, Any] = {}
+    raw = issue.get("metadata_json") or issue.get("metadata") or {}
+    if isinstance(raw, str):
+        try:
+            metadata = json.loads(raw)
+        except Exception:
+            pass
+    elif isinstance(raw, dict):
+        metadata = raw
+    return normalize_run_profile(metadata.get("profile") or "")
+
+
+def build_team_proposal(
+    issue: dict[str, Any],
+    *,
+    profile: str | None = None,
+    adapter_profiles: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build the first structured Lead proposal for a fresh project.
+
+    Profile is read from the issue metadata (key ``profile``) or the explicit
+    ``profile`` argument. Defaults to ``full_team``.
+
+    ``solo_lead``   — no team hiring; Lead works alone; returns a minimal
+                      proposal flagged as direct_work so the executor skips the
+                      ``suggest_tasks`` interaction.
+
+    ``lead_quorum`` — Lead + two senior quorum auditors review the plan before
+                      execution begins.
+
+    ``full_team``   — Lead + engineer + reviewer + qa (default).
+    """
+    effective_profile = normalize_run_profile(profile or _issue_profile(issue))
+    title = str(issue.get("title") or "Proyecto").strip()
+    description = str(issue.get("description") or title).strip()
+    parent_issue_id = str(issue.get("id") or "issue:intake").strip() or "issue:intake"
+
+    blueprint = build_default_team_blueprint(
+        goal_id=parent_issue_id,
+        raw_profile=effective_profile,
+        objective=description,
+        source="lead_intake",
+    )
+    pconf = profile_config(effective_profile)
+
+    proposed_team = [
+        _blueprint_to_member(a, adapter_profiles=adapter_profiles or [])
+        for a in blueprint.agents
+        if a.role not in {"team_lead", "lead"}
+    ]  # Lead is already created
+
+    suggested_issues = _suggested_issues_for_profile(effective_profile, parent_issue_id, proposed_team)
+
+    accountability = _accountability_for_profile(effective_profile)
+
+    return {
+        "version": 1,
+        "profile": effective_profile,
+        "direct_work": effective_profile == SOLO_LEAD,  # executor reads this to skip suggest_tasks
+        "goal": {
+            "issue_id": issue.get("id"),
+            "title": title,
+            "description": description,
+        },
+        "accountability": accountability,
+        "proposed_team": proposed_team,
+        "suggested_issues": suggested_issues,
+        "cost_policy": {
+            "profile": effective_profile,
+            "principle": blueprint.rationale,
+            "allows_hiring": pconf.allows_hiring,
+            "allows_worker_delegation": pconf.allows_worker_delegation,
+            "requires_review_gate": pconf.requires_review_gate,
+            "requires_qa_gate": pconf.requires_qa_gate,
+            "delegation_taxonomy": [
+                "planning",
+                "well_scoped_code_change",
+                "long_read",
+                "context_compression",
+                "web_research",
+                "mcp_simple",
+                "risk_review",
+                "acceptance_verification",
+                "high_risk_escalation",
+            ],
+        },
+    }
+
+
+_LEAD_ID_ALIASES = {"role:team_lead", "role:lead", "team_lead", "lead"}
+
+
+def _normalize_lead_id(agent_id: str | None) -> str | None:
+    """Map any variant of the Lead agent ID to the canonical 'role:lead'."""
+    if not agent_id:
+        return None
+    return "role:lead" if agent_id in _LEAD_ID_ALIASES else agent_id
+
+
+def _blueprint_to_member(agent: AgentBlueprint, *, adapter_profiles: list[dict[str, Any]]) -> dict[str, Any]:
+    member = {
+        "id": agent.agent_id,
+        "role": agent.role,
+        "name": agent.name,
+        "seniority": agent.seniority,
+        "adapter_type": "role_builtin",  # default; user can change in hiring panel
+        "adapter_config": {},
+        "budget_monthly_cents": 0,
+        "capabilities": list(agent.capabilities),
+        "supervisor_agent_id": _normalize_lead_id(agent.supervisor_agent_id),
+        "rationale": agent.assignment_reason,
+    }
+    return apply_adapter_policy_to_member(member, adapter_profiles)
+
+
+def _accountability_for_profile(profile: str) -> list[dict[str, Any]]:
+    if profile == SOLO_LEAD:
+        return []
+    if profile == LEAD_QUORUM:
+        return [
+            {"from": "quorum_auditor_1", "to": "lead", "reason": "independent plan review"},
+            {"from": "quorum_auditor_2", "to": "lead", "reason": "independent plan review"},
+        ]
+    return [
+        {"from": "engineer", "to": "lead", "reason": "implementation progress, blockers, and risk notes"},
+        {"from": "reviewer", "to": "lead", "reason": "code review + static QA before done"},
+    ]
+
+
+def _suggested_issues_for_profile(
+    profile: str,
+    parent_issue_id: str,
+    proposed_team: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    def child_id(suffix: str) -> str:
+        return f"{parent_issue_id}:{suffix}"
+
+    if profile == SOLO_LEAD:
+        # Lead works alone — just one planning+execution issue for itself
+        return [
+            {
+                "id": child_id("work"),
+                "title": "Ejecutar tarea directamente",
+                "description": "El Lead ejecuta la tarea completo sin delegar. Reportará progreso en el thread.",
+                "role": "lead",
+                "assignee_agent_id": "role:lead",
+                "complexity": "medium",
+                "priority": 100,
+                "delegation_type": "direct_work",
+                "cost_tier": "lead",
+                "report_to": None,
+                "reviewed_by": None,
+                "evidence_required": ["resultado y cambios realizados", "criterio de cierre cumplido"],
+                "risk_checks": ["alcance ambiguo", "supuestos no declarados"],
+            }
+        ]
+
+    if profile == LEAD_QUORUM:
+        # Lead + quorum auditors review the plan; no worker delegation
+        reviewer_ids = [m["id"] for m in proposed_team if "quorum" in m["role"] or "reviewer" in m["role"]]
+        return [
+            {
+                "id": child_id("plan"),
+                "title": "Planificar y presentar al quorum",
+                "description": "El Lead crea el plan detallado que los auditores revisarán antes de ejecutar.",
+                "role": "lead",
+                "assignee_agent_id": "role:lead",
+                "complexity": "high",
+                "priority": 100,
+                "delegation_type": "planning",
+                "cost_tier": "lead",
+                "report_to": None,
+                "reviewed_by": reviewer_ids[0] if reviewer_ids else None,
+                "evidence_required": [
+                    "objetivo y criterio de cierre",
+                    "fases y dependencias",
+                    "riesgos y plan de mitigación",
+                    "aprobación del quorum",
+                ],
+                "risk_checks": ["alcance ambiguo", "plan sin revisión independiente"],
+            },
+        ] + [
+            {
+                "id": child_id(f"quorum_{i+1}"),
+                "title": f"Revisión de quorum {i+1}",
+                "description": "Auditor senior revisa el plan del Lead de forma independiente antes de ejecutar.",
+                "role": m["role"],
+                "assignee_agent_id": m["id"],
+                "complexity": "medium",
+                "priority": 90 - i * 5,
+                "delegation_type": "risk_review",
+                "cost_tier": "senior",
+                "report_to": "role:lead",
+                "reviewed_by": "role:lead",
+                "evidence_required": [
+                    "veredicto: approved / changes_requested / blocked",
+                    "riesgos identificados",
+                    "cambios requeridos si los hay",
+                ],
+                "risk_checks": ["plan demasiado ambicioso", "dependencias no modeladas"],
+            }
+            for i, m in enumerate(proposed_team)
+        ]
+
+    # full_team — plan + engineer + reviewer.
+    # QA is NOT created by default: the Reviewer absorbs static QA.
+    # The LLM Lead may add a QA issue explicitly if runtime verification is needed
+    # and a CLI adapter is available to execute tests.
+    role_to_agent = {m["role"]: m["id"] for m in proposed_team}
+    return [
+        {
+            "id": child_id("plan"),
+            "title": "Planificar flujo, riesgos y delegaciones",
+            "description": (
+                "Convertir el objetivo en un plan de trabajo detallado: fases, dependencias, "
+                "delegaciones, riesgos, y condiciones de revisión."
+            ),
+            "role": "lead",
+            "assignee_agent_id": "role:lead",
+            "complexity": "high",
+            "priority": 100,
+            "delegation_type": "planning",
+            "cost_tier": "lead",
+            "report_to": None,
+            "reviewed_by": "user_or_light_review",
+            "evidence_required": [
+                "objetivo y criterio de cierre",
+                "sub-issues con owner y complejidad",
+                "riesgos de esta run y de la siguiente",
+                "condiciones de escalado",
+            ],
+            "risk_checks": ["alcance ambiguo", "dependencias no modeladas", "delegaciones sin owner o sin evidencia"],
+        },
+        {
+            "id": child_id("build"),
+            "title": "Implementar primera entrega ejecutable",
+            "description": (
+                "Construir el primer vertical funcional siguiendo el plan del Lead. "
+                "Reportar supuestos, decisiones y bloqueos."
+            ),
+            "role": "engineer",
+            "assignee_agent_id": role_to_agent.get("engineer", "role:engineer"),
+            "complexity": "medium",
+            "priority": 70,
+            "delegation_type": "well_scoped_code_change",
+            "cost_tier": "standard_worker",
+            "report_to": "role:lead",
+            "reviewed_by": role_to_agent.get("reviewer", "role:reviewer"),
+            "evidence_required": [
+                "resumen de cambios",
+                "archivos o modulos tocados",
+                "pruebas ejecutadas o razon de no ejecutarlas",
+                "riesgos pendientes para review",
+            ],
+            "risk_checks": ["scope creep", "cambios sin prueba", "supuestos no comunicados al Lead"],
+        },
+        {
+            "id": child_id("review"),
+            "title": "Revisar riesgos, diseño, QA estático y regresiones",
+            "description": (
+                "Revisar el plan y la implementación. Cubrir code review y QA estático: "
+                "correctness, edge cases, error handling y riesgos de la siguiente run. "
+                "Listar items no verificables en runtime para que el Lead decida si se necesita QA."
+            ),
+            "role": "reviewer",
+            "assignee_agent_id": role_to_agent.get("reviewer", "role:reviewer"),
+            "complexity": "medium",
+            "priority": 50,
+            "delegation_type": "risk_review",
+            "cost_tier": "senior",
+            "report_to": "role:lead",
+            "reviewed_by": "role:lead",
+            "evidence_required": [
+                "veredicto approved/changes_requested/blocked",
+                "riesgos concretos con referencias a código",
+                "resultado QA estático (happy path, edge cases, error handling)",
+                "items no verificables en runtime (listados explícitamente)",
+                "cambios requeridos antes de cerrar",
+            ],
+            "risk_checks": ["regresiones", "diseño frágil", "falta de criterios de cierre", "QA insuficiente"],
+        },
+    ]
+
+
+_API_ONLY_ADAPTER_TYPES = {"openai_api", "anthropic_api", "gemini_api", "anthropic_sonnet"}
+_FILE_WRITING_ROLES = {"engineer", "qa", "worker"}
+
+
+def format_team_proposal(proposal: dict[str, Any]) -> str:
+    profile = proposal.get("profile", "full_team")
+    team = proposal.get("proposed_team") or []
+    issues = proposal.get("suggested_issues") or []
+    direct_work = proposal.get("direct_work", False)
+
+    lines = [
+        "Propuesta inicial del Lead",
+        "",
+        f"Perfil: {profile}",
+    ]
+
+    if direct_work:
+        lines += [
+            "",
+            "Modo solo_lead: el Lead ejecuta la tarea directamente sin contratar equipo.",
+            "Crearé la issue de trabajo y empezaré inmediatamente.",
+        ]
+    else:
+        if team:
+            lines += ["", "Equipo propuesto:"]
+            for member in team:
+                role = member.get("role", "")
+                adapter = member.get("adapter_type", "role_builtin")
+                model = (member.get("adapter_config") or {}).get("model") or ""
+                role_cap = ROLE_CAPABILITY_PROFILES.get(role.lower(), {})
+                cap_note = role_cap.get("note", "")
+                # Build a concise model annotation
+                model_tag = f"modelo: {model}" if model else "modelo: automático (config.toml)"
+                ws_tag = " · ⚠️ requiere CLI" if role_cap.get("requires_workspace") and adapter in _API_ONLY_ADAPTER_TYPES else ""
+                lines.append(
+                    f"- {member['name']} ({role}, {member.get('seniority','standard')})"
+                    f" — {adapter} · {model_tag}{ws_tag}"
+                    f"\n  {cap_note}"
+                    f"\n  {member.get('rationale','')}"
+                )
+        lines += ["", "Issues que se crearán:"]
+        for issue in issues:
+            assignee = issue.get("assignee_agent_id") or issue.get("role") or "?"
+            evidence = ", ".join(issue.get("evidence_required") or [])
+            lines.append(
+                f"- [{issue.get('delegation_type','work')}] {issue['title']}"
+                f"\n  → {assignee} | evidencia: {evidence}"
+            )
+        lines += ["", "Acepta para crear el equipo y las issues. Rechaza para ajustar instrucciones."]
+
+        # ── API-only adapter warning ─────────────────────────────────────────
+        api_only_warnings = [
+            member
+            for member in team
+            if member.get("role", "").lower() in _FILE_WRITING_ROLES
+            and member.get("adapter_type", "").lower() in _API_ONLY_ADAPTER_TYPES
+        ]
+        if api_only_warnings:
+            lines += [
+                "",
+                "⚠️  ADVERTENCIA — Adapter API-only detectado en rol de implementación:",
+            ]
+            for member in api_only_warnings:
+                lines.append(
+                    f"   · {member['name']} ({member['role']}) usa `{member.get('adapter_type')}` "
+                    f"que NO puede escribir archivos en el workspace."
+                )
+            lines += [
+                "   El engineer necesita un adapter CLI/local (subscription_cli, Codex CLI, Gemini CLI u Ollama)",
+                "   para producir evidencia de implementación. Si aceptas con este adapter el engineer",
+                "   quedará bloqueado inmediatamente con liveness_reason=api_only_engineer_no_workspace_changes.",
+                "   Cambia el adapter antes de aceptar o ajusta el proyecto para usar subscription_cli.",
+            ]
+
+    return "\n".join(lines)
+
+
+def apply_accepted_team_proposal(
+    db_path: Path,
+    *,
+    parent_issue_id: str,
+    proposal: dict[str, Any],
+    source_run_id: str,
+) -> dict[str, Any]:
+    created_agents: list[str] = []
+    created_issues: list[str] = []
+    with contextlib.closing(_connect(db_path)) as conn:
+        for member in proposal.get("proposed_team") or []:
+            row = conn.execute(
+                """
+                INSERT INTO agents (
+                    id, role, name, seniority, adapter_type, adapter_config_json, capabilities_json,
+                    budget_monthly_cents, supervisor_agent_id, metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    role = excluded.role,
+                    name = excluded.name,
+                    seniority = excluded.seniority,
+                    adapter_type = excluded.adapter_type,
+                    adapter_config_json = excluded.adapter_config_json,
+                    capabilities_json = excluded.capabilities_json,
+                    budget_monthly_cents = excluded.budget_monthly_cents,
+                    supervisor_agent_id = excluded.supervisor_agent_id,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+                """,
+                (
+                    member["id"],
+                    member["role"],
+                    member["name"],
+                    member.get("seniority") or "standard",
+                    member.get("adapter_type") or "manual",
+                    json.dumps(member.get("adapter_config") or {}, ensure_ascii=False, sort_keys=True),
+                    json.dumps(member.get("capabilities") or [], ensure_ascii=False),
+                    int(member.get("budget_monthly_cents") or 0),
+                    member.get("supervisor_agent_id"),
+                    json.dumps({"source": "lead_intake", "rationale": member.get("rationale")}, ensure_ascii=False),
+                ),
+            ).fetchone()
+            if row:
+                created_agents.append(row["id"])
+
+        parent = conn.execute("SELECT goal_id FROM issues WHERE id = ?", (parent_issue_id,)).fetchone()
+        goal_id = parent["goal_id"] if parent else None
+        for item in proposal.get("suggested_issues") or []:
+            row = conn.execute(
+                """
+                INSERT OR IGNORE INTO issues (
+                    id, parent_id, goal_id, title, description, status, priority,
+                    role, complexity, criticality, assignee_agent_id, metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, 'medium', ?, ?)
+                RETURNING id
+                """,
+                (
+                    item["id"],
+                    parent_issue_id,
+                    goal_id,
+                    item["title"],
+                    item.get("description"),
+                    int(item.get("priority") or 0),
+                    item.get("role"),
+                    item.get("complexity"),
+                    item.get("assignee_agent_id"),
+                    json.dumps(
+                        {
+                            "source": "lead_intake",
+                            "source_run_id": source_run_id,
+                            "delegation_type": item.get("delegation_type"),
+                            "cost_tier": item.get("cost_tier"),
+                            "report_to": item.get("report_to"),
+                            "reviewed_by": item.get("reviewed_by"),
+                            "evidence_required": item.get("evidence_required") or [],
+                            "risk_checks": item.get("risk_checks") or [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            ).fetchone()
+            if row:
+                created_issues.append(row["id"])
+                if item.get("assignee_agent_id"):
+                    enqueue_wakeup(
+                        db_path,
+                        agent_id=item["assignee_agent_id"],
+                        source="assignment",
+                        reason="assignment",
+                        trigger_detail=f"accepted_proposal:{parent_issue_id}",
+                        payload={
+                            "issue_id": item["id"],
+                            "wake_reason": "assignment",
+                            "delegation_reason": item.get("description") or item.get("title"),
+                            "delegation_type": item.get("delegation_type"),
+                            "complexity": item.get("complexity"),
+                            "cost_tier": item.get("cost_tier"),
+                            "report_to": item.get("report_to"),
+                            "reviewed_by": item.get("reviewed_by"),
+                            "evidence_required": item.get("evidence_required") or [],
+                        },
+                        idempotency_key=f"assignment:{item['id']}:{item['assignee_agent_id']}",
+                    )
+
+        conn.execute(
+            """
+            UPDATE issues
+            SET status = 'in_progress',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND status IN ('todo', 'backlog')
+            """,
+            (parent_issue_id,),
+        )
+
+    sync_default_child_dependencies(db_path, parent_issue_id=parent_issue_id)
+
+    return {"created_agents": created_agents, "created_issues": created_issues}
+
+
+def _connect(db_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(db_path), timeout=20.0, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 20000")
+    return conn

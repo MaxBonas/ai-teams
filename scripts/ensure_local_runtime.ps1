@@ -194,9 +194,8 @@ try {
     Ensure-Directory -PathValue (Join-Path $runtimeDir "ollama")
     $state = Load-State
 
-    Sync-Template -State $state -SourcePath (Join-Path $configDir "adapters.example.json") -TargetPath (Join-Path $runtimeDir "adapters.json")
-    Sync-Template -State $state -SourcePath (Join-Path $configDir "mcp_servers.example.json") -TargetPath (Join-Path $runtimeDir "mcp_servers.json")
-    Sync-Template -State $state -SourcePath (Join-Path $configDir "model_catalog.example.json") -TargetPath (Join-Path $runtimeDir "model_catalog.json")
+    Sync-Template -State $state -SourcePath (Join-Path $configDir "control_plane.example.json") -TargetPath (Join-Path $runtimeDir "control_plane.json")
+    Sync-Template -State $state -SourcePath (Join-Path $configDir "agents.example.json") -TargetPath (Join-Path $runtimeDir "agents.json")
     Save-State -State $state
 
     Write-Info "Runtime local listo."

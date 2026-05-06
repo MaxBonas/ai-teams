@@ -1,16 +1,25 @@
-from .api import ApiAdapter
-from .base import ModelAdapter
-from .external_program import ExternalProgramAdapter
-from .fake import FakeSuccessAdapter
-from .registry import build_external_adapter_template, load_external_adapters
-from .subscription import SubscriptionAdapter
+from aiteam.adapters.registry import (
+    AdapterDescriptor,
+    AdapterRegistry,
+    AdapterRuntime,
+    ExecutionResult,
+    StaticAdapterRuntime,
+    build_default_registry,
+)
+from aiteam.adapters.subprocess_adapter import SubprocessAdapterRuntime
+from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntime
+from aiteam.adapters.openai_adapter import OpenAIResponsesRuntime
+from aiteam.adapters.gemini_adapter import GeminiApiRuntime
 
 __all__ = [
-    "ApiAdapter",
-    "ExternalProgramAdapter",
-    "FakeSuccessAdapter",
-    "ModelAdapter",
-    "SubscriptionAdapter",
-    "build_external_adapter_template",
-    "load_external_adapters",
+    "AdapterDescriptor",
+    "AdapterRegistry",
+    "AdapterRuntime",
+    "ClaudeSubscriptionCliRuntime",
+    "ExecutionResult",
+    "GeminiApiRuntime",
+    "OpenAIResponsesRuntime",
+    "StaticAdapterRuntime",
+    "SubprocessAdapterRuntime",
+    "build_default_registry",
 ]

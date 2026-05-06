@@ -74,7 +74,7 @@ try {
 }
 
 Write-Host "`nListo! Python ahora bypasea el VPN." -ForegroundColor Green
-Write-Host "Prueba Groq con: venv\Scripts\python.exe scripts\probe_providers.py" -ForegroundColor Cyan
+Write-Host "Prueba providers desde el futuro adapter registry v2 cuando este conectado a ejecucion real." -ForegroundColor Cyan
 Write-Host "`nSi no funciona, hazlo manual en NordVPN > Ajustes > Split Tunneling:" -ForegroundColor Yellow
 Write-Host "  1. Activar Split Tunneling" -ForegroundColor White
 Write-Host "  2. Modo: 'Deshabilitar VPN para apps seleccionadas'" -ForegroundColor White

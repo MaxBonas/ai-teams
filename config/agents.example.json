@@ -1,0 +1,66 @@
+{
+  "profiles": {
+    "solo_lead": {
+      "description": "Solo el Lead planifica, ejecuta o decide delegaciones manuales.",
+      "default_roles": ["lead"]
+    },
+    "lead_quorum": {
+      "description": "Lead mas quorum senior para planificacion, riesgos y decisiones criticas.",
+      "default_roles": ["lead", "senior_engineer", "senior_reviewer"]
+    },
+    "full_team": {
+      "description": "Equipo dinamico contratado por el Lead segun el proyecto.",
+      "default_roles": ["lead"]
+    }
+  },
+  "adapters": [
+    {
+      "adapter_type": "manual",
+      "channel": "manual",
+      "provider": "human",
+      "model": "operator",
+      "cost_tier": "free"
+    },
+    {
+      "adapter_type": "openai_api",
+      "channel": "api",
+      "provider": "openai",
+      "model": "configured-per-agent",
+      "cost_tier": "paid"
+    },
+    {
+      "adapter_type": "gemini_api",
+      "channel": "api",
+      "provider": "google",
+      "model": "configured-per-agent",
+      "cost_tier": "paid"
+    },
+    {
+      "adapter_type": "subscription_cli",
+      "channel": "subscription",
+      "provider": "codex-or-gemini-cli",
+      "model": "configured-per-agent-or-local",
+      "cost_tier": "subscription"
+    },
+    {
+      "adapter_type": "subscription_cli",
+      "channel": "local",
+      "provider": "codex-oss",
+      "model": "qwen/gemma configured per agent",
+      "cost_tier": "local"
+    }
+  ],
+  "delegation_policy": {
+    "senior_roles": ["lead", "senior_engineer", "senior_reviewer"],
+    "worker_roles": ["engineer", "qa", "researcher", "scout"],
+    "prefer_cheaper_workers_for": [
+      "long_file_reading",
+      "context_compression",
+      "simple_coding",
+      "well_scoped_changes",
+      "basic_research",
+      "simple_mcp_or_cli_work"
+    ],
+    "senior_retains_accountability": true
+  }
+}

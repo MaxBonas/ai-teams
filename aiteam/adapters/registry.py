@@ -1,254 +1,203 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-from aiteam.adapters.api import ApiAdapter
-from aiteam.adapters.base import ModelAdapter
-from aiteam.adapters.external_program import ExternalProgramAdapter
-from aiteam.adapters.subscription import SubscriptionAdapter
-from aiteam.types import ChannelType
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 
-def load_external_adapters(config_path: Path) -> list[ModelAdapter]:
-    if not config_path.exists():
-        return []
-    raw = config_path.read_text(encoding="utf-8")
-    if not raw.strip():
-        return []
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return []
-
-    items = payload.get("external_adapters", [])
-    if not isinstance(items, list):
-        return []
-
-    adapters: list[ModelAdapter] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        if not _is_enabled(item.get("enabled", True)):
-            continue
-        adapter = _build_adapter(item)
-        if adapter is not None:
-            adapters.append(adapter)
-    return adapters
+@dataclass(frozen=True)
+class AdapterDescriptor:
+    adapter_type: str
+    channel: str
+    provider: str = ""
+    model: str = ""
+    cost_tier: int = 1
+    fallback_order: tuple[str, ...] = field(default_factory=tuple)
 
 
-def build_external_adapter_template(config_path: Path) -> None:
-    template = {
-        "external_adapters": [
-            {
-                "type": "external_program",
-                "name": "my_engineer_runtime",
-                "provider": "custom",
-                "model": "runtime-v1",
-                "channel": "subscription",
-                "command": ["python", "-c", "print('external runtime ok')"],
-                "capabilities": ["coding", "analysis"],
-                "role_targets": ["engineer", "reviewer"],
-                "priority": "secondary",
-                "enabled": True,
-                "requires_approval": False,
-                "timeout_seconds": 120,
-                "cost_tier": 0,
-            },
-            {
-                "type": "external_program",
-                "name": "secretariawhatsapp",
-                "provider": "custom",
-                "model": "whatsapp-assistant",
-                "channel": "subscription",
-                "command": ["python", "-c", "print('configure secretariawhatsapp command')"],
-                "capabilities": ["analysis", "knowledge_base", "messaging"],
-                "role_targets": ["team_lead", "researcher"],
-                "priority": "secondary",
-                "enabled": False,
-                "requires_approval": True,
-                "timeout_seconds": 120,
-                "cost_tier": 1,
-            },
-            {
-                "type": "external_program",
-                "name": "playstore_publisher",
-                "provider": "custom",
-                "model": "android-release-bot",
-                "channel": "subscription",
-                "command": ["python", "-c", "print('configure playstore publisher command')"],
-                "capabilities": ["release", "android", "automation"],
-                "role_targets": ["engineer", "qa"],
-                "priority": "secondary",
-                "enabled": False,
-                "requires_approval": True,
-                "timeout_seconds": 180,
-                "cost_tier": 1,
-            },
-            {
-                "type": "external_program",
-                "name": "android_browser_auditor",
-                "provider": "custom",
-                "model": "android-audit-bot",
-                "channel": "subscription",
-                "command": ["python", "-c", "print('configure android auditor command')"],
-                "capabilities": ["qa", "android", "browser_testing"],
-                "role_targets": ["qa"],
-                "priority": "secondary",
-                "enabled": False,
-                "requires_approval": True,
-                "timeout_seconds": 180,
-                "cost_tier": 1,
-            },
-            {
-                "type": "external_program",
-                "name": "video_editor_remotion",
-                "provider": "custom",
-                "model": "remotion-video-suite",
-                "channel": "subscription",
-                "command": [
-                    "cmd",
-                    "/c",
-                    "cd /d \"C:\\Users\\Max\\Antigravity Projects\\VideoGenerator\" && npm run build -- --help",
-                ],
-                "capabilities": ["multimodal", "video_generation", "rendering"],
-                "role_targets": ["engineer", "researcher"],
-                "priority": "secondary",
-                "enabled": False,
-                "requires_approval": False,
-                "timeout_seconds": 180,
-                "cost_tier": 1,
-            },
-            {
-                "type": "external_program",
-                "name": "notebooklm_bridge",
-                "provider": "notebooklm",
-                "model": "knowledge-sync-v1",
-                "channel": "subscription",
-                "command": [
-                    "python",
-                    "-m",
-                    "aiteam.cli",
-                    "notebooklm-sync",
-                    "--runtime-dir",
-                    "runtime",
-                    "--notebooklm-from-prompt",
-                    "{prompt}",
-                    "--quiet",
-                ],
-                "capabilities": ["knowledge_base", "learning_sync", "summarization"],
-                "role_targets": ["team_lead", "researcher"],
-                "priority": "secondary",
-                "enabled": False,
-                "requires_approval": False,
-                "timeout_seconds": 180,
-                "cost_tier": 0,
-            },
-        ]
-    }
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(json.dumps(template, indent=2), encoding="utf-8")
+@dataclass
+class ExecutionResult:
+    """Result of executing a run through an adapter."""
+    status: str  # completed | failed | skipped
+    output: str | None = None
+    exit_code: int | None = None
+    error: str | None = None
+    error_code: str | None = None
+    usage: dict[str, Any] | None = None
+    actual_cost_cents: int = 0
+    actions: dict[str, Any] | None = None
 
 
-def _build_adapter(item: dict) -> ModelAdapter | None:
-    kind = str(item.get("type", "external_program")).strip().lower()
-    name = str(item.get("name", "external")).strip()
-    provider = str(item.get("provider", "custom")).strip().lower()
-    model = str(item.get("model", "unknown")).strip()
-    capabilities = _to_str_set(item.get("capabilities", []))
-    role_targets = _to_str_set(item.get("role_targets", []))
-    cost_tier = int(item.get("cost_tier", 1))
-    channel = _to_channel(item.get("channel", "subscription"))
-    routing_priority = _resolve_routing_priority(item, kind)
-    requires_approval = _to_bool(item.get("requires_approval", False))
+class AdapterRuntime(Protocol):
+    descriptor: AdapterDescriptor
 
-    if kind == "external_program":
-        command = item.get("command", [])
-        if not isinstance(command, list) or not all(isinstance(x, str) for x in command):
-            return None
-        return ExternalProgramAdapter(
-            name=name,
-            provider=provider,
-            model=model,
-            command=command,
-            capabilities=capabilities,
-            channel=channel,
-            timeout_seconds=int(item.get("timeout_seconds", 120)),
-            cost_tier=cost_tier,
-            role_targets=role_targets,
-            routing_priority=routing_priority,
-            requires_approval=requires_approval,
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        ...
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        ...
+
+
+@dataclass
+class StaticAdapterRuntime:
+    """No-op adapter — acts as manual/placeholder. Real execution requires SubprocessAdapterRuntime."""
+    descriptor: AdapterDescriptor
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        import os
+        issue_id = str(wake_context.get("issue_id", "") or "")
+        reason = str(wake_context.get("reason", "") or "")
+        comment_id = str(wake_context.get("comment_id", "") or "")
+        agent_role = str(wake_context.get("agent_role", "") or "")
+        agent_skill = str(wake_context.get("agent_skill", "") or "")
+        wake_payload_json = str(wake_context.get("wake_payload_json", "") or "")
+        api_url = os.environ.get("AITEAM_API_URL", "http://localhost:8000")
+        interaction_id = str(wake_context.get("interaction_id", "") or "")
+        interaction_action = str(wake_context.get("interaction_action", "") or "")
+        interaction_kind = str(wake_context.get("interaction_kind", "") or "")
+        return {
+            "AITEAM_RUN_ID": run_id,
+            "AITEAM_TASK_ID": issue_id,
+            "AITEAM_WAKE_REASON": reason,
+            "AITEAM_WAKE_COMMENT_ID": comment_id,
+            "AITEAM_AGENT_ROLE": agent_role,
+            "AITEAM_AGENT_SKILL": agent_skill,
+            "AITEAM_WAKE_PAYLOAD_JSON": wake_payload_json,
+            "AITEAM_API_URL": api_url,
+            "AITEAM_INTERACTION_ID": interaction_id,
+            "AITEAM_INTERACTION_ACTION": interaction_action,
+            "AITEAM_INTERACTION_KIND": interaction_kind,
+        }
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="skipped",
+            output=f"static adapter ({self.descriptor.adapter_type}): no automated execution",
         )
 
-    if kind == "subscription":
-        return SubscriptionAdapter(
-            name=name,
-            provider=provider,
-            model=model,
-            capabilities=capabilities,
-            cost_tier=cost_tier,
-            role_targets=role_targets,
-            routing_priority=routing_priority,
-            requires_approval=requires_approval,
+
+class AdapterRegistry:
+    def __init__(self, runtimes: list[AdapterRuntime] | None = None) -> None:
+        self._items: dict[str, AdapterRuntime] = {}
+        for runtime in runtimes or []:
+            self.register(runtime)
+
+    def register(self, runtime: AdapterRuntime) -> None:
+        adapter_type = runtime.descriptor.adapter_type.strip()
+        if not adapter_type:
+            raise ValueError("adapter_type is required")
+        if adapter_type in self._items:
+            raise ValueError(f"Duplicate adapter_type: {adapter_type}")
+        self._items[adapter_type] = runtime
+
+    def get(self, adapter_type: str) -> AdapterRuntime | None:
+        return self._items.get(adapter_type)
+
+    def require(self, adapter_type: str) -> AdapterRuntime:
+        runtime = self.get(adapter_type)
+        if runtime is None:
+            raise KeyError(f"unknown adapter_type: {adapter_type}")
+        return runtime
+
+    def descriptors(self) -> list[AdapterDescriptor]:
+        return [runtime.descriptor for runtime in self._items.values()]
+
+
+def build_default_registry() -> AdapterRegistry:
+    from aiteam.adapters.anthropic_adapter import AnthropicApiRuntime  # noqa: PLC0415
+    from aiteam.adapters.gemini_adapter import GeminiApiRuntime  # noqa: PLC0415
+    from aiteam.adapters.openai_adapter import OpenAIResponsesRuntime  # noqa: PLC0415
+    from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntime  # noqa: PLC0415
+    registry = AdapterRegistry()
+    registry.register(
+        StaticAdapterRuntime(
+            AdapterDescriptor(
+                adapter_type="lead_builtin",
+                channel="local",
+                provider="aiteams",
+                model="structured-lead-intake",
+                cost_tier=0,
+            )
         )
-
-    if kind == "api":
-        return ApiAdapter(
-            name=name,
-            provider=provider,
-            model=model,
-            capabilities=capabilities,
-            cost_tier=cost_tier,
-            require_key=_to_bool(item.get("require_key", False)),
-            role_targets=role_targets,
-            routing_priority=routing_priority,
-            requires_approval=requires_approval,
+    )
+    registry.register(
+        StaticAdapterRuntime(
+            AdapterDescriptor(
+                adapter_type="role_builtin",
+                channel="local",
+                provider="aiteams",
+                model="structured-role-runtime",
+                cost_tier=0,
+            )
         )
-
-    return None
-
-
-def _to_channel(value: object) -> ChannelType:
-    try:
-        return ChannelType(str(value).strip().lower())
-    except ValueError:
-        return ChannelType.SUBSCRIPTION
-
-
-def _to_str_set(value: object) -> set[str]:
-    if not isinstance(value, list):
-        return set()
-    return {str(item).strip().lower() for item in value if str(item).strip()}
-
-
-def _resolve_routing_priority(item: dict, kind: str) -> int:
-    explicit = item.get("routing_priority")
-    if explicit is not None:
-        try:
-            return int(explicit)
-        except (TypeError, ValueError):
-            pass
-
-    priority = str(item.get("priority", "")).strip().lower()
-    if priority == "primary":
-        return 100
-    if priority == "secondary":
-        return 200
-
-    if kind == "external_program":
-        return 200
-    return 100
-
-
-def _is_enabled(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    normalized = str(value).strip().lower()
-    return normalized not in {"0", "false", "no", "off", ""}
-
-
-def _to_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    normalized = str(value).strip().lower()
-    return normalized in {"1", "true", "yes", "on"}
+    )
+    registry.register(
+        StaticAdapterRuntime(
+            AdapterDescriptor(
+                adapter_type="manual",
+                channel="manual",
+                provider="human",
+                model="operator",
+                cost_tier=0,
+            )
+        )
+    )
+    registry.register(
+        AnthropicApiRuntime(
+            AdapterDescriptor(
+                adapter_type="anthropic_api",
+                channel="api",
+                provider="anthropic",
+                model="claude-opus-4-5",
+                cost_tier=3,
+            ),
+            model="claude-opus-4-5",
+        )
+    )
+    registry.register(
+        AnthropicApiRuntime(
+            AdapterDescriptor(
+                adapter_type="anthropic_sonnet",
+                channel="api",
+                provider="anthropic",
+                model="claude-sonnet-4-5",
+                cost_tier=2,
+            ),
+            model="claude-sonnet-4-5",
+        )
+    )
+    registry.register(
+        OpenAIResponsesRuntime(
+            AdapterDescriptor(
+                adapter_type="openai_api",
+                channel="api",
+                provider="openai",
+                model="gpt-4.1",
+                cost_tier=2,
+            ),
+            model="gpt-4.1",
+        )
+    )
+    registry.register(
+        GeminiApiRuntime(
+            AdapterDescriptor(
+                adapter_type="gemini_api",
+                channel="api",
+                provider="google",
+                model="gemini-2.5-flash",
+                cost_tier=2,
+            ),
+            model="gemini-2.5-flash",
+        )
+    )
+    registry.register(
+        ClaudeSubscriptionCliRuntime(
+            AdapterDescriptor(
+                adapter_type="subscription_cli",
+                channel="subscription",
+                provider="claude-code",
+                model="configured",
+                cost_tier=1,
+            )
+        )
+    )
+    return registry

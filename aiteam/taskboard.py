@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import contextlib
+import datetime as dt
 import json
+import sqlite3
 import threading
+import uuid
 from pathlib import Path
 
-from aiteam.runtime import FileLockRegistry
-from aiteam.types import TaskState, WorkTask
+from aiteam.db.issues import checkout_issue
+from aiteam.db.runs import create_run
+from aiteam.types import Complexity, Criticality, Role, TaskState, WorkTask
 
 
 class TaskBoard:
+    """Temporary compatibility shim for legacy task payloads.
+
+    New runtime behavior should use the v2 `issues`, `runs` and `wakeup_requests`
+    tables directly. This class only keeps old task-shaped tests and migration
+    helpers alive while the issue repository becomes the primary surface.
+    """
+
     def __init__(
         self,
         storage_path: Path,
@@ -16,6 +28,7 @@ class TaskBoard:
         legacy_snapshot_path: Path | None = None,
     ) -> None:
         from aiteam.sqlite_store import SqliteStore
+
         storage_path = Path(storage_path)
         if storage_path.name.lower() == "aiteam.db":
             self.db_path = storage_path
@@ -26,7 +39,6 @@ class TaskBoard:
         self.storage_path = self.legacy_snapshot_path
         self._lock = threading.RLock()
         self._tasks: dict[str, WorkTask] = {}
-        self._file_locks = FileLockRegistry(self.db_path.parent / "file_locks.json")
         self._store = SqliteStore(self.db_path)
         self._load()
 
@@ -43,12 +55,8 @@ class TaskBoard:
             before = self._snapshot_tasks()
             if task.task_id in self._tasks:
                 raise ValueError(f"Task already exists: {task.task_id}")
-            # Preserve explicit non-pending states for recovered/imported tasks.
-            if task.state == TaskState.PENDING:
-                if task.dependencies:
-                    task.state = TaskState.PENDING
-                else:
-                    task.state = TaskState.READY
+            if task.state == TaskState.PENDING and not task.dependencies:
+                task.state = TaskState.READY
             self._tasks[task.task_id] = task
             self._persist_task_changes(before)
 
@@ -63,81 +71,42 @@ class TaskBoard:
     def ready_tasks(self) -> list[WorkTask]:
         with self._lock:
             self._refresh_readiness()
-            return [t for t in self._tasks.values() if t.state == TaskState.READY]
+            return [task for task in self._tasks.values() if task.state == TaskState.READY]
 
     def checkpoint(self) -> None:
-        with self._lock:
-            return
+        return
 
     def persist_tasks(self, task_ids: list[str]) -> None:
         with self._lock:
-            payload = [
-                self._task_to_dict(self._tasks[task_id])
-                for task_id in task_ids
-                if task_id in self._tasks
-            ]
-            self._store.upsert_tasks(payload)
+            self._store.upsert_tasks(
+                [
+                    self._task_to_dict(self._tasks[task_id])
+                    for task_id in task_ids
+                    if task_id in self._tasks
+                ]
+            )
 
     def claim_task(self, task_id: str, assignee: str) -> bool:
         with self._lock:
             before = self._snapshot_tasks()
             self._refresh_readiness()
             task = self._tasks.get(task_id)
-            if not task or task.state != TaskState.READY:
+            if task is None or task.state != TaskState.READY:
                 return False
-            if task.dependencies:
-                soft_terminal_dependencies = [
-                    dep
-                    for dep in task.dependencies
-                    if dep in self._tasks
-                    and self._is_soft_support_dependency(task, self._tasks[dep])
-                    and self._tasks[dep].state
-                    in (
-                        TaskState.FAILED,
-                        TaskState.BLOCKED,
-                        TaskState.SKIPPED,
-                        TaskState.ARCHIVED,
-                    )
-                ]
-                unmet = [
-                    dep
-                    for dep in task.dependencies
-                    if dep not in self._tasks
-                    or (
-                        self._tasks[dep].state != TaskState.COMPLETED
-                        and dep not in soft_terminal_dependencies
-                    )
-                ]
-                if soft_terminal_dependencies:
-                    task.metadata["support_dependency_degraded"] = True
-                    task.metadata["soft_terminal_dependencies"] = soft_terminal_dependencies
-                if unmet:
-                    failed_deps = [
-                        dep
-                        for dep in unmet
-                        if dep in self._tasks
-                        and self._tasks[dep].state in (TaskState.FAILED, TaskState.BLOCKED)
-                        and dep not in soft_terminal_dependencies
-                    ]
-                    if failed_deps:
-                        task.state = TaskState.BLOCKED
-                        task.metadata["blocked_reason"] = "dependency_failed"
-                        task.metadata["blocked_dependencies"] = failed_deps
-                    else:
-                        task.state = TaskState.PENDING
+
+            if self._has_unmet_dependencies(task):
+                self._mark_dependency_state(task)
+                self._persist_task_changes(before)
+                return False
+
+            v2_claimed = self._try_claim_issue_v2(task, assignee)
+            if v2_claimed is not None:
+                if not v2_claimed:
+                    task.metadata["checkout_conflict"] = True
                     self._persist_task_changes(before)
                     return False
-            owned_files = self._owned_files(task)
-            if owned_files:
-                acquired, conflicts = self._file_locks.acquire(
-                    task_id=task.task_id, files=owned_files
-                )
-                if not acquired:
-                    task.state = TaskState.BLOCKED
-                    task.metadata["blocked_by_files"] = conflicts
-                    task.metadata["owned_files"] = owned_files
-                    self._persist_task_changes(before)
-                    return False
+                task.metadata.pop("checkout_conflict", None)
+
             task.state = TaskState.CLAIMED
             task.assignee = assignee
             self._persist_task_changes(before)
@@ -148,7 +117,6 @@ class TaskBoard:
             before = self._snapshot_tasks()
             task = self._require(task_id)
             task.state = TaskState.COMPLETED
-            self._file_locks.release_for_task(task_id)
             if details:
                 task.metadata["result"] = details
             self._refresh_readiness()
@@ -158,13 +126,9 @@ class TaskBoard:
         with self._lock:
             before = self._snapshot_tasks()
             task = self._require(task_id)
-            previous_state = (
-                task.state.value if hasattr(task.state, "value") else str(task.state)
-            )
-            self._file_locks.release_for_task(task_id)
+            task.metadata["skipped_from_state"] = task.state.value
             task.state = TaskState.SKIPPED
             task.metadata["skipped_reason"] = reason
-            task.metadata["skipped_from_state"] = previous_state
             self._refresh_readiness()
             self._persist_task_changes(before)
 
@@ -173,7 +137,6 @@ class TaskBoard:
             before = self._snapshot_tasks()
             task = self._require(task_id)
             task.state = TaskState.FAILED
-            self._file_locks.release_for_task(task_id)
             task.metadata["error"] = error
             self._refresh_readiness()
             self._persist_task_changes(before)
@@ -183,60 +146,45 @@ class TaskBoard:
             before = self._snapshot_tasks()
             task = self._require(task_id)
             task.state = TaskState.BLOCKED
-            self._file_locks.release_for_task(task_id)
             task.metadata["blocked_reason"] = reason
             self._persist_task_changes(before)
 
     def mark_waiting_user(self, task_id: str, question: str) -> None:
-        """E7-D4: Pausa una tarea mid-run esperando respuesta del usuario.
-
-        La tarea queda en estado WAITING_USER hasta que el usuario responda
-        via POST /api/aiteam/chat/clarify. _refresh_readiness ignora este estado,
-        por lo que las tareas downstream permanecen PENDING hasta que se reanude.
-        """
         with self._lock:
             before = self._snapshot_tasks()
             task = self._require(task_id)
-            self._file_locks.release_for_task(task_id)
             task.state = TaskState.WAITING_USER
             task.metadata["clarify_question"] = question
-            import datetime as _dt
-            task.metadata["waiting_since"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+            task.metadata["waiting_since"] = dt.datetime.now(dt.timezone.utc).isoformat()
             self._persist_task_changes(before)
 
     def update_metadata(self, task_id: str, patch: dict) -> None:
         with self._lock:
             before = self._snapshot_tasks()
-            task = self._require(task_id)
-            task.metadata.update(patch)
+            self._require(task_id).metadata.update(patch)
             self._persist_task_changes(before)
 
     def archive_incomplete_tasks(
-        self, reason: str, exclude_chat_root: str | None = None
+        self,
+        reason: str,
+        exclude_chat_root: str | None = None,
     ) -> list[str]:
-        """C2: Marca como ARCHIVED las tareas no terminadas de runs previas.
-
-        Las tareas en PENDING, READY, BLOCKED o WAITING_USER quedan archivadas
-        con el motivo indicado. Las tareas COMPLETED, FAILED o ARCHIVED no se tocan.
-
-        Si se indica exclude_chat_root, las tareas cuyo task_id empieza por ese
-        prefijo (formato CHAT-XXXX::phase) se excluyen — util para limpiar zombies
-        de runs anteriores sin tocar las tareas del run actual.
-
-        Retorna la lista de task_ids archivadas.
-        """
-        archivable_states = {TaskState.PENDING, TaskState.READY, TaskState.BLOCKED, TaskState.WAITING_USER}
+        archivable = {
+            TaskState.PENDING,
+            TaskState.READY,
+            TaskState.BLOCKED,
+            TaskState.WAITING_USER,
+        }
         with self._lock:
             before = self._snapshot_tasks()
             archived: list[str] = []
             for task in self._tasks.values():
-                if task.state not in archivable_states:
+                if task.state not in archivable:
                     continue
                 if exclude_chat_root:
-                    task_root = task.task_id.split("::")[0] if "::" in task.task_id else task.task_id
-                    if task_root == exclude_chat_root:
+                    root = task.task_id.split("::")[0] if "::" in task.task_id else task.task_id
+                    if root == exclude_chat_root:
                         continue
-                self._file_locks.release_for_task(task.task_id)
                 task.state = TaskState.ARCHIVED
                 task.metadata["archived_reason"] = reason
                 archived.append(task.task_id)
@@ -245,22 +193,21 @@ class TaskBoard:
             return archived
 
     def remove_tasks(self, task_ids: list[str]) -> None:
-        """Elimina tareas del taskboard (usado para limpiar gates antes de re-iteracion)."""
         with self._lock:
             before = self._snapshot_tasks()
             for task_id in task_ids:
-                if task_id in self._tasks:
-                    self._file_locks.release_for_task(task_id)
-                    del self._tasks[task_id]
+                self._tasks.pop(task_id, None)
             self._persist_task_changes(before, deleted_ids=task_ids)
 
     def retry_task(
-        self, task_id: str, reason: str, assignee: str | None = None
+        self,
+        task_id: str,
+        reason: str,
+        assignee: str | None = None,
     ) -> None:
         with self._lock:
             before = self._snapshot_tasks()
             task = self._require(task_id)
-            self._file_locks.release_for_task(task_id)
             task.state = TaskState.READY
             task.assignee = assignee
             task.metadata.pop("error", None)
@@ -273,111 +220,100 @@ class TaskBoard:
 
     def _refresh_readiness(self) -> None:
         for task in self._tasks.values():
-            if task.state in (
-                TaskState.COMPLETED, TaskState.SKIPPED, TaskState.CLAIMED, TaskState.FAILED,
-                TaskState.WAITING_USER,  # E7-D4: no propagar ni resetear tareas en pausa
-                TaskState.ARCHIVED,      # C2: terminal state, no propagate or reset
-            ):
+            if task.state in {
+                TaskState.COMPLETED,
+                TaskState.SKIPPED,
+                TaskState.CLAIMED,
+                TaskState.FAILED,
+                TaskState.WAITING_USER,
+                TaskState.ARCHIVED,
+            }:
                 continue
-            if task.state == TaskState.BLOCKED:
-                if task.metadata.get("blocked_by_files"):
-                    # Se reevalua solo al liberar locks, manteniendo trazabilidad de bloqueo.
-                    task.state = TaskState.PENDING
-                    task.metadata.pop("blocked_by_files", None)
-                elif task.metadata.get("blocked_reason") != "dependency_failed":
-                    continue
+            if task.state == TaskState.BLOCKED and task.metadata.get("blocked_reason") != "dependency_failed":
+                continue
             if not task.dependencies:
                 task.state = TaskState.READY
                 continue
+            self._mark_dependency_state(task)
 
-            soft_terminal_dependencies = [
-                dep
-                for dep in task.dependencies
-                if dep in self._tasks
-                and self._is_soft_support_dependency(task, self._tasks[dep])
-                and self._tasks[dep].state
-                in (TaskState.FAILED, TaskState.BLOCKED, TaskState.SKIPPED, TaskState.ARCHIVED)
-            ]
-            failed_dependencies = [
-                dep
-                for dep in task.dependencies
-                if dep in self._tasks and self._tasks[dep].state in (TaskState.FAILED, TaskState.BLOCKED)
-                and dep not in soft_terminal_dependencies
-            ]
-            if failed_dependencies:
-                task.state = TaskState.BLOCKED
-                task.metadata["blocked_reason"] = "dependency_failed"
-                task.metadata["blocked_dependencies"] = failed_dependencies
-                continue
-            if soft_terminal_dependencies:
-                task.metadata["support_dependency_degraded"] = True
-                task.metadata["soft_terminal_dependencies"] = soft_terminal_dependencies
-            else:
-                task.metadata.pop("support_dependency_degraded", None)
-                task.metadata.pop("soft_terminal_dependencies", None)
-
-            if task.metadata.get("blocked_reason") == "dependency_failed":
-                task.metadata.pop("blocked_reason", None)
-                task.metadata.pop("blocked_dependencies", None)
-
-            unresolved = [
-                dep
-                for dep in task.dependencies
-                if dep not in self._tasks
-                or (
-                    self._tasks[dep].state != TaskState.COMPLETED
-                    and dep not in soft_terminal_dependencies
-                )
-            ]
-            task.state = TaskState.PENDING if unresolved else TaskState.READY
-
-    @staticmethod
-    def _is_soft_support_dependency(task: WorkTask, dependency: WorkTask) -> bool:
-        metadata = dependency.metadata if isinstance(dependency.metadata, dict) else {}
-        contract = metadata.get("phase_contract", {}) if isinstance(metadata, dict) else {}
-        if not isinstance(contract, dict):
-            contract = {}
-        contract_kind = str(contract.get("contract_kind", "") or "").strip().lower()
-        evidence_position = str(metadata.get("evidence_position", "") or "").strip().lower()
-        dependency_phase = str(metadata.get("phase", "") or dependency.task_id).strip().lower()
-        is_explicit_support = contract_kind == "delegate_support_pre_phase"
-        is_legacy_delegate_support = (
-            evidence_position == "pre_phase"
-            and bool(metadata.get("structured_evidence_task"))
-            and dependency_phase.startswith("delegate_")
+    def _has_unmet_dependencies(self, task: WorkTask) -> bool:
+        return any(
+            dep not in self._tasks or self._tasks[dep].state != TaskState.COMPLETED
+            for dep in task.dependencies
         )
-        if not is_explicit_support and not is_legacy_delegate_support:
-            return False
-        target_phase = str(contract.get("evidence_target_phase", "") or "").strip()
-        task_phase = str(task.metadata.get("phase", "") or "").strip()
-        if target_phase and task_phase and target_phase != task_phase:
-            return False
-        return bool(metadata.get("structured_evidence_task") or is_explicit_support)
 
-    @staticmethod
-    def _owned_files(task: WorkTask) -> list[str]:
-        raw = task.metadata.get("owned_files", [])
-        if not isinstance(raw, list):
-            return []
-        return [str(path) for path in raw]
+    def _mark_dependency_state(self, task: WorkTask) -> None:
+        failed = [
+            dep
+            for dep in task.dependencies
+            if dep in self._tasks and self._tasks[dep].state in {TaskState.FAILED, TaskState.BLOCKED}
+        ]
+        if failed:
+            task.state = TaskState.BLOCKED
+            task.metadata["blocked_reason"] = "dependency_failed"
+            task.metadata["blocked_dependencies"] = failed
+            return
+        task.metadata.pop("blocked_reason", None)
+        task.metadata.pop("blocked_dependencies", None)
+        task.state = TaskState.PENDING if self._has_unmet_dependencies(task) else TaskState.READY
+
+    def _try_claim_issue_v2(self, task: WorkTask, assignee: str) -> bool | None:
+        issue = self._load_v2_issue(task.task_id)
+        if issue is None:
+            return None
+        agent_id = str(issue.get("assignee_agent_id") or "").strip() or f"role:{task.role.value}"
+        run_id = str(task.metadata.get("checkout_run_id") or "").strip() or f"legacy-claim:{uuid.uuid4()}"
+        try:
+            create_run(
+                self.db_path,
+                run_id=run_id,
+                agent_id=agent_id,
+                issue_id=task.task_id,
+                profile=str(task.metadata.get("run_profile", "") or "") or None,
+                invocation_source="legacy_taskboard",
+                trigger_detail="TaskBoard.claim_task",
+                context_snapshot={
+                    "wake_reason": "legacy_claim",
+                    "source_task_id": task.task_id,
+                    "legacy_assignee": assignee,
+                },
+                complexity=task.complexity.value,
+            )
+            row = checkout_issue(
+                self.db_path,
+                issue_id=task.task_id,
+                agent_id=agent_id,
+                expected_statuses=["todo", "backlog"],
+                run_id=run_id,
+            )
+        except (sqlite3.Error, ValueError):
+            return None
+        if row is None:
+            return False
+        task.metadata["checkout_run_id"] = run_id
+        task.metadata["execution_run_id"] = run_id
+        task.metadata["v2_issue_checkout"] = True
+        task.metadata["v2_agent_id"] = agent_id
+        return True
+
+    def _load_v2_issue(self, issue_id: str) -> dict | None:
+        try:
+            with contextlib.closing(sqlite3.connect(str(self.db_path), timeout=20.0)) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT * FROM issues WHERE id = ?", (issue_id,)).fetchone()
+                return dict(row) if row is not None else None
+        except sqlite3.Error:
+            return None
 
     def _require(self, task_id: str) -> WorkTask:
         task = self._tasks.get(task_id)
-        if not task:
+        if task is None:
             raise KeyError(f"Task not found: {task_id}")
         return task
 
-    def _save(self) -> None:
-        payload = [self._task_to_dict(task) for task in self._tasks.values()]
-        self._store.upsert_tasks(payload)
-
     def _snapshot_tasks(self) -> dict[str, str]:
         return {
-            task_id: json.dumps(
-                self._task_to_dict(task),
-                ensure_ascii=False,
-                sort_keys=True,
-            )
+            task_id: json.dumps(self._task_to_dict(task), ensure_ascii=False, sort_keys=True)
             for task_id, task in self._tasks.items()
         }
 
@@ -388,13 +324,13 @@ class TaskBoard:
         deleted_ids: list[str] | None = None,
     ) -> None:
         after = self._snapshot_tasks()
-        changed_payload = [
+        changed = [
             self._task_to_dict(self._tasks[task_id])
             for task_id, serialized in after.items()
             if before.get(task_id) != serialized and task_id in self._tasks
         ]
-        if changed_payload:
-            self._store.upsert_tasks(changed_payload)
+        if changed:
+            self._store.upsert_tasks(changed)
         removed = [
             task_id
             for task_id in list(deleted_ids or [])
@@ -404,14 +340,10 @@ class TaskBoard:
             self._store.delete_tasks(removed)
 
     def _load(self) -> None:
-        import sqlite3
         try:
             payload = self._store.load_all_tasks()
-        except sqlite3.OperationalError:
-            payload = []
         except Exception:
             payload = []
-            
         for item in payload:
             if not isinstance(item, dict):
                 continue
@@ -438,8 +370,6 @@ class TaskBoard:
 
     @staticmethod
     def _task_from_dict(item: dict) -> WorkTask:
-        from aiteam.types import Complexity, Criticality, Role
-
         return WorkTask(
             task_id=item["task_id"],
             title=item["title"],

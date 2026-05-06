@@ -25,8 +25,8 @@ venv/Scripts/pip install -r requirements.txt
 ## Paso 3 — Paths con espacios
 ```bash
 # Siempre usar comillas en paths con espacios
-# Correcto: "/c/Users/she__/Documents/Antigravity Projects/..."
-# Incorrecto: /c/Users/she__/Documents/Antigravity Projects/...
+# Correcto: "/c/Users/tuusuario/Mis Proyectos/..."
+# Incorrecto: /c/Users/tuusuario/Mis Proyectos/...
 ```
 
 ## Paso 4 — Test directo del comando MCP

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import subprocess
 import sys
@@ -17,13 +18,16 @@ def main() -> int:
     parser.add_argument("--prompt", default="", help="Optional prompt text")
     parser.add_argument(
         "--tool-path",
-        default=r"C:\Users\she__\Documents\Antigravity Projects\AndroidWeb\android-controller.exe",
-        help="Path to android-controller executable",
+        default=os.environ.get("ANDROID_CONTROLLER_PATH"),
+        help="Path to android-controller executable (or set ANDROID_CONTROLLER_PATH env var)",
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Controller port")
     parser.add_argument("--timeout", type=float, default=12.0, help="Startup timeout in seconds")
     args = parser.parse_args()
 
+    if not args.tool_path:
+        print("android_auditor_missing: --tool-path not provided and ANDROID_CONTROLLER_PATH not set")
+        return 2
     exe_path = Path(args.tool_path)
     if not exe_path.exists():
         print(f"android_auditor_missing: {exe_path}")

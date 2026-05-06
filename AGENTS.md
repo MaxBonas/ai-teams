@@ -1,253 +1,112 @@
-# AI Team Hybrid Orchestrator
+# AI Teams - instrucciones para agentes de desarrollo
 
-<!-- layer: system-development | audiencia: agentes de desarrollo (Codex, Claude Code, Gemini) | NO es artefacto de producto -->
+<!-- layer: system-development | audiencia: Codex, Claude Code, Gemini y agentes de desarrollo -->
 
-Sistema de orquestacion multi-agente para desarrollo y entrega de software.
-Nombre del paquete: `aiteam-hybrid` (v0.1.0). Estado: operativo para orquestacion, observabilidad y continuidad por proyecto.
-Validacion mas reciente: `2026-04-03`, `ORCH-01`, `858 passed`.
+AI Teams es un control plane multi-agente para equipos de programacion. El repo esta en una limpieza y reconstruccion profunda: se abandona la compatibilidad con dogfooding/proyectos antiguos y se converge hacia un sistema Paperclip-like sobre SQLite.
 
-## Stack
+## Prioridad vigente
 
-- **Backend**: Python 3.10+ con FastAPI (launcher por defecto en puerto 8010)
-- **Frontend**: React 19 + TypeScript 5.9 + Vite (launcher por defecto en puerto 9490)
-- **Persistencia**: SQLite para `tasks` y `workflow_state`, JSONL para ledger/eventos y compatibilidad JSON residual solo en tests/constructores legacy
-- **Tests**: pytest (`858 passed` en `ORCH-01`, 2026-04-03)
+Trabajar siempre contra el plan rector:
 
-## Estructura del proyecto
+- `docs/MIGRATION_PAPERCLIP.md`
+- `task.md`
+- `docs/INDEX.md`
+- `HANDOFF.md`
 
+La documentacion legacy, los tests legacy y los prompts raiz de proveedor fueron retirados de la fuente viva. No reintroducir `CLAUDE.md`, `GEMINI.md`, docs de archivo antiguo ni suites que protejan el flujo viejo salvo que el usuario lo pida explicitamente.
+
+## Producto objetivo
+
+AI Teams debe funcionar casi como Paperclip a nivel de control plane, pero con identidad propia:
+
+- orientado a equipos de programacion, no a empresas genericas;
+- Lead-first: se crea primero el Lead;
+- flujo Paperclip-like: el usuario propone una tarea de proyecto, el Lead la recibe y la mantiene viva mediante issues, heartbeats, delegaciones, revisiones e interactions hasta cerrarla o pedir desbloqueo;
+- hiring dinamico: el Lead forma el equipo despues de entender el proyecto;
+- perfiles canonicos: `solo_lead`, `lead_quorum`, `full_team`;
+- planificacion detallada como obligacion de rol: objetivo, sub-issues, delegaciones, riesgos, posibles roturas de la siguiente run, criterios de revision y condiciones de escalado;
+- accountability explicita: cada agente debe saber a quien reporta, que entrega, que evidencia produce y quien acepta/rechaza su resultado;
+- bajo ruido operativo: gates proporcionales al riesgo, pocas approvals, pocas preguntas al usuario y ningun quorum/review pesado para tareas simples;
+- delegacion economica: seniors/quorum planifican y supervisan, workers baratos ejecutan tareas simples para ahorrar tokens/coste;
+- suscripciones LLM y APIs son canales independientes;
+- SQLite queda como motor unico.
+
+## Arquitectura objetivo
+
+Patron Paperclip sobre SQLite:
+
+- `issues`: trabajo estructurado, dependencias y checkout;
+- `agents`: identidad, rol, adapter fijo, presupuesto y heartbeat;
+- `team_blueprints` y `agent_assignments`: hiring dinamico y composicion del equipo;
+- `runs`: entidad central de telemetria, liveness, coste y recovery;
+- `wakeup_requests`: cola durable en DB;
+- `issue_thread_interactions`: pausa/reanudacion persistente;
+- `run_events`, `cost_events`, `activity_log`, `tool_access`: reemplazo de JSONL.
+
+## Codigo activo y deuda
+
+Mantener funcionando los shims necesarios mientras se extirpa el sistema viejo.
+
+Objetivos de extirpacion:
+
+- parser `[WORKFLOW_PLAN]`;
+- round-based `process_once()`/`run_until_idle()`;
+- router algoritmico con scoring multifactor;
+- writers JSONL como fuente primaria;
+- promptaje antiguo de Lead/roles;
+- tests que solo validan comportamiento legacy.
+
+No borrar modulos importados sin reemplazar primero sus rutas activas.
+
+## Comandos
+
+```powershell
+.\scripts\python_local.bat -m uvicorn api.main:app --reload --port 8010
+.\scripts\pytest_local.bat tests -q --tb=short
+.\scripts\python_local.bat scripts\migrate_to_v2.py --json
 ```
-aiteam/           Nucleo del orquestador (33 modulos Python)
-api/              Backend FastAPI
-ide-frontend/     Frontend React + TypeScript
-tests/            Suite de pruebas pytest
-config/           Templates de configuracion y catalogos
-docs/             28 archivos de documentacion
-scripts/          Scripts utilitarios (benchmark, ingestion)
-runtime/          Estado de runtime: memoria, eventos, mailbox
+
+Frontend:
+
+```powershell
+Set-Location ide-frontend
+npm run dev -- --port 9490
+node_modules\.bin\tsc.cmd -b
 ```
 
-## Comandos de desarrollo
+## Reglas de trabajo
 
-```bash
-# Arranque rapido (Windows)
-start_ide.bat                    # levanta backend + frontend con health checks
-stop_ide.bat                     # detiene procesos del IDE
+- Documentacion del proyecto en espanol.
+- No commitear `.env`, API keys, `venv/`, `node_modules/` ni runtime local.
+- Templates compartidos en `config/*.example.json`.
+- Runtime por maquina en `runtime/`.
+- Usar `rg` para busquedas.
+- Usar `apply_patch` para ediciones manuales.
+- No revertir cambios no propios.
+- Antes de tocar un bug o limpieza delicada, listar 3 causas probables y arreglar de una en una.
 
-# Manual
-scripts\python_local.bat -m uvicorn api.main:app --reload --port 8010   # backend
-cd ide-frontend && npm run dev -- --port 9490                           # frontend
+## Naming critico
 
-# Tests
-scripts\pytest_local.bat tests -q --tb=line
+AI Teams nunca debe crear `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` ni equivalentes en proyectos externos. Todo artefacto del producto va bajo `.aiteam/`, y las instrucciones persistentes del usuario viven en `.aiteam/instructions.md`.
 
-# CLI
-scripts\python_local.bat -m aiteam.cli <comando>
-# Comandos principales: init, plan, run, status, dashboard, system-check
+Evitar ambiguedades:
+
+- `agent` de desarrollo: Codex, Claude Code, Gemini.
+- `agent` del producto: Lead, Engineer, Reviewer, QA.
+- `run` de desarrollo: sesion humana/agente sobre este repo.
+- `run` del producto: ejecucion persistida en SQLite.
+
+## Maquinas
+
+Git es la fuente de verdad. Cada maquina mantiene su propio entorno:
+
+- `venv/`
+- `runtime/`
+- `node_modules/`
+
+Al cambiar de maquina:
+
+```powershell
+git pull
+.\scripts\prepare_dev_env.bat
 ```
-
-## Arquitectura
-
-Workflow base por fases: `lead_intake -> dynamic phases -> lead_close`
-
-6 roles: Team Lead (R5), Scout (R2/R3), Researcher (R3), Engineer (R4), Reviewer (R4), QA (R4).
-
-- **Router**: Pro-first (suscripciones OpenAI/Anthropic/Google) con fallback a API.
-- **Observabilidad de routing**: pestaña `Routing` en `StatusPanel` y endpoint `/api/aiteam/routing/catalog` para ver primario/fallbacks efectivos por rol.
-- **Quality gates**: Review + QA obligatorios antes de cerrar tareas de Engineer.
-- **Compliance**: guardrails para operaciones sensibles, redaccion de secretos, doble aprobacion en `prod`.
-- **FinOps**: presupuesto diario/mensual, señal de presion, ledger de costos.
-
-## Direccion de producto para agentes de desarrollo
-
-Orientacion vigente del producto: **AITeams no debe perseguir a corto plazo un IDE generalista tipo VSCode**.
-La prioridad es construir un **agent workspace** o **cockpit operativo del Team Lead**:
-
-- interfaz para dirigir, observar, pausar, replanificar y auditar agentes
-- continuidad entre runs, memoria, routing, capabilities, gates y trazabilidad
-- experiencia clara de artefactos, diffs, estado y aprobaciones
-
-### Minimo de IDE necesario para AITeams v1
-
-- arbol de archivos
-- visor/editor suficiente
-- terminal estable
-- chat
-- timeline/estado de runs
-- paneles de routing/capabilities/status
-- diffs, artefactos generados y trazabilidad por fase/agente
-- pausa/reanudacion/aprobacion del flujo
-
-### Lo que NO es prioritario ahora
-
-- competir con VSCode en edicion avanzada
-- sistema complejo de tabs/layout
-- ecosistema de extensiones de terceros
-- debugger completo
-- refactors/LSP de nivel IDE generalista
-- features de UX cuyo valor principal sea "editar codigo a mano mejor"
-
-### Regla de decision para capa 1
-
-Si una tarea mejora principalmente la **edicion manual de codigo**, tratarla como prioridad baja salvo que desbloquee una capacidad central del orquestador.
-Si una tarea mejora **direccion de agentes, observabilidad, continuidad, memoria, gates, routing o control operativo**, tratarla como prioridad alta.
-
-En dudas de roadmap o implementacion frontend, preferir siempre **agent workspace** sobre **IDE full**.
-
-## Archivos clave
-
-| Archivo | Funcion |
-|---------|---------|
-| `aiteam/orchestrator.py` | Motor principal de orquestacion |
-| `aiteam/router.py` | Logica de ruteo hibrido Pro-first + API |
-| `aiteam/taskboard.py` | Gestion de tareas y dependencias |
-| `aiteam/compliance.py` | Guardrails de seguridad y compliance |
-| `aiteam/finops.py` | Presupuesto y control de costos |
-| `aiteam/memory.py` | Memoria persistente por agente |
-| `aiteam/execution.py` | Ejecucion de comandos con sandbox |
-| `api/main.py` | Entrada de la app FastAPI |
-| `ide-frontend/src/` | Interfaz web React |
-
-## Glosario de capas (evitar colisiones de lenguaje)
-
-Este sistema construye otros sistemas. Los mismos terminos tienen significados diferentes segun la capa.
-Ver investigacion completa en `docs/NAMING_COLLISION_INVESTIGATION.md`.
-Ver guia de comunicacion para desarrolladores en `docs/COMMUNICATION_GUIDE_FOR_DEVS.md`.
-
-| Termino | En este repo (desarrollo) | En el orquestador (producto) |
-|---|---|---|
-| `agent` | Agente de desarrollo: Codex, Claude Code, Gemini | Rol LLM interno: Lead, Engineer, Reviewer, QA |
-| `task` | Tarea en `task.md` (backlog de desarrollo) | `WorkTask`: unidad ejecutable del orquestador |
-| `handoff` | Traspaso de sesion de desarrollo (`HANDOFF.md`) | Failover automatico de adapter en el orquestador |
-| `run` | Sesion de trabajo de desarrollo | Ejecucion de chat completa (lead_intake → lead_close) |
-| `phase` | Fase de desarrollo del sistema (B7, B8, B9) | Etapa del WORKFLOW_PLAN (build, review, qa) |
-| `checkpoint` | Punto de revision en el proceso de desarrollo | Tarea especial del Lead (`lead_report_*`, `lead_preflight_*`) |
-| `plan` | Planificacion del sistema | WORKFLOW_PLAN emitido por el Lead |
-| `workspace` | Directorio del repo Ai_Teams | Directorio raiz del proyecto externo gestionado |
-| `project` | El sistema Ai_Teams / el repo | Un proyecto externo gestionado por AI Teams |
-| `agent` (sin calificar) | **AMBIGUO** — calificar siempre | **AMBIGUO** — calificar siempre |
-
-**Norma critica**: AI Teams nunca crea archivos `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` ni similares en proyectos externos. Todos los artefactos de producto van bajo `.aiteam/` del proyecto, y las instrucciones persistentes del usuario para el Lead viven en `.aiteam/instructions.md`. Ver `docs/NAMING_COLLISION_INVESTIGATION.md` seccion "Colision 1".
-
-## Convenciones
-
-- Documentacion del proyecto en **espanol**.
-- Variables de entorno en `.env` (copiar de `.env.example`). Nunca commitear `.env` ni API keys.
-- Templates de configuracion usan sufijo `.example` (ej. `adapters.example.json`).
-- Estado de runtime va en directorios `runtime/` o `runtime_<entorno>/`.
-- Entorno de desarrollo: Windows 11, shell PowerShell o bash, venv en `venv/` (Python 3.12).
-- Raiz base de proyectos: `C:\Users\<usuario>\Documents\Antigravity Projects\` (varia por maquina).
-- Activar venv: `source venv/Scripts/activate` (bash). Bootstrap recomendado: `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ensure_local_venv.ps1`
-- Wrappers locales:
-  - Python: `.\scripts\python_local.bat`
-  - Pytest: `.\scripts\pytest_local.bat`
-  - Pytest estable para ORCH-01 / sesiones Windows sensibles: `.\scripts\pytest_local_stable.bat`
-  - Reanudacion tras pull: `.\scripts\prepare_dev_env.bat`
-- Tests actuales: **858 passed** (2026-04-03, `ORCH-01`). Antes de cualquier cambio, verificar que pasan.
-- Smoke test rapido (2s): `.\scripts\pytest_local.bat tests/test_orchestrator.py tests/test_taskboard.py tests/test_router.py tests/test_api_adapter_live.py -q --tb=line -x`
-
-### Notas operativas de tests en ORCH-01 / Windows
-
-- En ORCH-01 y en algunas sesiones de Codex sobre Windows, la suite monolítica `tests -q --tb=short` puede tardar demasiado o pegar con temporales/permisos. En esos casos, usar `.\scripts\pytest_local_stable.bat`.
-- No lances varias corridas de pytest en paralelo en esta máquina: el `venv` y algunos temporales quedan bloqueados con facilidad y aparecen errores espurios de acceso.
-- Si una batería grande se acerca al timeout de la sesión, partirla en 2 o 3 fases en vez de insistir con una sola corrida larga. Orden recomendado:
-  1. `tests/test_lcp_directives.py tests/test_taskboard.py tests/test_run_health.py tests/test_mid_run_clarify.py tests/test_orchestrator.py`
-  2. `tests/test_api_team_chat.py`
-  3. `tests/test_api_aiteam_state.py`
-- Cuando se toque frontend además de backend, cerrar siempre con `cd ide-frontend && node_modules\\.bin\\tsc.cmd -b`.
-
-## Infraestructura — dos maquinas
-
-Este proyecto se desarrolla en un setup de dos maquinas en red local.
-
-| Maquina | Rol | Notas |
-|---------|-----|-------|
-| **MAX-GAMINGPC** | Principal (desarrollo activo) | Windows 11, usuario activo: `she__` |
-| **ORCH-01** (DESKTOP-SR6CQA1) | Secundaria (orquestacion) | Online en LAN, acceso via RustDesk |
-
-**Syncthing** sincroniza la carpeta `Antigravity Projects` entre ambas maquinas.
-- **NUNCA sincronizar**: `venv/`, `node_modules/`, `__pycache__/`, `.git/`, `runtime/`
-- Si un venv fue sincronizado desde otra maquina, los paths internos en `pyvenv.cfg` estan rotos.
-  Recrear siempre con: `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ensure_local_venv.ps1 -ForceRecreate`
-- Si el launcher de `venv/Scripts/python.exe` falla en una maquina sincronizada, tratar el venv como no confiable y recrearlo localmente antes de depurar codigo.
-- `start_ide.bat` ya intenta validar o reparar `venv/` antes de arrancar backend/frontend.
-- `runtime/` debe tratarse como estado local por maquina. Si falta config runtime tras un pull, rehidratar con `.\scripts\prepare_dev_env.bat`.
-- **GitHub** (`github.com/MaxBonas/ai-teams`, privado) es la fuente de verdad para codigo.
-
-**Red**: NordVPN en max-gamingpc puede interferir con conexiones LAN directas (RustDesk usa UDP).
-
-## Protocolo De Desarrollo Entre Maquinas
-
-Objetivo principal: poder avanzar en una maquina, cambiar a la otra y seguir programando rapido sin reparaciones manuales largas.
-
-Regla de oro:
-
-- Git comparte codigo y plantillas
-- Cada maquina mantiene su propio `venv/`
-- Cada maquina mantiene su propio `runtime/`
-- Cada maquina mantiene su propio `node_modules/`
-
-Flujo obligatorio al cambiar de maquina:
-
-1. `git commit` + `git push` en la maquina origen
-2. `git pull` en la maquina destino
-3. `.\scripts\prepare_dev_env.bat`
-4. continuar con `.\scripts\python_local.bat` y `.\scripts\pytest_local.bat`
-
-## Estrategia de commit entre maquinas
-
-Cuando haya una tanda grande de cambios, no hacer un commit monolítico si mezcla:
-
-- portabilidad del entorno
-- limpieza de artefactos locales
-- funcionalidad de backend/frontend
-- documentación
-
-Estrategia recomendada:
-
-1. `chore/dev-env-portability`
-2. `chore/stop-tracking-local-state`
-3. `feat/...` con funcionalidad, tests y docu
-
-Regla práctica:
-
-- el commit 1 debe dejar `pull -> .\scripts\prepare_dev_env.bat` funcionando
-- el commit 2 debe sacar del repo `runtime/`, snapshots y artefactos locales históricamente trackeados
-- el commit 3 debe llevar el producto
-
-Estrategia de referencia: ver `docs/INDEX.md` → sección "Documentos operativos".
-
-Configuracion compartida:
-
-- editar `config/*.example.json`
-- no usar `runtime/*.json` como fuente de verdad compartida
-- `prepare_dev_env` solo refresca desde plantilla si el archivo local seguia sincronizado; si detecta override local, lo conserva
-
-Excepcion permitida en `runtime/`:
-
-- `runtime/ollama/Modelfile.aiteam-qwen-coder`
-
-## Diagnostico antes de cualquier fix
-
-**Regla: listar 3 causas probables ANTES de tocar nada. Arreglar de una en una y verificar.**
-
-### MCP servers que no arrancan — orden obligatorio
-
-1. **Env vars** — Codex Desktop en Windows no hereda el PATH del shell. Verificar primero.
-2. **Venv integridad** — ¿existe local? ¿`pyvenv.cfg` apunta a esta maquina?
-3. **Paths con espacios** — `Antigravity Projects` tiene un espacio; usar comillas siempre.
-4. **Puerto/protocolo** — verificar puerto correcto y TCP vs UDP antes de tocar firewall.
-5. Solo si 1-4 estan OK: investigar DLL / pywin32. Usar skill `/fix-mcp`.
-
-### Problemas de red / conectividad — orden obligatorio
-
-1. Verificar si **NordVPN esta activo** — puede bloquear trafico LAN directo.
-2. Verificar **protocolo correcto** (RustDesk = UDP, no TCP).
-3. Verificar **puerto correcto** antes de modificar reglas de firewall.
-4. Solo entonces: revisar reglas de firewall.
-
-### Python / venv en Windows
-
-- Multiples versiones instaladas. Usar siempre `py -3.12` o el venv del proyecto.
-- En bash (Git Bash): paths con `/c/Users/...` no con `C:\Users\...`.
-- Comillas obligatorias en paths con espacios: `"/c/Users/she__/Documents/Antigravity Projects/..."`.
-- `UnicodeDecodeError cp1252` en subprocesos externos: ignorar, es un warning del SO, no del codigo.
