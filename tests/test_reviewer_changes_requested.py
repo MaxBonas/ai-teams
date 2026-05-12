@@ -18,6 +18,7 @@ import pytest
 
 from aiteam.adapters.registry import AdapterRegistry, ExecutionResult, build_default_registry
 from aiteam.adapters.registry import AdapterDescriptor
+from aiteam.db.interactions import create_interaction, resolve_interaction
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.heartbeat.executor import RunExecutor

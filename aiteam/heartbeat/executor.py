@@ -656,6 +656,15 @@ class RunExecutor:
                     ),
                 )
 
+            if reason == "reviewer_fix_cycle_limit":
+                return self._handle_fix_cycle_limit_resolved(
+                    issue_id=issue_id,
+                    action=action,
+                    interaction_payload=payload,
+                    run=run,
+                    agent_id=agent_id,
+                )
+
             # Unknown reason — log and return diagnostic rather than falling through to proposal logic
             if reason:
                 logger.warning(
@@ -2191,6 +2200,211 @@ class RunExecutor:
                 "Si el Reviewer vuelve a rechazar, considera revisar la especificación "
                 "o cambiar el adapter del Engineer.",
             ]
+
+        return ExecutionResult(
+            status="completed",
+            output="\n".join(output_lines),
+        )
+
+    def _handle_fix_cycle_limit_resolved(
+        self,
+        *,
+        issue_id: str,
+        action: str,
+        interaction_payload: dict[str, Any],
+        run: dict[str, Any],
+        agent_id: str,
+    ) -> ExecutionResult:
+        """Handle user response to a reviewer_fix_cycle_limit escalation.
+
+        Called when the user accepts or rejects the "fix cycle limit reached"
+        request_confirmation interaction.
+
+        accept:
+          Create one final engineer issue with a comprehensive description that
+          surfaces the full rejection history (cycle count, last blocker, last
+          evidence) and reset the reviewer to todo.  This is a last-resort attempt
+          with maximum context — the Lead should not create further fix cycles after
+          this one.
+
+        reject:
+          The user has decided to stop.  Cancel the reviewer (and any todo/in_progress
+          children), set the parent issue to cancelled, and post a diagnostic summary.
+        """
+        fix_cycle_count = int(interaction_payload.get("fix_cycle_count") or 0)
+        last_blocker = str(interaction_payload.get("last_blocker") or "").strip()
+        last_evidence = str(interaction_payload.get("last_evidence") or "").strip()
+
+        if action == "reject":
+            # ── Cancel active children and close parent ───────────────────────
+            rows = self._child_issue_rows(issue_id)
+            cancelled: list[str] = []
+            for row in rows:
+                child_id = str(row.get("id") or "").strip()
+                child_status = str(row.get("status") or "").strip().lower()
+                if child_status in {"done", "cancelled"}:
+                    continue
+                try:
+                    update_issue(self.db_path, issue_id=child_id, status="cancelled")
+                    log_activity(
+                        self.db_path,
+                        action="issue.updated",
+                        target_type="issue",
+                        target_id=child_id,
+                        actor_agent_id=agent_id,
+                        run_id=str(run.get("id")),
+                        payload={"status": "cancelled", "source": "fix_cycle_limit_rejected"},
+                    )
+                    cancelled.append(child_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to cancel child %s during fix_cycle_limit rejection for %s",
+                        child_id, issue_id, exc_info=True,
+                    )
+            output_parts = [
+                "Lead — Ciclo de corrección cancelado por el usuario",
+                "",
+                f"El usuario ha rechazado continuar tras {fix_cycle_count} ciclo(s) de corrección. "
+                "El proyecto ha sido marcado como cancelado.",
+                "",
+            ]
+            if last_blocker:
+                output_parts.append(f"**Último problema detectado por el Reviewer:** {last_blocker}")
+            if last_evidence:
+                output_parts.append(f"**Evidencia más reciente:** {last_evidence}")
+            if cancelled:
+                output_parts += [
+                    "",
+                    f"Issues hijas canceladas: {', '.join(cancelled)}",
+                ]
+            output_parts += [
+                "",
+                "Puedes reabrir el proyecto en cualquier momento creando una nueva issue "
+                "con una especificación más detallada o con un adapter CLI asignado al Engineer.",
+            ]
+            return ExecutionResult(
+                status="completed",
+                output="\n".join(output_parts),
+                actions={"issue_status": "cancelled"},
+            )
+
+        # accept (or any other value — treat as accept for safety)
+        # ── Create one final engineer issue with full rejection history ────────
+        rows = self._child_issue_rows(issue_id)
+        reviewer_roles = {"reviewer", "code_reviewer"}
+        engineer_roles = {"engineer", "software_engineer"}
+
+        # Collect all reviewer findings for the final spec
+        reviewer_findings: list[str] = []
+        for row in rows:
+            if str(row.get("role") or "").strip().lower() not in reviewer_roles:
+                continue
+            report = row.get("last_agent_report") or {}
+            r_evidence = str(report.get("evidence") or "").strip()
+            r_blocker = str(report.get("blocker") or "").strip()
+            if r_evidence or r_blocker:
+                entry = f"- Revisión de '{row.get('title') or 'Reviewer'}'"
+                if r_blocker and r_blocker.lower() != "none":
+                    entry += f": {r_blocker}"
+                if r_evidence and r_evidence.lower() != "none":
+                    entry += f" (evidencia: {r_evidence})"
+                reviewer_findings.append(entry)
+
+        desc_parts = [
+            f"**Fix final (intervención humana) — tras {fix_cycle_count} ciclo(s) fallidos**",
+            "",
+            "El Reviewer ha rechazado las implementaciones anteriores varias veces. "
+            "Este es el intento final autorizado por el usuario.",
+            "",
+            "## Historial de rechazos del Reviewer",
+        ]
+        if reviewer_findings:
+            desc_parts += reviewer_findings
+        else:
+            if last_blocker:
+                desc_parts.append(f"- Problema persistente: {last_blocker}")
+            if last_evidence:
+                desc_parts.append(f"- Evidencia: {last_evidence}")
+        desc_parts += [
+            "",
+            "## Instrucciones especiales para este intento final",
+            "- Lee **todos** los comentarios del Reviewer antes de escribir una sola línea.",
+            "- Confirma que entiendes el problema específico al inicio de tu comentario.",
+            "- Si el problema requiere cambiar el adapter o acceder a herramientas externas, "
+            "declara bloqueado inmediatamente con `next_owner: lead`. No intentes simular lo que no puedes hacer.",
+            "- Implementa solo lo que el Reviewer especifica. Sin features extra.",
+            "",
+            "El Reviewer se ejecutará automáticamente cuando esta issue esté completada.",
+        ]
+        final_description = "\n".join(desc_parts)
+
+        # Reset reviewer to todo
+        for row in rows:
+            if str(row.get("role") or "").strip().lower() not in reviewer_roles:
+                continue
+            if str(row.get("status") or "").strip().lower() != "done":
+                continue
+            rev_id = str(row.get("id") or "").strip()
+            if not rev_id:
+                continue
+            try:
+                update_issue(self.db_path, issue_id=rev_id, status="todo")
+                log_activity(
+                    self.db_path,
+                    action="issue.updated",
+                    target_type="issue",
+                    target_id=rev_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id")),
+                    payload={
+                        "status": "todo",
+                        "source": "fix_cycle_limit_accepted",
+                        "reason": "user authorised final fix attempt",
+                    },
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to reset reviewer %s to todo for final fix attempt (issue %s)",
+                    rev_id, issue_id, exc_info=True,
+                )
+
+        fix_issue = self._create_delegated_issue(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            run=run,
+            spec={
+                "title": f"Fix final: intento autorizado por usuario tras {fix_cycle_count} ciclos",
+                "description": final_description,
+                "role": "engineer",
+                "complexity": "high",  # this is a hard case; give it the high-complexity signal
+            },
+            metadata_source="reviewer_fix_cycle_limit_final",
+            activity_source="fix_cycle_limit_accepted",
+        )
+        try:
+            sync_default_child_dependencies(self.db_path, parent_issue_id=issue_id)
+        except Exception:
+            logger.warning(
+                "sync_default_child_dependencies failed for final fix attempt on %s",
+                issue_id, exc_info=True,
+            )
+
+        fix_id = str((fix_issue or {}).get("id") or "desconocido")
+        output_lines = [
+            "Lead — Intento final autorizado por el usuario",
+            "",
+            f"Tras {fix_cycle_count} ciclo(s) de corrección, el usuario ha autorizado un último intento.",
+            "",
+            f"Issue de corrección final creada: `{fix_id}`",
+            "El Reviewer ha sido restablecido a `todo` y se ejecutará automáticamente cuando el Engineer termine.",
+            "",
+            "⚠ Si este intento también falla, cancela el proyecto manualmente o rediseña la especificación "
+            "desde cero — el framework no creará más ciclos automáticos.",
+        ]
+        if last_blocker:
+            output_lines += ["", f"**Problema a resolver:** {last_blocker}"]
+        if last_evidence:
+            output_lines += [f"**Evidencia del Reviewer:** {last_evidence}"]
 
         return ExecutionResult(
             status="completed",
