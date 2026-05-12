@@ -26,7 +26,7 @@ OP_SCHEMA: dict[str, Any] = {
         "path": {"type": "string"},
         "title": {"type": "string"},
         "description": {"type": "string"},
-        "role": {"type": "string", "enum": ["lead", "engineer", "reviewer", "qa"]},
+        "role": {"type": "string", "enum": ["lead", "engineer", "reviewer", "test_runner"]},
         "complexity": {"type": "string", "enum": ["low", "medium", "high"]},
         "kind": {"type": "string", "enum": ["suggest_tasks", "request_confirmation"]},
         "summary": {"type": "string"},
@@ -66,7 +66,7 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "path": {"type": ["string", "null"]},
                     "title": {"type": ["string", "null"]},
                     "description": {"type": ["string", "null"]},
-                    "role": {"type": ["string", "null"], "enum": ["lead", "engineer", "reviewer", "qa", None]},
+                    "role": {"type": ["string", "null"], "enum": ["lead", "engineer", "reviewer", "test_runner", None]},
                     "complexity": {"type": ["string", "null"], "enum": ["low", "medium", "high", None]},
                     "kind": {"type": ["string", "null"], "enum": ["suggest_tasks", "request_confirmation", None]},
                     "summary": {"type": ["string", "null"]},
@@ -131,7 +131,8 @@ def build_execution_contract() -> str:
         "the UI Plan tab reads the durable plan document, not plan-shaped comments.\n"
         "- Use update_plan only when the plan has materially changed.\n"
         "- If you are the Lead on a normal full-team software build, default to Engineer + Reviewer; "
-        "QA is optional and only needed for runtime verification. Skip Reviewer only for low-risk work and state why.\n"
+        "Reviewer absorbs static QA. Use role='test_runner' (Tier 3) only when runtime command execution is needed. "
+        "Skip Reviewer only for low-risk work and state why.\n"
         "- Keep accountability explicit: each delegated issue should name who reports to whom and who accepts the result.\n"
         "- After delegating child issues, wait for concrete child reports before waking/polling the Lead again.\n"
         "- Use create_issue to delegate sub-work; use set_status: done when complete.\n"
@@ -142,7 +143,7 @@ def build_execution_contract() -> str:
         "- Common reasons: 'lead_wants_file_read', 'initial_cycle_ready', 'child_blocked_requires_action', 'reviewer_fix_cycle_limit'.\n"
         "- LIMIT: only ONE create_interaction per run. The executor will silently drop any extras. "
         "If you need multiple user decisions, ask the most important one now and ask the rest in future heartbeats.\n"
-        "- 'lead_wants_file_read' is ONLY for blocked Tier 3 scouts (file_scout, web_scout, context_curator). "
+        "- 'lead_wants_file_read' is ONLY for blocked Tier 3 scouts (file_scout, web_scout, context_curator, test_runner). "
         "Never use it for blocked engineers — engineers already receive workspace_files automatically.\n"
         "- Example: {\"type\": \"create_interaction\", \"kind\": \"request_confirmation\", "
         "\"title\": \"...\", \"summary\": \"...\", \"payload\": {\"reason\": \"lead_wants_file_read\"}, "
@@ -174,8 +175,8 @@ def build_execution_contract() -> str:
         "- If 'workspace_files' is empty, the workspace is genuinely empty — state this explicitly and "
         "either start creating the required files (Engineer) or report that no files were available (Reviewer/QA).\n"
         "- NEVER fabricate test results, pass/fail verdicts, or code quality assessments without actual file evidence.\n"
-        "\n## Tier 3 scout roles (file_scout, web_scout, context_curator)\n"
-        "- Your only job is to read inputs (workspace_files, web, or issue thread) and write one summary comment.\n"
+        "\n## Tier 3 scout roles (file_scout, web_scout, context_curator, test_runner)\n"
+        "- Your only job is to read inputs (or execute commands) and write one summary comment.\n"
         "- Use add_comment for your findings, then set_status: done. Close in the same run.\n"
         "- Do NOT create sub-issues, interactions, update_plan, or write files.\n"
         "- Append the ---AGENT-REPORT--- block as the last part of your comment before setting status.\n"

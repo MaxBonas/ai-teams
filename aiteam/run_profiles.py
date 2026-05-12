@@ -19,7 +19,7 @@ class RunProfileConfig:
     allows_hiring: bool
     allows_worker_delegation: bool
     requires_review_gate: bool
-    requires_qa_gate: bool
+    requires_qa_gate: bool  # DEPRECATED — always False; Reviewer absorbs static QA; kept for API compat
     default_agent_ids: tuple[str, ...]
     cheap_delegate_roles: tuple[str, ...]
     senior_control_roles: tuple[str, ...]
@@ -247,16 +247,23 @@ def _agent_blueprint(agent_id: str) -> AgentBlueprint:
             assignment_reason="Quality supervision before work is considered complete.",
         )
     if role_key == "qa":
+        # DEPRECATED — QA Tier 2 role has been absorbed by the Reviewer.
+        # For runtime test execution, use role='test_runner' (Tier 3) instead.
+        # This branch is kept for backward compatibility with existing DB records only.
+        import logging as _logging  # noqa: PLC0415
+        _logging.getLogger(__name__).warning(
+            "_agent_blueprint: role='qa' is deprecated; map to test_runner (Tier 3) for runtime tests."
+        )
         return AgentBlueprint(
             agent_id=agent_id,
             role="qa",
-            name="QA",
+            name="QA (deprecated)",
             seniority="standard",
             capabilities=("test", "validation", "repro", "artifact_check"),
             supervisor_agent_id="role:team_lead",
             preferred_tier="budget_api",
             preferred_channel="api_or_local",
-            assignment_reason="Validation and evidence gathering after implementation.",
+            assignment_reason="DEPRECATED — use test_runner for runtime test execution.",
         )
     return AgentBlueprint(
         agent_id=agent_id,

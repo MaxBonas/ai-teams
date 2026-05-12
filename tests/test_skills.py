@@ -38,11 +38,18 @@ def test_load_skill_reviewer():
     assert "Gate note" in skill
 
 
-def test_load_skill_qa():
+def test_load_skill_qa_deprecated():
+    """qa.md was deleted in Phase 2 (2026-05-12); load_skill must return None."""
     skill = load_skill("qa")
+    assert skill is None, "qa skill has been deleted — expect None from load_skill"
+
+
+def test_load_skill_test_runner():
+    """test_runner.md must be discoverable as a Tier 3 scout skill."""
+    skill = load_skill("test_runner")
     assert skill is not None
-    assert "QA" in skill
-    assert "workspace_files" in skill  # updated: inject real code context, prevent hallucinations
+    assert "test_runner" in skill.lower() or "Test Runner" in skill
+    assert "Tier 3" in skill
 
 
 def test_load_skill_quorum_senior():
@@ -98,12 +105,13 @@ def test_list_skills_returns_all_roles():
     assert "lead" in roles
     assert "engineer" in roles
     assert "reviewer" in roles
-    assert "qa" in roles
+    assert "qa" not in roles, "qa skill has been deleted — must not appear in list_skills()"
     assert "quorum_senior" in roles
     # Tier 3 specialists must be discoverable
     assert "file_scout" in roles
     assert "web_scout" in roles
     assert "context_curator" in roles
+    assert "test_runner" in roles
 
 
 def test_list_skills_sorted():

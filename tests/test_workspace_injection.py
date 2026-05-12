@@ -243,11 +243,12 @@ class TestExecutorWorkspaceInjection:
             assert "path" in f
             assert "content" in f
 
-    def test_qa_gets_workspace_files(self, tmp_path: Path) -> None:
-        ctx = self._run_and_capture(tmp_path, role="qa")
+    def test_test_runner_gets_workspace_files(self, tmp_path: Path) -> None:
+        """test_runner (Tier 3) must receive workspace_files so it can see test targets."""
+        ctx = self._run_and_capture(tmp_path, role="test_runner")
         assert ctx is not None
         payload = json.loads(str(ctx.get("wake_payload_json") or "{}"))
-        assert payload.get("workspace_files") is not None, "qa should receive workspace_files"
+        assert payload.get("workspace_files") is not None, "test_runner should receive workspace_files"
 
     def test_engineer_gets_workspace_files_on_new_issue(self, tmp_path: Path) -> None:
         # Engineers now receive workspace_files on ALL wakes (including new_issue) so

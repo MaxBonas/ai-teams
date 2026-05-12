@@ -88,8 +88,8 @@ def _safe_truncate_output(text: str, max_len: int = _COMMENT_BODY_MAX) -> str:
 # questions to the user, bypassing the communication chain.
 _WORKSPACE_READER_ROLES = frozenset({
     "reviewer", "code_reviewer",
-    "qa",
     "file_scout",
+    "test_runner",
     "engineer", "software_engineer",
 })
 
@@ -1485,7 +1485,7 @@ class RunExecutor:
         )
 
     # Tier 3 cheap specialists — always prefer budget/local adapters.
-    _TIER3_ROLES = frozenset({"file_scout", "web_scout", "context_curator"})
+    _TIER3_ROLES = frozenset({"file_scout", "web_scout", "context_curator", "test_runner"})
 
     def _ensure_role_agent(self, *, role: str, supervisor_agent_id: str, source_run_id: str) -> str | None:
         role_key = role.strip().lower().replace(" ", "_").replace("-", "_")
@@ -1784,10 +1784,10 @@ class RunExecutor:
           A missing report (e.g. role_builtin) is treated as acceptable so legacy runs
           still close normally.
 
-        QA gate (optional — only enforced when a QA child exists):
-        - If any child with role ``qa`` or ``quality_assurance`` is ``done``, its
-          ``result`` must NOT be ``blocked`` or ``partial``.  A missing report is accepted.
-          (QA is optional but if it ran and found failures, cycle-close must wait.)
+        Note: the QA Tier 2 role has been removed.  The Reviewer absorbs static QA.
+        For runtime test execution, a ``test_runner`` (Tier 3) may be delegated; its
+        output is informational — the Lead reads exit codes and decides whether to
+        re-open a fix cycle.
         """
         rows = self._child_issue_rows(issue_id)
         if not rows:
@@ -1795,7 +1795,6 @@ class RunExecutor:
         if not all(str(row["status"]) == "done" for row in rows):
             return False
         reviewer_roles = {"reviewer", "code_reviewer"}
-        qa_roles = {"qa", "quality_assurance"}
         reviewer_rows = [
             r for r in rows
             if str(r.get("role") or "").strip().lower() in reviewer_roles
@@ -1808,16 +1807,6 @@ class RunExecutor:
             if report:
                 result = str(report.get("result") or "").strip().lower()
                 if result in {"blocked", "partial", "changes_requested"}:
-                    return False
-        # QA quality gate (optional): if QA ran and reported bad results, block cycle-close.
-        # QA is not required for cycle-close but if present and failing, we must not close.
-        for qa_row in rows:
-            if str(qa_row.get("role") or "").strip().lower() not in qa_roles:
-                continue
-            report = qa_row.get("last_agent_report") or {}
-            if report:
-                result = str(report.get("result") or "").strip().lower()
-                if result in {"blocked", "partial"}:
                     return False
         return True
 

@@ -14,10 +14,10 @@ PROJECT_CONFIG_NAME = "project_config.json"
 SENIOR_ROLES = {"lead", "team_lead", "reviewer", "quorum_senior", "quorum_auditor", "architect"}
 # Tier 3 cheap specialists — prefer budget/local adapters.
 # file_scout and context_curator benefit from workspace access but can fall back to API.
-JUNIOR_ROLES = {"engineer", "qa", "worker", "file_scout", "web_scout", "context_curator"}
+JUNIOR_ROLES = {"engineer", "test_runner", "worker", "file_scout", "web_scout", "context_curator"}
 
 # API-only adapters cannot write workspace files — they will immediately block
-# when assigned to junior roles that require file writes (engineer, qa, worker).
+# when assigned to junior roles that require file writes (engineer, worker).
 # reconcile_project_agent_policy upgrades these to subscription_cli when available.
 _API_ONLY_ADAPTER_TYPES = {"openai_api", "anthropic_api", "anthropic_sonnet", "gemini_api"}
 
@@ -126,7 +126,7 @@ def reconcile_project_agent_policy(db_path: Path) -> list[str]:
     Two upgrade paths:
     1. Default/placeholder adapters (role_builtin, lead_builtin, manual, empty) are
        always replaced with the best adapter for the role.
-    2. API-only adapters on junior roles (engineer, qa, worker) are upgraded to
+    2. API-only adapters on junior roles (engineer, worker) are upgraded to
        subscription_cli when a CLI profile is now available in the project's allowlist.
        This handles projects that had only openai_api initially but later added
        codex_subscription — without this, the engineer would stay on the API-only
@@ -227,9 +227,9 @@ def _profile_score(profile: dict[str, Any], *, needs_senior: bool) -> int:
         # cannot write workspace files and will immediately block with
         # liveness_reason = "api_only_engineer_no_workspace_changes".
         if adapter_type == "subscription_cli":
-            score += 30  # subscription_cli can write files — ideal for engineer/qa
+            score += 30  # subscription_cli can write files — ideal for engineer
         elif adapter_type in {"openai_api", "anthropic_api", "gemini_api", "anthropic_sonnet"}:
-            score -= 30  # API-only immediately blocks engineer/qa
+            score -= 30  # API-only immediately blocks engineer (file-write required)
     return score
 
 

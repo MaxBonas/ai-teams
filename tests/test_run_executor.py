@@ -128,9 +128,9 @@ class _LeadCreateIssuesWithoutReviewerRuntime:
                         "complexity": "medium",
                     },
                     {
-                        "title": "Verify playable prototype",
-                        "description": "Exercise the build and report acceptance evidence.",
-                        "role": "qa",
+                        "title": "Run test suite",
+                        "description": "Execute tests and report exit codes.",
+                        "role": "test_runner",
                         "complexity": "medium",
                     },
                 ],
@@ -604,7 +604,7 @@ def test_full_team_lead_delegation_adds_review_guardrail_when_missing(tmp_path: 
 
     roles = {row["role"] for row in issues}
     guardrail_issue = next(row for row in issues if row["role"] == "reviewer")
-    assert {"engineer", "qa", "reviewer"} <= roles
+    assert {"engineer", "test_runner", "reviewer"} <= roles
     assert json.loads(guardrail_issue["metadata_json"])["source"] == "full_team_review_guardrail"
     assert guardrail_issue["assignee_agent_id"] == "role:reviewer"
     assert reviewer_wakeup is not None
@@ -861,7 +861,7 @@ def test_blocked_dependency_wakeup_is_skipped_until_blocker_done(tmp_path: Path)
         )
         conn.execute(
             "INSERT INTO agents (id, role, name, adapter_type) VALUES (?, ?, ?, ?)",
-            ("role:qa", "qa", "QA", "role_builtin"),
+            ("role:test_runner", "test_runner", "Test Runner", "role_builtin"),
         )
         conn.execute(
             """
@@ -875,7 +875,7 @@ def test_blocked_dependency_wakeup_is_skipped_until_blocker_done(tmp_path: Path)
             INSERT INTO issues (id, parent_id, goal_id, title, status, role, assignee_agent_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("issue:qa", "issue:intake", "goal-1", "Test prototype", "todo", "qa", "role:qa"),
+            ("issue:qa", "issue:intake", "goal-1", "Run tests", "todo", "test_runner", "role:test_runner"),
         )
         conn.execute(
             "INSERT INTO issue_dependencies (issue_id, depends_on_issue_id) VALUES (?, ?)",
@@ -884,11 +884,11 @@ def test_blocked_dependency_wakeup_is_skipped_until_blocker_done(tmp_path: Path)
         conn.commit()
     enqueue_wakeup(
         db_path,
-        agent_id="role:qa",
+        agent_id="role:test_runner",
         source="assignment",
         reason="new_issue",
         payload={"issue_id": "issue:qa"},
-        wakeup_id="wake:001-qa",
+        wakeup_id="wake:001-test_runner",
     )
     enqueue_wakeup(
         db_path,
@@ -905,7 +905,7 @@ def test_blocked_dependency_wakeup_is_skipped_until_blocker_done(tmp_path: Path)
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         skipped = conn.execute(
-            "SELECT status, error FROM wakeup_requests WHERE agent_id = 'role:qa'"
+            "SELECT status, error FROM wakeup_requests WHERE agent_id = 'role:test_runner'"
         ).fetchone()
 
     assert dispatch is not None
@@ -1726,7 +1726,7 @@ def test_lead_manual_wake_skips_when_non_terminal_children_exist(tmp_path: Path)
         for suffix, role, status in [
             ("build", "engineer", "in_progress"),
             ("review", "reviewer", "todo"),
-            ("qa", "qa", "todo"),
+            ("tests", "test_runner", "todo"),
         ]:
             conn.execute(
                 """

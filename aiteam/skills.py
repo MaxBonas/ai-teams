@@ -11,14 +11,15 @@ _ROLE_FILE: dict[str, str] = {
     "software_engineer": "engineer.md",
     "reviewer": "reviewer.md",
     "code_reviewer": "reviewer.md",
-    "qa": "qa.md",
-    "qa_engineer": "qa.md",
     "quorum_senior": "quorum_senior.md",
     "senior": "quorum_senior.md",
     # Tier 3 specialists
     "file_scout": "file_scout.md",
     "web_scout": "web_scout.md",
     "context_curator": "context_curator.md",
+    "test_runner": "test_runner.md",
+    # DEPRECATED — qa.md deleted 2026-05-12; kept as sentinel so load_skill("qa")
+    # returns None gracefully (file no longer exists, load_skill handles the missing file).
 }
 
 
