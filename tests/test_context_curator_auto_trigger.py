@@ -257,16 +257,21 @@ class TestActiveCuratorIdempotency:
             "Should not create a second curator when one is in_progress"
         )
 
-    def test_new_curator_spawned_when_prior_is_done(self, tmp_path: Path) -> None:
-        """A completed curator is terminal; the next long-thread wave should spawn a fresh one."""
+    def test_no_new_curator_when_prior_is_done(self, tmp_path: Path) -> None:
+        """A done curator blocks re-spawn even if the thread is still long.
+
+        Without this guard the curator would re-trigger on every subsequent
+        child_report wake (comment count never decreases), creating an infinite
+        loop of curator → done → spawn → curator → done → …
+        """
         db_path = tmp_path / "aiteam.db"
         _init_db(db_path)
         _add_parent_comments(db_path, RunExecutor._CONTEXT_CURATOR_COMMENT_THRESHOLD)
         self._add_curator_child(db_path, "done")
         _run_lead(db_path)
-        # Two total: the pre-existing done one + the newly spawned todo one
-        assert _count_curator_children(db_path) == 2, (
-            "A done curator is terminal — a new one should be spawned for the next wave"
+        # Still only the original done curator — no second one
+        assert _count_curator_children(db_path) == 1, (
+            "A done curator should block re-spawn to prevent infinite loops"
         )
 
     def test_new_curator_spawned_when_prior_is_cancelled(self, tmp_path: Path) -> None:
@@ -338,8 +343,27 @@ class TestCuratorChildProperties:
                 " AND lower(role) = 'context_curator' LIMIT 1",
             ).fetchone()
         assert row is not None
-        assert "hilo" in str(row["description"] or "").lower(), (
+        desc = str(row["description"] or "")
+        assert "hilo" in desc.lower(), (
             "Curator description should mention 'hilo' (thread)"
+        )
+
+    def test_curator_description_includes_target_issue_id(self, tmp_path: Path) -> None:
+        """Description must include 'Target issue: <id>' so the curator skill can parse it."""
+        db_path = tmp_path / "aiteam.db"
+        _init_db(db_path)
+        _add_parent_comments(db_path, RunExecutor._CONTEXT_CURATOR_COMMENT_THRESHOLD)
+        _run_lead(db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT description FROM issues WHERE parent_id = 'issue:intake'"
+                " AND lower(role) = 'context_curator' LIMIT 1",
+            ).fetchone()
+        assert row is not None
+        desc = str(row["description"] or "")
+        assert "Target issue: issue:intake" in desc, (
+            "Curator description must contain 'Target issue: <id>' for the skill to parse"
         )
 
     def test_curator_parent_id_is_intake(self, tmp_path: Path) -> None:

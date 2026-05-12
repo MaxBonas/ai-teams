@@ -1740,13 +1740,21 @@ class RunExecutor:
         return "\n".join(lines)
 
     def _all_children_done(self, issue_id: str) -> bool:
-        """Return True only when every child is done AND a reviewer ran with acceptable output.
+        """Return True only when every child is done AND quality gates pass.
 
-        Acceptance rules for the reviewer:
+        Quality gates:
+
+        Reviewer gate (required):
         - At least one child with role ``reviewer`` or ``code_reviewer`` must be ``done``.
         - If the reviewer wrote an ``---AGENT-REPORT---`` block its ``result`` field must
-          NOT be ``blocked`` or ``partial``.  A missing report (e.g. role_builtin) is
-          treated as acceptable so legacy runs still close normally.
+          NOT be ``blocked``, ``partial``, or ``changes_requested``.
+          A missing report (e.g. role_builtin) is treated as acceptable so legacy runs
+          still close normally.
+
+        QA gate (optional — only enforced when a QA child exists):
+        - If any child with role ``qa`` or ``quality_assurance`` is ``done``, its
+          ``result`` must NOT be ``blocked`` or ``partial``.  A missing report is accepted.
+          (QA is optional but if it ran and found failures, cycle-close must wait.)
         """
         rows = self._child_issue_rows(issue_id)
         if not rows:
@@ -1754,20 +1762,29 @@ class RunExecutor:
         if not all(str(row["status"]) == "done" for row in rows):
             return False
         reviewer_roles = {"reviewer", "code_reviewer"}
+        qa_roles = {"qa", "quality_assurance"}
         reviewer_rows = [
             r for r in rows
             if str(r.get("role") or "").strip().lower() in reviewer_roles
         ]
         if not reviewer_rows:
             return False  # reviewer required before cycle-close
-        # Reviewer quality gate: blocked/partial/changes_requested reports block cycle-close.
-        # "changes_requested" means the reviewer found real problems — the engineer must fix
-        # them before the project can be considered complete.
+        # Reviewer quality gate: blocked/partial/changes_requested block cycle-close.
         for rev_row in reviewer_rows:
             report = rev_row.get("last_agent_report") or {}
             if report:
                 result = str(report.get("result") or "").strip().lower()
                 if result in {"blocked", "partial", "changes_requested"}:
+                    return False
+        # QA quality gate (optional): if QA ran and reported bad results, block cycle-close.
+        # QA is not required for cycle-close but if present and failing, we must not close.
+        for qa_row in rows:
+            if str(qa_row.get("role") or "").strip().lower() not in qa_roles:
+                continue
+            report = qa_row.get("last_agent_report") or {}
+            if report:
+                result = str(report.get("result") or "").strip().lower()
+                if result in {"blocked", "partial"}:
                     return False
         return True
 
@@ -1977,7 +1994,12 @@ class RunExecutor:
         1. The parent issue has ≥ ``_CONTEXT_CURATOR_COMMENT_THRESHOLD`` comments.
         2. No plan document exists for the issue (curator adds the most value before
            a plan is written; once a plan exists the thread is already summarised).
-        3. No non-terminal ``context_curator`` child already exists (idempotency).
+        3. No non-cancelled ``context_curator`` child already exists.
+           - Active (todo/in_progress/blocked): wait for it to finish.
+           - Done: the thread has already been curated; do NOT re-spawn (prevents
+             an infinite loop where each curator finish immediately triggers
+             another spawn on the next child_report wake).
+           - Cancelled: the curator was abandoned; a fresh one is allowed.
 
         The method never raises — any failure is logged and silently swallowed so
         the calling ``child_report`` path continues unaffected.
@@ -1999,7 +2021,7 @@ class RunExecutor:
                     """
                     SELECT id FROM issues
                     WHERE parent_id = ? AND lower(role) = 'context_curator'
-                      AND status NOT IN ('done', 'cancelled')
+                      AND status != 'cancelled'
                     LIMIT 1
                     """,
                     (issue_id,),
@@ -2018,14 +2040,14 @@ class RunExecutor:
                 spec={
                     "title": "Context curator — sintetizar hilo del proyecto",
                     "description": (
-                        "El hilo de esta issue ha acumulado suficientes comentarios para "
-                        "dificultar la navegación. Tu tarea: leer el hilo completo y escribir "
-                        "un resumen ejecutivo en un único comentario (add_comment) que incluya:\n"
-                        "- Estado actual del proyecto\n"
-                        "- Decisiones ya tomadas\n"
-                        "- Problemas pendientes\n"
-                        "- Próximos pasos\n\n"
-                        "Usa set_status: done cuando hayas terminado. "
+                        f"Target issue: {issue_id}\n\n"
+                        "El hilo de la issue padre ha acumulado suficientes comentarios para "
+                        "dificultar la navegación. Sigue tu protocolo estándar de context_curator:\n"
+                        "1. Lee el hilo completo del Target issue (via API o wake payload).\n"
+                        "2. Escribe un documento de plan comprimido en el Target issue "
+                        "(PUT /api/issues/{target_id}/documents/plan). Si la API no está "
+                        "disponible, usa add_comment en el Target issue como fallback.\n"
+                        "3. Usa set_status: done cuando hayas terminado.\n\n"
                         "No crees sub-issues ni interacciones."
                     ),
                     "role": "context_curator",
