@@ -807,6 +807,11 @@ class RunExecutor:
             _fix_result = self._handle_reviewer_changes_requested(issue_id, agent_id, run)
             if _fix_result is not None:
                 return _fix_result
+            # ── Auto-spawn context curator when thread grows long ─────────────
+            # Silently creates a context_curator child when the comment count
+            # crosses the threshold AND no plan document AND no active curator.
+            # Does not short-circuit — the rest of the child_report logic runs.
+            self._maybe_spawn_context_curator(issue_id, agent_id, run)
             actions: dict[str, Any] = {}
             if self._all_children_done(issue_id):
                 # Cancel any stale child_blocked_requires_action interaction —
@@ -1956,6 +1961,84 @@ class RunExecutor:
     # the system escalates to the user instead of spawning another fix issue.
     # Prevents runaway loops when the engineer repeatedly delivers wrong output.
     _MAX_FIX_CYCLES: int = 3
+
+    # Comment threshold for auto-spawning a context_curator child.  When the
+    # parent issue accumulates this many comments and has no plan document and no
+    # active curator child, the Lead silently creates a context_curator to
+    # synthesise the thread before the next round of delegation.
+    _CONTEXT_CURATOR_COMMENT_THRESHOLD: int = 8
+
+    def _maybe_spawn_context_curator(
+        self, issue_id: str, agent_id: str, run: dict[str, Any]
+    ) -> None:
+        """Silently spawn a context_curator child when the issue thread grows long.
+
+        Triggered in the ``child_report`` branch when ALL three conditions hold:
+        1. The parent issue has ≥ ``_CONTEXT_CURATOR_COMMENT_THRESHOLD`` comments.
+        2. No plan document exists for the issue (curator adds the most value before
+           a plan is written; once a plan exists the thread is already summarised).
+        3. No non-terminal ``context_curator`` child already exists (idempotency).
+
+        The method never raises — any failure is logged and silently swallowed so
+        the calling ``child_report`` path continues unaffected.
+        """
+        try:
+            with contextlib.closing(_connect(self.db_path)) as conn:
+                comment_count = conn.execute(
+                    "SELECT COUNT(*) FROM issue_comments WHERE issue_id = ?",
+                    (issue_id,),
+                ).fetchone()[0]
+            if comment_count < self._CONTEXT_CURATOR_COMMENT_THRESHOLD:
+                return
+
+            if get_document(self.db_path, issue_id=issue_id, key="plan") is not None:
+                return
+
+            with contextlib.closing(_connect(self.db_path)) as conn:
+                existing_curator = conn.execute(
+                    """
+                    SELECT id FROM issues
+                    WHERE parent_id = ? AND lower(role) = 'context_curator'
+                      AND status NOT IN ('done', 'cancelled')
+                    LIMIT 1
+                    """,
+                    (issue_id,),
+                ).fetchone()
+            if existing_curator is not None:
+                return
+
+            logger.info(
+                "Spawning context_curator for issue %s (comment_count=%d, threshold=%d)",
+                issue_id, comment_count, self._CONTEXT_CURATOR_COMMENT_THRESHOLD,
+            )
+            self._create_delegated_issue(
+                issue_id=issue_id,
+                agent_id=agent_id,
+                run=run,
+                spec={
+                    "title": "Context curator — sintetizar hilo del proyecto",
+                    "description": (
+                        "El hilo de esta issue ha acumulado suficientes comentarios para "
+                        "dificultar la navegación. Tu tarea: leer el hilo completo y escribir "
+                        "un resumen ejecutivo en un único comentario (add_comment) que incluya:\n"
+                        "- Estado actual del proyecto\n"
+                        "- Decisiones ya tomadas\n"
+                        "- Problemas pendientes\n"
+                        "- Próximos pasos\n\n"
+                        "Usa set_status: done cuando hayas terminado. "
+                        "No crees sub-issues ni interacciones."
+                    ),
+                    "role": "context_curator",
+                    "complexity": "low",
+                },
+                metadata_source="context_curator_auto_trigger",
+                activity_source="context_curator_auto_trigger",
+            )
+        except Exception:
+            logger.warning(
+                "_maybe_spawn_context_curator failed silently for issue %s", issue_id,
+                exc_info=True,
+            )
 
     def _handle_reviewer_changes_requested(
         self, issue_id: str, agent_id: str, run: dict[str, Any]
