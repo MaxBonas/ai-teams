@@ -30,6 +30,7 @@ from aiteam.project_adapters import (
     reconcile_project_agent_policy,
     write_project_adapter_policy,
 )
+from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.tools.catalog import default_capabilities_for_role
 
 router = APIRouter()
@@ -137,6 +138,21 @@ async def create_project(payload: NewProjectRequest, request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _initialize_project_runtime(target, initial_task=payload.initial_task)
     set_current_workspace(target, persist=True)
+
+    # Enqueue the Lead's first wakeup so the HeartbeatLoop can start immediately
+    # without waiting for a manual "Iniciar" click in the frontend.
+    try:
+        _db = resolve_runtime_dir(target, PROJECT_ROOT) / "aiteam.db"
+        enqueue_wakeup(
+            _db,
+            agent_id="role:lead",
+            source="project_bootstrap",
+            reason="new_project",
+            payload={"issue_id": "issue:intake", "wake_reason": "new_project"},
+            idempotency_key="bootstrap:issue:intake:role:lead",
+        )
+    except Exception:
+        pass  # Non-fatal — the user can still click Iniciar manually
 
     return {
         "success": True,

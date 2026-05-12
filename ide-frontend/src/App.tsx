@@ -539,6 +539,8 @@ export default function App() {
   const [secretValue, setSecretValue] = useState('');
   const [selectedProjectAdapterIds, setSelectedProjectAdapterIds] = useState<string[]>([]);
   const [deleteConfirm, setDeleteConfirm] = useState('');
+  // Project initialization loading state
+  const [projectInitializing, setProjectInitializing] = useState(false);
   // Chat channel (Lead ↔ User)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatDraft, setChatDraft] = useState('');
@@ -794,6 +796,32 @@ export default function App() {
     void loadBudgets();
   };
 
+  /**
+   * Poll issue:intake every 2 s until the Lead has started running (status ≠ 'todo').
+   * Shows the projectInitializing overlay during the wait.
+   * Times out after 90 s so the user is never permanently blocked.
+   */
+  const waitForLeadInit = async () => {
+    setProjectInitializing(true);
+    const MAX_POLLS = 45; // 45 × 2 s = 90 s max
+    for (let i = 0; i < MAX_POLLS; i++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+      try {
+        const res = await apiFetch('/api/issues/issue%3Aintake');
+        if (res.ok) {
+          const data = (await res.json()) as { issue?: { status?: string } };
+          if (data.issue?.status && data.issue.status !== 'todo') {
+            await loadProjectData('issue:intake');
+            break;
+          }
+        }
+      } catch {
+        // ignore transient errors and keep polling
+      }
+    }
+    setProjectInitializing(false);
+  };
+
   const refresh = async () => {
     setLoading(true);
     setError('');
@@ -997,6 +1025,9 @@ export default function App() {
       applyWorkspace(json);
       setLastResult(json);
       await loadProjectData('issue:intake');
+      // Show loading overlay until the Lead's first run starts (≤30 s with the
+      // workspace-aware HeartbeatLoop; falls back gracefully after 90 s).
+      void waitForLeadInit();
     } catch (projectError) {
       setError(projectError instanceof Error ? projectError.message : 'project_create_failed');
     } finally {
@@ -1854,6 +1885,31 @@ export default function App() {
 
   return (
     <main className="shell app-shell">
+      {projectInitializing && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(13,17,23,0.92)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          gap: '1.5rem',
+        }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%',
+            border: '3px solid var(--border)',
+            borderTopColor: 'var(--accent)',
+            animation: 'spin 0.8s linear infinite',
+          }} />
+          <div style={{ textAlign: 'center', color: 'var(--text-bright)' }}>
+            <div style={{ fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.35rem' }}>
+              Iniciando proyecto…
+            </div>
+            <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>
+              El Lead está leyendo la tarea y organizando el equipo
+            </div>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <div className="topbar-brand">
           <span className="brand-mark">▸</span>

@@ -4,7 +4,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
+from aiteam.adapters.registry import AdapterRegistry
 from aiteam.db.liveness import reconcile_stalled_subtrees, reconcile_unassigned_role_issues, reconcile_unqueued_assigned_issues
 from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
@@ -13,7 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 class HeartbeatLoop:
-    """Async loop: tick timers → drain wakeup queue → execute runs."""
+    """Async loop: tick timers → drain wakeup queue → execute runs.
+
+    Pass ``db_path_factory`` (a zero-arg callable that returns the current
+    workspace DB path) so the loop can transparently switch to a new project
+    when the user creates or switches workspaces at runtime — without needing
+    a server restart.  ``registry`` is required when ``db_path_factory`` is
+    supplied; it is used to re-create the executor for the new path.
+    """
 
     def __init__(
         self,
@@ -21,15 +30,47 @@ class HeartbeatLoop:
         executor: RunExecutor,
         *,
         tick_interval_sec: float = 30.0,
+        db_path_factory: Callable[[], Path] | None = None,
+        registry: AdapterRegistry | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.executor = executor
         self.tick_interval_sec = tick_interval_sec
         self._scheduler = HeartbeatScheduler(db_path)
+        self._db_path_factory = db_path_factory
+        self._registry = registry
+
+    def _refresh_workspace(self) -> None:
+        """Check whether the current workspace has changed and, if so, switch.
+
+        Called at the top of every ``run_once`` tick so a project
+        create/switch takes effect within one tick interval (≤30 s).
+        """
+        if self._db_path_factory is None:
+            return
+        try:
+            fresh = Path(self._db_path_factory())
+        except Exception:
+            logger.warning("HeartbeatLoop: db_path_factory raised — keeping current path", exc_info=True)
+            return
+        if fresh == self.db_path:
+            return
+        if not fresh.exists():
+            # New workspace DB not ready yet; wait for the next tick.
+            return
+        logger.info("HeartbeatLoop: workspace changed %s → %s", self.db_path, fresh)
+        self.db_path = fresh
+        self._scheduler = HeartbeatScheduler(fresh)
+        if self._registry is not None:
+            self.executor = RunExecutor(fresh, self._registry)
 
     async def run_once(self) -> int:
         """Tick timers, run liveness reconciler, and drain the wakeup queue. Returns number of runs dispatched."""
         loop = asyncio.get_event_loop()
+
+        # Switch workspace if the user created / switched projects since last tick.
+        await loop.run_in_executor(None, self._refresh_workspace)
+
         now = datetime.now(timezone.utc)
         try:
             await loop.run_in_executor(None, self._scheduler.tick_timers, now)

@@ -99,7 +99,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception:
             logger.exception("startup reconciliation failed — continuing")
 
-        loop = HeartbeatLoop(db_path, executor)
+        loop = HeartbeatLoop(
+            db_path,
+            executor,
+            db_path_factory=_db_path,
+            registry=registry,
+        )
         task = asyncio.create_task(loop.run_forever())
     else:
         logger.warning("HeartbeatLoop not started; schema unavailable at %s", db_path)
