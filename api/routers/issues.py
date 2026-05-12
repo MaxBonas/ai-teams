@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from api.utils import PROJECT_ROOT, _require_api_auth_request, _workspace_from_request, get_current_workspace, resolve_runtime_dir
 from aiteam.db.activity_log import log_activity
 from aiteam.db.dependencies import list_dependencies, resolve_blocker_wakeups
-from aiteam.db.documents import get_document
+from aiteam.db.documents import get_context_summary, get_document
 from aiteam.db.interactions import list_interactions
 from aiteam.db.issues import create_issue, get_issue, list_issues, update_issue
 from aiteam.db.liveness import diagnose_issue
@@ -123,6 +123,119 @@ async def get_issue_by_id(issue_id: str, request: Request):
     except Exception:
         plan_document = None
     return {"success": True, "issue": row, "pending_interactions": pending, "plan_document": plan_document}
+
+
+@router.get("/api/issues/{issue_id}/thread")
+async def get_issue_thread(
+    issue_id: str,
+    request: Request,
+    view: str = "compact",
+    max_recent: int = 15,
+    max_full: int = 200,
+):
+    """Return the thread for an issue in compact or full form.
+
+    **compact** (default):
+      - ``summary_blocks``: blocks from the context_summary document (already synthesized)
+      - ``recent_comments``: up to *max_recent* comments AFTER ``synthesized_through``
+        (or the last *max_recent* if no synthesis exists)
+      - ``has_synthesized_history``: True when prior blocks exist
+
+    **full**:
+      - ``comments``: all comments chronological (capped at *max_full*)
+    """
+    _require_api_auth_request(request)
+    db = _db(request)
+    if view not in ("compact", "full"):
+        raise HTTPException(status_code=400, detail="view must be 'compact' or 'full'")
+    try:
+        with sqlite3.connect(str(db), timeout=20.0) as conn:
+            conn.row_factory = sqlite3.Row
+
+            total_comments: int = conn.execute(
+                "SELECT COUNT(*) FROM issue_comments WHERE issue_id = ?", (issue_id,)
+            ).fetchone()[0]
+
+            if view == "full":
+                rows = conn.execute(
+                    """
+                    SELECT id, body, author_agent_id, author_user_id, source_run_id, created_at
+                    FROM issue_comments WHERE issue_id = ?
+                    ORDER BY created_at ASC, rowid ASC
+                    LIMIT ?
+                    """,
+                    (issue_id, max_full),
+                ).fetchall()
+                comments = [dict(r) for r in rows]
+                return {
+                    "success": True,
+                    "view": "full",
+                    "issue_id": issue_id,
+                    "total_comments": total_comments,
+                    "comments": comments,
+                    "truncated": total_comments > max_full,
+                }
+
+            # compact view
+            summary_data = get_context_summary(db, issue_id=issue_id)
+            summary_blocks: list[dict] = []
+            synthesized_through: str | None = None
+            if summary_data:
+                summary_blocks = summary_data.get("blocks", [])
+                synthesized_through = summary_data.get("synthesized_through_comment_id")
+
+            # Fetch recent comments — only those after synthesized_through
+            if synthesized_through:
+                synth_row = conn.execute(
+                    "SELECT rowid FROM issue_comments WHERE id = ?",
+                    (synthesized_through,),
+                ).fetchone()
+                if synth_row:
+                    recent_rows = conn.execute(
+                        """
+                        SELECT id, body, author_agent_id, author_user_id, source_run_id, created_at
+                        FROM issue_comments WHERE issue_id = ? AND rowid > ?
+                        ORDER BY created_at ASC, rowid ASC
+                        LIMIT ?
+                        """,
+                        (issue_id, synth_row[0], max_recent),
+                    ).fetchall()
+                else:
+                    recent_rows = conn.execute(
+                        """
+                        SELECT id, body, author_agent_id, author_user_id, source_run_id, created_at
+                        FROM issue_comments WHERE issue_id = ?
+                        ORDER BY created_at DESC, rowid DESC LIMIT ?
+                        """,
+                        (issue_id, max_recent),
+                    ).fetchall()
+                    recent_rows = list(reversed(recent_rows))
+            else:
+                recent_rows = conn.execute(
+                    """
+                    SELECT id, body, author_agent_id, author_user_id, source_run_id, created_at
+                    FROM issue_comments WHERE issue_id = ?
+                    ORDER BY created_at DESC, rowid DESC LIMIT ?
+                    """,
+                    (issue_id, max_recent),
+                ).fetchall()
+                recent_rows = list(reversed(recent_rows))
+
+            recent_comments = [dict(r) for r in recent_rows]
+
+    except sqlite3.OperationalError as exc:
+        raise _schema_err(exc)
+
+    return {
+        "success": True,
+        "view": "compact",
+        "issue_id": issue_id,
+        "total_comments": total_comments,
+        "summary_blocks": summary_blocks,
+        "synthesized_through": synthesized_through,
+        "recent_comments": recent_comments,
+        "has_synthesized_history": len(summary_blocks) > 0,
+    }
 
 
 @router.get("/api/issues/{issue_id}/liveness")

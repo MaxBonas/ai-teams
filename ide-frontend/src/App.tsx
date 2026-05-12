@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ThreadView } from './components/ThreadView';
 import {
   Activity,
   AlertCircle,
@@ -2139,18 +2140,14 @@ export default function App() {
                   ) : null}
 
                   <div className="thread">
-                    {selectedComments.length ? selectedComments.map((comment) => (
-                      <article
-                        className={comment.author_user_id ? 'thread-message user-message' : 'thread-message agent-message'}
-                        key={comment.id}
-                      >
-                        <div className="message-author">
-                          {comment.author_user_id || comment.author_agent_id || 'sistema'}
-                          <span>{formatTime(comment.created_at)}</span>
-                        </div>
-                        <p>{comment.body}</p>
-                      </article>
-                    )) : <p className="muted">Sin comentarios.</p>}
+                    {selectedIssue ? (
+                      <ThreadView
+                        issueId={selectedIssue.id}
+                        preloadedComments={selectedComments}
+                      />
+                    ) : (
+                      <p className="muted">Sin comentarios.</p>
+                    )}
                   </div>
 
                   <div className="composer">
