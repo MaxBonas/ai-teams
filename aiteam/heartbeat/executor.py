@@ -15,7 +15,7 @@ from aiteam.db.agents import create_agent
 from aiteam.db.activity_log import log_activity
 from aiteam.db.comments import create_comment
 from aiteam.db.dependencies import resolve_blocker_wakeups, sync_default_child_dependencies
-from aiteam.db.documents import DocumentConflict, get_document, put_document
+from aiteam.db.documents import DocumentConflict, get_document, get_context_summary, put_document
 from aiteam.db.issues import create_issue
 from aiteam.db.finops import BudgetStatus, check_budget, current_period, record_cost
 from aiteam.db.interactions import create_interaction, get_interaction, list_interactions
@@ -2057,74 +2057,129 @@ class RunExecutor:
     # Prevents runaway loops when the engineer repeatedly delivers wrong output.
     _MAX_FIX_CYCLES: int = 3
 
-    # Comment threshold for auto-spawning a context_curator child.  When the
-    # parent issue accumulates this many comments and has no plan document and no
-    # active curator child, the Lead silently creates a context_curator to
-    # synthesise the thread before the next round of delegation.
-    _CONTEXT_CURATOR_COMMENT_THRESHOLD: int = 8
+    # Char threshold for auto-spawning a context_curator child.  When the
+    # unsynthesized portion of the parent issue thread exceeds this many characters
+    # (≈ 2 000 tokens) and no plan document exists, the Lead silently creates a
+    # context_curator to synthesise the next block before the next delegation round.
+    _CONTEXT_CURATOR_CHAR_THRESHOLD: int = 8_000
 
     def _maybe_spawn_context_curator(
         self, issue_id: str, agent_id: str, run: dict[str, Any]
     ) -> None:
-        """Silently spawn a context_curator child when the issue thread grows long.
+        """Silently spawn a context_curator child when unsynthesized thread content grows large.
 
-        Triggered in the ``child_report`` branch when ALL three conditions hold:
-        1. The parent issue has ≥ ``_CONTEXT_CURATOR_COMMENT_THRESHOLD`` comments.
-        2. No plan document exists for the issue (curator adds the most value before
-           a plan is written; once a plan exists the thread is already summarised).
-        3. No non-cancelled ``context_curator`` child already exists.
-           - Active (todo/in_progress/blocked): wait for it to finish.
-           - Done: the thread has already been curated; do NOT re-spawn (prevents
-             an infinite loop where each curator finish immediately triggers
-             another spawn on the next child_report wake).
-           - Cancelled: the curator was abandoned; a fresh one is allowed.
+        Triggered in the ``child_report`` branch when ALL conditions hold:
+
+        1. Unsynthesized char count ≥ ``_CONTEXT_CURATOR_CHAR_THRESHOLD`` (8 000).
+           "Unsynthesized" means comments after ``synthesized_through_comment_id``
+           stored in the ``context_summary`` document, or all comments if no
+           synthesis has happened yet.
+        2. No ``plan`` document exists for the issue (curator adds the most value
+           before a plan is written; once a plan exists the thread is summarised).
+        3. No **active** (todo/in_progress/blocked) context_curator child exists.
+           - Done: the previous block is complete; a new block MAY be spawned when
+             new content accumulates past the threshold (this is the key difference
+             from the old comment-count model — done does NOT block re-spawn).
+           - Cancelled: the curator was abandoned; a fresh one is always allowed.
+
+        The spawned curator receives a description that tells it exactly which
+        comment to start from (``Synthesize from: comment:<id>`` or ``all``).
 
         The method never raises — any failure is logged and silently swallowed so
         the calling ``child_report`` path continues unaffected.
         """
         try:
+            # ── 1. Read context_summary to get synthesized_through_comment_id ──────
+            summary_data = get_context_summary(self.db_path, issue_id=issue_id)
+            synthesized_through_id: str | None = None
+            if summary_data:
+                synthesized_through_id = summary_data.get("synthesized_through_comment_id")
+
+            # ── 2. Calculate unsynthesized char count ─────────────────────────────
             with contextlib.closing(_connect(self.db_path)) as conn:
-                comment_count = conn.execute(
-                    "SELECT COUNT(*) FROM issue_comments WHERE issue_id = ?",
-                    (issue_id,),
-                ).fetchone()[0]
-            if comment_count < self._CONTEXT_CURATOR_COMMENT_THRESHOLD:
+                if synthesized_through_id is None:
+                    # No prior synthesis — count all comments
+                    unsynthesized_chars: int = conn.execute(
+                        "SELECT COALESCE(SUM(LENGTH(body)), 0)"
+                        " FROM issue_comments WHERE issue_id = ?",
+                        (issue_id,),
+                    ).fetchone()[0]
+                    first_row = conn.execute(
+                        "SELECT id FROM issue_comments WHERE issue_id = ?"
+                        " ORDER BY rowid ASC LIMIT 1",
+                        (issue_id,),
+                    ).fetchone()
+                    from_comment_id: str | None = first_row[0] if first_row else None
+                else:
+                    synth_row = conn.execute(
+                        "SELECT rowid FROM issue_comments WHERE id = ?",
+                        (synthesized_through_id,),
+                    ).fetchone()
+                    if synth_row is None:
+                        # synthesized_through ID no longer resolvable — count all
+                        unsynthesized_chars = conn.execute(
+                            "SELECT COALESCE(SUM(LENGTH(body)), 0)"
+                            " FROM issue_comments WHERE issue_id = ?",
+                            (issue_id,),
+                        ).fetchone()[0]
+                        from_comment_id = None
+                    else:
+                        synth_rowid: int = synth_row[0]
+                        unsynthesized_chars = conn.execute(
+                            "SELECT COALESCE(SUM(LENGTH(body)), 0)"
+                            " FROM issue_comments WHERE issue_id = ? AND rowid > ?",
+                            (issue_id, synth_rowid),
+                        ).fetchone()[0]
+                        next_row = conn.execute(
+                            "SELECT id FROM issue_comments"
+                            " WHERE issue_id = ? AND rowid > ? ORDER BY rowid ASC LIMIT 1",
+                            (issue_id, synth_rowid),
+                        ).fetchone()
+                        from_comment_id = next_row[0] if next_row else None
+
+            # ── 3. Check threshold ────────────────────────────────────────────────
+            if unsynthesized_chars < self._CONTEXT_CURATOR_CHAR_THRESHOLD:
                 return
 
+            # ── 4. Plan doc check (curator most useful before a plan exists) ──────
             if get_document(self.db_path, issue_id=issue_id, key="plan") is not None:
                 return
 
+            # ── 5. Idempotency: only ACTIVE curators block a new spawn ────────────
             with contextlib.closing(_connect(self.db_path)) as conn:
-                existing_curator = conn.execute(
+                existing_active_curator = conn.execute(
                     """
                     SELECT id FROM issues
                     WHERE parent_id = ? AND lower(role) = 'context_curator'
-                      AND status != 'cancelled'
+                      AND status IN ('todo', 'in_progress', 'blocked')
                     LIMIT 1
                     """,
                     (issue_id,),
                 ).fetchone()
-            if existing_curator is not None:
+            if existing_active_curator is not None:
                 return
 
+            # ── 6. Spawn with description anchored to the first unsynthesized comment ─
+            from_label = f"comment:{from_comment_id}" if from_comment_id else "all"
             logger.info(
-                "Spawning context_curator for issue %s (comment_count=%d, threshold=%d)",
-                issue_id, comment_count, self._CONTEXT_CURATOR_COMMENT_THRESHOLD,
+                "Spawning context_curator for issue %s"
+                " (unsynthesized_chars=%d, threshold=%d, from=%s)",
+                issue_id, unsynthesized_chars, self._CONTEXT_CURATOR_CHAR_THRESHOLD, from_label,
             )
             self._create_delegated_issue(
                 issue_id=issue_id,
                 agent_id=agent_id,
                 run=run,
                 spec={
-                    "title": "Context curator — sintetizar hilo del proyecto",
+                    "title": "Context curator — synthesize thread block",
                     "description": (
-                        f"Target issue: {issue_id}\n\n"
-                        "El hilo de la issue padre ha acumulado suficientes comentarios para "
-                        "dificultar la navegación. Sigue tu protocolo estándar de context_curator:\n"
-                        "1. Lee el hilo completo del Target issue (via API o wake payload).\n"
-                        "2. Escribe un documento de plan comprimido en el Target issue "
-                        "(PUT /api/issues/{target_id}/documents/plan). Si la API no está "
-                        "disponible, usa add_comment en el Target issue como fallback.\n"
+                        f"Target issue: {issue_id}\n"
+                        f"Synthesize from: {from_label}\n\n"
+                        "El hilo de la issue padre ha acumulado suficiente contenido sin sintetizar. "
+                        "Sigue tu protocolo de context_curator:\n"
+                        "1. Lee los comentarios del Target issue desde el marcador 'Synthesize from'.\n"
+                        "2. Produce un bloque de síntesis y llámalo mediante "
+                        "POST /api/issues/{target_id}/context-summary/blocks.\n"
                         "3. Usa set_status: done cuando hayas terminado.\n\n"
                         "No crees sub-issues ni interacciones."
                     ),

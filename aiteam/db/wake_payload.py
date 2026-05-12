@@ -138,6 +138,26 @@ def build_wake_payload(
                 "truncated": len(body) > 2000,
             }
 
+        # Context summary document (key='context_summary') — block-based synthesis
+        context_summary_row = conn.execute(
+            "SELECT body, current_revision_id, updated_at"
+            " FROM issue_documents WHERE issue_id = ? AND key = 'context_summary'",
+            (issue_id,),
+        ).fetchone()
+        context_summary_doc = None
+        if context_summary_row:
+            try:
+                summary_data = json.loads(str(context_summary_row["body"] or "{}"))
+            except (ValueError, TypeError):
+                summary_data = {}
+            synthesized_through = summary_data.get("synthesized_through_comment_id")
+            context_summary_doc = {
+                "blocks": summary_data.get("blocks", []),
+                "synthesized_through": synthesized_through,
+                "current_revision_id": context_summary_row["current_revision_id"],
+                "updated_at": context_summary_row["updated_at"],
+            }
+
         # Parent summary
         parent_summary = None
         if issue.get("parent_id"):
@@ -188,6 +208,20 @@ def build_wake_payload(
                 "last_agent_report": agent_report,
             })
 
+    # When context_summary is active, filter comments to only those after the
+    # last synthesized point — older content is captured in the summary blocks.
+    if context_summary_doc and context_summary_doc.get("synthesized_through"):
+        synth_id = context_summary_doc["synthesized_through"]
+        synth_found = False
+        filtered: list[dict[str, Any]] = []
+        for c in comments:  # already chronological (reversed shown)
+            if synth_found:
+                filtered.append(c)
+            if c["id"] == synth_id:
+                synth_found = True
+        if synth_found:
+            comments = filtered
+
     return {
         "issue_id": issue_id,
         "run_id": run_id,
@@ -212,6 +246,7 @@ def build_wake_payload(
         "fallback_fetch_needed": has_more_comments,
         "pending_interactions": interactions,
         "plan_document": plan_doc,
+        "context_summary": context_summary_doc,
         "trigger_comment_id": comment_id,
         "children": children_summary,
     }

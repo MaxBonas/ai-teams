@@ -160,6 +160,71 @@ def list_revisions(db_path: Path, *, issue_id: str, key: str) -> list[dict[str, 
         return [_decode(dict(row)) for row in rows]
 
 
+def append_summary_block(
+    db_path: Path,
+    *,
+    issue_id: str,
+    block: dict[str, Any],
+    synthesized_through_comment_id: str | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """Append a synthesis block to the ``context_summary`` document.
+
+    The document body is a JSON object::
+
+        {
+            "blocks": [
+                {"summary_markdown": "...", "start_comment_id": ..., ...}
+            ],
+            "synthesized_through_comment_id": "<last synthesized comment id>"
+        }
+
+    Creates the document if it doesn't exist yet.  If *synthesized_through_comment_id*
+    is provided it replaces the stored value (always advance forward, never backward).
+
+    Thread-safe: delegates to :func:`put_document` which uses ``BEGIN IMMEDIATE``.
+    """
+    doc = get_document(db_path, issue_id=issue_id, key="context_summary")
+    if doc is None:
+        current_data: dict[str, Any] = {"blocks": []}
+        base_revision_id: str | None = None
+    else:
+        try:
+            current_data = json.loads(doc["body"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            current_data = {"blocks": []}
+        base_revision_id = doc.get("current_revision_id")
+
+    if not isinstance(current_data.get("blocks"), list):
+        current_data["blocks"] = []
+
+    current_data["blocks"].append(block)
+    if synthesized_through_comment_id is not None:
+        current_data["synthesized_through_comment_id"] = synthesized_through_comment_id
+
+    return put_document(
+        db_path,
+        issue_id=issue_id,
+        key="context_summary",
+        title="Context Summary",
+        body=json.dumps(current_data, ensure_ascii=False),
+        format="json",
+        base_revision_id=base_revision_id,
+        run_id=run_id,
+    )
+
+
+def get_context_summary(db_path: Path, *, issue_id: str) -> dict[str, Any] | None:
+    """Return the parsed body of the ``context_summary`` document, or ``None`` if absent."""
+    doc = get_document(db_path, issue_id=issue_id, key="context_summary")
+    if doc is None:
+        return None
+    try:
+        return json.loads(doc["body"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
 def _connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=20.0, isolation_level=None)
     conn.row_factory = sqlite3.Row

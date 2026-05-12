@@ -9,7 +9,15 @@ from pydantic import BaseModel
 
 from api.utils import PROJECT_ROOT, _require_api_auth_request, _workspace_from_request, get_current_workspace, resolve_runtime_dir
 from aiteam.db.activity_log import log_activity
-from aiteam.db.documents import DocumentConflict, get_document, list_documents, list_revisions, put_document
+from aiteam.db.documents import (
+    DocumentConflict,
+    append_summary_block,
+    get_document,
+    get_context_summary,
+    list_documents,
+    list_revisions,
+    put_document,
+)
 
 router = APIRouter()
 
@@ -129,6 +137,88 @@ async def put_issue_document(issue_id: str, key: str, body: PutDocumentRequest, 
         },
     )
     return {"success": True, "document": document}
+
+
+class AppendSummaryBlockRequest(BaseModel):
+    summary_markdown: str
+    start_comment_id: str | None = None
+    end_comment_id: str | None = None
+    char_count_original: int
+    run_id: str | None = None
+
+
+@router.post("/api/issues/{issue_id}/context-summary/blocks")
+async def post_context_summary_block(
+    issue_id: str, body: AppendSummaryBlockRequest, request: Request
+):
+    """Append a synthesis block to the context_summary document.
+
+    Validates that ``len(summary_markdown) / char_count_original ≤ 0.30``.
+    Returns HTTP 422 if the compression ratio is exceeded.
+    """
+    _require_api_auth_request(request)
+    db = _db(request)
+
+    ratio = len(body.summary_markdown) / max(body.char_count_original, 1)
+    if ratio > 0.30:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Compression ratio {ratio:.2%} exceeds the 30% maximum. "
+                "Trim the synthesis and retry."
+            ),
+        )
+
+    block = {
+        "summary_markdown": body.summary_markdown,
+        "start_comment_id": body.start_comment_id,
+        "end_comment_id": body.end_comment_id,
+        "char_count_original": body.char_count_original,
+    }
+    try:
+        doc = append_summary_block(
+            db,
+            issue_id=issue_id,
+            block=block,
+            synthesized_through_comment_id=body.end_comment_id,
+            run_id=body.run_id,
+        )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except sqlite3.OperationalError as exc:
+        raise _schema_err(exc)
+
+    log_activity(
+        db,
+        action="context_summary.block_appended",
+        target_type="issue_document",
+        target_id=doc["id"],
+        actor_agent_id=None,
+        run_id=body.run_id,
+        payload={
+            "issue_id": issue_id,
+            "start_comment_id": body.start_comment_id,
+            "end_comment_id": body.end_comment_id,
+            "char_count_original": body.char_count_original,
+            "char_count_summary": len(body.summary_markdown),
+            "compression_ratio": round(ratio, 4),
+        },
+    )
+    return {"success": True, "document": doc}
+
+
+@router.get("/api/issues/{issue_id}/context-summary")
+async def get_issue_context_summary(issue_id: str, request: Request):
+    """Return the parsed context_summary document for an issue."""
+    _require_api_auth_request(request)
+    db = _db(request)
+    try:
+        data = get_context_summary(db, issue_id=issue_id)
+    except sqlite3.OperationalError as exc:
+        raise _schema_err(exc)
+    if data is None:
+        raise HTTPException(status_code=404, detail="No context summary for this issue")
+    return {"success": True, "context_summary": data}
 
 
 @router.get("/api/issues/{issue_id}/documents/{key}/revisions")
