@@ -275,6 +275,36 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 - `_cancel_stale_interaction(reason="initial_cycle_ready")` antes de cada ciclo: evita que coexista un popup "todo terminado" con un ciclo de fix activo.  
 - 25 tests nuevos en `tests/test_reviewer_changes_requested.py` y `tests/test_fix_cycle_limit_resolved.py`.
 
+### P-12: LLM propone rol incorrecto para tarea crítica (routing ciego del Lead)
+**Síntoma:** El Lead LLM crea un hijo con `role="engineer"` para una tarea con `criticality="critical"` y `complexity="high"`. El engineer queda bloqueado o produce trabajo de baja calidad porque la tarea requería nivel senior. El Lead no escala porque no hay ningún gate automático.  
+**Causa:** El routing de roles era 100% LLM-driven: el Lead proponía el rol en el JSON de `create_issues` y el executor lo usaba tal cual. No existía una función de scoring que validara si el rol propuesto era apropiado para la criticidad/complejidad.  
+**Detección:** Hijo con `role=engineer` + `criticality=critical` en DB. Liveness stuck o output de baja calidad. `SELECT role, criticality FROM issues WHERE parent_id = ?`.  
+**Acción (2026-05-13):** Nuevo módulo `aiteam/action_routing.py`: `route_action(criticality, complexity, action_type) → Routing`. `_create_delegated_issue` en executor llama al routing cuando el spec incluye `criticality + action_type`; sobreescribe el rol LLM si el scoring diverge. Log de actividad `action.routed`. `pick_role_for_routing(LEAD_SELF, action_type)` devuelve `lead_executor`. Tests: `tests/test_action_routing.py` (30 tests), `tests/test_lead_intake_routing.py` (3 tests).
+
+### P-13: Agente Tier 3 creando issues / escribiendo archivos (violación de frontera)
+**Síntoma:** Un `file_scout` o `context_curator` emite ops `create_issue` o `write_file` en su JSON. El executor los aplica silenciosamente, creando issues no supervisadas por el Lead o modificando el workspace sin revisión.  
+**Causa:** No había ningún filtro en runtime que bloqueara ops inapropiadas para roles Tier 3. El contrato de trabajo definía las reglas en texto, pero el executor no las validaba.  
+**Detección:** Issues con `parent_id` de una issue Tier 3 en la DB. Workspace changes cuyo `source_run_id` corresponde a un run de `file_scout`/`context_curator`.  
+**Acción (2026-05-13):** `filter_forbidden_ops_for_role(ops, role)` en `work_contract.py`: ops prohibidas para `{file_scout, web_scout, context_curator, test_runner}` = `{create_issue, create_interaction, update_plan, write_file, append_file, delete_file}`. `_apply_result_actions` en executor invoca el filtro antes de procesar; log `warning` por cada op dropeada. Skill files de cada rol Tier 3 actualizados con tabla explícita de ops prohibidas. Tests: `tests/test_tier_discipline.py` (9 tests).
+
+### P-14: Agente QA bloqueado por adapter API-only (rol deprecado sin sucesor claro)
+**Síntoma:** Un proyecto legacy con `role:qa` (Tier 2) en DB tiene el agente bloqueado porque el adapter API-only no puede ejecutar comandos de test. El QA emite `result: blocked` con `blocker: no_workspace_access`. El Lead no tiene instrucciones para crear un `test_runner` en su lugar.  
+**Causa:** El rol QA Tier 2 mezclaba ejecución de tests de runtime (que requiere CLI) con validación estática (que puede hacer cualquier LLM). Al eliminarse, el sucesor natural (`test_runner` Tier 3 para ejecución + `reviewer` absorbiendo QA estático) no se wired automáticamente.  
+**Detección:** `SELECT id, role, adapter_type FROM agents WHERE lower(role) = 'qa'`. Runs con `agent_id LIKE 'role:qa%'` y `liveness_state = 'api_only_no_workspace'`.  
+**Acción (2026-05-13):** `skills/qa.md` eliminado; rol `qa` marcado deprecated en `work_contract.py`, `run_profiles.py` y `project_adapters.py`. Reviewer absorbe QA estático. Nuevo `test_runner` (Tier 3) para ejecución de comandos: recibe lista de comandos, reporta stdout/exitcode, no toma decisiones. Script de migración en `docs/MIGRATION_2026_05_12.md`. Tests: `tests/test_full_team_no_qa.py` (5 tests), `tests/test_test_runner_scout.py` (9 tests).
+
+### P-15: Context curator en loop infinito (done bloqueaba re-spawn pero umbrales eran por conteo)
+**Síntoma:** Hilo con 50 comentarios cortos (< 200 chars cada uno) no dispara el curator porque el conteo supera el umbral pero el contenido acumulado es trivial. O al revés: 3 comentarios de 5 000 chars c/u NO disparan el curator porque el conteo (3) es < 8.  
+**Causa:** El umbral original era `_CONTEXT_CURATOR_COMMENT_THRESHOLD = 8` (conteo de comentarios). El conteo no refleja el volumen real de contexto. Además, un curator `done` bloqueaba re-spawn para siempre — en hilos que seguían creciendo el Lead no recibía síntesis adicionales.  
+**Detección:** Issue padre con > 40 000 chars en comentarios sin curator hijo. O curator hijo `done` y 20 000 chars nuevos sin nuevo curator.  
+**Acción (2026-05-13):** Umbral cambia a `_CONTEXT_CURATOR_CHAR_THRESHOLD = 8_000` (chars no sintetizados). "No sintetizados" = comentarios con `rowid > rowid(synthesized_through_comment_id)` del doc `context_summary`. Curator `done` ya **NO** bloquea re-spawn — permite bloques incrementales. Solo curatores activos (todo/in_progress/blocked) bloquean. El curator publica bloques vía `POST /api/issues/{id}/context-summary/blocks` (ratio ≤ 30% validado). Tests: `tests/test_context_curator_auto_trigger.py` (16 tests), `tests/test_append_summary_block.py` (13 tests).
+
+### P-16: lead_executor creado con adapter incorrecto (Lead usa subscription_cli, ejecutor recibe openai_api)
+**Síntoma:** El Lead usa `subscription_cli` (Claude Code / Gemini CLI) pero cuando routing determina LEAD_SELF y se crea `role:lead_executor`, el agente recibe `adapter_type=openai_api` por defecto. El executor no puede ejecutar workspace changes en modo API-only y queda bloqueado con `liveness_reason=api_only_no_workspace`.  
+**Causa:** `_ensure_role_agent` creaba el agente con el adapter elegido por scoring genérico (`choose_adapter_for_role`), sin relación con el adapter del Lead. Para un ejecutor senior del Lead, el adapter debería ser idéntico al del Lead.  
+**Detección:** `SELECT a.adapter_type FROM agents a WHERE a.id = 'role:lead_executor'` difiere de `SELECT adapter_type FROM agents WHERE id = 'role:lead'`.  
+**Acción (2026-05-13):** `_ensure_role_agent` en executor: caso especial para `lead_executor` — lee `adapter_type` y `adapter_config_json` del Lead desde DB y los hereda directamente. `seniority='senior'`. Tests: `tests/test_lead_executor.py` (11 tests).
+
 ---
 
 ## Historial de cambios al sistema de evidencia
@@ -325,3 +355,13 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 | 2026-05-12 | `_maybe_spawn_context_curator`: side-effect silencioso en `child_report`; 17 tests en `test_context_curator_auto_trigger.py` | `aiteam/heartbeat/executor.py`, `tests/` |
 | 2026-05-12 | 16 tests formales de `_safe_truncate_output` + 9 tests del interaction gate | `tests/test_safe_truncate.py`, `tests/test_interaction_gate.py` |
 | 2026-05-12 | Documentados patrones P-9, P-10, P-11 | `docs/RUN_PROBLEMS_REGISTRY.md` |
+| 2026-05-13 | Tier discipline: `filter_forbidden_ops_for_role()` + skills Tier 3 con tabla de ops prohibidas | `aiteam/adapters/work_contract.py`, `skills/` |
+| 2026-05-13 | QA Tier 2 eliminado; `test_runner` Tier 3 introducido; `requires_qa_gate` deprecated | `aiteam/run_profiles.py`, `skills/test_runner.md` |
+| 2026-05-13 | `aiteam/action_routing.py`: `route_action()` + `pick_role_for_routing()`; integrado en `_create_delegated_issue` | `aiteam/action_routing.py`, `aiteam/heartbeat/executor.py` |
+| 2026-05-13 | `lead_executor`: Tier 1 senior, hereda adapter del Lead; `skills/lead_executor.md` | `aiteam/heartbeat/executor.py`, `skills/lead_executor.md` |
+| 2026-05-13 | Context curator: umbral 8 comments → 8 000 chars; bloques incrementales; done no bloquea re-spawn | `aiteam/heartbeat/executor.py`, `aiteam/db/documents.py` |
+| 2026-05-13 | `append_summary_block()` / `get_context_summary()` en documents.py; `POST /api/issues/{id}/context-summary/blocks` | `aiteam/db/documents.py`, `api/routers/documents.py` |
+| 2026-05-13 | Wake payload: inyecta `context_summary.blocks`; filtra comentarios antes de `synthesized_through` | `aiteam/db/wake_payload.py` |
+| 2026-05-13 | `GET /api/issues/{id}/thread?view=compact|full`; `ThreadView` React component | `api/routers/issues.py`, `ide-frontend/src/components/ThreadView/` |
+| 2026-05-13 | `lead_intake.py` F3.2: `action_type` + `criticality` en `suggested_issues`; routing override en `apply_accepted_team_proposal` | `aiteam/lead_intake.py` |
+| 2026-05-13 | Documentados patrones P-12, P-13, P-14, P-15, P-16 | `docs/RUN_PROBLEMS_REGISTRY.md` |

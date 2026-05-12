@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
 
+from aiteam.action_routing import pick_role_for_routing, route_action
 from aiteam.db.dependencies import sync_default_child_dependencies
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.project_adapters import apply_adapter_policy_to_member
@@ -19,6 +21,12 @@ from aiteam.run_profiles import (
     profile_config,
     build_default_team_blueprint,
 )
+
+logger = logging.getLogger(__name__)
+
+# Roles that are NOT subject to action routing override (they run at Lead tier
+# regardless of the criticality/complexity matrix).
+_LEAD_TIER_ROLES = frozenset({"lead", "team_lead", "lead_executor"})
 
 
 def _issue_profile(issue: dict[str, Any]) -> str:
@@ -243,6 +251,8 @@ def _suggested_issues_for_profile(
             "role": "lead",
             "assignee_agent_id": "role:lead",
             "complexity": "high",
+            "criticality": "medium",
+            "action_type": "synthesis",
             "priority": 100,
             "delegation_type": "planning",
             "cost_tier": "lead",
@@ -266,6 +276,8 @@ def _suggested_issues_for_profile(
             "role": "engineer",
             "assignee_agent_id": role_to_agent.get("engineer", "role:engineer"),
             "complexity": "medium",
+            "criticality": "medium",
+            "action_type": "code",
             "priority": 70,
             "delegation_type": "well_scoped_code_change",
             "cost_tier": "standard_worker",
@@ -290,6 +302,8 @@ def _suggested_issues_for_profile(
             "role": "reviewer",
             "assignee_agent_id": role_to_agent.get("reviewer", "role:reviewer"),
             "complexity": "medium",
+            "criticality": "medium",
+            "action_type": "review",
             "priority": 50,
             "delegation_type": "risk_review",
             "cost_tier": "senior",
@@ -434,13 +448,63 @@ def apply_accepted_team_proposal(
         parent = conn.execute("SELECT goal_id FROM issues WHERE id = ?", (parent_issue_id,)).fetchone()
         goal_id = parent["goal_id"] if parent else None
         for item in proposal.get("suggested_issues") or []:
+            # ── Action routing override ───────────────────────────────────────
+            # When the item carries criticality + action_type, run route_action
+            # and potentially upgrade the role (e.g. engineer → lead_executor
+            # when criticality=critical).  Lead-tier roles are never overridden.
+            effective_role = item.get("role") or "engineer"
+            effective_assignee = item.get("assignee_agent_id")
+            action_type = item.get("action_type")
+            criticality = item.get("criticality", "medium")
+            complexity = item.get("complexity", "medium")
+            if action_type and effective_role not in _LEAD_TIER_ROLES:
+                try:
+                    routing = route_action(
+                        criticality=criticality,
+                        complexity=complexity,
+                        action_type=action_type,
+                    )
+                    routed_role = pick_role_for_routing(routing, action_type)
+                    if routed_role != effective_role:
+                        logger.info(
+                            "lead_intake: routing override %s → %s"
+                            " (criticality=%s, complexity=%s, action_type=%s, issue=%s)",
+                            effective_role, routed_role,
+                            criticality, complexity, action_type, item["id"],
+                        )
+                        effective_role = routed_role
+                        effective_assignee = f"role:{routed_role}"
+                        # Ensure the overridden agent row exists (FK constraint).
+                        # Use INSERT OR IGNORE — if the agent already exists the
+                        # row stays untouched; if it is brand-new a minimal record
+                        # is created that liveness reconciliation will enrich later.
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO agents
+                                (id, role, name, seniority, adapter_type)
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (
+                                effective_assignee,
+                                routed_role,
+                                routed_role.replace("_", " ").title(),
+                                "senior",
+                                "lead_builtin",
+                            ),
+                        )
+                except Exception:
+                    logger.warning(
+                        "lead_intake: route_action failed for item %s — keeping original role",
+                        item["id"], exc_info=True,
+                    )
+
             row = conn.execute(
                 """
                 INSERT OR IGNORE INTO issues (
                     id, parent_id, goal_id, title, description, status, priority,
                     role, complexity, criticality, assignee_agent_id, metadata_json
                 )
-                VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, 'medium', ?, ?)
+                VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
@@ -450,13 +514,16 @@ def apply_accepted_team_proposal(
                     item["title"],
                     item.get("description"),
                     int(item.get("priority") or 0),
-                    item.get("role"),
-                    item.get("complexity"),
-                    item.get("assignee_agent_id"),
+                    effective_role,
+                    complexity,
+                    criticality,
+                    effective_assignee,
                     json.dumps(
                         {
                             "source": "lead_intake",
                             "source_run_id": source_run_id,
+                            "action_type": action_type,
+                            "routing_criticality": criticality,
                             "delegation_type": item.get("delegation_type"),
                             "cost_tier": item.get("cost_tier"),
                             "report_to": item.get("report_to"),
@@ -470,10 +537,10 @@ def apply_accepted_team_proposal(
             ).fetchone()
             if row:
                 created_issues.append(row["id"])
-                if item.get("assignee_agent_id"):
+                if effective_assignee:
                     enqueue_wakeup(
                         db_path,
-                        agent_id=item["assignee_agent_id"],
+                        agent_id=effective_assignee,
                         source="assignment",
                         reason="assignment",
                         trigger_detail=f"accepted_proposal:{parent_issue_id}",
@@ -482,13 +549,15 @@ def apply_accepted_team_proposal(
                             "wake_reason": "assignment",
                             "delegation_reason": item.get("description") or item.get("title"),
                             "delegation_type": item.get("delegation_type"),
-                            "complexity": item.get("complexity"),
+                            "action_type": action_type,
+                            "complexity": complexity,
+                            "criticality": criticality,
                             "cost_tier": item.get("cost_tier"),
                             "report_to": item.get("report_to"),
                             "reviewed_by": item.get("reviewed_by"),
                             "evidence_required": item.get("evidence_required") or [],
                         },
-                        idempotency_key=f"assignment:{item['id']}:{item['assignee_agent_id']}",
+                        idempotency_key=f"assignment:{item['id']}:{effective_assignee}",
                     )
 
         conn.execute(
