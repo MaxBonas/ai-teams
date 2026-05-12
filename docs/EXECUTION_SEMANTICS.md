@@ -262,3 +262,71 @@ El reconciliador de liveness corre en cada tick del heartbeat loop:
 - `diagnose_issue(issue_id)`: devuelve diagnóstico de liveness con paths activos y blockers.
 
 El recovery no marca issues como `done` basándose en prosa de comentarios. Solo superficia el estado como recovery visible.
+
+---
+
+## 12. Action routing matrix
+
+Cuando el Lead crea una issue hija, el executor llama a `route_action(criticality, complexity, action_type)` para determinar a qué tier y rol asignarla. Esto sobreescribe el rol propuesto por el LLM si el scoring lo indica.
+
+### Roles especiales
+
+| Tier | Roles |
+|---|---|
+| Tier 1 (Lead) | `lead`, `lead_executor` |
+| Tier 2 | `engineer`, `reviewer` |
+| Tier 3 | `file_scout`, `web_scout`, `context_curator`, `test_runner` |
+
+### Overrides fijos
+
+| Condición | Routing |
+|---|---|
+| `action_type ∈ {test_exec, scout_files, scout_web}` | TIER_3 (siempre) |
+| `criticality = critical` | LEAD_SELF (siempre, sin importar complexity) |
+
+### Matriz de scoring (criticality × complexity)
+
+| criticality \ complexity | low | medium | high |
+|---|---|---|---|
+| **low** | TIER_3 (0) | TIER_3 (2) | TIER_2 (4) |
+| **medium** | TIER_2 (2) | TIER_2 (4) | TIER_2 (6) |
+| **high** | TIER_2 (4) | TIER_2 (6) | LEAD_SELF (8) |
+| **critical** | LEAD_SELF | LEAD_SELF | LEAD_SELF |
+
+Scores: criticality {low=0, medium=2, high=4, critical=6} + complexity {low=0, medium=2, high=4}. Threshold: ≥8 → LEAD_SELF, ≥4 → TIER_2, else TIER_3.
+
+### lead_executor
+
+Cuando routing = LEAD_SELF, se crea o reutiliza un agente `role:lead_executor` con:
+- `seniority = senior`
+- `adapter_type` heredado del Lead (mismo modelo)
+- No tiene ops prohibidas (Tier 1)
+- Siempre llama `notify_supervisor` al cerrar
+
+### Tier 3 — ops prohibidas en runtime
+
+El executor filtra silenciosamente los action groups prohibidos para roles Tier 3 (`file_scout`, `web_scout`, `context_curator`, `test_runner`):
+
+`create_issues`, `create_interactions`, `update_plan`, `write_file`, `append_file`, `delete_file`
+
+Fuente: `aiteam/adapters/work_contract.py` → `filter_forbidden_ops_for_role()`.
+
+---
+
+## 13. Context curator — modelo de bloques
+
+El Lead auto-lanza un context_curator hijo cuando el contenido **no sintetizado** del hilo supera `_CONTEXT_CURATOR_CHAR_THRESHOLD = 8 000` caracteres (≈ 2 000 tokens).
+
+"No sintetizado" = comentarios con `rowid > rowid(synthesized_through_comment_id)`, o todos si no hay síntesis previa.
+
+### Idempotencia
+
+- Un curator **activo** (todo/in_progress/blocked) bloquea un nuevo spawn.
+- Un curator **done** NO bloquea un nuevo spawn — permite bloques increméntales a medida que el hilo crece.
+- Un curator **cancelled** permite un nuevo spawn.
+
+### Bloque de síntesis
+
+El curator publica un bloque vía `POST /api/issues/{id}/context-summary/blocks`. El servidor valida `len(summary_markdown) / char_count_original ≤ 0.30` (rechaza 422 si se excede).
+
+El campo `synthesized_through_comment_id` avanza en cada bloque. El wake payload filtra los comentarios anteriores a ese punto e incluye los bloques ya sintetizados como `context_summary.blocks`.
