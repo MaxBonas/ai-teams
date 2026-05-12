@@ -26,8 +26,13 @@ OP_SCHEMA: dict[str, Any] = {
         "path": {"type": "string"},
         "title": {"type": "string"},
         "description": {"type": "string"},
-        "role": {"type": "string", "enum": ["lead", "engineer", "reviewer", "test_runner"]},
+        "role": {"type": "string", "enum": ["lead", "engineer", "reviewer", "test_runner", "lead_executor"]},
         "complexity": {"type": "string", "enum": ["low", "medium", "high"]},
+        "criticality": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+        "action_type": {
+            "type": "string",
+            "enum": ["code", "review", "scout_files", "scout_web", "research", "synthesis", "test_exec"],
+        },
         "kind": {"type": "string", "enum": ["suggest_tasks", "request_confirmation"]},
         "summary": {"type": "string"},
         "idempotency_key": {"type": "string"},
@@ -66,8 +71,19 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "path": {"type": ["string", "null"]},
                     "title": {"type": ["string", "null"]},
                     "description": {"type": ["string", "null"]},
-                    "role": {"type": ["string", "null"], "enum": ["lead", "engineer", "reviewer", "test_runner", None]},
+                    "role": {
+                        "type": ["string", "null"],
+                        "enum": ["lead", "engineer", "reviewer", "test_runner", "lead_executor", None],
+                    },
                     "complexity": {"type": ["string", "null"], "enum": ["low", "medium", "high", None]},
+                    "criticality": {
+                        "type": ["string", "null"],
+                        "enum": ["low", "medium", "high", "critical", None],
+                    },
+                    "action_type": {
+                        "type": ["string", "null"],
+                        "enum": ["code", "review", "scout_files", "scout_web", "research", "synthesis", "test_exec", None],
+                    },
                     "kind": {"type": ["string", "null"], "enum": ["suggest_tasks", "request_confirmation", None]},
                     "summary": {"type": ["string", "null"]},
                     "idempotency_key": {"type": ["string", "null"]},
@@ -95,6 +111,8 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "description",
                     "role",
                     "complexity",
+                    "criticality",
+                    "action_type",
                     "kind",
                     "summary",
                     "idempotency_key",
@@ -244,14 +262,19 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
                 "body": str(op.get("body") or ""),
             }
         elif op_type == "create_issue":
-            create_issues.append(
-                {
-                    "title": str(op.get("title") or ""),
-                    "description": str(op.get("description") or ""),
-                    "role": str(op.get("role") or "engineer"),
-                    "complexity": str(op.get("complexity") or "medium"),
-                }
-            )
+            issue_spec: dict[str, Any] = {
+                "title": str(op.get("title") or ""),
+                "description": str(op.get("description") or ""),
+                "role": str(op.get("role") or "engineer"),
+                "complexity": str(op.get("complexity") or "medium"),
+            }
+            # Optional routing fields — passed through when present so the executor
+            # can apply route_action() to override the proposed role if needed.
+            if op.get("criticality"):
+                issue_spec["criticality"] = str(op["criticality"])
+            if op.get("action_type"):
+                issue_spec["action_type"] = str(op["action_type"])
+            create_issues.append(issue_spec)
         elif op_type == "create_interaction":
             # Merge agent-supplied payload (must include 'reason') with version sentinel.
             # The executor routes interaction responses by payload['reason'], so agents

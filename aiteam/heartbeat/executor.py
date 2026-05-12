@@ -1371,6 +1371,47 @@ class RunExecutor:
             return None
         try:
             role_for_issue = str(spec.get("role") or "engineer")
+
+            # ── Action routing override ───────────────────────────────────────
+            # If the spec includes criticality + action_type, apply route_action()
+            # to determine the effective role regardless of what the LLM proposed.
+            # This enforces tier discipline even when the LLM mis-assigns a role.
+            _criticality = str(spec.get("criticality") or "").strip().lower()
+            _complexity = str(spec.get("complexity") or "").strip().lower()
+            _action_type = str(spec.get("action_type") or "").strip().lower()
+            if _criticality and _action_type:
+                from aiteam.action_routing import route_action, pick_role_for_routing  # noqa: PLC0415
+                _routing = route_action(
+                    criticality=_criticality or "medium",
+                    complexity=_complexity or "medium",
+                    action_type=_action_type,
+                )
+                _effective_role = pick_role_for_routing(_routing, _action_type)
+                if _effective_role != role_for_issue:
+                    logger.info(
+                        "action.routed: issue %s proposed role=%r overridden to %r "
+                        "(criticality=%r complexity=%r action_type=%r routing=%r)",
+                        issue_id, role_for_issue, _effective_role,
+                        _criticality, _complexity, _action_type, _routing.value,
+                    )
+                    log_activity(
+                        self.db_path,
+                        action="action.routed",
+                        target_type="issue",
+                        target_id=issue_id,
+                        actor_agent_id=agent_id,
+                        run_id=str(run.get("id")),
+                        payload={
+                            "proposed_role": role_for_issue,
+                            "effective_role": _effective_role,
+                            "criticality": _criticality,
+                            "complexity": _complexity,
+                            "action_type": _action_type,
+                            "routing": _routing.value,
+                        },
+                    )
+                role_for_issue = _effective_role
+
             # Idempotency: don't create if a non-terminal child with same role already exists
             with contextlib.closing(_connect(self.db_path)) as _conn:
                 _existing = _conn.execute(
