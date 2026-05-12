@@ -13,6 +13,7 @@ _ROLE_FILE: dict[str, str] = {
     "code_reviewer": "reviewer.md",
     "quorum_senior": "quorum_senior.md",
     "senior": "quorum_senior.md",
+    "lead_executor": "lead_executor.md",
     # Tier 3 specialists
     "file_scout": "file_scout.md",
     "web_scout": "web_scout.md",

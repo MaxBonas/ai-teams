@@ -246,6 +246,18 @@ def _agent_blueprint(agent_id: str) -> AgentBlueprint:
             preferred_channel="subscription_or_api",
             assignment_reason="Quality supervision before work is considered complete.",
         )
+    if role_key == "lead_executor":
+        return AgentBlueprint(
+            agent_id=agent_id,
+            role="lead_executor",
+            name="Lead Executor",
+            seniority="senior",
+            capabilities=("code_change", "implementation", "code_review", "research", "synthesis"),
+            supervisor_agent_id="role:team_lead",
+            preferred_tier="senior_cloud",
+            preferred_channel="subscription_or_api",
+            assignment_reason="Senior execution arm of the Lead for critical/complex actions.",
+        )
     if role_key == "qa":
         # DEPRECATED — QA Tier 2 role has been absorbed by the Reviewer.
         # For runtime test execution, use role='test_runner' (Tier 3) instead.

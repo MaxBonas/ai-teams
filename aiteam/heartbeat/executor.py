@@ -1486,7 +1486,7 @@ class RunExecutor:
     ) -> None:
         if "reviewer" in created_child_roles or "code_reviewer" in created_child_roles:
             return
-        if not {"engineer", "qa"} & set(created_child_roles):
+        if not {"engineer", "lead_executor"} & set(created_child_roles):
             return
         agent = self._agent_info(agent_id) or {}
         if str(agent.get("role") or "").strip().lower() not in {"lead", "team_lead"}:
@@ -1547,14 +1547,29 @@ class RunExecutor:
             # Tier 3 scouts use "cheap" seniority so choose_adapter_for_role
             # selects the most economical available adapter (local > flash > groq)
             # instead of defaulting to an expensive senior model.
-            effective_seniority = "cheap" if role_key in self._TIER3_ROLES else "standard"
-            selection = choose_adapter_for_role(role_key, effective_seniority, project_profiles(Path(self.db_path).parent))
+            # lead_executor uses "senior" seniority and inherits the Lead's adapter
+            # so it runs the same senior LLM as the Lead's planning runs.
+            if role_key == "lead_executor":
+                effective_seniority = "senior"
+                lead_info = self._agent_info(supervisor_agent_id or "role:lead") or {}
+                lead_adapter_type = str(lead_info.get("adapter_type") or "").strip()
+                lead_adapter_config = _decode_json(lead_info.get("adapter_config_json") or "{}")
+                selection = {
+                    "adapter_type": lead_adapter_type or "role_builtin",
+                    "adapter_config": lead_adapter_config,
+                }
+            elif role_key in self._TIER3_ROLES:
+                effective_seniority = "cheap"
+                selection = choose_adapter_for_role(role_key, effective_seniority, project_profiles(Path(self.db_path).parent))
+            else:
+                effective_seniority = "standard"
+                selection = choose_adapter_for_role(role_key, effective_seniority, project_profiles(Path(self.db_path).parent))
             row = create_agent(
                 self.db_path,
                 agent_id=agent_id,
                 role=role_key,
                 name=role_key.replace("_", " ").title(),
-                seniority="standard",
+                seniority=effective_seniority,
                 adapter_type=str((selection or {}).get("adapter_type") or "role_builtin"),
                 adapter_config=(selection or {}).get("adapter_config") or {},
                 capabilities=default_capabilities_for_role(role_key),
