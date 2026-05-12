@@ -252,6 +252,29 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 **Causa:** `_profile_score` no diferenciaba API vs CLI para roles junior (`engineer`, `qa`, `worker`). El score era idéntico entre `openai_api` y `subscription_cli` en igualdad de condiciones de salud.  
 **Acción (2026-05-05):** `_profile_score` ahora penaliza -30 pts los adapters API-only para roles no-senior y añade +30 pts a `subscription_cli`. Propuesta del lead también advierte explícitamente si el engineer recibiría un adapter API-only al aceptar.
 
+### P-9: Engineer pide al Lead el contenido de archivos (file-access blocking)
+**Síntoma:** El engineer crea una interacción `lead_wants_file_read` o escala al Lead pidiendo que le "envíe" el contenido de archivos antes de poder implementar. El Lead queda en espera; el engineer nunca produce workspace changes.  
+**Causa:** El agente engineer no sabía que el wake payload ya incluye `workspace_files` (contenido completo) para su rol. Sin ese conocimiento explícito, el agente infería que tenía que pedir los archivos.  
+**Detección:** Interacción `reason: "lead_wants_file_read"` creada por el Lead **por un engineer** (no un scout). Output del engineer menciona "necesito ver los archivos" o similar. Workspace delta vacío.  
+**Acción (2026-05-12):** `_WORKSPACE_READER_ROLES` incluye `engineer` — el payload de wake siempre incluye `workspace_files` con contenido completo. `engineer.md` skill y `work_contract.py` actualizados con instrucción explícita: "workspace_files está siempre en tu wake payload — NO pidas al Lead el contenido de archivos". `lead_wants_file_read` marcado como ONLY válido para scouts tier 3, nunca para engineers.
+
+### P-10: Flood de popups de confirmación (múltiples `create_interaction` en una run)
+**Síntoma:** El usuario recibe 2–3 ventanas de confirmación en sucesión rápida por el mismo ciclo de issue. Confirmar una dispara el siguiente wakeup antes de que las demás hayan sido respondidas, creando popups en cascada y duplicando runs.  
+**Causa:** Un agente LLM podía incluir varios ops `create_interaction` en un solo `submit_work`. El executor los creaba todos, encolando un wakeup por interacción. El usuario veía múltiples diálogos simultáneos del mismo issue.  
+**Detección:** `SELECT COUNT(*) FROM issue_thread_interactions WHERE issue_id = ? AND status = 'pending'` > 1 para la misma issue.  
+**Acción (2026-05-12):** Interaction gate en `_apply_actions`: al crear interacciones, cuenta las pendientes pre-existentes. Si ya hay ≥ 1, descarta las nuevas con `logger.warning`. Dentro de un mismo run, solo la primera interacción de la lista se materializa (`_created_this_run` counter). `work_contract.py` documenta el límite explícitamente: "LIMIT: only ONE create_interaction per run. The executor will silently drop any extras."
+
+### P-11: Reviewer `changes_requested` sin ciclo de corrección automático (deadlock de revisión)
+**Síntoma:** El reviewer termina su run con `result: changes_requested` en el `---AGENT-REPORT---` pero no se crea ninguna issue de corrección. El Lead skippea en wakeups sucesivos porque `_all_children_done` devuelve `False` pero ningún hijo está en estado activo que genere una acción. El proyecto queda en limbo indefinido.  
+**Causa:** El framework no tenía lógica automática para detectar `changes_requested` y responder creando una issue de corrección para el engineer. El Lead LLM a veces creaba una issue nueva pero a veces no — comportamiento no determinista. El reviewer tampoco tenía wakeup automático para re-ejecutarse después del fix.  
+**Detección:** `SELECT role, status, last_agent_report FROM issues WHERE parent_id = ?` muestra reviewer en `done` con `result: changes_requested` y todos los engineers en `done` o `cancelled`. Sin nueva issue de engineer activa. Wakeups del Lead todos `skipped` o `completed` sin crear issues.  
+**Acción (2026-05-12):**  
+- `_handle_reviewer_changes_requested()` en el branch `child_report`: detecta reviewer `done` + `changes_requested`, resetea reviewer a `todo`, crea issue numerada `Fix #N` con description que incluye `blocker` y `evidence` del reviewer.  
+- `sync_default_child_dependencies` cablea reviewer → fix_engineer: el reviewer se auto-despierta cuando el engineer termina.  
+- `_MAX_FIX_CYCLES = 3`: límite duro. Tras 3 ciclos consecutivos sin aprobación, escala al usuario via interacción `reviewer_fix_cycle_limit` (accept → engineer final con `complexity=high`; reject → cancela proyecto).  
+- `_cancel_stale_interaction(reason="initial_cycle_ready")` antes de cada ciclo: evita que coexista un popup "todo terminado" con un ciclo de fix activo.  
+- 25 tests nuevos en `tests/test_reviewer_changes_requested.py` y `tests/test_fix_cycle_limit_resolved.py`.
+
 ---
 
 ## Historial de cambios al sistema de evidencia
@@ -286,3 +309,19 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 | 2026-05-05 | `_profile_score`: penaliza API-only (-30) y bonifica subscription_cli (+30) para roles junior | `aiteam/project_adapters.py` |
 | 2026-05-05 | `format_team_proposal`: advertencia explícita si el engineer recibiría adapter API-only | `aiteam/lead_intake.py` |
 | 2026-05-05 | Documentados patrones P-6, P-7, P-8 | `docs/RUN_PROBLEMS_REGISTRY.md` |
+| 2026-05-12 | `_WORKSPACE_READER_ROLES` incluye `engineer`; wake payload siempre lleva `workspace_files` para engineers | `aiteam/heartbeat/executor.py` |
+| 2026-05-12 | `engineer.md` skill: instrucción explícita "workspace_files siempre presente, no pedir al Lead" | `skills/engineer.md` |
+| 2026-05-12 | `work_contract.py`: `workspace_files` documentado para ALL roles; `lead_wants_file_read` reservado solo para scouts | `aiteam/adapters/work_contract.py` |
+| 2026-05-12 | `_safe_truncate_output`: preserva `---AGENT-REPORT---` block al truncar output largo | `aiteam/heartbeat/executor.py` |
+| 2026-05-12 | Interaction gate en `_apply_actions`: máx 1 interacción pendiente por issue, máx 1 creada por run | `aiteam/heartbeat/executor.py` |
+| 2026-05-12 | `work_contract.py`: documenta límite de 1 `create_interaction` por run; lista `reviewer_fix_cycle_limit` como razón conocida | `aiteam/adapters/work_contract.py` |
+| 2026-05-12 | `_handle_reviewer_changes_requested`: auto-crea Fix #N engineer + resetea reviewer a todo en `child_report` | `aiteam/heartbeat/executor.py` |
+| 2026-05-12 | `_MAX_FIX_CYCLES = 3`: cap duro con escalación a usuario via `reviewer_fix_cycle_limit` | `aiteam/heartbeat/executor.py` |
+| 2026-05-12 | `_handle_fix_cycle_limit_resolved`: accept → engineer final (complexity=high); reject → cancela proyecto | `aiteam/heartbeat/executor.py` |
+| 2026-05-12 | `_cancel_stale_interaction(reason="initial_cycle_ready")` antes de cada ciclo de fix | `aiteam/heartbeat/executor.py` |
+| 2026-05-12 | `lead.md` skill: documenta automatización de `changes_requested` y protocolo de `reviewer_fix_cycle_limit` | `skills/lead.md` |
+| 2026-05-12 | 25 tests: `test_reviewer_changes_requested.py` (15) + `test_fix_cycle_limit_resolved.py` (10) | `tests/` |
+| 2026-05-12 | `_CONTEXT_CURATOR_COMMENT_THRESHOLD = 8`: auto-spawn curator cuando hilo > 8 comentarios y sin plan | `aiteam/heartbeat/executor.py` |
+| 2026-05-12 | `_maybe_spawn_context_curator`: side-effect silencioso en `child_report`; 17 tests en `test_context_curator_auto_trigger.py` | `aiteam/heartbeat/executor.py`, `tests/` |
+| 2026-05-12 | 16 tests formales de `_safe_truncate_output` + 9 tests del interaction gate | `tests/test_safe_truncate.py`, `tests/test_interaction_gate.py` |
+| 2026-05-12 | Documentados patrones P-9, P-10, P-11 | `docs/RUN_PROBLEMS_REGISTRY.md` |
