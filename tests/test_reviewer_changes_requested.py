@@ -331,6 +331,149 @@ class TestHandleReviewerChangesRequested:
             ).fetchone()[0]
         assert fix_count == 1, f"Expected 1 fix engineer issue, found {fix_count}"
 
+    def test_fix_title_is_numbered(self, tmp_path: Path) -> None:
+        """Fix issue title should include the cycle number."""
+        db_path = tmp_path / "aiteam.db"
+        _init_db(db_path)
+        _add_child_issue(
+            db_path, issue_id="issue:intake:eng", role="engineer",
+            status="done", comment=_ENGINEER_DONE_COMMENT,
+        )
+        _add_child_issue(
+            db_path, issue_id="issue:intake:rev", role="reviewer",
+            status="done", comment=_CHANGES_REQUESTED_COMMENT,
+        )
+        executor = self._make_executor(db_path)
+        executor._handle_reviewer_changes_requested(
+            "issue:intake", "role:lead", self._fake_run()
+        )
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            fix_issue = conn.execute(
+                """
+                SELECT title FROM issues
+                WHERE parent_id = 'issue:intake' AND role = 'engineer'
+                  AND id != 'issue:intake:eng'
+                ORDER BY created_at DESC LIMIT 1
+                """,
+            ).fetchone()
+        assert fix_issue is not None
+        assert "#1" in fix_issue["title"], (
+            f"First fix issue title should contain '#1', got: {fix_issue['title']!r}"
+        )
+
+    def test_stale_initial_cycle_ready_is_cancelled_on_fix_start(self, tmp_path: Path) -> None:
+        """A pending initial_cycle_ready interaction must be cancelled when a fix cycle starts."""
+        db_path = tmp_path / "aiteam.db"
+        _init_db(db_path)
+        _add_child_issue(
+            db_path, issue_id="issue:intake:eng", role="engineer",
+            status="done", comment=_ENGINEER_DONE_COMMENT,
+        )
+        _add_child_issue(
+            db_path, issue_id="issue:intake:rev", role="reviewer",
+            status="done", comment=_CHANGES_REQUESTED_COMMENT,
+        )
+        # Inject a stale initial_cycle_ready interaction
+        from aiteam.db.interactions import create_interaction
+        create_interaction(
+            db_path,
+            issue_id="issue:intake",
+            kind="request_confirmation",
+            payload={"version": 1, "reason": "initial_cycle_ready", "parent_issue_id": "issue:intake"},
+            idempotency_key="lead:cycle-review:issue:intake",
+        )
+        executor = self._make_executor(db_path)
+        executor._handle_reviewer_changes_requested(
+            "issue:intake", "role:lead", self._fake_run()
+        )
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            stale = conn.execute(
+                "SELECT status FROM issue_thread_interactions"
+                " WHERE idempotency_key = 'lead:cycle-review:issue:intake'",
+            ).fetchone()
+        assert stale is not None
+        assert stale["status"] == "cancelled", (
+            f"Stale initial_cycle_ready should be cancelled, got {stale['status']!r}"
+        )
+
+    def test_fix_cycle_limit_escalates_to_user(self, tmp_path: Path) -> None:
+        """After MAX_FIX_CYCLES done engineers, escalate instead of creating another fix."""
+        db_path = tmp_path / "aiteam.db"
+        _init_db(db_path)
+        # Create MAX_FIX_CYCLES + 1 done engineers (original + 3 fixes = 4 total)
+        max_cycles = RunExecutor._MAX_FIX_CYCLES
+        for i in range(max_cycles + 1):
+            _add_child_issue(
+                db_path, issue_id=f"issue:intake:eng{i}", role="engineer",
+                status="done", comment=_ENGINEER_DONE_COMMENT,
+            )
+        _add_child_issue(
+            db_path, issue_id="issue:intake:rev", role="reviewer",
+            status="done", comment=_CHANGES_REQUESTED_COMMENT,
+        )
+        executor = self._make_executor(db_path)
+        result = executor._handle_reviewer_changes_requested(
+            "issue:intake", "role:lead", self._fake_run()
+        )
+        assert result is not None, "Should return an ExecutionResult for escalation"
+        assert result.status == "completed"
+        # Should NOT have created a new engineer fix issue
+        with sqlite3.connect(str(db_path)) as conn:
+            new_eng_count = conn.execute(
+                f"SELECT COUNT(*) FROM issues WHERE parent_id = 'issue:intake' AND role = 'engineer'",
+            ).fetchone()[0]
+        assert new_eng_count == max_cycles + 1, (
+            f"No new engineer should be created at limit; expected {max_cycles + 1}, got {new_eng_count}"
+        )
+        # Should have created an escalation interaction
+        assert result.actions is not None
+        interactions = result.actions.get("interactions") or []
+        assert len(interactions) == 1
+        assert interactions[0]["payload"]["reason"] == "reviewer_fix_cycle_limit"
+
+    def test_second_cycle_has_cycle_number_in_title_and_description(self, tmp_path: Path) -> None:
+        """After original + fix #1 done, fix #2 title/description should include '#2'."""
+        db_path = tmp_path / "aiteam.db"
+        _init_db(db_path)
+        # Original engineer done + fix #1 engineer done = 2 done engineers
+        _add_child_issue(
+            db_path, issue_id="issue:intake:eng", role="engineer",
+            status="done", comment=_ENGINEER_DONE_COMMENT,
+        )
+        _add_child_issue(
+            db_path, issue_id="issue:intake:fix1", role="engineer",
+            status="done", comment=_ENGINEER_DONE_COMMENT,
+        )
+        _add_child_issue(
+            db_path, issue_id="issue:intake:rev", role="reviewer",
+            status="done", comment=_CHANGES_REQUESTED_COMMENT,
+        )
+        executor = self._make_executor(db_path)
+        result = executor._handle_reviewer_changes_requested(
+            "issue:intake", "role:lead", self._fake_run()
+        )
+        assert result is not None
+        assert "#2" in result.output, (
+            f"Output should reference cycle #2; got: {result.output[:300]}"
+        )
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            new_fix = conn.execute(
+                """
+                SELECT title, description FROM issues
+                WHERE parent_id = 'issue:intake' AND role = 'engineer'
+                  AND id NOT IN ('issue:intake:eng', 'issue:intake:fix1')
+                ORDER BY created_at DESC LIMIT 1
+                """,
+            ).fetchone()
+        assert new_fix is not None
+        assert "#2" in new_fix["title"], f"Fix #2 title should contain '#2': {new_fix['title']!r}"
+        assert "2" in (new_fix["description"] or ""), (
+            "Fix #2 description should mention prior attempt count"
+        )
+
 
 # ── Integration: child_report wake end-to-end ─────────────────────────────────
 

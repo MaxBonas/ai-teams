@@ -1943,6 +1943,11 @@ class RunExecutor:
         except Exception:
             logger.warning("_cancel_stale_interaction failed for issue %s reason=%r", issue_id, reason, exc_info=True)
 
+    # Hard cap on automatic fix cycles.  After this many reviewer→engineer rounds
+    # the system escalates to the user instead of spawning another fix issue.
+    # Prevents runaway loops when the engineer repeatedly delivers wrong output.
+    _MAX_FIX_CYCLES: int = 3
+
     def _handle_reviewer_changes_requested(
         self, issue_id: str, agent_id: str, run: dict[str, Any]
     ) -> "ExecutionResult | None":
@@ -1952,15 +1957,20 @@ class RunExecutor:
         ``---AGENT-REPORT---`` block and there is no currently open (non-terminal)
         engineer child, this method:
 
-        1. Resets the reviewer back to ``todo`` so it can re-run after the fix.
-        2. Creates a new engineer child issue whose description surfaces the
-           reviewer's evidence and blocker fields.
-        3. Calls ``sync_default_child_dependencies`` which wires a
+        1. Checks the fix cycle count; if the cap (_MAX_FIX_CYCLES) is reached,
+           escalates to the user with a request_confirmation instead of creating
+           another fix issue — preventing infinite retry loops.
+        2. Cancels any stale ``initial_cycle_ready`` interaction so a premature
+           cycle-close prompt cannot coexist with an active fix cycle.
+        3. Resets the reviewer(s) back to ``todo`` so they can re-run after fix.
+        4. Creates a numbered engineer child issue (Fix #N) whose description
+           surfaces the reviewer's evidence and blocker fields.
+        5. Calls ``sync_default_child_dependencies`` which wires a
            reviewer → fix_engineer dependency — the reviewer is automatically
            woken by ``resolve_blocker_wakeups`` when the engineer finishes.
 
         Returns an ``ExecutionResult`` (caller should return it immediately) if a
-        fix cycle was started, or ``None`` if no action was needed.
+        fix cycle was started or escalated, or ``None`` if no action was needed.
         """
         rows = self._child_issue_rows(issue_id)
         reviewer_roles = {"reviewer", "code_reviewer"}
@@ -1977,7 +1987,7 @@ class RunExecutor:
         if not changes_requested_reviewers:
             return None
 
-        # If there is already an open engineer fix, wait for it to complete
+        # If there is already an open engineer fix issue, wait for it to complete
         open_engineers = [
             r for r in rows
             if str(r.get("role") or "").strip().lower() in engineer_roles
@@ -1986,6 +1996,77 @@ class RunExecutor:
         if open_engineers:
             return None
 
+        # Count non-cancelled engineer children to determine which fix cycle this is.
+        # Cycle #1 = original engineer done + reviewer says changes_requested for the first time.
+        # Cycle #N = N-1 fix engineers done + reviewer still unhappy.
+        non_cancelled_engineers = [
+            r for r in rows
+            if str(r.get("role") or "").strip().lower() in engineer_roles
+            and str(r.get("status") or "").strip().lower() != "cancelled"
+        ]
+        fix_cycle_number = len(non_cancelled_engineers)  # 1-based: 1 = first fix, 2 = second…
+
+        # ── Fix cycle hard cap ────────────────────────────────────────────────
+        # After _MAX_FIX_CYCLES rounds the system can no longer self-recover.
+        # Escalate to the user rather than create yet another doomed fix issue.
+        if fix_cycle_number > self._MAX_FIX_CYCLES:
+            rev_row = changes_requested_reviewers[0]
+            report = rev_row.get("last_agent_report") or {}
+            evidence = str(report.get("evidence") or "").strip()
+            blocker = str(report.get("blocker") or "").strip()
+            logger.warning(
+                "Fix cycle limit reached (%d/%d) for parent issue %s — escalating to user",
+                fix_cycle_number, self._MAX_FIX_CYCLES, issue_id,
+            )
+            escalation_lines = [
+                f"Lead — Límite de ciclos de corrección alcanzado ({fix_cycle_number - 1}/{self._MAX_FIX_CYCLES})",
+                "",
+                f"El Reviewer ha solicitado `changes_requested` {fix_cycle_number - 1} veces consecutivas "
+                "y el Engineer no ha logrado entregar una implementación aprobada.",
+                "Se necesita intervención manual para desbloquear el proyecto.",
+                "",
+            ]
+            if evidence:
+                escalation_lines.append(f"**Evidencia más reciente del Reviewer:** {evidence}")
+            if blocker:
+                escalation_lines.append(f"**Problema persistente:** {blocker}")
+            escalation_lines += [
+                "",
+                "Opciones para el usuario:",
+                "- Acepta para que el Lead intente un nuevo Engineer con instrucciones más detalladas.",
+                "- Rechaza para mantener el estado actual y diagnosticar manualmente.",
+            ]
+            return ExecutionResult(
+                status="completed",
+                output="\n".join(escalation_lines),
+                actions={
+                    "interactions": [
+                        {
+                            "kind": "request_confirmation",
+                            "payload": {
+                                "version": 1,
+                                "reason": "reviewer_fix_cycle_limit",
+                                "parent_issue_id": issue_id,
+                                "fix_cycle_count": fix_cycle_number - 1,
+                                "last_blocker": blocker,
+                                "last_evidence": evidence,
+                            },
+                            "title": f"Ciclos de corrección agotados — intervención requerida",
+                            "summary": (
+                                f"El Reviewer ha rechazado {fix_cycle_number - 1} implementaciones. "
+                                "Acepta para intentar un ciclo final con instrucciones ampliadas; "
+                                "rechaza para diagnosticar manualmente."
+                            ),
+                            "idempotency_key": f"lead:fix-cycle-limit:{issue_id}",
+                        }
+                    ]
+                },
+            )
+
+        # Cancel any stale initial_cycle_ready interaction — it would be misleading
+        # (telling the user "all done") while an active fix cycle is about to start.
+        self._cancel_stale_interaction(issue_id, reason="initial_cycle_ready")
+
         # Gather reviewer findings for the fix issue description
         rev_row = changes_requested_reviewers[0]
         report = rev_row.get("last_agent_report") or {}
@@ -1993,12 +2074,25 @@ class RunExecutor:
         evidence = str(report.get("evidence") or "").strip()
         blocker = str(report.get("blocker") or "").strip()
 
+        if fix_cycle_number > 1:
+            logger.warning(
+                "Fix cycle #%d starting for parent issue %s — reviewer still unhappy after %d prior attempt(s)",
+                fix_cycle_number, issue_id, fix_cycle_number - 1,
+            )
+
         desc_parts = [
-            f"**Corrección solicitada por el Reviewer** ({reviewer_title})",
+            f"**Corrección #{fix_cycle_number} solicitada por el Reviewer** ({reviewer_title})",
             "",
             "El Reviewer completó la revisión y encontró problemas que deben corregirse "
             "antes de que el ciclo pueda cerrarse.",
         ]
+        if fix_cycle_number > 1:
+            desc_parts += [
+                "",
+                f"⚠ Este es el ciclo de corrección #{fix_cycle_number}. "
+                f"Los {fix_cycle_number - 1} intento(s) anteriores no resolvieron los problemas. "
+                "Lee el último comentario del Reviewer con atención antes de implementar.",
+            ]
         if evidence:
             desc_parts += ["", f"**Evidencia del Reviewer:** {evidence}"]
         if blocker:
@@ -2028,28 +2122,31 @@ class RunExecutor:
                     payload={
                         "status": "todo",
                         "source": "reviewer_changes_requested_cycle",
+                        "fix_cycle_number": fix_cycle_number,
                         "reason": "reviewer reported changes_requested; reset to await fix engineer",
                     },
                 )
                 logger.info(
-                    "Reviewer %s reset to todo for changes_requested fix cycle (parent=%s)",
-                    rev_id,
-                    issue_id,
+                    "Reviewer %s reset to todo for fix cycle #%d (parent=%s)",
+                    rev_id, fix_cycle_number, issue_id,
                 )
             except Exception:
                 logger.warning(
-                    "Failed to reset reviewer %s to todo for changes_requested cycle",
-                    rev_id,
+                    "Failed to reset reviewer %s to todo for changes_requested cycle #%d",
+                    rev_id, fix_cycle_number,
                     exc_info=True,
                 )
 
-        # Create the fix engineer issue (idempotent via _create_delegated_issue)
+        # Create the numbered fix engineer issue (idempotent via _create_delegated_issue)
+        fix_title = (
+            f"Fix #{fix_cycle_number}: correcciones solicitadas por Reviewer"
+        )
         fix_issue = self._create_delegated_issue(
             issue_id=issue_id,
             agent_id=agent_id,
             run=run,
             spec={
-                "title": "Fix: correcciones solicitadas por Reviewer",
+                "title": fix_title,
                 "description": fix_description,
                 "role": "engineer",
                 "complexity": "medium",
@@ -2063,28 +2160,37 @@ class RunExecutor:
             sync_default_child_dependencies(self.db_path, parent_issue_id=issue_id)
         except Exception:
             logger.warning(
-                "sync_default_child_dependencies failed after changes_requested cycle for %s",
-                issue_id,
+                "sync_default_child_dependencies failed after changes_requested cycle #%d for %s",
+                fix_cycle_number, issue_id,
                 exc_info=True,
             )
 
         fix_id = str((fix_issue or {}).get("id") or "desconocido")
+        cycles_remaining = self._MAX_FIX_CYCLES - fix_cycle_number
         output_lines = [
-            "Lead — Ciclo de corrección iniciado automáticamente",
+            f"Lead — Ciclo de corrección #{fix_cycle_number} iniciado automáticamente",
             "",
             "El Reviewer reportó `changes_requested`. Se ha iniciado un ciclo de corrección:",
             "",
             "1. El Reviewer ha sido restablecido a `todo` — se volverá a ejecutar automáticamente "
             "cuando las correcciones estén listas.",
-            f"2. Issue de corrección creada: `{fix_id}` (Engineer)",
+            f"2. Issue de corrección creada: `{fix_id}` ({fix_title})",
             "3. La dependencia Reviewer → Engineer ha sido configurada — no se requiere "
             "intervención manual.",
+            f"4. Ciclos de corrección restantes antes de escalar: {cycles_remaining}",
             "",
         ]
         if evidence:
             output_lines.append(f"**Evidencia del Reviewer:** {evidence}")
         if blocker:
             output_lines.append(f"**Problema identificado:** {blocker}")
+        if fix_cycle_number > 1:
+            output_lines += [
+                "",
+                f"⚠ Este es el intento de corrección #{fix_cycle_number}. "
+                "Si el Reviewer vuelve a rechazar, considera revisar la especificación "
+                "o cambiar el adapter del Engineer.",
+            ]
 
         return ExecutionResult(
             status="completed",

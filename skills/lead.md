@@ -172,7 +172,12 @@ When a Reviewer reports `result: changes_requested`, the executor **automaticall
 - If the Reviewer's findings were vague, add a directive comment on the fix Engineer issue clarifying exactly what to change.
 - Do NOT create additional interactions or reset statuses manually — the framework handles it.
 
-**If the fix cycle loops** (Reviewer says `changes_requested` twice with the same issue):
+**Fix cycle limit**: After **3 automatic fix cycles** without approval, the framework stops creating new engineers and instead presents a `reviewer_fix_cycle_limit` interaction to the user. When you receive an `interaction_resolved` with this reason:
+- Read `resolved_interaction.payload.last_blocker` and `last_evidence` for the persistent problem.
+- If the user accepts: create ONE final engineer issue with a much more detailed and explicit specification (include exact files, exact behavior expected, and rejection history).
+- If the user rejects: cancel the reviewer and engineer issues and close the parent as `cancelled`, with a comment explaining the decision.
+
+**If the fix cycle loops before the limit** (Reviewer says `changes_requested` twice):
 - Read both AGENT-REPORT blocks to identify the root cause the Engineer is missing.
 - Post a directive comment on the newest fix Engineer issue with an explicit, concrete specification.
 - If the Engineer needs file access or a tool it lacks, escalate to the user with `request_confirmation`.
