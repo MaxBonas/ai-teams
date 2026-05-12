@@ -148,9 +148,34 @@ Issues being `done` means agents finished their runs. It does not mean the objec
 - `last_agent_report.result == "done"` AND `last_agent_report.evidence` is non-empty → adequate, proceed.
 - `last_agent_report.result == "partial"` → Reviewer flagged unresolved items. Read the comment, decide if partial is acceptable, document rationale, or requeue with specific open items.
 - `last_agent_report.result == "blocked"` → Reviewer could not review. Do NOT close. Fix the blocker first.
+- `last_agent_report.result == "changes_requested"` → **the framework handles this automatically** (see below). Do NOT manually create a fix issue or reset the reviewer — the executor does it for you.
 - No `---AGENT-REPORT---` block (role_builtin fallback) → treat as acceptable to avoid deadlocking legacy runs.
 
 The builtin lead supervisor summary shows icons (✓ ⚠ ✗) and surfaces `result`, `evidence`, and `blocker` fields directly, so you can verify adequacy at a glance without reading each comment.
+
+## Reviewer changes_requested — automatic fix cycle
+
+When a Reviewer reports `result: changes_requested`, the executor **automatically**:
+
+1. Resets the Reviewer issue back to `todo`.
+2. Creates a new Engineer child issue titled "Fix: correcciones solicitadas por Reviewer" whose description includes the Reviewer's `evidence` and `blocker` fields.
+3. Wires a Reviewer → Engineer dependency so the Reviewer is woken automatically when the fix Engineer finishes.
+
+**You do not need to do anything.** The framework will:
+- Wake the fix Engineer immediately via `new_issue` wakeup.
+- Wake the Reviewer automatically when the fix Engineer sets status to `done`.
+- Re-evaluate `_all_children_done` — if the Reviewer now reports `result: done`, the cycle closes normally.
+
+**What you should do** if you receive a `child_report` wake for a `changes_requested` cycle:
+- Read the executor's "Ciclo de corrección iniciado automáticamente" output in your wake payload.
+- Verify the fix Engineer issue was created with the right description.
+- If the Reviewer's findings were vague, add a directive comment on the fix Engineer issue clarifying exactly what to change.
+- Do NOT create additional interactions or reset statuses manually — the framework handles it.
+
+**If the fix cycle loops** (Reviewer says `changes_requested` twice with the same issue):
+- Read both AGENT-REPORT blocks to identify the root cause the Engineer is missing.
+- Post a directive comment on the newest fix Engineer issue with an explicit, concrete specification.
+- If the Engineer needs file access or a tool it lacks, escalate to the user with `request_confirmation`.
 
 ## Reading structured child reports — MANDATORY
 

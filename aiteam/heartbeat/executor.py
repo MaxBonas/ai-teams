@@ -789,6 +789,15 @@ class RunExecutor:
                         ]
                     },
                 )
+            # ── Auto-create fix engineer on reviewer changes_requested ────────────
+            # If a reviewer completed with result=changes_requested AND there is no
+            # open engineer fix issue, reset the reviewer to todo and create a new
+            # engineer issue with the reviewer's findings.  sync_default_child_dependencies
+            # wires the reviewer → fix_engineer dependency so the reviewer is woken
+            # automatically when the engineer finishes.
+            _fix_result = self._handle_reviewer_changes_requested(issue_id, agent_id, run)
+            if _fix_result is not None:
+                return _fix_result
             actions: dict[str, Any] = {}
             if self._all_children_done(issue_id):
                 # Cancel any stale child_blocked_requires_action interaction —
@@ -1933,6 +1942,154 @@ class RunExecutor:
                 )
         except Exception:
             logger.warning("_cancel_stale_interaction failed for issue %s reason=%r", issue_id, reason, exc_info=True)
+
+    def _handle_reviewer_changes_requested(
+        self, issue_id: str, agent_id: str, run: dict[str, Any]
+    ) -> "ExecutionResult | None":
+        """Detect reviewer changes_requested and auto-create a fix engineer issue.
+
+        When a reviewer finishes with ``result=changes_requested`` in its
+        ``---AGENT-REPORT---`` block and there is no currently open (non-terminal)
+        engineer child, this method:
+
+        1. Resets the reviewer back to ``todo`` so it can re-run after the fix.
+        2. Creates a new engineer child issue whose description surfaces the
+           reviewer's evidence and blocker fields.
+        3. Calls ``sync_default_child_dependencies`` which wires a
+           reviewer → fix_engineer dependency — the reviewer is automatically
+           woken by ``resolve_blocker_wakeups`` when the engineer finishes.
+
+        Returns an ``ExecutionResult`` (caller should return it immediately) if a
+        fix cycle was started, or ``None`` if no action was needed.
+        """
+        rows = self._child_issue_rows(issue_id)
+        reviewer_roles = {"reviewer", "code_reviewer"}
+        engineer_roles = {"engineer", "software_engineer"}
+
+        # Identify reviewers that are done with changes_requested
+        changes_requested_reviewers = [
+            r for r in rows
+            if str(r.get("role") or "").strip().lower() in reviewer_roles
+            and str(r.get("status") or "").strip().lower() == "done"
+            and str((r.get("last_agent_report") or {}).get("result") or "").strip().lower()
+            == "changes_requested"
+        ]
+        if not changes_requested_reviewers:
+            return None
+
+        # If there is already an open engineer fix, wait for it to complete
+        open_engineers = [
+            r for r in rows
+            if str(r.get("role") or "").strip().lower() in engineer_roles
+            and str(r.get("status") or "").strip().lower() not in {"done", "cancelled"}
+        ]
+        if open_engineers:
+            return None
+
+        # Gather reviewer findings for the fix issue description
+        rev_row = changes_requested_reviewers[0]
+        report = rev_row.get("last_agent_report") or {}
+        reviewer_title = str(rev_row.get("title") or "Reviewer").strip()
+        evidence = str(report.get("evidence") or "").strip()
+        blocker = str(report.get("blocker") or "").strip()
+
+        desc_parts = [
+            f"**Corrección solicitada por el Reviewer** ({reviewer_title})",
+            "",
+            "El Reviewer completó la revisión y encontró problemas que deben corregirse "
+            "antes de que el ciclo pueda cerrarse.",
+        ]
+        if evidence:
+            desc_parts += ["", f"**Evidencia del Reviewer:** {evidence}"]
+        if blocker:
+            desc_parts += ["", f"**Problema identificado:** {blocker}"]
+        desc_parts += [
+            "",
+            "Implementa las correcciones necesarias y reporta al Lead via "
+            "notify_supervisor cuando termines. El Reviewer se volverá a ejecutar "
+            "automáticamente cuando esta issue esté completada.",
+        ]
+        fix_description = "\n".join(desc_parts)
+
+        # Reset all changes_requested reviewers back to todo
+        for rev in changes_requested_reviewers:
+            rev_id = str(rev.get("id") or "").strip()
+            if not rev_id:
+                continue
+            try:
+                update_issue(self.db_path, issue_id=rev_id, status="todo")
+                log_activity(
+                    self.db_path,
+                    action="issue.updated",
+                    target_type="issue",
+                    target_id=rev_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id")),
+                    payload={
+                        "status": "todo",
+                        "source": "reviewer_changes_requested_cycle",
+                        "reason": "reviewer reported changes_requested; reset to await fix engineer",
+                    },
+                )
+                logger.info(
+                    "Reviewer %s reset to todo for changes_requested fix cycle (parent=%s)",
+                    rev_id,
+                    issue_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to reset reviewer %s to todo for changes_requested cycle",
+                    rev_id,
+                    exc_info=True,
+                )
+
+        # Create the fix engineer issue (idempotent via _create_delegated_issue)
+        fix_issue = self._create_delegated_issue(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            run=run,
+            spec={
+                "title": "Fix: correcciones solicitadas por Reviewer",
+                "description": fix_description,
+                "role": "engineer",
+                "complexity": "medium",
+            },
+            metadata_source="reviewer_changes_requested_fix",
+            activity_source="reviewer_changes_requested_cycle",
+        )
+
+        # Wire reviewer → fix_engineer dependency so reviewer auto-wakes when done
+        try:
+            sync_default_child_dependencies(self.db_path, parent_issue_id=issue_id)
+        except Exception:
+            logger.warning(
+                "sync_default_child_dependencies failed after changes_requested cycle for %s",
+                issue_id,
+                exc_info=True,
+            )
+
+        fix_id = str((fix_issue or {}).get("id") or "desconocido")
+        output_lines = [
+            "Lead — Ciclo de corrección iniciado automáticamente",
+            "",
+            "El Reviewer reportó `changes_requested`. Se ha iniciado un ciclo de corrección:",
+            "",
+            "1. El Reviewer ha sido restablecido a `todo` — se volverá a ejecutar automáticamente "
+            "cuando las correcciones estén listas.",
+            f"2. Issue de corrección creada: `{fix_id}` (Engineer)",
+            "3. La dependencia Reviewer → Engineer ha sido configurada — no se requiere "
+            "intervención manual.",
+            "",
+        ]
+        if evidence:
+            output_lines.append(f"**Evidencia del Reviewer:** {evidence}")
+        if blocker:
+            output_lines.append(f"**Problema identificado:** {blocker}")
+
+        return ExecutionResult(
+            status="completed",
+            output="\n".join(output_lines),
+        )
 
     def _handle_lead_self_file_read(
         self, issue_id: str, run: dict[str, Any], agent_id: str
