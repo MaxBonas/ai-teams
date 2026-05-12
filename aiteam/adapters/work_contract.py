@@ -187,6 +187,38 @@ def build_execution_contract() -> str:
     )
 
 
+# ── Tier 3 op filter ─────────────────────────────────────────────────────────
+
+_TIER3_ROLES_FOR_VALIDATION: frozenset[str] = frozenset(
+    {"file_scout", "web_scout", "context_curator", "test_runner"}
+)
+_OPS_FORBIDDEN_FOR_TIER3: frozenset[str] = frozenset(
+    {"create_issue", "create_interaction", "update_plan", "write_file", "append_file", "delete_file"}
+)
+
+
+def filter_forbidden_ops_for_role(
+    ops: list[dict[str, Any]], role: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (allowed_ops, dropped_ops).
+
+    Tier 3 roles (file_scout, web_scout, context_curator, test_runner) may not
+    create issues, interactions, update the plan, or write/delete workspace files.
+    Any such op is silently removed before the executor processes the op list.
+    Non-Tier-3 roles pass through unchanged.
+    """
+    if role.lower() not in _TIER3_ROLES_FOR_VALIDATION:
+        return ops, []
+    allowed: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for op in ops:
+        if str(op.get("type", "")) in _OPS_FORBIDDEN_FOR_TIER3:
+            dropped.append(op)
+        else:
+            allowed.append(op)
+    return allowed, dropped
+
+
 def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
     actions: dict[str, Any] = {}
     interactions: list[dict[str, Any]] = []

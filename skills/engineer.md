@@ -16,7 +16,9 @@ If `AITEAM_WAKE_PAYLOAD_JSON` is set, use it first. It contains the issue summar
 
 **`workspace_files` is always in your wake payload** — you do NOT need to ask the Lead for file contents. Each entry has `path`, `content`, and `size_bytes`. Read these before writing anything; do not create files that already exist unless you intend to modify them.
 
-Do NOT block on missing files and do NOT create a `request_confirmation` or escalate to the Lead just to read files. The files are already there. If `workspace_files` is empty the workspace is genuinely empty — proceed to create the files the issue requires.
+**If `workspace_files` is empty:**
+- If the issue is to create new files from scratch → the workspace is genuinely empty. Proceed to create the required files.
+- If the issue requires modifying existing files → something went wrong with payload assembly. Set `issue_status: blocked` with an explicit `blocker: workspace_files empty — expected existing files for modification`, then call `notify_supervisor`. **Do NOT create a `create_interaction` or `request_confirmation` to ask for files.** Interactions belong to the Lead only — the executor will silently drop yours.
 
 Only call `/api/issues/{id}` or fetch the full thread if `fallback_fetch_needed` is true or you need broader context beyond the payload.
 

@@ -10,6 +10,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from aiteam.adapters.registry import AdapterRegistry, ExecutionResult
+from aiteam.adapters.work_contract import filter_forbidden_ops_for_role
 from aiteam.db.agents import create_agent
 from aiteam.db.activity_log import log_activity
 from aiteam.db.comments import create_comment
@@ -438,7 +439,7 @@ class RunExecutor:
                 )
 
         # ── Step 2: Apply the adapter's own result actions ───────────────────
-        self._apply_result_actions(run=run, agent_id=agent_id, result=result)
+        self._apply_result_actions(run=run, agent_id=agent_id, agent_role=agent_role, result=result)
 
         # ── Step 3: Collect structured evidence from DB (post-comment) ───────
         workspace_files_changed = len(workspace_delta.created) + len(workspace_delta.modified)
@@ -470,7 +471,7 @@ class RunExecutor:
                 output=None,
                 actions=liveness_result.actions_override,
             )
-            self._apply_result_actions(run=run, agent_id=agent_id, result=override_result)
+            self._apply_result_actions(run=run, agent_id=agent_id, agent_role=agent_role, result=override_result)
 
         # ── Step 6: Record workspace evidence event (for blocked + advanced) ──
         is_engineering = str(agent_role or "").strip().lower() in {"engineer", "software_engineer"}
@@ -1160,11 +1161,43 @@ class RunExecutor:
             actions={"issue_status": "done", "notify_supervisor": True},
         )
 
-    def _apply_result_actions(self, *, run: dict[str, Any], agent_id: str, result: ExecutionResult) -> None:
+    def _apply_result_actions(
+        self,
+        *,
+        run: dict[str, Any],
+        agent_id: str,
+        agent_role: str = "",
+        result: ExecutionResult,
+    ) -> None:
         actions = result.actions or {}
         issue_id = str(run.get("issue_id") or "")
         if not issue_id:
             return
+
+        # ── Tier 3 op filter ─────────────────────────────────────────────────
+        # Tier 3 scout roles may not create issues, interactions, update plans,
+        # or write workspace files.  We normalise the agent_role and drop any
+        # action groups that are forbidden.  filter_forbidden_ops_for_role
+        # operates on raw ops, so we reconstruct a minimal ops list, filter it,
+        # and rebuild the actions dict from the surviving ops only.
+        _FORBIDDEN_ACTION_KEYS_FOR_TIER3 = {
+            "create_issues",
+            "interactions",
+            "update_plan",
+            "file_ops",
+        }
+        from aiteam.adapters.work_contract import _TIER3_ROLES_FOR_VALIDATION
+        if agent_role.lower() in _TIER3_ROLES_FOR_VALIDATION:
+            for _forbidden_key in _FORBIDDEN_ACTION_KEYS_FOR_TIER3:
+                if _forbidden_key in actions:
+                    logger.warning(
+                        "Dropped forbidden action group %r for Tier 3 role %r (issue %s)",
+                        _forbidden_key,
+                        agent_role,
+                        issue_id,
+                    )
+                    actions = {k: v for k, v in actions.items() if k != _forbidden_key}
+
         # ── Interaction gate: max 1 pending interaction per issue at a time ─────
         # Presenting multiple confirmation popups simultaneously confuses users:
         # accepting one triggers a new run before the others are answered,
