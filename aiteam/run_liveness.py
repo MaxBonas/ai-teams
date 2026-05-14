@@ -128,6 +128,7 @@ def classify_run_liveness(
     agent_role: str,
     useful_output: bool,
     has_explicit_issue_status: bool = False,
+    explicit_blocking_declared: bool = False,
     continuation_attempt: int = 0,
     max_continuation_attempts: int = MAX_CONTINUATION_ATTEMPTS,
 ) -> LivenessResult:
@@ -139,8 +140,14 @@ def classify_run_liveness(
     2. Builtin adapter (role_builtin / lead_builtin / manual) → advanced/completed
     3. Non-engineering role: useful output OR concrete DB evidence → advanced
     4. Engineering role with workspace changes → advanced (auto-closes if no explicit status)
-    5. Engineering role, no workspace changes, useful output → plan_only (continuable)
-    6. Engineering role, no workspace changes, no output → empty_response (continuable)
+    5. Engineering role that explicitly declared ``blocked`` or ``cancelled`` via ops →
+       advanced/completed, NO continuation.  Prevents re-waking an engineer that
+       deliberately blocked the issue with a ``set_status`` op.
+       NOTE: ``done`` without workspace evidence is NOT covered here — those runs
+       fall through to plan_only so the continuation loop can nudge the engineer
+       to produce real file changes before the issue is accepted.
+    6. Engineering role, no workspace changes, useful output → plan_only (continuable)
+    7. Engineering role, no workspace changes, no output → empty_response (continuable)
 
     All adapters — including API-only (openai_api, anthropic_api, gemini_api) — are
     treated the same.  The executor materializes write_file/append_file/delete_file
@@ -160,9 +167,15 @@ def classify_run_liveness(
     useful_output:
         True when ``result.output`` is non-empty and non-trivial.
     has_explicit_issue_status:
-        True when the adapter already set ``issue_status`` in its actions.
-        If False, the classifier may auto-set ``issue_status = "done"``
-        for engineering runs with workspace evidence.
+        True when the adapter already set *any* ``issue_status`` in its actions.
+        Used in rule 4 to suppress auto-closing (auto-setting ``done``) when the
+        adapter already declared its own status.
+    explicit_blocking_declared:
+        True when the adapter set ``issue_status`` to ``"blocked"`` or ``"cancelled"``
+        via a ``set_status`` op.  Triggers rule 5: skips the continuation loop so the
+        deliberate block is not overridden by a liveness wakeup.
+        Distinct from ``has_explicit_issue_status`` because ``done`` without workspace
+        evidence should still go through plan_only, not bypass the continuation loop.
     continuation_attempt:
         Current continuation attempt number (0 = first/original run).
     max_continuation_attempts:
@@ -227,7 +240,23 @@ def classify_run_liveness(
             actions_override=override,
         )
 
-    # 6. Engineering, no workspace changes, but useful output → plan_only.
+    # 6. If the engineer explicitly declared a blocking terminal status
+    #    (``blocked`` or ``cancelled``) via a set_status op, honour that and do NOT
+    #    re-enqueue a liveness continuation.  A continuation would silently reset the
+    #    issue back to todo and re-wake the engineer — defeating the deliberate block.
+    #
+    #    ``done`` without workspace evidence is intentionally excluded: an engineer
+    #    that claims done but produced no files should still enter the plan_only loop
+    #    so it is nudged to provide real workspace output.
+    if explicit_blocking_declared:
+        state = "advanced" if (useful_output or evidence.has_concrete_action_evidence) else "completed"
+        return LivenessResult(
+            state=state,
+            reason="explicit_blocking_declared",
+            needs_continuation=False,
+        )
+
+    # 7. Engineering, no workspace changes, but useful output → plan_only.
     #    Give the agent a bounded number of continuation attempts.
     if useful_output:
         return _continuable_or_exhausted(
@@ -242,7 +271,7 @@ def classify_run_liveness(
             ),
         )
 
-    # 7. Engineering, no workspace changes, no output → empty_response.
+    # 8. Engineering, no workspace changes, no output → empty_response.
     return _continuable_or_exhausted(
         state_name="empty_response",
         reason="no_output_no_workspace_changes",

@@ -100,6 +100,8 @@ class HeartbeatScheduler:
             "instruction",
             "continuation_attempt",
             "max_continuation_attempts",
+            "prompt_budget_hint",
+            "timeout_retry_attempt",
         ):
             if _clean_optional(payload.get(key)):
                 context_snapshot[key] = _clean_optional(payload.get(key))

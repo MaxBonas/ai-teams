@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -288,6 +289,111 @@ async def patch_issue(issue_id: str, body: UpdateIssueRequest, request: Request)
         except Exception:
             pass
     return {"success": True, "issue": row}
+
+
+@router.get("/api/loop-health")
+async def get_loop_health(request: Request):
+    """Return a summary of detected Lead-Engineer loops and stuck blocked children.
+
+    Used by the UI to surface a warning banner when the system has detected
+    issues that are looping without resolution.
+
+    Returns:
+        detected_loops: list of {child_issue_id, parent_issue_id, skip_count, loop_detected_at}
+        thin_delegations: count of issues where the Lead delegated with a too-short description
+        summary: {total_loops, total_unresolved_blocked, requires_attention: bool}
+    """
+    _require_api_auth_request(request)
+    db = _db(request)
+    try:
+        with contextlib.closing(sqlite3.connect(str(db), timeout=20.0)) as conn:
+            conn.row_factory = sqlite3.Row
+
+            # Issues where loop.detected was fired and the child is still blocked
+            loop_rows = conn.execute(
+                """
+                SELECT
+                    a.target_id AS child_issue_id,
+                    json_extract(a.payload_json, '$.parent_issue_id') AS parent_issue_id,
+                    COUNT(CASE WHEN a.action = 'lead.unblock_skipped' THEN 1 END) AS skip_count,
+                    MAX(CASE WHEN a.action = 'loop.detected' THEN a.created_at END) AS loop_detected_at,
+                    i.status AS child_status,
+                    i.title AS child_title
+                FROM activity_log a
+                JOIN issues i ON i.id = a.target_id
+                WHERE a.action IN ('lead.unblock_skipped', 'loop.detected')
+                  AND i.status = 'blocked'
+                GROUP BY a.target_id
+                HAVING MAX(CASE WHEN a.action = 'loop.detected' THEN 1 ELSE 0 END) = 1
+                ORDER BY loop_detected_at DESC
+                LIMIT 20
+                """
+            ).fetchall()
+
+            # Thin delegation count (last 24h)
+            thin_row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT target_id) AS n
+                FROM activity_log
+                WHERE action = 'delegation.thin_description'
+                  AND created_at >= datetime('now', '-1 day')
+                """
+            ).fetchone()
+            thin_count = int(thin_row["n"]) if thin_row else 0
+
+            # Blocked children with high skip count but not yet at loop.detected threshold
+            at_risk_rows = conn.execute(
+                """
+                SELECT
+                    a.target_id AS child_issue_id,
+                    COUNT(*) AS skip_count,
+                    i.status AS child_status,
+                    i.title AS child_title
+                FROM activity_log a
+                JOIN issues i ON i.id = a.target_id
+                WHERE a.action = 'lead.unblock_skipped'
+                  AND i.status = 'blocked'
+                GROUP BY a.target_id
+                HAVING skip_count >= 2
+                   AND MAX(CASE WHEN a.action = 'loop.detected' THEN 1 ELSE 0 END) = 0
+                ORDER BY skip_count DESC
+                LIMIT 10
+                """
+            ).fetchall()
+
+        detected_loops = [
+            {
+                "child_issue_id": row["child_issue_id"],
+                "parent_issue_id": row["parent_issue_id"],
+                "child_title": row["child_title"],
+                "skip_count": int(row["skip_count"] or 0),
+                "loop_detected_at": row["loop_detected_at"],
+            }
+            for row in loop_rows
+        ]
+        at_risk = [
+            {
+                "child_issue_id": row["child_issue_id"],
+                "child_title": row["child_title"],
+                "skip_count": int(row["skip_count"] or 0),
+            }
+            for row in at_risk_rows
+        ]
+
+        requires_attention = bool(detected_loops) or any(r["skip_count"] >= 2 for r in at_risk)
+        return {
+            "success": True,
+            "detected_loops": detected_loops,
+            "at_risk": at_risk,
+            "thin_delegations_last_24h": thin_count,
+            "summary": {
+                "total_loops": len(detected_loops),
+                "total_at_risk": len(at_risk),
+                "requires_attention": requires_attention,
+            },
+        }
+    except sqlite3.OperationalError as exc:
+        raise _schema_err(exc)
 
 
 def _db(request: Request) -> Path:

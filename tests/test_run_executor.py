@@ -295,7 +295,9 @@ def test_executor_completes_run_and_wakeup(tmp_path: Path) -> None:
     assert wakeup["run_id"] == run["id"]
     assert len(events) == 1
     assert json.loads(events[0]["payload_json"])["text"] == "done"
-    assert [row["action"] for row in activity] == ["comment.created"]
+    # issue.auto_in_progress now fires before comment.created when issue starts
+    # in 'todo' — assert the comment is present rather than the exact list.
+    assert "comment.created" in [row["action"] for row in activity]
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         cost = conn.execute(
@@ -481,6 +483,15 @@ def test_builtin_roles_write_first_delegation_result(tmp_path: Path) -> None:
     accepted = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
     executor.execute(accepted)
 
+    # Settle the plan and review siblings so the sibling-completion gate allows
+    # the Lead to be woken when the engineer finishes.  Without this, the gate
+    # correctly suppresses the supervisor wakeup (siblings still todo).
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE issues SET status = 'done' WHERE id IN ('issue:intake:plan', 'issue:intake:review')"
+        )
+        conn.commit()
+
     engineer = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:engineer")
     executor.execute(engineer)
 
@@ -505,6 +516,14 @@ def test_builtin_roles_write_first_delegation_result(tmp_path: Path) -> None:
 
 
 def test_child_reports_to_same_lead_are_coalesced(tmp_path: Path) -> None:
+    """Lead is woken exactly once when parallel engineer + reviewer finish.
+
+    With the sibling-completion gate, the engineer's notify_supervisor is
+    suppressed while the reviewer is still active (and vice-versa).  Only the
+    last settling child fires the Lead wakeup, so the result is 1 wakeup total
+    (not 2 that were coalesced, and not 0 because of the gate blocking both).
+    The plan sibling is cancelled upfront so it doesn't hold the gate open.
+    """
     db_path = tmp_path / "aiteam.db"
     _init_lead_db(db_path)
     executor = RunExecutor(db_path, build_default_registry())
@@ -518,7 +537,15 @@ def test_child_reports_to_same_lead_are_coalesced(tmp_path: Path) -> None:
     accepted = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
     executor.execute(accepted)
 
-    # QA removed from full_team — only engineer + reviewer run by default
+    # Cancel the plan sibling so it doesn't hold the sibling-completion gate open
+    # while we run only engineer and reviewer in this test.
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE issues SET status = 'cancelled' WHERE id = 'issue:intake:plan'")
+        conn.commit()
+
+    # Run engineer then reviewer.  With the gate:
+    # - engineer finishes: reviewer still todo → gate suppresses (0 wakeups)
+    # - reviewer finishes: no more active siblings → gate allows (1 wakeup created)
     scheduler = HeartbeatScheduler(db_path)
     for agent_id in ("role:engineer", "role:reviewer"):
         dispatch = scheduler.dispatch_next(agent_id=agent_id)
@@ -537,10 +564,180 @@ def test_child_reports_to_same_lead_are_coalesced(tmp_path: Path) -> None:
             """
         ).fetchall()
 
-    # engineer creates the wakeup; reviewer coalesces into it → coalesced_count = 1
+    # Exactly ONE wakeup for the Lead — not two (gate suppressed the first;
+    # second fires when no active siblings remain).
     assert len(wakeups) == 1
     assert wakeups[0]["status"] == "queued"
-    assert wakeups[0]["coalesced_count"] == 1
+
+
+# ── Sibling-completion gate tests ────────────────────────────────────────────
+
+
+def _init_sibling_db(db_path: Path) -> None:
+    """Lead with two parallel engineer children under issue:intake."""
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("INSERT INTO goals (id, title) VALUES ('goal-1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type) VALUES (?, ?, ?, ?, ?)",
+            ("role:lead", "lead", "Lead", "lead", "lead_builtin"),
+        )
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type) VALUES (?, ?, ?, ?, ?)",
+            ("role:engineer", "engineer", "Engineer", "standard", "manual"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("issue:intake", "goal-1", "Build", "in_progress", "lead", "role:lead"),
+        )
+        # Two parallel children
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("issue:child-a", "goal-1", "issue:intake", "Child A", "in_progress", "engineer", "role:engineer"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("issue:child-b", "goal-1", "issue:intake", "Child B", "in_progress", "engineer", "role:engineer"),
+        )
+        conn.commit()
+
+
+class _DoneRuntime:
+    """Engineer adapter that simply returns done with a comment."""
+
+    descriptor = AdapterDescriptor(adapter_type="manual", channel="builtin")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="completed",
+            output="Done.",
+            actions={"issue_status": "done", "notify_supervisor": True},
+        )
+
+
+class _BlockedRuntime:
+    """Engineer adapter that declares itself blocked."""
+
+    descriptor = AdapterDescriptor(adapter_type="manual", channel="builtin")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="completed",
+            output="Blocked.",
+            actions={"issue_status": "blocked", "notify_supervisor": True},
+        )
+
+
+def _count_lead_child_report_wakeups(db_path: Path) -> list[dict]:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT * FROM wakeup_requests
+            WHERE agent_id = 'role:lead'
+              AND reason = 'child_report'
+              AND status = 'queued'
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def test_supervisor_not_woken_while_sibling_still_active(tmp_path: Path) -> None:
+    """When child-A finishes but child-B is still in_progress, the Lead must NOT be woken."""
+    db_path = tmp_path / "aiteam.db"
+    _init_sibling_db(db_path)
+    registry = AdapterRegistry([_DoneRuntime()])
+    executor = RunExecutor(db_path, registry)
+
+    # Dispatch and run only child-A
+    enqueue_wakeup(db_path, agent_id="role:engineer", source="test", reason="assignment", payload={"issue_id": "issue:child-a"})
+    dispatch_a = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:engineer")
+    assert dispatch_a is not None
+    executor.execute(dispatch_a)
+
+    # child-B is still in_progress → Lead must NOT be woken
+    wakeups = _count_lead_child_report_wakeups(db_path)
+    assert wakeups == [], f"Lead should not be woken while child-B is still active, got: {wakeups}"
+
+
+def test_supervisor_woken_when_last_sibling_finishes(tmp_path: Path) -> None:
+    """When all siblings are done (or settled), the Lead MUST be woken exactly once."""
+    db_path = tmp_path / "aiteam.db"
+    _init_sibling_db(db_path)
+    registry = AdapterRegistry([_DoneRuntime()])
+    executor = RunExecutor(db_path, registry)
+
+    # Run child-A (sibling B still in_progress → Lead suppressed)
+    enqueue_wakeup(db_path, agent_id="role:engineer", source="test", reason="assignment", payload={"issue_id": "issue:child-a"})
+    dispatch_a = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:engineer")
+    executor.execute(dispatch_a)
+    assert _count_lead_child_report_wakeups(db_path) == []
+
+    # Run child-B (no more active siblings → Lead woken)
+    enqueue_wakeup(db_path, agent_id="role:engineer", source="test", reason="assignment", payload={"issue_id": "issue:child-b"})
+    dispatch_b = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:engineer")
+    executor.execute(dispatch_b)
+
+    wakeups = _count_lead_child_report_wakeups(db_path)
+    assert len(wakeups) == 1, f"Lead should be woken once after last sibling finishes, got: {wakeups}"
+
+
+def test_supervisor_woken_immediately_for_blocked_child(tmp_path: Path) -> None:
+    """A blocked child must always wake the supervisor immediately, even with active siblings."""
+    db_path = tmp_path / "aiteam.db"
+    _init_sibling_db(db_path)
+    registry = AdapterRegistry([_BlockedRuntime()])
+    executor = RunExecutor(db_path, registry)
+
+    # child-A blocks (child-B still in_progress) → Lead MUST be woken immediately
+    enqueue_wakeup(db_path, agent_id="role:engineer", source="test", reason="assignment", payload={"issue_id": "issue:child-a"})
+    dispatch_a = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:engineer")
+    executor.execute(dispatch_a)
+
+    wakeups = _count_lead_child_report_wakeups(db_path)
+    assert len(wakeups) == 1, f"Lead should be woken immediately for blocked child, got: {wakeups}"
+
+
+def test_supervisor_woken_for_sole_child_completion(tmp_path: Path) -> None:
+    """A single child completing (no siblings) must always wake the supervisor."""
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("INSERT INTO goals (id, title) VALUES ('goal-1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type) VALUES (?, ?, ?, ?, ?)",
+            ("role:lead", "lead", "Lead", "lead", "lead_builtin"),
+        )
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type) VALUES (?, ?, ?, ?, ?)",
+            ("role:engineer", "engineer", "Engineer", "standard", "manual"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("issue:intake", "goal-1", "Build", "in_progress", "lead", "role:lead"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("issue:child-a", "goal-1", "issue:intake", "Only child", "in_progress", "engineer", "role:engineer"),
+        )
+        conn.commit()
+
+    registry = AdapterRegistry([_DoneRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(db_path, agent_id="role:engineer", source="test", reason="assignment", payload={"issue_id": "issue:child-a"})
+    dispatch_a = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:engineer")
+    executor.execute(dispatch_a)
+
+    wakeups = _count_lead_child_report_wakeups(db_path)
+    assert len(wakeups) == 1, f"Sole child completion must wake Lead, got: {wakeups}"
 
 
 def test_full_team_lead_delegation_adds_review_guardrail_when_missing(tmp_path: Path) -> None:
@@ -1907,3 +2104,340 @@ def test_lead_manual_wake_escalates_when_all_children_are_blocked(tmp_path: Path
     assert run["status"] == "completed", f"Expected completed, got skipped with error={run['error']}"
     assert escalation is not None, "Expected escalation interaction when all children blocked"
     assert json.loads(escalation["payload_json"])["reason"] == "child_blocked_requires_action"
+
+
+# ── update_child_issue tests ──────────────────────────────────────────────────
+
+
+def _init_lead_child_db(db_path: Path) -> None:
+    """Lead issue with one blocked engineer child.
+
+    Lead uses adapter_type='subscription_cli' so the executor routes it through
+    runtime.execute() (the else branch) rather than _execute_builtin_lead, which
+    is triggered for 'manual' + lead/team_lead.
+    """
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("INSERT INTO goals (id, title) VALUES ('goal-1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("role:lead", "lead", "Lead", "lead", "subscription_cli", None),
+        )
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("role:engineer", "engineer", "Engineer", "standard", "manual", "role:lead"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("issue:intake", "goal-1", "Build", "in_progress", "lead", "role:lead"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("issue:child", "goal-1", "issue:intake", "Implement feature", "blocked", "engineer", "role:engineer"),
+        )
+        conn.commit()
+
+
+class _UpdateChildRuntime:
+    """Lead adapter that uses update_child_issue to unblock its child."""
+
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="completed",
+            output="Unblocking engineer.",
+            actions={
+                "update_child_issues": [
+                    {
+                        "child_issue_id": "issue:child",
+                        "status": "todo",
+                        "body": "Use Web Audio API instead of WAV files.",
+                    }
+                ]
+            },
+        )
+
+
+def test_update_child_issue_sets_status_and_posts_comment(tmp_path: Path) -> None:
+    """update_child_issue op must set child status, post directive comment, and enqueue child wakeup."""
+    db_path = tmp_path / "aiteam.db"
+    _init_lead_child_db(db_path)
+
+    registry = AdapterRegistry([_UpdateChildRuntime()])
+    executor = RunExecutor(db_path, registry)
+
+    enqueue_wakeup(
+        db_path,
+        agent_id="role:lead",
+        source="test",
+        reason="child_report",
+        payload={"issue_id": "issue:intake"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        child = conn.execute("SELECT * FROM issues WHERE id = 'issue:child'").fetchone()
+        comments = conn.execute(
+            "SELECT * FROM issue_comments WHERE issue_id = 'issue:child' ORDER BY created_at"
+        ).fetchall()
+        wakeups = conn.execute(
+            "SELECT * FROM wakeup_requests WHERE agent_id = 'role:engineer' AND status = 'queued'"
+        ).fetchall()
+
+    assert dict(child)["status"] == "todo", f"Child status should be 'todo', got {dict(child)['status']}"
+    assert len(comments) >= 1, "Expected at least one directive comment on child issue"
+    assert any("Web Audio API" in (c["body"] or "") for c in comments), "Directive body not found in comments"
+    assert len(wakeups) >= 1, "Expected child to be re-queued after update_child_issue"
+
+
+def test_update_child_issue_ignores_non_child(tmp_path: Path) -> None:
+    """update_child_issue on an issue that is NOT a child of the current issue must be silently dropped."""
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("INSERT INTO goals (id, title) VALUES ('goal-1', 'G')")
+        # Use subscription_cli so the executor routes through runtime.execute() (else branch),
+        # not _execute_builtin_lead (which intercepts manual + lead/team_lead).
+        conn.execute(
+            "INSERT INTO agents (id, role, name, adapter_type) VALUES (?, ?, ?, ?)",
+            ("role:lead", "lead", "Lead", "subscription_cli"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("issue:intake", "goal-1", "Build", "in_progress", "lead", "role:lead"),
+        )
+        # A SIBLING issue, not a child
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role) VALUES (?, ?, ?, ?, ?)",
+            ("issue:unrelated", "goal-1", "Unrelated", "blocked", "engineer"),
+        )
+        conn.commit()
+
+    class _BadUpdateRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Trying to update unrelated issue.",
+                actions={
+                    "update_child_issues": [
+                        {"child_issue_id": "issue:unrelated", "status": "todo", "body": "Directive"}
+                    ]
+                },
+            )
+
+    registry = AdapterRegistry([_BadUpdateRuntime()])
+    executor = RunExecutor(db_path, registry)
+
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="test", reason="new_issue", payload={"issue_id": "issue:intake"}
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        unrelated = conn.execute("SELECT status FROM issues WHERE id = 'issue:unrelated'").fetchone()
+
+    assert dict(unrelated)["status"] == "blocked", "Non-child issue must not be modified by update_child_issue"
+
+
+# ── Circuit breaker tests ─────────────────────────────────────────────────────
+
+
+def _make_circuit_breaker_db(db_path: Path) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("INSERT INTO goals (id, title) VALUES (?, ?)", ("goal-1", "G"))
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("role:lead", "lead", "Lead", "lead", "subscription_cli", None),
+        )
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("role:engineer", "engineer", "Engineer", "standard", "manual", "role:lead"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("issue:intake", "goal-1", "Build", "in_progress", "lead", "role:lead"),
+        )
+        conn.execute(
+            "INSERT INTO issues"
+            " (id, goal_id, parent_id, title, status, role, assignee_agent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("issue:child", "goal-1", "issue:intake", "Feature", "blocked", "engineer", "role:engineer"),
+        )
+        conn.commit()
+
+
+def _enqueue_blocked_child_wake(db_path: Path, idempotency_key: str | None = None) -> None:
+    enqueue_wakeup(
+        db_path,
+        agent_id="role:lead",
+        source="delegation",
+        reason="child_report",
+        payload={
+            "issue_id": "issue:intake",
+            "child_issue_id": "issue:child",
+            "child_issue_status": "blocked",
+            "wake_reason": "child_report",
+        },
+        idempotency_key=idempotency_key,
+    )
+
+
+class _NoOpLeadRuntime:
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(status="completed", output="Engineer desbloqueado.", actions={})
+
+
+def _count_activity(db_path: Path, action: str, target_id: str) -> int:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = ? AND target_id = ?",
+            (action, target_id),
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _count_cb_interactions(db_path: Path, issue_id: str) -> int:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT COUNT(*) FROM issue_thread_interactions"
+            " WHERE issue_id = ? AND idempotency_key LIKE ?",
+            (issue_id, "loop_circuit_breaker:%"),
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def test_circuit_breaker_logs_unblock_skipped_on_no_op(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    registry = AdapterRegistry([_NoOpLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    _enqueue_blocked_child_wake(db_path)
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+    assert _count_activity(db_path, "lead.unblock_skipped", "issue:child") == 1
+
+
+def test_circuit_breaker_no_event_when_child_unblocked(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    registry = AdapterRegistry([_UpdateChildRuntime()])
+    executor = RunExecutor(db_path, registry)
+    _enqueue_blocked_child_wake(db_path)
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+    assert _count_activity(db_path, "lead.unblock_skipped", "issue:child") == 0
+
+
+def test_circuit_breaker_escalates_after_three_skips(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    registry = AdapterRegistry([_NoOpLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    for i in range(3):
+        _enqueue_blocked_child_wake(db_path, idempotency_key=f"cb_test_{i}")
+        dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+        if dispatch is not None:
+            executor.execute(dispatch)
+    assert _count_activity(db_path, "lead.unblock_skipped", "issue:child") >= 3
+    assert _count_activity(db_path, "loop.detected", "issue:child") >= 1
+    assert _count_cb_interactions(db_path, "issue:intake") >= 1
+
+
+def test_circuit_breaker_payload_has_mandatory_instruction(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    captured: list[dict] = []
+
+    class _CapturingRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            raw = str(wake_context.get("wake_payload_json") or "{}")
+            try:
+                captured.append(json.loads(raw))
+            except Exception:
+                pass
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(status="completed", output="ok", actions={})
+
+    registry = AdapterRegistry([_CapturingRuntime()])
+    executor = RunExecutor(db_path, registry)
+    _enqueue_blocked_child_wake(db_path)
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+    assert captured, "Runtime was never called"
+    payload = captured[0]
+    assert "unblock_action_required" in payload
+    assert "mandatory_instruction" in payload
+    assert payload["unblock_action_required"][0]["child_issue_id"] == "issue:child"
+
+
+def test_update_child_issue_empty_body_requeue_rejected(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+
+    class _EmptyBodyRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Unblocking.",
+                actions={
+                    "update_child_issues": [
+                        {"child_issue_id": "issue:child", "status": "todo", "body": ""}
+                    ]
+                },
+            )
+
+    registry = AdapterRegistry([_EmptyBodyRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="test", reason="child_report",
+        payload={"issue_id": "issue:intake"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        child = conn.execute(
+            "SELECT status FROM issues WHERE id = ?", ("issue:child",)
+        ).fetchone()
+    assert dict(child)["status"] == "blocked"

@@ -27,6 +27,21 @@ interface HealthPayload {
   mode?: string;
 }
 
+interface LoopHealthEntry {
+  child_issue_id: string;
+  parent_issue_id?: string | null;
+  child_title?: string | null;
+  skip_count: number;
+  loop_detected_at?: string | null;
+}
+
+interface LoopHealth {
+  detected_loops: LoopHealthEntry[];
+  at_risk: Array<{ child_issue_id: string; child_title?: string | null; skip_count: number }>;
+  thin_delegations_last_24h: number;
+  summary: { total_loops: number; total_at_risk: number; requires_attention: boolean };
+}
+
 interface WorkspacePayload {
   workspace?: string;
   configured?: boolean;
@@ -554,6 +569,7 @@ export default function App() {
   // Project list (switcher)
   const [projectList, setProjectList] = useState<Array<{ name: string; path: string; current: boolean }>>([]);
   const [projectListOpen, setProjectListOpen] = useState(false);
+  const [loopHealth, setLoopHealth] = useState<LoopHealth | null>(null);
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedIssueId) || issues[0] || null,
@@ -794,6 +810,7 @@ export default function App() {
     void loadWsFiles();
     void loadProjectList();
     void loadBudgets();
+    void loadLoopHealth();
   };
 
   /**
@@ -911,6 +928,15 @@ export default function App() {
       const json = (await res.json()) as { files?: Array<{ path: string; size_bytes: number; mime: string }> };
       setWsFiles(json.files || []);
     } catch { /* ignore */ }
+  };
+
+  const loadLoopHealth = async () => {
+    try {
+      const res = await apiFetch('/api/loop-health');
+      if (!res.ok) return;
+      const json = (await res.json()) as LoopHealth & { success?: boolean };
+      setLoopHealth(json);
+    } catch { /* non-critical — ignore */ }
   };
 
   const loadWsFile = async (path: string) => {
@@ -1971,6 +1997,37 @@ export default function App() {
               <span className={`status-pill status-${latestRun.status}`}>{statusLabel(latestRun.status)}</span>
               <span className="last-run-id">{latestRun.id.slice(-8)}</span>
             </button>
+          )}
+
+          {loopHealth?.summary?.requires_attention && (
+            <div className="loop-health-banner">
+              <div className="loop-health-title">
+                <AlertCircle size={13} />
+                <span>Bucle detectado</span>
+              </div>
+              {loopHealth.detected_loops.map((entry) => (
+                <button
+                  key={entry.child_issue_id}
+                  className="loop-health-entry loop-health-critical"
+                  onClick={() => { setSelectedIssueId(entry.child_issue_id); setViewMode('issue'); }}
+                  title={`Saltado ${entry.skip_count} veces sin desbloqueo`}
+                >
+                  <span className="loop-health-label">{entry.child_title || entry.child_issue_id}</span>
+                  <span className="loop-health-badge">{entry.skip_count}×</span>
+                </button>
+              ))}
+              {loopHealth.at_risk.map((entry) => (
+                <button
+                  key={entry.child_issue_id}
+                  className="loop-health-entry loop-health-warn"
+                  onClick={() => { setSelectedIssueId(entry.child_issue_id); setViewMode('issue'); }}
+                  title={`En riesgo — saltado ${entry.skip_count} veces`}
+                >
+                  <span className="loop-health-label">{entry.child_title || entry.child_issue_id}</span>
+                  <span className="loop-health-badge">{entry.skip_count}×</span>
+                </button>
+              ))}
+            </div>
           )}
 
           <div className="nav-column-issues">

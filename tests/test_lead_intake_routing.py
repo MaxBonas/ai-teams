@@ -177,7 +177,7 @@ class TestCreateDelegatedIssueRoutingOverride:
                         "create_issues": [
                             {
                                 "title": "Build basic feature",
-                                "description": "Simple feature",
+                                "description": "Implement the basic feature as described in the issue thread.",
                                 "role": "engineer",
                                 "complexity": "medium",
                                 # No criticality or action_type — no routing override

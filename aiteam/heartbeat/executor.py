@@ -157,6 +157,10 @@ class RunExecutor:
         workspace_root = workspace_root_for_db(self.db_path)
 
         payload_json = ""
+        # When the previous run timed out, we re-enqueue with prompt_budget_hint=reduced
+        # to halve the comment window and avoid re-timing out on the same large context.
+        _prompt_budget_hint = str(ctx.get("prompt_budget_hint") or "").strip().lower()
+        _max_comments = 4 if _prompt_budget_hint == "reduced" else 10
         if issue_id_str:
             try:  # noqa: SIM117  (nested try is intentional — outer catches payload build failure)
                 payload = build_wake_payload(
@@ -164,6 +168,7 @@ class RunExecutor:
                     issue_id=issue_id_str,
                     comment_id=comment_id_str or None,
                     run_id=str(run.get("id") or ""),
+                    max_comments=_max_comments,
                 )
                 payload["wake_context"] = ctx
                 # ── Workspace files for reviewer/QA (prevents hallucinated reviews) ──
@@ -231,6 +236,116 @@ class RunExecutor:
                         ws_listing = _list_workspace_files(workspace_root)
                         if ws_listing:
                             payload["workspace_listing"] = ws_listing
+                # ── Blocked-child mandatory action injection (LLM Lead only) ─────
+                # When a Lead wakes because a child reported blocked, add an explicit
+                # unblock_action_required field and a mandatory instruction so the
+                # LLM cannot claim it didn't notice.  Also include the skip_count so
+                # the Lead knows how urgent resolution is.
+                if (
+                    agent_role in {"lead", "team_lead"}
+                    and wake_reason == "child_report"
+                    and str(ctx.get("child_issue_status") or "") == "blocked"
+                ):
+                    _blocked_child_id = str(ctx.get("child_issue_id") or "").strip()
+                    if _blocked_child_id:
+                        try:
+                            _bc = get_issue(self.db_path, issue_id=_blocked_child_id)
+                            _bc_skip_count = self._count_unblock_skipped(child_issue_id=_blocked_child_id)
+                            payload["unblock_action_required"] = [
+                                {
+                                    "child_issue_id": _blocked_child_id,
+                                    "child_title": (_bc or {}).get("title"),
+                                    "child_role": (_bc or {}).get("role"),
+                                    "previous_failed_attempts": _bc_skip_count,
+                                }
+                            ]
+                            payload["mandatory_instruction"] = (
+                                "⚠ ACCIÓN OBLIGATORIA ESTA RUN: "
+                                f"El hijo {_blocked_child_id!r} está BLOCKED. "
+                                "Debes emitir UNA de estas dos opciones:\n"
+                                f"  (a) update_child_issue: {{\"type\": \"update_child_issue\", "
+                                f"\"path\": \"{_blocked_child_id}\", \"body\": \"<directiva concreta>\", "
+                                "\"status\": \"todo\"}\n"
+                                "  (b) create_interaction para preguntar al usuario si la decisión "
+                                "es de producto/negocio.\n"
+                                "Cualquier otra respuesta (comentar en tu propia issue, escribir 'desbloqueado' "
+                                "en el summary, crear un issue nuevo) se registra como no-op y acerca "
+                                "el escalado automático al usuario."
+                            )
+                        except Exception:
+                            logger.warning("blocked-child payload injection failed for child %r", _blocked_child_id, exc_info=True)
+                # ── Blocked-child reminder for non-child_report wakes ─────────
+                # When the Lead is woken manually (or via interaction/chat) and
+                # has blocked children, surface the same mandatory instruction
+                # so it cannot do a status-check no-op while children are stuck.
+                elif (
+                    agent_role in {"lead", "team_lead"}
+                    and wake_reason in {"manual", "interaction_resolved", "chat_message", "user_chat_message"}
+                ):
+                    try:
+                        _bc_list = self._get_blocked_children(issue_id=issue_id_str)
+                        if _bc_list:
+                            payload["unblock_action_required"] = _bc_list
+                            _bc_ids_str = ", ".join(
+                                str(e["child_issue_id"])[-8:] for e in _bc_list
+                            )
+                            payload["mandatory_instruction"] = (
+                                f"⚠ ATENCIÓN: Tienes {len(_bc_list)} hijo(s) BLOCKED sin resolver "
+                                f"({_bc_ids_str}). "
+                                "Esta run DEBES actuar sobre cada uno con update_child_issue "
+                                "(directiva concreta + status:todo) o create_interaction para escalar. "
+                                "Escribir comentarios en tu propia issue no desbloquea a nadie."
+                            )
+                    except Exception:
+                        logger.warning(
+                            "blocked-child injection for manual wake failed, issue %r",
+                            issue_id_str, exc_info=True,
+                        )
+                # ── Thin-delegation rejection feedback ───────────────────────
+                # If the Lead's most recent delegation was hard-rejected for having
+                # an empty description, surface that fact prominently in the next
+                # wake payload so the Lead cannot keep retrying with empty ops.
+                if agent_role in {"lead", "team_lead"} and issue_id_str:
+                    try:
+                        with contextlib.closing(_connect(self.db_path)) as _conn:
+                            _rej = _conn.execute(
+                                """
+                                SELECT payload_json, created_at FROM activity_log
+                                WHERE action = 'delegation.thin_description'
+                                  AND target_id = ?
+                                ORDER BY created_at DESC LIMIT 1
+                                """,
+                                (issue_id_str,),
+                            ).fetchone()
+                        if _rej:
+                            import datetime as _dt
+                            _rej_time = _rej[0] if isinstance(_rej, tuple) else _rej["created_at"]
+                            _rej_payload = json.loads((_rej[0] if isinstance(_rej, tuple) else _rej["payload_json"]) or "{}")
+                            _rej_title = str(_rej_payload.get("title") or "")
+                            _rej_chars = int(_rej_payload.get("description_chars") or 0)
+                            _rejection_note = (
+                                "🚫 DELEGACIÓN RECHAZADA: tu último create_issue "
+                                f"('{_rej_title[:40]}') fue rechazado porque el campo "
+                                f"`description` estaba vacío ({_rej_chars} chars). "
+                                "La especificación escrita en tu comentario NO llega al engineer — "
+                                "DEBES copiarla dentro del campo `description` del op create_issue. "
+                                "Ejemplo mínimo: "
+                                '{"type":"create_issue","title":"...","role":"engineer",'
+                                '"description":"Tecnología: X. Archivos: Y. Objetivo: Z. Aceptación: W."}'
+                            )
+                            existing_mi = payload.get("mandatory_instruction", "")
+                            payload["mandatory_instruction"] = (
+                                _rejection_note + ("\n\n" + existing_mi if existing_mi else "")
+                            )
+                            payload["delegation_rejection"] = {
+                                "title": _rej_title,
+                                "description_chars": _rej_chars,
+                            }
+                    except Exception:
+                        logger.warning(
+                            "thin-delegation feedback injection failed for issue %r",
+                            issue_id_str, exc_info=True,
+                        )
                 payload_json = json.dumps(payload, ensure_ascii=False)
             except Exception:
                 logger.warning("Failed to build wake payload for run %r issue %r", run_id, issue_id_str, exc_info=True)
@@ -341,6 +456,47 @@ class RunExecutor:
             channel=runtime.descriptor.channel,
         )
         mark_run_running(self.db_path, run_id=run_id)
+        # Auto-advance the issue todo → in_progress before the LLM runs.
+        # This prevents the control-plane from re-dispatching the same issue
+        # while this run is still active (control-plane only requeues 'todo').
+        if issue_id_str:
+            try:
+                _issue_at_start = get_issue(self.db_path, issue_id=issue_id_str)
+                _issue_status_now = str(_issue_at_start.get("status") or "") if _issue_at_start else ""
+                _run_wake_reason = str(ctx.get("wake_reason") or "")
+                # todo → in_progress: prevents control-plane re-dispatch mid-run.
+                if _issue_at_start and _issue_status_now == "todo":
+                    update_issue(self.db_path, issue_id=issue_id_str, status="in_progress")
+                    log_activity(
+                        self.db_path,
+                        action="issue.auto_in_progress",
+                        target_type="issue",
+                        target_id=issue_id_str,
+                        actor_agent_id=agent_id,
+                        run_id=run_id,
+                        payload={"source": "run_start"},
+                    )
+                # done/cancelled → in_progress when the user sends a new chat message.
+                # Chat messages always carry new work — reopen the issue automatically
+                # so the Lead can delegate new child issues without being stuck in done.
+                elif (
+                    _issue_at_start
+                    and _issue_status_now in {"done", "cancelled"}
+                    and _run_wake_reason == "user_chat_message"
+                    and agent_role in {"lead", "team_lead"}
+                ):
+                    update_issue(self.db_path, issue_id=issue_id_str, status="in_progress")
+                    log_activity(
+                        self.db_path,
+                        action="issue.reopened_for_chat",
+                        target_type="issue",
+                        target_id=issue_id_str,
+                        actor_agent_id=agent_id,
+                        run_id=run_id,
+                        payload={"source": "user_chat_message", "previous_status": _issue_status_now},
+                    )
+            except Exception:
+                logger.warning("auto in_progress failed for issue %s", issue_id_str)
         record_tool_access(
             self.db_path,
             run_id=run_id,
@@ -441,6 +597,116 @@ class RunExecutor:
         # ── Step 2: Apply the adapter's own result actions ───────────────────
         self._apply_result_actions(run=run, agent_id=agent_id, agent_role=agent_role, result=result)
 
+        # ── Step 2.5: Lead unblock audit + circuit breaker ───────────────────
+        # When a non-builtin LLM Lead wakes because a child reported blocked,
+        # verify it emitted update_child_issue (or a user interaction).  If it
+        # did neither, log lead.unblock_skipped and post a system warning.
+        # After 3 consecutive skips for the same child, auto-escalate to user.
+        _wake_reason_for_audit = str(ctx.get("wake_reason") or "")
+        _blocked_child_id_audit = str(ctx.get("child_issue_id") or "").strip()
+        _is_llm_lead = (
+            agent_role in {"lead", "team_lead"}
+            and adapter_type not in _BUILTIN_ADAPTERS
+        )
+        if (
+            _is_llm_lead
+            and _wake_reason_for_audit == "child_report"
+            and _blocked_child_id_audit
+            and str(ctx.get("child_issue_status") or "") == "blocked"
+        ):
+            _acted_on_child = any(
+                str(u.get("child_issue_id") or "") == _blocked_child_id_audit
+                for u in (result.actions or {}).get("update_child_issues") or []
+            )
+            _created_interaction = bool((result.actions or {}).get("interactions"))
+            if not _acted_on_child and not _created_interaction:
+                log_activity(
+                    self.db_path,
+                    action="lead.unblock_skipped",
+                    target_type="issue",
+                    target_id=_blocked_child_id_audit,
+                    actor_agent_id=agent_id,
+                    run_id=run_id,
+                    payload={
+                        "parent_issue_id": issue_id_str,
+                        "blocked_child_id": _blocked_child_id_audit,
+                    },
+                )
+                _skip_count = self._count_unblock_skipped(child_issue_id=_blocked_child_id_audit)
+                try:
+                    create_comment(
+                        self.db_path,
+                        issue_id=issue_id_str,
+                        author_agent_id=agent_id,
+                        source_run_id=run_id,
+                        body=(
+                            f"⚙ Sistema: el hijo `{_blocked_child_id_audit}` sigue BLOCKED "
+                            f"y esta run no emitió `update_child_issue` ni una interacción "
+                            f"(intento fallido #{_skip_count}). "
+                            "Usa `update_child_issue` con instrucción concreta o crea una interacción "
+                            "para preguntar al usuario."
+                        ),
+                        metadata={"source": "loop_circuit_breaker", "skip_count": _skip_count},
+                    )
+                except Exception:
+                    logger.warning("circuit_breaker: failed to post system comment", exc_info=True)
+                # Circuit breaker: 3 skips → escalate to user
+                _CIRCUIT_BREAKER_THRESHOLD = 3
+                if _skip_count >= _CIRCUIT_BREAKER_THRESHOLD:
+                    log_activity(
+                        self.db_path,
+                        action="loop.detected",
+                        target_type="issue",
+                        target_id=_blocked_child_id_audit,
+                        actor_agent_id=agent_id,
+                        run_id=run_id,
+                        payload={
+                            "parent_issue_id": issue_id_str,
+                            "blocked_child_id": _blocked_child_id_audit,
+                            "skip_count": _skip_count,
+                        },
+                    )
+                    logger.warning(
+                        "loop.detected: Lead %s has skipped unblocking child %s %d times — escalating to user",
+                        agent_id, _blocked_child_id_audit, _skip_count,
+                    )
+                    try:
+                        create_interaction(
+                            self.db_path,
+                            issue_id=issue_id_str,
+                            kind="request_confirmation",
+                            payload={
+                                "version": 1,
+                                "reason": "lead_engineer_loop_detected",
+                                "blocked_child_id": _blocked_child_id_audit,
+                                "skip_count": _skip_count,
+                            },
+                            continuation_policy="wake_assignee",
+                            idempotency_key=f"loop_circuit_breaker:{_blocked_child_id_audit}",
+                            source_run_id=run_id,
+                            created_by_agent_id=agent_id,
+                            title=f"Bucle detectado — engineer bloqueado sin resolución ({_skip_count} intentos)",
+                            summary=(
+                                f"El engineer en `{_blocked_child_id_audit}` lleva "
+                                f"{_skip_count} runs bloqueado y el Lead no ha podido resolverlo. "
+                                "Acepta para dar al Lead un último intento con instrucciones completas. "
+                                "Rechaza para cancelar la issue del engineer y reasignar la tarea manualmente."
+                            ),
+                        )
+                    except Exception:
+                        logger.warning("circuit_breaker: failed to create escalation interaction", exc_info=True)
+            else:
+                if _acted_on_child:
+                    log_activity(
+                        self.db_path,
+                        action="lead.unblock_attempted",
+                        target_type="issue",
+                        target_id=_blocked_child_id_audit,
+                        actor_agent_id=agent_id,
+                        run_id=run_id,
+                        payload={"parent_issue_id": issue_id_str, "blocked_child_id": _blocked_child_id_audit},
+                    )
+
         # ── Step 3: Collect structured evidence from DB (post-comment) ───────
         workspace_files_changed = len(workspace_delta.created) + len(workspace_delta.modified)
         evidence = collect_run_evidence(
@@ -451,7 +717,13 @@ class RunExecutor:
 
         # ── Step 4: Classify liveness (pure function, no regex) ───────────────
         useful_output = bool(str(result.output or "").strip())
-        has_explicit_issue_status = bool((result.actions or {}).get("issue_status"))
+        explicit_issue_status = str((result.actions or {}).get("issue_status") or "").strip()
+        has_explicit_issue_status = bool(explicit_issue_status)
+        # Only treat blocked/cancelled as a deliberate terminal declaration that
+        # should bypass the plan_only continuation loop.  A 'done' claim without
+        # workspace evidence should still go through plan_only so the engineer is
+        # nudged to provide real file output.
+        explicit_blocking_declared = explicit_issue_status in {"blocked", "cancelled"}
         exec_status = result.status if result.status in _TERMINAL_EXEC_STATUSES else "completed"
         liveness_result = classify_run_liveness(
             run_status=exec_status,
@@ -460,6 +732,7 @@ class RunExecutor:
             agent_role=agent_role,
             useful_output=useful_output,
             has_explicit_issue_status=has_explicit_issue_status,
+            explicit_blocking_declared=explicit_blocking_declared,
             continuation_attempt=_safe_int(ctx.get("continuation_attempt")),
             max_continuation_attempts=MAX_CONTINUATION_ATTEMPTS,
         )
@@ -534,6 +807,93 @@ class RunExecutor:
             run_id=run_id,
             error=result.error if wakeup_terminal == "failed" else None,
         )
+
+        # ── Timeout auto-retry ────────────────────────────────────────────────
+        # When a run fails because the adapter timed out, re-enqueue the agent
+        # with prompt_budget_hint=reduced (halves the comment window).
+        # After _MAX_TIMEOUT_RETRIES attempts the issue is marked blocked and the
+        # Lead is woken to intervene — prevents silent infinite timeout loops.
+        _is_timeout_failure = (
+            final_status == "failed"
+            and (
+                str(result.error_code or "") in {"subscription_cli_timeout", "liveness_timeout"}
+                or "timeout" in str(result.error or "").lower()
+            )
+        )
+        if _is_timeout_failure and issue_id_str:
+            try:
+                _MAX_TIMEOUT_RETRIES = 2
+                _retry_count = self._count_timeout_retries(agent_id=agent_id, issue_id=issue_id_str)
+                if _retry_count < _MAX_TIMEOUT_RETRIES:
+                    _next_attempt = _retry_count + 1
+                    enqueue_wakeup(
+                        self.db_path,
+                        agent_id=agent_id,
+                        source="timeout_retry",
+                        reason="timeout_retry",
+                        payload={
+                            "issue_id": issue_id_str,
+                            "wake_reason": str(ctx.get("wake_reason") or ""),
+                            "prompt_budget_hint": "reduced",
+                            "timeout_retry_attempt": _next_attempt,
+                            "source_run_id": run_id,
+                        },
+                        idempotency_key=f"timeout_retry:{issue_id_str}:{agent_id}:{run_id}",
+                    )
+                    log_activity(
+                        self.db_path,
+                        action="run.timeout_retry",
+                        target_type="run",
+                        target_id=run_id,
+                        actor_agent_id=agent_id,
+                        run_id=run_id,
+                        payload={
+                            "issue_id": issue_id_str,
+                            "attempt": _next_attempt,
+                            "max_attempts": _MAX_TIMEOUT_RETRIES,
+                            "prompt_budget_hint": "reduced",
+                        },
+                    )
+                    logger.info(
+                        "timeout_retry: re-enqueued %s for issue %s (attempt %d/%d, prompt_budget=reduced)",
+                        agent_id, issue_id_str, _next_attempt, _MAX_TIMEOUT_RETRIES,
+                    )
+                else:
+                    # Retry cap reached — block the issue and wake the Lead.
+                    logger.warning(
+                        "timeout_retry: cap reached (%d) for agent %s issue %s — marking blocked",
+                        _retry_count, agent_id, issue_id_str,
+                    )
+                    try:
+                        update_issue(self.db_path, issue_id=issue_id_str, status="blocked")
+                        log_activity(
+                            self.db_path,
+                            action="issue.updated",
+                            target_type="issue",
+                            target_id=issue_id_str,
+                            actor_agent_id=agent_id,
+                            run_id=run_id,
+                            payload={"status": "blocked", "source": "timeout_retry_cap"},
+                        )
+                        create_comment(
+                            self.db_path,
+                            issue_id=issue_id_str,
+                            body=(
+                                f"⚙ Sistema: {_retry_count} timeout(s) consecutivos — issue marcada como blocked. "
+                                "El Lead debe simplificar el alcance, reducir el contexto, o usar un adapter con "
+                                "mayor límite de tiempo."
+                            ),
+                            author_agent_id="system",
+                        )
+                    except Exception:
+                        logger.warning("timeout_retry: failed to block issue %s", issue_id_str, exc_info=True)
+                    self._enqueue_supervisor_report(
+                        issue_id=issue_id_str,
+                        reporting_agent_id=agent_id,
+                        source_run_id=run_id,
+                    )
+            except Exception:
+                logger.warning("timeout_retry: failed for run %s issue %s", run_id, issue_id_str, exc_info=True)
 
     def _execute_builtin_lead(self, *, run: dict[str, Any], agent_id: str, context: dict[str, Any]) -> ExecutionResult:
         issue_id = str(run.get("issue_id") or "")
@@ -654,6 +1014,44 @@ class RunExecutor:
                         f"Confirmación recibida (acción: {action}). "
                         "El issue hijo bloqueado sigue esperando intervención. "
                         "Cambia el adapter del agente bloqueado a CLI/local o cancela la delegación."
+                    ),
+                )
+
+            if reason == "lead_engineer_loop_detected":
+                _cb_child_id = str(payload.get("blocked_child_id") or "")
+                _cb_skips = int(payload.get("skip_count") or 0)
+                if action == "reject":
+                    # Cancel the stuck engineer issue
+                    cancel_actions: dict[str, Any] = {}
+                    if _cb_child_id:
+                        try:
+                            update_issue(self.db_path, issue_id=_cb_child_id, status="cancelled")
+                            log_activity(
+                                self.db_path,
+                                action="issue.updated",
+                                target_type="issue",
+                                target_id=_cb_child_id,
+                                actor_agent_id=agent_id,
+                                run_id=str(run.get("id")),
+                                payload={"status": "cancelled", "source": "loop_circuit_breaker_reject"},
+                            )
+                        except Exception:
+                            logger.warning("loop_circuit_breaker: failed to cancel child %s", _cb_child_id, exc_info=True)
+                    return ExecutionResult(
+                        status="completed",
+                        output=(
+                            f"Lead — Bucle cortado (rechazado)\n\n"
+                            f"La issue `{_cb_child_id}` ha sido cancelada tras {_cb_skips} intentos fallidos. "
+                            "Reasigna la tarea manualmente si es necesario."
+                        ),
+                    )
+                # action == "accept": give Lead one more attempt with full context
+                return ExecutionResult(
+                    status="completed",
+                    output=(
+                        f"Lead — Último intento autorizado\n\n"
+                        f"El usuario ha autorizado un intento más para desbloquear `{_cb_child_id}`. "
+                        "Usa `update_child_issue` con una directiva completa y detallada para resolverlo."
                     ),
                 )
 
@@ -1097,15 +1495,20 @@ class RunExecutor:
         next_attempt = continuation_attempt + 1
         if liveness_state == "plan_only":
             instruction = (
-                "La run anterior produjo solo texto/plan sin cambios verificables en el workspace. "
-                "Esta continuación debe crear o modificar archivos reales fuera de .aiteam, "
-                "o declarar bloqueo explícito indicando qué adapter CLI/local es necesario."
+                "CONTINUACION OBLIGATORIA: La run anterior produjo texto pero CERO cambios en el workspace. "
+                "Esta run DEBE incluir write_file ops con contenido real. "
+                "Si necesitas audio → usa Web Audio API en JavaScript (AudioContext + OscillatorNode). "
+                "Si necesitas imagenes → usa SVG o canvas. "
+                "Para cualquier binario → crea un archivo stub con texto explicativo. "
+                "Para declarar bloqueo real: incluye ops {type:set_status, status:blocked} + {type:notify_supervisor}. "
+                "ATTENCION: escribir 'blocked' solo en el summary NO tiene efecto — el sistema te seguira despertando "
+                "hasta que uses write_file ops o los ops de bloqueo correctos."
             )
         else:
             instruction = (
-                "La run anterior terminó sin output ni evidencia concreta. "
-                "Produce una respuesta significativa: modifica archivos, escribe un plan detallado, "
-                "o declara bloqueo explícito."
+                "CONTINUACION OBLIGATORIA: La run anterior termino sin output ni evidencia concreta. "
+                "Debes producir write_file ops con archivos reales, o usar ops {set_status:blocked} + {notify_supervisor} "
+                "para declarar bloqueo. Un summary vacio o solo texto no cuenta como progreso."
             )
         enqueue_wakeup(
             self.db_path,
@@ -1184,6 +1587,7 @@ class RunExecutor:
             "create_issues",
             "interactions",
             "update_plan",
+            "update_child_issues",
             "file_ops",
         }
         from aiteam.adapters.work_contract import _TIER3_ROLES_FOR_VALIDATION
@@ -1276,6 +1680,35 @@ class RunExecutor:
                 liveness_state=actions.get("_liveness_state"),
                 liveness_reason=actions.get("_liveness_reason"),
             )
+        # ── Auto-supervisor report for terminal statuses ───────────────────────
+        # LLM agents don't always emit notify_supervisor when they complete.
+        # Reviewers in particular are API-only (no workspace changes) so the
+        # liveness system never fires the workspace-based notify_supervisor.
+        # Auto-report on any terminal issue_status so the Lead is always woken
+        # without requiring a manual wakeup between the reviewer and the Lead.
+        # Idempotency in _enqueue_supervisor_report prevents double-wakeups when
+        # notify_supervisor was already emitted above.
+        _AUTO_REPORT_ROLES = {
+            "reviewer", "code_reviewer",
+            "engineer", "software_engineer",
+            "qa", "lead_executor",
+        }
+        if (
+            isinstance(issue_status, str)
+            and issue_status in {"done", "blocked", "cancelled"}
+            and agent_role.lower() in _AUTO_REPORT_ROLES
+            and not actions.get("notify_supervisor")
+        ):
+            try:
+                self._enqueue_supervisor_report(
+                    issue_id=issue_id,
+                    reporting_agent_id=agent_id,
+                    source_run_id=str(run.get("id")),
+                )
+            except Exception:
+                logger.warning(
+                    "auto-supervisor-report failed for issue %s role %s", issue_id, agent_role, exc_info=True
+                )
 
         # add_comments: extra comments emitted by the LLM adapter (beyond result.output)
         for body in actions.get("add_comments") or []:
@@ -1329,6 +1762,129 @@ class RunExecutor:
             except Exception:
                 logger.warning("update_plan action failed for issue %s", issue_id, exc_info=True)
 
+        # update_child_issues: Lead posts a directive and/or requeues a child issue
+        for child_update in actions.get("update_child_issues") or []:
+            if not isinstance(child_update, dict):
+                continue
+            child_issue_id = str(child_update.get("child_issue_id") or "").strip()
+            if not child_issue_id:
+                continue
+            try:
+                child_issue = get_issue(self.db_path, issue_id=child_issue_id)
+                if child_issue is None:
+                    logger.warning(
+                        "update_child_issue: child %s not found (from issue %s)", child_issue_id, issue_id
+                    )
+                    continue
+                # Safety: only allow updating direct children of the current issue
+                if str(child_issue.get("parent_id") or "") != issue_id:
+                    logger.warning(
+                        "update_child_issue: issue %s is not a child of %s — skipped",
+                        child_issue_id,
+                        issue_id,
+                    )
+                    continue
+                new_status = str(child_update.get("status") or "").strip()
+                directive_body = str(child_update.get("body") or "").strip()
+                _active_requeue_statuses = {"todo", "in_progress"}
+                # Validate: requeuing without a directive is a no-op for the engineer.
+                # Drop the op and log a warning so the Lead is informed next run.
+                if new_status in _active_requeue_statuses and not directive_body:
+                    logger.warning(
+                        "update_child_issue: child %s requeued to %r with no directive body "
+                        "— engineer will have no new information. Body is required. Op dropped.",
+                        child_issue_id, new_status,
+                    )
+                    try:
+                        create_comment(
+                            self.db_path,
+                            issue_id=issue_id,
+                            author_agent_id=agent_id,
+                            source_run_id=str(run.get("id")),
+                            body=(
+                                f"⚙ Sistema: update_child_issue para `{child_issue_id}` rechazado — "
+                                f"status={new_status!r} pero body vacío. "
+                                "El engineer necesita una instrucción concreta. Incluye un `body` con la directiva."
+                            ),
+                            metadata={"source": "update_child_issue_validation"},
+                        )
+                    except Exception:
+                        pass
+                    continue
+                if new_status:
+                    update_issue(self.db_path, issue_id=child_issue_id, status=new_status)
+                    log_activity(
+                        self.db_path,
+                        action="issue.updated",
+                        target_type="issue",
+                        target_id=child_issue_id,
+                        actor_agent_id=agent_id,
+                        run_id=str(run.get("id")),
+                        payload={"status": new_status, "source": "update_child_issue"},
+                    )
+                if directive_body:
+                    try:
+                        dir_comment = create_comment(
+                            self.db_path,
+                            issue_id=child_issue_id,
+                            author_agent_id=agent_id,
+                            source_run_id=str(run.get("id")),
+                            body=_safe_truncate_output(directive_body),
+                            metadata={"source": "lead_directive"},
+                        )
+                        log_activity(
+                            self.db_path,
+                            action="comment.created",
+                            target_type="comment",
+                            target_id=dir_comment["id"],
+                            actor_agent_id=agent_id,
+                            run_id=str(run.get("id")),
+                            payload={"issue_id": child_issue_id, "source": "action:update_child_issue"},
+                        )
+                    except Exception:
+                        logger.warning(
+                            "update_child_issue: failed to post directive comment on %s", child_issue_id, exc_info=True
+                        )
+                # If the Lead set the child to an active status, enqueue a wakeup
+                if new_status in _active_requeue_statuses:
+                    child_assignee = str(child_issue.get("assignee_agent_id") or "").strip()
+                    if child_assignee:
+                        enqueue_wakeup(
+                            self.db_path,
+                            agent_id=child_assignee,
+                            source="unblock",
+                            reason="lead_directive",
+                            payload={
+                                "issue_id": child_issue_id,
+                                "parent_issue_id": issue_id,
+                                "wake_reason": "lead_directive",
+                            },
+                            idempotency_key=f"lead_directive:{child_issue_id}:{str(run.get('id') or '')}",
+                        )
+                        log_activity(
+                            self.db_path,
+                            action="lead.unblock_attempted",
+                            target_type="issue",
+                            target_id=child_issue_id,
+                            actor_agent_id=agent_id,
+                            run_id=str(run.get("id")),
+                            payload={
+                                "parent_issue_id": issue_id,
+                                "new_status": new_status,
+                                "has_directive": bool(directive_body),
+                            },
+                        )
+                        logger.info(
+                            "update_child_issue: requeued child %s (status=%r) with directive from issue %s",
+                            child_issue_id,
+                            new_status,
+                            issue_id,
+                        )
+            except Exception:
+                logger.warning(
+                    "update_child_issue failed for child %s (from issue %s)", child_issue_id, issue_id, exc_info=True
+                )
+
         # create_issues: sub-issues delegated by the LLM
         created_child_roles: list[str] = []
         for spec in actions.get("create_issues") or []:
@@ -1371,6 +1927,52 @@ class RunExecutor:
             return None
         try:
             role_for_issue = str(spec.get("role") or "engineer")
+
+            # ── Pre-flight delegation quality check ───────────────────────────
+            # Sparse descriptions produce blocked or wrong engineer runs.
+            # Log a structured warning so it's visible in activity and metrics.
+            _desc_val = str(spec.get("description") or "").strip()
+            _MIN_DESCRIPTION_CHARS = 120
+            _HARD_BLOCK_CHARS = 20  # truly empty — engineer will block immediately
+            if len(_desc_val) < _MIN_DESCRIPTION_CHARS and role_for_issue in {"engineer", "software_engineer"}:
+                logger.warning(
+                    "delegation_quality: issue %r for role=%r has short description (%d chars < %d). "
+                    "Engineers need technology, file list, and acceptance criteria to avoid blocking.",
+                    title_val, role_for_issue, len(_desc_val), _MIN_DESCRIPTION_CHARS,
+                )
+                log_activity(
+                    self.db_path,
+                    action="delegation.thin_description",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id")),
+                    payload={
+                        "title": title_val,
+                        "role": role_for_issue,
+                        "description_chars": len(_desc_val),
+                        "minimum_chars": _MIN_DESCRIPTION_CHARS,
+                    },
+                )
+                # Hard rejection: a truly empty description guarantees engineer blockage.
+                # Post a system comment on the Lead's issue so it knows to re-delegate
+                # with proper specs, and skip creating the child issue entirely.
+                if len(_desc_val) < _HARD_BLOCK_CHARS:
+                    _rejection_body = (
+                        f"⚙ Sistema: delegación rechazada para «{title_val}» — "
+                        f"descripción vacía ({len(_desc_val)} chars, mínimo: {_HARD_BLOCK_CHARS}). "
+                        "Vuelve a delegar incluyendo: tecnología, archivos a modificar y criterios de aceptación."
+                    )
+                    try:
+                        create_comment(
+                            self.db_path,
+                            issue_id=issue_id,
+                            body=_rejection_body,
+                            author_agent_id="system",
+                        )
+                    except Exception:
+                        logger.warning("failed to post thin-delegation rejection comment on %s", issue_id)
+                    return None
 
             # ── Action routing override ───────────────────────────────────────
             # If the spec includes criticality + action_type, apply route_action()
@@ -1702,13 +2304,36 @@ class RunExecutor:
         if not supervisor_agent_id:
             return
 
-        # Read the child issue's current status from DB (already updated by liveness override)
+        # Re-fetch the child issue to get its status *after* liveness overrides were applied
+        # (liveness may have auto-set it to 'done' or 'blocked' earlier in the same run).
         child_status = str(issue.get("status") or "unknown")
-        child_adapter = str(issue.get("checkout_run_id") or "")  # not adapter, but we get it below
-        # Re-fetch to get updated status after liveness override was applied
         fresh_issue = get_issue(self.db_path, issue_id=issue_id)
         if fresh_issue:
             child_status = str(fresh_issue.get("status") or child_status)
+
+        # ── Sibling-completion gate ───────────────────────────────────────────
+        # If the child finished normally (done/in_review/in_progress) but there
+        # are siblings still actively working, hold back the supervisor wakeup.
+        # The supervisor will be woken naturally when the last active sibling
+        # finishes or when any sibling is blocked.
+        #
+        # Why: without this gate the supervisor is woken once per child
+        # completion — N LLM calls instead of 1 — each seeing a partial picture
+        # and adding a "waiting for siblings" comment that wastes budget.
+        #
+        # Exceptions: always wake for blocked/cancelled children so the
+        # supervisor can intervene immediately.
+        _immediate_statuses = {"blocked", "cancelled"}
+        if child_status not in _immediate_statuses:
+            if self._has_active_siblings(issue_id=issue_id, parent_issue_id=parent_issue_id):
+                logger.debug(
+                    "_enqueue_supervisor_report: suppressing wakeup for %s (child %s %s) — siblings still active",
+                    supervisor_agent_id,
+                    issue_id,
+                    child_status,
+                )
+                return
+        # ─────────────────────────────────────────────────────────────────────
 
         payload: dict[str, Any] = {
             "issue_id": parent_issue_id,
@@ -1736,6 +2361,91 @@ class RunExecutor:
             payload=payload,
             idempotency_key=f"child_report:{parent_issue_id}:{supervisor_agent_id}:{terminal_bucket}",
         )
+
+    def _count_unblock_skipped(self, *, child_issue_id: str) -> int:
+        """Count how many times the Lead has failed to unblock a specific blocked child.
+
+        Counts ``lead.unblock_skipped`` events in the activity_log where
+        target_id == child_issue_id.  Used by the circuit breaker to decide
+        when to escalate to the user.
+        """
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM activity_log WHERE action = 'lead.unblock_skipped' AND target_id = ?",
+                (child_issue_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def _count_timeout_retries(self, *, agent_id: str, issue_id: str) -> int:
+        """Count how many timeout_retry wakeups have been enqueued for this agent+issue.
+
+        Used by the timeout auto-retry logic to enforce the _MAX_TIMEOUT_RETRIES cap.
+        Counts wakeup_requests with source='timeout_retry' whose payload references the issue.
+        """
+        if not agent_id or not issue_id:
+            return 0
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) FROM wakeup_requests
+                WHERE agent_id = ?
+                  AND source = 'timeout_retry'
+                  AND payload_json LIKE ?
+                """,
+                (agent_id, f'%{issue_id}%'),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def _get_blocked_children(self, *, issue_id: str) -> list[dict]:
+        """Return blocked direct child issues for *issue_id* with their skip counts.
+
+        Used to inject ``unblock_action_required`` into the Lead's payload when
+        it wakes for any reason (not just ``child_report``) while children are stuck.
+        """
+        if not issue_id:
+            return []
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, title, role FROM issues WHERE parent_id = ? AND status = 'blocked'",
+                (issue_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            skip_count = self._count_unblock_skipped(child_issue_id=str(row["id"]))
+            result.append(
+                {
+                    "child_issue_id": str(row["id"]),
+                    "child_title": row["title"],
+                    "child_role": row["role"],
+                    "previous_failed_attempts": skip_count,
+                }
+            )
+        return result
+
+    def _has_active_siblings(self, *, issue_id: str, parent_issue_id: str) -> bool:
+        """Return True when the parent has at least one sibling still actively working.
+
+        "Actively working" means status is NOT in {done, cancelled, blocked} —
+        i.e., the sibling is still todo / in_progress / in_review / backlog.
+
+        Used by _enqueue_supervisor_report to suppress intermediate supervisor
+        wakeups when multiple parallel children are running.  The supervisor
+        will be woken naturally when the last active sibling finishes.
+        """
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM issues
+                WHERE parent_id = ?
+                  AND id != ?
+                  AND status NOT IN ('done', 'cancelled', 'blocked')
+                LIMIT 1
+                """,
+                (parent_issue_id, issue_id),
+            ).fetchone()
+        return row is not None
 
     def _format_supervisor_summary(self, issue_id: str) -> str:
         """Produce a rich supervisor summary that surfaces agent report signals.
@@ -1973,6 +2683,52 @@ class RunExecutor:
             if tech_match == "no":
                 tech_mismatches.append(f"  ⚠ {title} → tech_match: no")
 
+        # ── Workspace verification ────────────────────────────────────────────
+        # The Lead verifies that the workspace actually contains real files —
+        # not just that the team reported they created them.  This prevents
+        # closing a cycle where the engineer delivered stubs or placeholders.
+        workspace_warnings: list[str] = []
+        try:
+            _ws_root = workspace_root_for_db(self.db_path)
+            _ws_snap = snapshot_workspace(_ws_root)
+            _ws_files = list(_ws_snap.keys()) if isinstance(_ws_snap, dict) else []
+            _stub_indicators = ("placeholder", "stub", "todo: replace", "todo: implement", "replace with actual")
+            _stub_files: list[str] = []
+            for _fpath, _fmeta in (_ws_snap.items() if isinstance(_ws_snap, dict) else {}.items()):
+                # Check for stub content in small text files (< 2 KB)
+                _fsize = int((_fmeta or {}).get("size", 0)) if isinstance(_fmeta, dict) else 0
+                if _fsize == 0:
+                    _stub_files.append(f"{_fpath} (0 bytes)")
+                elif _fsize < 2048:
+                    try:
+                        _content = (_ws_root / _fpath).read_text(encoding="utf-8", errors="ignore").lower()
+                        if any(ind in _content for ind in _stub_indicators):
+                            _stub_files.append(f"{_fpath} (stub content detected)")
+                    except Exception:
+                        pass
+            if not _ws_files:
+                workspace_warnings.append(
+                    "⚠ ALERTA CRÍTICA: El workspace está VACÍO — ningún archivo fue entregado. "
+                    "El engineer reportó haber creado archivos pero no hay nada en el workspace. "
+                    "NO cierres el ciclo hasta que haya entregables reales."
+                )
+            elif _stub_files:
+                workspace_warnings.append(
+                    f"⚠ ALERTA: {len(_stub_files)} archivo(s) son stubs/vacíos: "
+                    + ", ".join(_stub_files[:5])
+                    + ". Verifica que los entregables principales no sean placeholders."
+                )
+            else:
+                # Workspace has files — list a short manifest so the user knows what's there
+                _visible = sorted(_ws_files)[:10]
+                workspace_warnings.append(
+                    f"Workspace verificado: {len(_ws_files)} archivo(s) presentes. "
+                    f"Muestra: {', '.join(_visible)}"
+                    + (" [+ más]" if len(_ws_files) > 10 else "")
+                )
+        except Exception:
+            logger.warning("_format_cycle_close_summary: workspace verification failed for issue %s", issue_id, exc_info=True)
+
         # ── Build the summary ─────────────────────────────────────────────────
         parts: list[str] = []
         parts.append(f"**Objetivo original:** {objective_text}")
@@ -1989,6 +2745,12 @@ class RunExecutor:
 
         if engineer_evidence:
             parts.append(f"**Evidencia del Engineer:** {'; '.join(engineer_evidence)}")
+
+        if workspace_warnings:
+            parts.append("")
+            parts.append("**Verificación del workspace (Lead):**")
+            for w in workspace_warnings:
+                parts.append(f"  {w}")
 
         if tech_mismatches:
             parts.append("")

@@ -58,6 +58,35 @@ Compress: all comments up to now
 
 Every delegated issue must carry `delegation_type`, `complexity`, `cost_tier`, `report_to`, `reviewed_by`, `evidence_required`, and `risk_checks` in payload or metadata.
 
+## Delegation quality — issue descriptions must be fully self-contained
+
+An engineer receives ONLY what you write in the **`description` field of the `create_issue` op**. They cannot read your comments, your plan document, or any other context. **Writing the spec in your comment body and leaving `description` empty means the engineer receives a blank task and will block immediately.**
+
+Every `create_issue` description MUST include:
+
+- **Exact objective**: what the issue must produce (files, features, APIs) stated precisely.
+- **Technology choices already made**: language, framework, library, file structure. Do not leave these for the engineer to guess — they will guess wrong and need to be corrected.
+- **List of files to create or modify**: at minimum a rough list (e.g. `src/main.py`, `index.html`). If you know the exact schema, include it.
+- **Acceptance criteria**: the specific conditions that make this issue `done`. Be concrete — "the app shows a waveform" not "the feature is complete".
+- **Constraints**: what must NOT be changed, what dependencies exist, what design decisions are already locked.
+- **Context already known**: relevant decisions from the plan, architectural choices, anything from prior child reports the engineer needs to know.
+
+### MANDATORY op format — description field is NOT optional
+
+```json
+{
+  "type": "create_issue",
+  "title": "Implement keyboard binding for web piano",
+  "role": "engineer",
+  "complexity": "medium",
+  "description": "Technology: HTML/CSS/JS vanilla (no frameworks). Files to modify: index.html, script.js, style.css.\n\nObjective: add physical keyboard binding so users can play the piano with their keyboard. Map white keys A-S-D-F-G-H-J (C4-B4) and black keys W-E-T-Y-U (C#4-D#4-F#4-G#4-A#4). Binding must be linear/contiguous — no gaps or jumps.\n\nAlso add: minimum 4 selectable instrument sounds (piano, organ, synth, strings) via a UI dropdown. Current implementation uses Web Audio API oscillators — extend this to support multiple waveforms.\n\nAcceptance: (1) pressing a key produces the correct note, (2) sound selector is visible and functional, (3) on-screen visual hint shows which keys map to which notes."
+}
+```
+
+**The `description` field is the engineer's only briefing.** If it is empty or missing, the system hard-rejects the delegation — the issue is never created and you are notified with a rejection comment. Writing the spec in your comment body instead of in `description` is the most common delegation mistake.
+
+**Do-it-yourself rule**: If explaining the task fully would cost roughly the same tokens as doing it yourself, skip the delegation and do it directly using `write_file` ops. This applies to small, well-scoped tasks: writing a config file, a short script, a skeleton file. Delegation has overhead — a new run, a new context load, a potential retry. Use it only when the engineer can do more than you can in a single run.
+
 ## Low-noise gates
 
 Do not create ceremony. A gate is justified only if it reduces a named risk.
@@ -92,15 +121,70 @@ When a Tier 3 scout reports `result: blocked` in its `---AGENT-REPORT---`, the b
 
 **Blocked engineer (not a scout):** Engineers receive `workspace_files` automatically in their wake payload — they do NOT need to ask the Lead to fetch files.  If an engineer blocks with "I need file contents", the correct action is to post a directive comment on the engineer's issue reminding them that `workspace_files` is already in `AITEAM_WAKE_PAYLOAD_JSON`, then requeue the engineer.  Never escalate this to the user.
 
+## Capability gap — immediate user escalation, NOT a fix cycle
+
+When a child reports `blocker: capability_gap` in its `---AGENT-REPORT---`, the child has detected that the task requires something the adapter **structurally cannot do** (e.g., compile code and produce a native binary, access hardware, generate licensed assets). This is NOT the same as a technical difficulty that more tries will solve.
+
+**Critical rule: do NOT create fix-cycle issues for a capability gap.** Creating another engineer issue with the same ask will produce the same gap. You are not solving the problem — you are burning budget in a loop.
+
+**Mandatory action:**
+
+1. Read the child's comment to understand exactly what was requested vs. what the adapter can deliver.
+2. Immediately create a `request_confirmation` interaction with:
+   - A clear, jargon-free explanation of what the adapter can and cannot do.
+   - **Concrete alternatives** the team CAN deliver (e.g., "I can deliver the Java source code + build scripts, but not a compiled .exe — you would run `mvn package` locally to produce the binary").
+   - A specific question: "Do you accept the alternative, or should we find a different approach?"
+3. Do NOT create more engineer/lead_executor issues on the same deliverable until the user responds.
+4. If the user accepts an alternative (e.g., a `.jar` instead of `.exe`): update the plan, create a new engineer issue with the revised objective explicitly stated, and continue normally.
+5. If the user rejects: close the project as `cancelled` or wait for a different instruction (e.g., switch to a CLI adapter that can actually compile).
+
+**What a capability gap looks like in `workspace_files`:** If you check the workspace and find a file with the required extension that contains only comments, placeholders, or is 0 bytes — the engineer delivered a stub, not the real artifact. Treat this exactly like a declared `capability_gap` — escalate immediately.
+
 ## Blocked children — mandatory escalation
 
 When `AITEAM_WAKE_REASON` is `child_report` **or** any wake, always inspect `children` in the wake payload. For each child with `status: "blocked"`:
 
 - **`liveness_reason: api_only_engineer_no_workspace_changes`** → The engineer's adapter cannot write files. You MUST post a comment telling the user to change the engineer's adapter to `subscription_cli` or another CLI/local adapter. Do NOT simply wait for other reports.
-- **`next_owner: lead` in the child's `---AGENT-REPORT---`** → The child needs a decision from you. Read the `blocker` field, make the decision yourself (or ask the user if it is genuinely a product decision), and post a directive comment on the child issue with the answer. Then requeue the child by updating its status back to `in_progress`. **IMPORTANT: unblock in place — do NOT create a new replacement issue.** Creating a new issue abandons the original one, which stays blocked forever and confuses the agent ledger. The fix goes as a comment on the original blocked issue, and its status must be explicitly reset to `in_progress` (or `todo`) with a new wakeup.
+- **`next_owner: lead` in the child's `---AGENT-REPORT---`** → The child needs a decision from you. Read the `blocker` field, make the decision yourself (or ask the user if it is genuinely a product decision). Then use `update_child_issue` to post the directive and requeue the child atomically:
+  ```json
+  {"type": "update_child_issue", "path": "<child_issue_id>", "body": "<specific directive answering the blocker>", "status": "todo"}
+  ```
+  **CRITICAL: this is the ONLY way to actually unblock a child.** Writing "engineer desbloqueado" in a comment on your own issue does nothing — the child issue remains `blocked` and the system will re-wake you in a loop. The `update_child_issue` op sets the child's status in the DB and enqueues a new wakeup for the child agent. **IMPORTANT: unblock in place — do NOT create a new replacement issue.** Creating a new issue abandons the original one, which stays blocked forever and confuses the agent ledger.
 - **Any other `blocked` reason** → Diagnose per the blocked-children rules. Post a resolution comment on the child issue.
 
 A blocked child issue cannot be ignored. Saying "I'll wait for Reviewer/QA reports" when the engineer is blocked is incorrect — the Reviewer and QA will also have nothing to review.
+
+### Canonical unblock flow — complete example
+
+Wake payload contains:
+```json
+{
+  "unblock_action_required": [{"child_issue_id": "issue:eng-01", "previous_failed_attempts": 0}],
+  "children": [{"id": "issue:eng-01", "status": "blocked",
+                "last_agent_report": {"result": "blocked", "blocker": "WAV file required, no tool available"}}]
+}
+```
+
+Correct response — emit this op:
+```json
+{"type": "update_child_issue", "path": "issue:eng-01",
+ "body": "Do NOT use WAV files. Use Web Audio API (JavaScript): create an AudioContext, use OscillatorNode for tones. No binary assets needed. Here is the pattern:\n\nconst ctx = new AudioContext();\nconst osc = ctx.createOscillator();\nosc.connect(ctx.destination);\nosc.start(); setTimeout(() => osc.stop(), 500);",
+ "status": "todo"}
+```
+
+### Anti-patterns — these all loop indefinitely
+
+❌ `{"type": "add_comment", "body": "Engineer desbloqueado, sigue adelante"}` — posts to **your** issue, child stays blocked.
+
+❌ `{"type": "set_status", "status": "done"}` — closes **your** issue, child still blocked, Lead re-woken.
+
+❌ `{"type": "create_issue", "title": "Implement audio feature", ...}` — creates a **new** child; the original blocked child stays blocked forever and confuses the agent ledger.
+
+❌ Writing "blocked" only in `summary` with no `set_status` op — the system re-wakes the engineer endlessly.
+
+### Circuit breaker
+
+The system tracks how many Lead runs receive a `child_report` for a blocked child without emitting `update_child_issue` or an interaction. After **3 consecutive skips**, the system auto-escalates to the user. A system comment will be posted on your issue for each missed attempt so you can see the count.
 
 ## Reading resolved interactions — user_note
 
@@ -128,20 +212,26 @@ Issues being `done` means agents finished their runs. It does not mean the objec
 
 1. **Re-read the original objective**: look at the parent issue's title and description. What exactly did the user ask for?
 
-2. **Read the reviewer's evidence**: look at `last_agent_report.evidence` for the reviewer child. What files/artifacts were actually reviewed and approved?
+2. **Verify the workspace directly — this is YOUR job, not the reviewer's**: look at `workspace_files` in your wake payload. You must do this yourself. Do not rely only on the reviewer's report — the reviewer approves based on what the engineer claimed, which may be wrong.
+   - List the files present: are the key deliverables actually there?
+   - Check file sizes and content when possible: a 0-byte file or a file containing only comments/placeholders is NOT a real deliverable.
+   - If a file the engineer claimed to create is absent from `workspace_files`, that is a gap. The user cannot find something that isn't there.
 
-3. **Cross-check for objective gaps**. Ask yourself each of these:
+3. **Read the reviewer's evidence**: look at `last_agent_report.evidence` for the reviewer child. What files/artifacts were actually reviewed and approved? Cross-reference this with your step-2 workspace check.
+
+4. **Cross-check for objective gaps**. Ask yourself each of these:
    - Does the technology match what was requested? (e.g. user asked for Java → delivered Java, not Python)
-   - Are the key deliverables present? (e.g. user asked for executable → is there a compiled jar/binary/runnable script?)
-   - Is any critical piece a placeholder? (e.g. `TODO: implement logic` in the main entry point is not done)
-   - Does the reviewer's evidence list the correct files, or are there wrong-language files mixed in?
+   - Are the key deliverables present **in the workspace**, not just mentioned in comments? (e.g. user asked for a JAR → is there actually a `.jar` file in `workspace_files`?)
+   - Is any critical piece a stub or placeholder? A file containing `// PLACEHOLDER`, `TODO: implement`, or whose content is a build script rather than the artifact itself is NOT done.
+   - Does the reviewer's evidence list the correct files, and do those files actually exist in the workspace you see?
+   - Could the user find and use this deliverable right now? If you were the user, would you know where to look?
 
-4. **If you find a gap**: do NOT propose cycle-close. Instead, post a comment with the specific gap found and what needs to happen to close it. Options:
-   - Create a corrective engineer sub-issue with the precise fix needed.
+5. **If you find a gap**: do NOT propose cycle-close. Instead, post a comment with the specific gap found and what needs to happen to close it. Options:
+   - Create a corrective sub-issue with the precise fix needed (e.g., "The `.jar` file is not visible in the workspace root — engineer must place it at a findable path and update the README with the exact location and command").
    - Post a `request_confirmation` asking the user: "The objective was X, but we delivered Y. Should I fix Z or close anyway?"
    - Ask the reviewer to re-check a specific aspect with a focused directive comment.
 
-5. **Only if the objective is met**: propose `initial_cycle_ready` with a one-paragraph summary that states: what was asked, what was delivered, and why it satisfies the objective. Do not propose cycle-close with a vague "the team finished".
+6. **Only if the objective is met**: propose `initial_cycle_ready` with a one-paragraph summary that states: what was asked, what was delivered, the workspace path where the user can find it, and why it satisfies the objective. Do not propose cycle-close with a vague "the team finished" — the user must know exactly where the deliverable is.
 
 ### Reviewer quality gate (runs as part of step 2 above)
 

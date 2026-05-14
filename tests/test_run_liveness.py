@@ -340,6 +340,85 @@ class TestEngineeringCli:
         assert result.state == "blocked"
         assert result.needs_continuation is False
 
+    # ── Rule 6: explicit blocking declared ───────────────────────────────────
+
+    def test_explicit_blocked_op_suppresses_continuation(self):
+        """Engineer that uses set_status:blocked op must NOT get a liveness continuation."""
+        result = classify_run_liveness(
+            run_status="completed",
+            evidence=_empty_evidence(issue_comments_created=1),
+            adapter_type="openai_api",
+            agent_role="engineer",
+            useful_output=True,
+            has_explicit_issue_status=True,
+            explicit_blocking_declared=True,  # set_status:blocked op was used
+        )
+        assert result.state == "advanced"
+        assert result.needs_continuation is False
+
+    def test_explicit_cancelled_op_suppresses_continuation(self):
+        """Engineer that uses set_status:cancelled op must NOT get a liveness continuation."""
+        result = classify_run_liveness(
+            run_status="completed",
+            evidence=_empty_evidence(),
+            adapter_type="openai_api",
+            agent_role="engineer",
+            useful_output=False,
+            has_explicit_issue_status=True,
+            explicit_blocking_declared=True,  # set_status:cancelled op was used
+        )
+        assert result.state == "completed"
+        assert result.needs_continuation is False
+
+    def test_explicit_done_without_workspace_still_plan_only(self):
+        """Engineer that claims done without workspace changes still goes through plan_only.
+
+        A 'done' claim is not a deliberate block — it should still be nudged via
+        the continuation loop to produce real workspace output.
+        """
+        result = classify_run_liveness(
+            run_status="completed",
+            evidence=_empty_evidence(issue_comments_created=1),
+            adapter_type="openai_api",
+            agent_role="engineer",
+            useful_output=True,
+            has_explicit_issue_status=True,
+            explicit_blocking_declared=False,  # set_status:done — NOT a blocking op
+            continuation_attempt=0,
+        )
+        assert result.state == "plan_only"
+        assert result.needs_continuation is True
+
+    def test_explicit_blocked_no_output_is_completed_not_advanced(self):
+        """Blocked op with no output returns 'completed', not 'advanced'."""
+        result = classify_run_liveness(
+            run_status="completed",
+            evidence=_empty_evidence(),
+            adapter_type="openai_api",
+            agent_role="engineer",
+            useful_output=False,
+            has_explicit_issue_status=True,
+            explicit_blocking_declared=True,
+        )
+        assert result.state == "completed"
+        assert result.needs_continuation is False
+
+    def test_explicit_blocking_declared_false_by_default(self):
+        """Passing only has_explicit_issue_status=True without explicit_blocking_declared
+        does not bypass the plan_only loop — backward compat with older callers."""
+        result = classify_run_liveness(
+            run_status="completed",
+            evidence=_empty_evidence(issue_comments_created=1),
+            adapter_type="openai_api",
+            agent_role="engineer",
+            useful_output=True,
+            has_explicit_issue_status=True,
+            # explicit_blocking_declared omitted → defaults to False
+            continuation_attempt=0,
+        )
+        assert result.state == "plan_only"
+        assert result.needs_continuation is True
+
 
 # ---------------------------------------------------------------------------
 # Non-engineering roles

@@ -14,6 +14,7 @@ OP_SCHEMA: dict[str, Any] = {
                 "add_comment",
                 "update_plan",
                 "create_issue",
+                "update_child_issue",
                 "create_interaction",
                 "set_status",
                 "notify_supervisor",
@@ -36,7 +37,7 @@ OP_SCHEMA: dict[str, Any] = {
         "kind": {"type": "string", "enum": ["suggest_tasks", "request_confirmation"]},
         "summary": {"type": "string"},
         "idempotency_key": {"type": "string"},
-        "status": {"type": "string", "enum": ["done", "in_progress", "todo", "cancelled"]},
+        "status": {"type": "string", "enum": ["done", "in_progress", "todo", "cancelled", "blocked"]},
         # payload is used exclusively with create_interaction.
         # Must include a 'reason' field so the executor can route the response correctly.
         # Example: {"reason": "lead_wants_file_read", "parent_issue_id": "..."}
@@ -89,7 +90,7 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "idempotency_key": {"type": ["string", "null"]},
                     "status": {
                         "type": ["string", "null"],
-                        "enum": ["done", "in_progress", "todo", "cancelled", None],
+                        "enum": ["done", "in_progress", "todo", "cancelled", "blocked", None],
                     },
                     # payload for create_interaction — must include 'reason'.
                     # Strictly defined for OpenAI structured output compatibility.
@@ -155,6 +156,11 @@ def build_execution_contract() -> str:
         "- After delegating child issues, wait for concrete child reports before waking/polling the Lead again.\n"
         "- Use create_issue to delegate sub-work; use set_status: done when complete.\n"
         "- Use notify_supervisor after setting status to done when reporting up the chain.\n"
+        "- Use update_child_issue to unblock or requeue a child issue: "
+        "{\"type\": \"update_child_issue\", \"path\": \"<child_issue_id>\", "
+        "\"body\": \"<directive for the child agent>\", \"status\": \"todo\"}. "
+        "This is the ONLY valid way to unblock a child — writing 'engineer desbloqueado' in a comment "
+        "on your own issue does nothing. The 'path' field must contain the child issue ID.\n"
         "\n## create_interaction — mandatory payload.reason\n"
         "- Every create_interaction op MUST include payload: {\"reason\": \"<name>\"} so the executor can route "
         "the user's response correctly. Without 'reason', the interaction will be silently skipped.\n"
@@ -183,6 +189,11 @@ def build_execution_contract() -> str:
         "- Paths must be relative (e.g. 'src/main.py', 'README.md'). Never use absolute paths.\n"
         "- The control plane materializes these ops on disk BEFORE evaluating workspace evidence.\n"
         "- Engineering runs that produce no workspace changes will be asked to retry.\n"
+        "- NEVER block because of binary/media assets (audio, images, video). "
+        "Use Web Audio API (JavaScript oscillators) for sound, SVG for images, stubs for anything else.\n"
+        "- Declaring blockage via ops: {\"type\":\"set_status\",\"status\":\"blocked\"} + {\"type\":\"notify_supervisor\"}. "
+        "Writing 'blocked' only in the summary text has NO effect — the issue remains in-progress "
+        "and the system re-wakes you until the ops are present.\n"
         "\n## Workspace files (ALL roles — Engineer, Reviewer, QA, file_scout)\n"
         "- The wake payload ALWAYS includes a 'workspace_files' list for Engineers, Reviewers, QA, and file_scouts.\n"
         "- Each entry has 'path', 'content', and 'size_bytes'.\n"
@@ -212,7 +223,15 @@ _TIER3_ROLES_FOR_VALIDATION: frozenset[str] = frozenset(
     {"file_scout", "web_scout", "context_curator", "test_runner"}
 )
 _OPS_FORBIDDEN_FOR_TIER3: frozenset[str] = frozenset(
-    {"create_issue", "create_interaction", "update_plan", "write_file", "append_file", "delete_file"}
+    {
+        "create_issue",
+        "create_interaction",
+        "update_plan",
+        "update_child_issue",
+        "write_file",
+        "append_file",
+        "delete_file",
+    }
 )
 
 
@@ -242,6 +261,7 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
     actions: dict[str, Any] = {}
     interactions: list[dict[str, Any]] = []
     create_issues: list[dict[str, Any]] = []
+    child_updates: list[dict[str, Any]] = []
     update_plan: dict[str, Any] | None = None
     add_comments: list[str] = []
     file_ops: list[dict[str, Any]] = []
@@ -293,6 +313,18 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
                     "continuation_policy": "wake_assignee",
                 }
             )
+        elif op_type == "update_child_issue":
+            # Lead posts a directive to a child issue and optionally requeues it.
+            # 'path' holds the child issue ID; 'body' is the directive comment;
+            # 'status' is the new status for the child (e.g. 'todo' to requeue).
+            child_id = str(op.get("path") or "").strip()
+            if child_id:
+                update: dict[str, Any] = {"child_issue_id": child_id}
+                if op.get("status"):
+                    update["status"] = str(op["status"])
+                if op.get("body"):
+                    update["body"] = str(op["body"])
+                child_updates.append(update)
         elif op_type in ("write_file", "append_file", "delete_file"):
             path = str(op.get("path") or "").strip()
             if path:
@@ -308,6 +340,8 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
         actions["interactions"] = interactions
     if create_issues:
         actions["create_issues"] = create_issues
+    if child_updates:
+        actions["update_child_issues"] = child_updates
     if update_plan is not None:
         actions["update_plan"] = update_plan
     if add_comments:
