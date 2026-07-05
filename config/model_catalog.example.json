@@ -90,6 +90,19 @@
       "local_allowed_for_team_lead": false,
       "api_allowed_for_team_lead": false,
       "notes": "Local coding fallback, never team lead"
+    },
+    {
+      "adapter_name": "ollama_gemma4_local",
+      "provider": "local",
+      "model": "gemma4:e4b",
+      "tier": "local",
+      "intelligence_rank": 82,
+      "coding_rank": 84,
+      "reasoning_rank": 82,
+      "trust_rank": 85,
+      "local_allowed_for_team_lead": false,
+      "api_allowed_for_team_lead": false,
+      "notes": "Eficiente modelo local (E4B). Cabe 100% en VRAM, ultrarrápido."
     }
   ]
 }

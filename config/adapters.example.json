@@ -33,6 +33,36 @@
     },
     {
       "type": "external_program",
+      "name": "ollama_gemma4_local",
+      "provider": "local",
+      "model": "gemma4:e4b",
+      "channel": "subscription",
+      "command": [
+        "C:\\Users\\she__\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+        "run",
+        "gemma4:e4b",
+        "{prompt}"
+      ],
+      "capabilities": [
+        "coding",
+        "reasoning",
+        "analysis",
+        "review"
+      ],
+      "role_targets": [
+        "engineer",
+        "reviewer",
+        "researcher",
+        "qa"
+      ],
+      "priority": "secondary",
+      "enabled": true,
+      "requires_approval": false,
+      "timeout_seconds": 120,
+      "cost_tier": 0
+    },
+    {
+      "type": "external_program",
       "name": "my_engineer_runtime",
       "provider": "custom",
       "model": "runtime-v1",
