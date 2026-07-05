@@ -110,6 +110,22 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
             "approval_policy": "never",
         },
     },
+    {
+        "id": "local_gemma4_ollama",
+        "label": "Gemma 4 local via Codex/Ollama",
+        "adapter_type": "subscription_cli",
+        "channel": "local",
+        "provider": "ollama",
+        "config": {
+            "cli_kind": "codex",
+            "command": ["codex"],
+            "oss": True,
+            "local_provider": "ollama",
+            "model": "gemma4:e4b",
+            "sandbox": "workspace-write",
+            "approval_policy": "never",
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -284,6 +300,14 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "tier": "premium", "caps": ["synthesis", "coding", "reasoning"],
             "best_for": ["lead", "engineer"],
             "price_note": "Local gratuito · Tier 1/2 · más RAM",
+        },
+    ],
+    "local_gemma4_ollama": [
+        {
+            "value": "gemma4:e4b", "label": "Gemma 4 E4B",
+            "tier": "budget", "caps": ["coding", "synthesis"],
+            "best_for": ["engineer", "reviewer", "researcher", "qa"],
+            "price_note": "Local gratuito · cabe 100% en VRAM · ultrarrápido",
         },
     ],
 }
