@@ -6,6 +6,7 @@ from typing import Any
 
 from aiteam.adapters.http_retry import post_json as _post_json
 from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
+from aiteam.pricing import estimate_cost_from_usage
 from aiteam.adapters.work_contract import SUBMIT_WORK_SCHEMA, build_execution_contract, ops_to_actions, parse_submit_work
 
 
@@ -56,7 +57,7 @@ class GeminiApiRuntime:
             status=status if status in {"completed", "failed", "skipped"} else "completed",
             output=str(work.get("summary") or "") or None,
             usage=usage,
-            actual_cost_cents=_estimate_cost_cents(model, usage),
+            actual_cost_cents=estimate_cost_from_usage("google", model, usage),
             actions=ops_to_actions([op for op in ops if isinstance(op, dict)]),
         )
 
@@ -75,29 +76,6 @@ def _user_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         f"Issue: {env.get('AITEAM_TASK_ID', run.get('issue_id') or '')}\n\n"
         f"{payload or '{}'}"
     )
-
-
-# Cost estimates (cents per 1M tokens) for common models — update as pricing changes
-_COST_TABLE: dict[str, tuple[int, int]] = {
-    "gemini-2.0-flash-lite": (8, 30),
-    "gemini-2.0-flash":      (10, 40),
-    "gemini-2.5-flash-lite": (10, 40),
-    "gemini-2.5-flash":      (30, 250),
-    "gemini-2.5-pro":        (125, 1000),
-}
-
-
-def _estimate_cost_cents(model: str, usage: dict[str, Any] | None) -> int:
-    if not isinstance(usage, dict):
-        return 0
-    try:
-        input_tokens = int(usage.get("promptTokenCount") or 0)
-        output_tokens = int(usage.get("candidatesTokenCount") or 0)
-    except (TypeError, ValueError):
-        return 0
-    key = next((k for k in _COST_TABLE if model.startswith(k)), "gemini-2.5-flash")
-    in_price, out_price = _COST_TABLE[key]
-    return max(0, (input_tokens * in_price + output_tokens * out_price) // 1_000_000)
 
 
 def _gemini_output_text(data: dict[str, Any]) -> str:

@@ -33,6 +33,7 @@ import os
 from typing import Any
 
 from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
+from aiteam.pricing import estimate_cost_from_usage
 from aiteam.adapters.work_contract import (
     SUBMIT_WORK_TOOL,
     build_execution_contract,
@@ -156,7 +157,7 @@ class AnthropicApiRuntime:
             "input_tokens": usage_obj.input_tokens,
             "output_tokens": usage_obj.output_tokens,
         } if usage_obj else None
-        cost_cents = _estimate_cost_cents(self._model, usage_obj)
+        cost_cents = estimate_cost_from_usage("anthropic", self._model, usage_obj)
 
         return ExecutionResult(
             status=exec_status if exec_status in {"completed", "failed", "skipped"} else "completed",
@@ -227,25 +228,3 @@ def _build_user(wake_payload_raw: str, run: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-# Cost estimates (cents per 1M tokens) for common models — update as pricing changes
-_COST_TABLE: dict[str, tuple[int, int]] = {
-    "claude-opus-4-5":       (1500, 7500),
-    "claude-sonnet-4-5":     (300, 1500),
-    "claude-haiku-4-5":      (80, 400),
-    "claude-3-5-sonnet-20241022": (300, 1500),
-    "claude-3-haiku-20240307":    (25, 125),
-}
-
-
-def _estimate_cost_cents(model: str, usage: Any) -> int:
-    if usage is None:
-        return 0
-    input_tokens = getattr(usage, "input_tokens", 0) or 0
-    output_tokens = getattr(usage, "output_tokens", 0) or 0
-    # Fuzzy match model name
-    key = next((k for k in _COST_TABLE if model.startswith(k) or k.startswith(model)), None)
-    if key is None:
-        key = "claude-sonnet-4-5"  # safe default
-    in_price, out_price = _COST_TABLE[key]
-    cents = (input_tokens * in_price + output_tokens * out_price) // 1_000_000
-    return max(0, cents)
