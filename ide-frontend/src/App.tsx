@@ -35,10 +35,20 @@ interface LoopHealthEntry {
   loop_detected_at?: string | null;
 }
 
+interface PolicyDeviation {
+  agent_id: string;
+  role: string;
+  provider: string;
+  model: string;
+  estimated_cost_cents_per_run: number;
+  reason: string;
+}
+
 interface LoopHealth {
   detected_loops: LoopHealthEntry[];
   at_risk: Array<{ child_issue_id: string; child_title?: string | null; skip_count: number }>;
   thin_delegations_last_24h: number;
+  policy_deviations?: PolicyDeviation[];
   summary: { total_loops: number; total_at_risk: number; requires_attention: boolean };
 }
 
@@ -2255,7 +2265,7 @@ export default function App() {
               <div className="timeline">
                 {timelineItems.map((item) => (
                   <button
-                    className={`timeline-item type-${item.type}`}
+                    className={`timeline-item type-${item.type}${item.status ? ` status-${item.status}` : ''}`}
                     key={item.id}
                     onClick={() => {
                       if (item.issueId) setSelectedIssueId(item.issueId);
@@ -3073,6 +3083,21 @@ export default function App() {
                 </>
               )}
 
+              {/* ── Cost-policy deviation warning ── */}
+              {viewMode === 'team' && (loopHealth?.policy_deviations?.length ?? 0) > 0 && (
+                <div className="policy-deviation-banner">
+                  <AlertCircle size={14} />
+                  <span>
+                    <strong>Política de costes:</strong>{' '}
+                    {(loopHealth?.policy_deviations ?? []).length} rol(es) worker en modelos de pago por token:{' '}
+                    {(loopHealth?.policy_deviations ?? []).map((d) => `${d.role} (${d.model})`).join(', ')}.{' '}
+                    {(loopHealth?.policy_deviations ?? []).some((d) => d.reason === 'no_zero_cost_channel_connected')
+                      ? 'Conecta un canal local (Ollama/LM Studio) o un CLI de suscripción y los workers pasarán a coste 0.'
+                      : 'Hay un canal de coste 0 conectado — revisa la selección de adapters de estos agentes.'}
+                  </span>
+                </div>
+              )}
+
               {/* ── Adapter Profiles panel ── */}
               {viewMode === 'team' && adapterProfiles.length > 0 && (
                 <div className="profiles-panel">
@@ -3117,7 +3142,7 @@ export default function App() {
                     })}
                   </div>
                   <p className="profiles-panel-hint">
-                    Para activar más adapters, añade tus API keys en <strong>Config</strong>. Para crear adapters personalizados (modelo propio, CLI alternativo, Ollama) → <strong>próximamente desde la UI</strong>; por ahora edita <code>~/.config/aiteams/adapter_profiles.json</code>.
+                    Para activar más adapters, añade tus API keys en <strong>Config</strong>. Para crear adapters personalizados (modelo propio, CLI alternativo, Ollama) → <strong>próximamente desde la UI</strong>; por ahora edita <code>adapter_profiles.json</code> en la carpeta de configuración (<code>%LOCALAPPDATA%\AI Teams</code> en Windows, <code>~/.config/aiteams</code> en Linux/Mac).
                   </p>
                 </div>
               )}

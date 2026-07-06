@@ -505,6 +505,22 @@ h2 { font-size: 1rem; }
   flex-direction: column;
   gap: 4px;
 }
+
+.policy-deviation-banner {
+  margin: 10px 0 0;
+  border-radius: 6px;
+  border: 1px solid #b45309;
+  background: rgba(180, 83, 9, 0.08);
+  padding: 8px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #d29922;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.policy-deviation-banner svg { flex-shrink: 0; margin-top: 2px; }
+.policy-deviation-banner strong { color: #e3b341; }
 .loop-health-title {
   display: flex;
   align-items: center;
@@ -729,6 +745,9 @@ h2 { font-size: 1rem; }
   box-shadow: 0 0 0 1px var(--border);
 }
 .timeline-item.type-run::before         { background: var(--accent-dim); }
+.timeline-item.type-run.status-failed::before  { background: #f85149; }
+.timeline-item.type-run.status-failed          { background: rgba(248,81,73,0.04); }
+.timeline-item.type-run.status-running::before { background: #d29922; }
 .timeline-item.type-interaction::before { background: var(--pending); }
 .timeline-item.type-interaction         { background: rgba(210,153,34,0.04); }
 .timeline-item.type-comment::before     { background: #58a6ff; }
