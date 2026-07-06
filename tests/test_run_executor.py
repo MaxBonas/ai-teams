@@ -2475,3 +2475,76 @@ def test_circuit_breaker_ignores_failed_lead_runs(tmp_path: Path) -> None:
     assert _count_activity(db_path, "loop.detected", "issue:child") == 0
     assert _count_cb_interactions(db_path, "issue:intake") == 0
     assert _count_activity(db_path, "lead.unblock_run_failed", "issue:child") == 4
+
+
+def test_llm_lead_cycle_close_gets_machine_verification(tmp_path: Path) -> None:
+    """An LLM Lead cannot whitewash the close proposal: the executor appends
+    the machine-computed verification (reviewer verdict + workspace scan)."""
+    from aiteam.db.comments import create_comment
+
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("role:reviewer", "reviewer", "Reviewer", "standard", "openai_api", "role:lead"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("issue:review", "goal-1", "issue:intake", "Review", "done", "reviewer", "role:reviewer"),
+        )
+        conn.commit()
+    create_comment(
+        db_path,
+        issue_id="issue:review",
+        author_agent_id="role:reviewer",
+        body="Approved with stubs.\n\n---AGENT-REPORT---\nrole: reviewer\nresult: approved\n",
+    )
+    (tmp_path / "Main.cs").write_text("// TODO: implement", encoding="utf-8")
+
+    class _CycleCloseLeadRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Propongo cierre",
+                actions={
+                    "interactions": [
+                        {
+                            "kind": "request_confirmation",
+                            "payload": {"version": 1, "reason": "initial_cycle_ready", "parent_issue_id": "issue:intake"},
+                            "title": "Validación de entrega",
+                            "summary": "Todo perfecto, sin stubs ni placeholders.",
+                        }
+                    ]
+                },
+            )
+
+    registry = AdapterRegistry([_CycleCloseLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="test", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT summary FROM issue_thread_interactions WHERE issue_id = 'issue:intake'"
+            " ORDER BY created_at DESC, rowid DESC LIMIT 1"
+        ).fetchone()
+    assert row is not None
+    summary = str(row["summary"])
+    assert "Todo perfecto" in summary
+    assert "Verificación automática del sistema" in summary
+    assert "approved" in summary
+    assert "stub" in summary.lower()

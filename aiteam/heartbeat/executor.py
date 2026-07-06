@@ -1716,6 +1716,29 @@ class RunExecutor:
                     interaction.get("title"),
                 )
                 continue
+            _summary = interaction.get("summary")
+            # ── Cycle-close verification (non-negotiable) ─────────────────────
+            # When a Lead proposes closing the cycle, append the machine-computed
+            # verification (structured reviewer verdict + workspace stub scan) so
+            # the user decides on objective data, not on the Lead's re-narration.
+            _payload_reason = str(((interaction.get("payload") or {}) or {}).get("reason") or "")
+            _creator_adapter = str((self._agent_info(agent_id) or {}).get("adapter_type") or "")
+            if (
+                _payload_reason == "initial_cycle_ready"
+                and agent_role.lower() in {"lead", "team_lead"}
+                # Builtin lead summaries already embed the verification block.
+                and _creator_adapter not in _BUILTIN_ADAPTERS
+            ):
+                try:
+                    _verification = self._machine_close_verification(issue_id)
+                    if _verification:
+                        _summary = (
+                            str(_summary or "").strip()
+                            + "\n\n**Verificación automática del sistema:**\n"
+                            + _verification
+                        )
+                except Exception:
+                    logger.warning("machine close verification failed for issue %s", issue_id, exc_info=True)
             created = create_interaction(
                 self.db_path,
                 issue_id=issue_id,
@@ -1726,7 +1749,7 @@ class RunExecutor:
                 source_run_id=str(run.get("id")),
                 created_by_agent_id=agent_id,
                 title=interaction.get("title"),
-                summary=interaction.get("summary"),
+                summary=_summary,
             )
             _created_this_run += 1
             log_activity(
@@ -2770,47 +2793,7 @@ class RunExecutor:
         # The Lead verifies that the workspace actually contains real files —
         # not just that the team reported they created them.  This prevents
         # closing a cycle where the engineer delivered stubs or placeholders.
-        workspace_warnings: list[str] = []
-        try:
-            _ws_root = workspace_root_for_db(self.db_path)
-            _ws_snap = snapshot_workspace(_ws_root)
-            _ws_files = list(_ws_snap.keys()) if isinstance(_ws_snap, dict) else []
-            _stub_indicators = ("placeholder", "stub", "todo: replace", "todo: implement", "replace with actual")
-            _stub_files: list[str] = []
-            for _fpath, _fmeta in (_ws_snap.items() if isinstance(_ws_snap, dict) else {}.items()):
-                # Check for stub content in small text files (< 2 KB)
-                _fsize = int((_fmeta or {}).get("size", 0)) if isinstance(_fmeta, dict) else 0
-                if _fsize == 0:
-                    _stub_files.append(f"{_fpath} (0 bytes)")
-                elif _fsize < 2048:
-                    try:
-                        _content = (_ws_root / _fpath).read_text(encoding="utf-8", errors="ignore").lower()
-                        if any(ind in _content for ind in _stub_indicators):
-                            _stub_files.append(f"{_fpath} (stub content detected)")
-                    except Exception:
-                        pass
-            if not _ws_files:
-                workspace_warnings.append(
-                    "⚠ ALERTA CRÍTICA: El workspace está VACÍO — ningún archivo fue entregado. "
-                    "El engineer reportó haber creado archivos pero no hay nada en el workspace. "
-                    "NO cierres el ciclo hasta que haya entregables reales."
-                )
-            elif _stub_files:
-                workspace_warnings.append(
-                    f"⚠ ALERTA: {len(_stub_files)} archivo(s) son stubs/vacíos: "
-                    + ", ".join(_stub_files[:5])
-                    + ". Verifica que los entregables principales no sean placeholders."
-                )
-            else:
-                # Workspace has files — list a short manifest so the user knows what's there
-                _visible = sorted(_ws_files)[:10]
-                workspace_warnings.append(
-                    f"Workspace verificado: {len(_ws_files)} archivo(s) presentes. "
-                    f"Muestra: {', '.join(_visible)}"
-                    + (" [+ más]" if len(_ws_files) > 10 else "")
-                )
-        except Exception:
-            logger.warning("_format_cycle_close_summary: workspace verification failed for issue %s", issue_id, exc_info=True)
+        workspace_warnings = self._workspace_verification_lines()
 
         # ── Build the summary ─────────────────────────────────────────────────
         parts: list[str] = []
@@ -2847,6 +2830,81 @@ class RunExecutor:
         )
 
         return "\n".join(parts)
+
+    def _workspace_verification_lines(self) -> list[str]:
+        """Scan the workspace for emptiness and stub/placeholder deliverables."""
+        warnings: list[str] = []
+        try:
+            _ws_root = workspace_root_for_db(self.db_path)
+            _ws_snap = snapshot_workspace(_ws_root)
+            _ws_files = list(_ws_snap.keys()) if isinstance(_ws_snap, dict) else []
+            _stub_indicators = ("placeholder", "stub", "todo: replace", "todo: implement", "replace with actual")
+            _stub_files: list[str] = []
+            for _fpath, _fmeta in (_ws_snap.items() if isinstance(_ws_snap, dict) else {}.items()):
+                # Check for stub content in small text files (< 2 KB).
+                # snapshot_workspace stores (mtime_ns, size) tuples.
+                if isinstance(_fmeta, (tuple, list)) and len(_fmeta) >= 2:
+                    _fsize = int(_fmeta[1])
+                elif isinstance(_fmeta, dict):
+                    _fsize = int(_fmeta.get("size", 0))
+                else:
+                    _fsize = 0
+                if _fsize == 0:
+                    _stub_files.append(f"{_fpath} (0 bytes)")
+                elif _fsize < 2048:
+                    try:
+                        _content = (_ws_root / _fpath).read_text(encoding="utf-8", errors="ignore").lower()
+                        if any(ind in _content for ind in _stub_indicators):
+                            _stub_files.append(f"{_fpath} (stub content detected)")
+                    except Exception:
+                        pass
+            if not _ws_files:
+                warnings.append(
+                    "⚠ ALERTA CRÍTICA: El workspace está VACÍO — ningún archivo fue entregado. "
+                    "El engineer reportó haber creado archivos pero no hay nada en el workspace. "
+                    "NO cierres el ciclo hasta que haya entregables reales."
+                )
+            elif _stub_files:
+                warnings.append(
+                    f"⚠ ALERTA: {len(_stub_files)} archivo(s) son stubs/vacíos: "
+                    + ", ".join(_stub_files[:5])
+                    + ". Verifica que los entregables principales no sean placeholders."
+                )
+            else:
+                # Workspace has files — list a short manifest so the user knows what's there
+                _visible = sorted(_ws_files)[:10]
+                warnings.append(
+                    f"Workspace verificado: {len(_ws_files)} archivo(s) presentes. "
+                    f"Muestra: {', '.join(_visible)}"
+                    + (" [+ más]" if len(_ws_files) > 10 else "")
+                )
+        except Exception:
+            logger.warning("workspace verification scan failed", exc_info=True)
+        return warnings
+
+    def _machine_close_verification(self, issue_id: str) -> str:
+        """Verification block appended to cycle-close proposals, computed from
+        structured child reports and a workspace scan — never from the Lead's
+        narration, so an LLM Lead cannot whitewash the reviewer's findings.
+        """
+        lines: list[str] = []
+        try:
+            rows = self._child_issue_rows(issue_id)
+        except Exception:
+            rows = []
+        reviewer_roles = {"reviewer", "code_reviewer"}
+        verdicts: list[str] = []
+        for row in rows:
+            if str(row.get("role") or "").strip().lower() in reviewer_roles:
+                report = row.get("last_agent_report") or {}
+                if report:
+                    verdicts.append(str(report.get("result") or "").strip() or "sin veredicto")
+        lines.append(
+            "Veredicto del reviewer (report estructurado): "
+            + (", ".join(verdicts) if verdicts else "sin report estructurado")
+        )
+        lines.extend(self._workspace_verification_lines())
+        return "\n".join(f"- {line}" for line in lines)
 
     def _lead_file_read_interaction_state(self, issue_id: str) -> str | None:
         """Return the status of the lead_wants_file_read interaction, or None if absent."""
