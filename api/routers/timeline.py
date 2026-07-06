@@ -188,7 +188,62 @@ def list_timeline(
     params = [issue_id, issue_id, type, type, actor, actor, since, since, capped_limit]
     with contextlib.closing(sqlite3.connect(str(db_path), timeout=20.0)) as conn:
         conn.row_factory = sqlite3.Row
-        return [dict(row) for row in conn.execute(sql, params).fetchall()]
+        items = [dict(row) for row in conn.execute(sql, params).fetchall()]
+    return _collapse_failed_runs(items)
+
+
+_RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit")
+
+
+def _failed_run_cause(detail: str) -> str:
+    text = str(detail or "").lower()
+    if any(marker in text for marker in _RATE_LIMIT_MARKERS):
+        return "rate_limit"
+    if "timed out" in text or "timeout" in text:
+        return "timeout"
+    return "other"
+
+
+def _failed_run_title(cause: str, count: int) -> str:
+    base = {
+        "rate_limit": "Run fallida — rate limit del proveedor",
+        "timeout": "Run fallida — timeout del proveedor",
+    }.get(cause, "Run fallida")
+    return f"{base} (x{count})" if count > 1 else base
+
+
+def _collapse_failed_runs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse consecutive failed runs of the same issue/cause into one item.
+
+    A provider outage produces a burst of identical "Run fallida" cards that
+    drowns the actual story of the run. The collapsed item carries ``count``
+    and a cause-labelled title ("rate limit del proveedor (x15)").
+    """
+    out: list[dict[str, Any]] = []
+    last_cause: str | None = None
+    for item in items:
+        if item.get("type") == "run" and item.get("status") == "failed":
+            cause = _failed_run_cause(str(item.get("detail") or ""))
+            prev = out[-1] if out else None
+            if (
+                prev is not None
+                and prev.get("type") == "run"
+                and prev.get("status") == "failed"
+                and prev.get("issue_id") == item.get("issue_id")
+                and last_cause == cause
+            ):
+                prev["count"] = int(prev.get("count") or 1) + 1
+                prev["title"] = _failed_run_title(cause, prev["count"])
+                continue
+            grouped = dict(item)
+            grouped["count"] = 1
+            grouped["title"] = _failed_run_title(cause, 1)
+            out.append(grouped)
+            last_cause = cause
+        else:
+            out.append(item)
+            last_cause = None
+    return out
 
 
 def _db(request: Request) -> Path:
