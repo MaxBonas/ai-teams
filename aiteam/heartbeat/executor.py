@@ -3030,7 +3030,34 @@ class RunExecutor:
             + (", ".join(verdicts) if verdicts else "sin report estructurado")
         )
         lines.extend(self._workspace_verification_lines())
+        cost_line = self._cycle_cost_line(issue_id)
+        if cost_line:
+            lines.append(cost_line)
         return "\n".join(f"- {line}" for line in lines)
+
+    def _cycle_cost_line(self, issue_id: str) -> str | None:
+        """Real spend and estimated savings for the issue's subtree runs."""
+        try:
+            with contextlib.closing(_connect(self.db_path)) as conn:
+                row = conn.execute(
+                    """
+                    SELECT COALESCE(SUM(actual_cost_cents), 0) AS cost,
+                           COALESCE(SUM(estimated_savings_cents), 0) AS savings
+                    FROM runs
+                    WHERE issue_id = ?
+                       OR issue_id IN (SELECT id FROM issues WHERE parent_id = ?)
+                    """,
+                    (issue_id, issue_id),
+                ).fetchone()
+        except Exception:
+            return None
+        if row is None:
+            return None
+        cost = int(row["cost"] or 0)
+        savings = int(row["savings"] or 0)
+        if cost == 0 and savings == 0:
+            return None
+        return f"Coste del ciclo: {cost}¢ · ahorro estimado {savings}¢ vs modelos premium"
 
     def _lead_file_read_interaction_state(self, issue_id: str) -> str | None:
         """Return the status of the lead_wants_file_read interaction, or None if absent."""

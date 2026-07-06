@@ -161,6 +161,18 @@ interface BudgetInfo {
   reason: string;
 }
 
+interface CostBucket {
+  runs: number;
+  actual_cost_cents: number;
+  estimated_savings_cents: number;
+}
+
+interface CostSummary {
+  totals: CostBucket;
+  by_role: Array<CostBucket & { role: string }>;
+  by_channel: Array<CostBucket & { channel: string }>;
+}
+
 function agentTier(seniority?: string | null): 1 | 2 | 3 {
   const s = (seniority ?? '').toLowerCase();
   if (s === 'lead' || s === 'senior') return 1;
@@ -517,6 +529,7 @@ export default function App() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [budgets, setBudgets] = useState<BudgetInfo[]>([]);
+  const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -810,6 +823,7 @@ export default function App() {
     void loadWsFiles();
     void loadProjectList();
     void loadBudgets();
+    void loadCostSummary();
     void loadLoopHealth();
   };
 
@@ -967,6 +981,15 @@ export default function App() {
       if (!res.ok) return;
       const json = (await res.json()) as { budgets?: BudgetInfo[] };
       setBudgets((json.budgets || []).filter((b) => b.budget_monthly_cents > 0));
+    } catch { /* ignore */ }
+  };
+
+  const loadCostSummary = async () => {
+    try {
+      const res = await apiFetch('/api/costs/summary');
+      if (!res.ok) return;
+      const json = (await res.json()) as CostSummary & { success?: boolean };
+      setCostSummary(json);
     } catch { /* ignore */ }
   };
 
@@ -2083,6 +2106,39 @@ export default function App() {
                     </div>
                   );
                 })}
+              </div>
+            </section>
+          )}
+
+          {costSummary && (costSummary.totals.actual_cost_cents > 0 || costSummary.totals.estimated_savings_cents > 0) && (
+            <section className="panel compact-panel budget-panel">
+              <div className="panel-title">
+                <Activity size={18} />
+                Coste del proyecto
+              </div>
+              <div className="budget-list">
+                <div className="budget-item budget-ok">
+                  <div className="budget-agent-name">Gasto real</div>
+                  <div className="budget-meta">
+                    <span>{(costSummary.totals.actual_cost_cents / 100).toFixed(2)} €</span>
+                    <span className="budget-limit">{costSummary.totals.runs} runs</span>
+                  </div>
+                </div>
+                <div className="budget-item budget-ok">
+                  <div className="budget-agent-name">Ahorro estimado vs premium</div>
+                  <div className="budget-meta">
+                    <span>{(costSummary.totals.estimated_savings_cents / 100).toFixed(2)} €</span>
+                  </div>
+                </div>
+                {costSummary.by_role.filter((entry) => entry.actual_cost_cents > 0).map((entry) => (
+                  <div key={entry.role} className="budget-item">
+                    <div className="budget-agent-name">{entry.role}</div>
+                    <div className="budget-meta">
+                      <span>{(entry.actual_cost_cents / 100).toFixed(2)} €</span>
+                      <span className="budget-limit">{entry.runs} runs</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
           )}

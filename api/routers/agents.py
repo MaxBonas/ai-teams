@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -190,6 +191,63 @@ async def get_all_budgets(request: Request, period: str | None = None):
         except Exception:
             pass
     return {"success": True, "budgets": budgets, "period": period}
+
+
+@router.get("/api/costs/summary")
+async def get_costs_summary(request: Request):
+    """Aggregate real spend and estimated savings across the project's runs.
+
+    ``estimated_savings_cents`` totals what the same runs would have cost on
+    the premium adapter a senior assignment would use — the headline number
+    for the cheap-workers hiring policy.
+    """
+    _require_api_auth_request(request)
+    db = _db(request)
+    try:
+        with contextlib.closing(sqlite3.connect(str(db), timeout=20.0)) as conn:
+            conn.row_factory = sqlite3.Row
+            totals = conn.execute(
+                """
+                SELECT COUNT(*) AS runs,
+                       COALESCE(SUM(actual_cost_cents), 0) AS actual_cost_cents,
+                       COALESCE(SUM(estimated_savings_cents), 0) AS estimated_savings_cents
+                FROM runs
+                WHERE status IN ('completed', 'failed', 'skipped')
+                """
+            ).fetchone()
+            by_role = conn.execute(
+                """
+                SELECT COALESCE(a.role, 'desconocido') AS role,
+                       COUNT(*) AS runs,
+                       COALESCE(SUM(r.actual_cost_cents), 0) AS actual_cost_cents,
+                       COALESCE(SUM(r.estimated_savings_cents), 0) AS estimated_savings_cents
+                FROM runs r
+                LEFT JOIN agents a ON a.id = r.agent_id
+                WHERE r.status IN ('completed', 'failed', 'skipped')
+                GROUP BY COALESCE(a.role, 'desconocido')
+                ORDER BY actual_cost_cents DESC, runs DESC
+                """
+            ).fetchall()
+            by_channel = conn.execute(
+                """
+                SELECT COALESCE(channel, 'desconocido') AS channel,
+                       COUNT(*) AS runs,
+                       COALESCE(SUM(actual_cost_cents), 0) AS actual_cost_cents,
+                       COALESCE(SUM(estimated_savings_cents), 0) AS estimated_savings_cents
+                FROM runs
+                WHERE status IN ('completed', 'failed', 'skipped')
+                GROUP BY COALESCE(channel, 'desconocido')
+                ORDER BY actual_cost_cents DESC, runs DESC
+                """
+            ).fetchall()
+    except sqlite3.OperationalError as exc:
+        raise _schema_err(exc)
+    return {
+        "success": True,
+        "totals": dict(totals) if totals else {"runs": 0, "actual_cost_cents": 0, "estimated_savings_cents": 0},
+        "by_role": [dict(row) for row in by_role],
+        "by_channel": [dict(row) for row in by_channel],
+    }
 
 
 def _db(request: Request) -> Path:
