@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
 import urllib.parse
-import urllib.request
 from typing import Any
 
+from aiteam.adapters.http_retry import post_json as _post_json
 from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
 from aiteam.adapters.work_contract import SUBMIT_WORK_SCHEMA, build_execution_contract, ops_to_actions, parse_submit_work
 
@@ -77,22 +75,6 @@ def _user_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         f"Issue: {env.get('AITEAM_TASK_ID', run.get('issue_id') or '')}\n\n"
         f"{payload or '{}'}"
     )
-
-
-def _post_json(url: str, body: dict[str, Any], *, headers: dict[str, str], timeout: float) -> dict[str, Any]:
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", **headers},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            parsed = json.loads(response.read().decode("utf-8"))
-            return parsed if isinstance(parsed, dict) else {}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
 
 
 def _gemini_output_text(data: dict[str, Any]) -> str:
