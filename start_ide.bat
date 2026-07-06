@@ -38,6 +38,7 @@ call :kill_port %FRONTEND_PORT%
 
 echo [AI Team IDE] Arrancando backend en puerto %BACKEND_PORT%...
 set "PYTHONUNBUFFERED=1"
+set "PYTHONUTF8=1"
 set "START_WD=%ROOT_DIR%"
 set "START_EXE=%PYTHON_EXE%"
 set "START_ARGS=-m uvicorn api.main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload"
