@@ -70,6 +70,77 @@ def test_create_project_requires_adapter_profile(tmp_path: Path, monkeypatch) ->
     assert "adapter" in response.json()["detail"]
 
 
+def test_create_project_warns_when_no_selected_adapter_connected(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={"name": "Demo", "adapter_profile_ids": ["openai_api"]},
+        )
+        payload = response.json()
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 200
+    assert payload["adapter_warning"]
+    assert "credenciales" in payload["adapter_warning"]
+    # The warning is also visible in the intake thread as a system comment.
+    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM issue_comments WHERE issue_id = 'issue:intake' AND body LIKE '%credenciales%'"
+        ).fetchone()
+    assert row[0] == 1
+
+
+def test_create_project_blocks_unconnected_when_required(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    monkeypatch.setenv("AITEAM_REQUIRE_CONNECTED_ADAPTER", "1")
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={"name": "Demo", "adapter_profile_ids": ["openai_api"]},
+        )
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 400
+    assert "credenciales" in response.json()["detail"]
+
+
+def test_create_project_no_warning_with_stored_secret(tmp_path: Path, monkeypatch) -> None:
+    from aiteam.user_config import store_secret
+
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    store_secret(provider="openai", name="default", secret="sk-test")
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={"name": "Demo", "adapter_profile_ids": ["openai_api"]},
+        )
+        payload = response.json()
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 200
+    assert payload["adapter_warning"] is None
+
+
 def test_create_project_bootstraps_lead_with_selected_adapter(tmp_path: Path, monkeypatch) -> None:
     source_root = tmp_path / "Ai_Teams"
     source_root.mkdir()

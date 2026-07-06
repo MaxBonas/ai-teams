@@ -25,11 +25,14 @@ from api.utils import (
 )
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.project_adapters import (
+    available_project_profiles,
     choose_adapter_for_role,
     project_profiles,
     reconcile_project_agent_policy,
     write_project_adapter_policy,
 )
+from aiteam.user_config import profile_is_connected
+from aiteam.db.comments import create_comment
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.tools.catalog import default_capabilities_for_role
 
@@ -128,6 +131,23 @@ async def create_project(payload: NewProjectRequest, request: Request):
     projects_root.mkdir(parents=True, exist_ok=True)
 
     normalized_name = _sanitize_project_name(payload.name)
+
+    # ── Connectivity check ────────────────────────────────────────────────
+    # A project whose selected adapters all lack credentials produces a first
+    # run that dies silently. Warn by default; hard-block when the operator
+    # sets AITEAM_REQUIRE_CONNECTED_ADAPTER=1.
+    selected_profiles = available_project_profiles(payload.adapter_profile_ids)
+    _unconnected = [str(p.get("id") or "") for p in selected_profiles if not profile_is_connected(p)]
+    adapter_warning: str | None = None
+    if selected_profiles and len(_unconnected) == len(selected_profiles):
+        adapter_warning = (
+            "Ningún adapter seleccionado tiene credenciales verificadas "
+            f"({', '.join(_unconnected)}). El primer run fallará hasta que "
+            "guardes la API key o hagas login del CLI y pruebes la conexión."
+        )
+        if os.environ.get("AITEAM_REQUIRE_CONNECTED_ADAPTER", "").strip().lower() in {"1", "true", "yes"}:
+            raise HTTPException(status_code=400, detail=adapter_warning)
+
     target = _allocate_project_path(projects_root, normalized_name)
     target.mkdir(parents=True, exist_ok=False)
     runtime_dir = resolve_runtime_dir(target, PROJECT_ROOT)
@@ -154,11 +174,24 @@ async def create_project(payload: NewProjectRequest, request: Request):
     except Exception:
         pass  # Non-fatal — the user can still click Iniciar manually
 
+    if adapter_warning:
+        try:
+            create_comment(
+                resolve_runtime_dir(target, PROJECT_ROOT) / "aiteam.db",
+                issue_id="issue:intake",
+                author_agent_id=None,
+                body=f"⚠ Sistema: {adapter_warning}",
+                metadata={"source": "project_creation_connectivity_check"},
+            )
+        except Exception:
+            pass  # informational only
+
     return {
         "success": True,
         "workspace": str(target.as_posix()),
         "project_name": target.name,
         "configured": True,
+        "adapter_warning": adapter_warning,
     }
 
 @router.delete("/api/projects/current")

@@ -361,6 +361,23 @@ def load_adapter_profiles() -> list[dict[str, Any]]:
     return out
 
 
+def profile_is_connected(profile: dict[str, Any]) -> bool:
+    """Best-effort connectivity check for an adapter profile.
+
+    Mirrors the frontend's ``profileState``: a profile counts as connected when
+    its health check passed (or the CLI is at least installed), or when it is
+    an API-channel profile whose secret is present in the local store.
+    """
+    health = profile.get("health") if isinstance(profile.get("health"), dict) else {}
+    if str(health.get("status") or "") in {"ok", "installed"}:
+        return True
+    if str(profile.get("channel") or "") == "api":
+        config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+        ref = str(config.get("api_key_ref") or "").strip() or _default_secret_ref(str(profile.get("adapter_type") or ""))
+        return bool(ref and read_secret(ref))
+    return False
+
+
 def upsert_adapter_profile(profile: dict[str, Any]) -> dict[str, Any]:
     profile_id = str(profile.get("id") or "").strip()
     if not profile_id:
