@@ -41,7 +41,7 @@ from aiteam.run_profiles import FULL_TEAM, normalize_run_profile
 from aiteam.skills import load_skill
 from aiteam.tools.catalog import check_capability, default_capabilities_for_role, get_agent_capabilities
 from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntime
-from aiteam.user_config import inject_adapter_secrets, resolve_adapter_config
+from aiteam.user_config import inject_adapter_secrets, profile_is_connected, resolve_adapter_config
 from aiteam.workspace_evidence import WorkspaceDelta, diff_snapshots, snapshot_workspace, workspace_root_for_db
 
 
@@ -828,6 +828,29 @@ class RunExecutor:
                 actions=liveness_result.actions_override,
             )
             self._apply_result_actions(run=run, agent_id=agent_id, agent_role=agent_role, result=override_result)
+
+        # ── Step 5.5: Adapter recovery on continuation exhaustion (RUN-003) ──
+        # An agent that exhausted its continuations without workspace evidence
+        # is blocked with a correct diagnosis but no recovery route. If the
+        # project has another connected adapter, swap the agent to it and
+        # reopen the issue once — mechanical decision, the Lead need not think.
+        if (
+            liveness_result.state == "blocked"
+            and "_exhausted_at_attempt_" in str(liveness_result.reason or "")
+            and agent_role not in {"lead", "team_lead"}
+            and issue_id_str
+        ):
+            try:
+                self._attempt_adapter_recovery(
+                    issue_id=issue_id_str,
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    failed_adapter_type=adapter_type,
+                    agent_role=agent_role,
+                    liveness_reason=str(liveness_result.reason or ""),
+                )
+            except Exception:
+                logger.warning("adapter recovery failed for issue %s", issue_id_str, exc_info=True)
 
         # ── Step 6: Record workspace evidence event (for blocked + advanced) ──
         is_engineering = str(agent_role or "").strip().lower() in {"engineer", "software_engineer"}
@@ -2830,6 +2853,98 @@ class RunExecutor:
         )
 
         return "\n".join(parts)
+
+    def _attempt_adapter_recovery(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        run_id: str,
+        failed_adapter_type: str,
+        agent_role: str,
+        liveness_reason: str,
+    ) -> bool:
+        """RUN-003 recovery: swap the blocked agent to another connected adapter.
+
+        When an issue blocks after exhausting continuations without workspace
+        evidence, the diagnosis is correct but nothing repairs it. If the
+        project has a *different* connected adapter available for the role,
+        switch the agent to it, reopen the issue and wake the agent — once per
+        issue (audited via ``issue.adapter_recovery`` in the activity log).
+        """
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM activity_log WHERE action = 'issue.adapter_recovery' AND target_id = ?",
+                (issue_id,),
+            ).fetchone()
+        if row and int(row[0]) > 0:
+            return False
+
+        profiles = project_profiles(Path(self.db_path).parent)
+        candidates = [
+            p for p in profiles
+            if str(p.get("adapter_type") or "") != failed_adapter_type and profile_is_connected(p)
+        ]
+        if not candidates:
+            return False
+        selection = choose_adapter_for_role(agent_role, None, candidates)
+        if not selection or str(selection.get("adapter_type") or "") == failed_adapter_type:
+            return False
+
+        new_adapter_type = str(selection["adapter_type"])
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            conn.execute(
+                "UPDATE agents SET adapter_type = ?, adapter_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (
+                    new_adapter_type,
+                    json.dumps(selection.get("adapter_config") or {}, ensure_ascii=False, sort_keys=True),
+                    agent_id,
+                ),
+            )
+        update_issue(self.db_path, issue_id=issue_id, status="todo")
+        log_activity(
+            self.db_path,
+            action="issue.adapter_recovery",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=run_id,
+            payload={
+                "failed_adapter_type": failed_adapter_type,
+                "new_adapter_type": new_adapter_type,
+                "new_adapter_profile_id": selection.get("adapter_profile_id"),
+                "liveness_reason": liveness_reason,
+            },
+        )
+        try:
+            create_comment(
+                self.db_path,
+                issue_id=issue_id,
+                author_agent_id=None,
+                body=(
+                    f"⚙ Sistema: el adapter `{failed_adapter_type}` agotó sus intentos sin "
+                    f"producir cambios verificables ({liveness_reason}). Reasignado a "
+                    f"`{new_adapter_type}` ({selection.get('adapter_profile_id')}) y la issue "
+                    "vuelve a `todo` para un intento con el canal nuevo."
+                ),
+                metadata={"source": "adapter_recovery"},
+            )
+        except Exception:
+            logger.warning("adapter_recovery: failed to post system comment", exc_info=True)
+        enqueue_wakeup(
+            self.db_path,
+            agent_id=agent_id,
+            source="adapter_recovery",
+            reason="assignment",
+            trigger_detail=f"adapter_recovery:{failed_adapter_type}->{new_adapter_type}",
+            payload={"issue_id": issue_id, "wake_reason": "assignment"},
+            idempotency_key=f"adapter_recovery:{issue_id}",
+        )
+        logger.info(
+            "adapter_recovery: issue %s reassigned %s -> %s after %s",
+            issue_id, failed_adapter_type, new_adapter_type, liveness_reason,
+        )
+        return True
 
     def _workspace_verification_lines(self) -> list[str]:
         """Scan the workspace for emptiness and stub/placeholder deliverables."""

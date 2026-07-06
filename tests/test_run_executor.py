@@ -2572,6 +2572,115 @@ def test_file_ops_reject_provider_convention_filenames(tmp_path: Path) -> None:
     assert (tmp_path / "README.md").read_text(encoding="utf-8") == "ok"
 
 
+def test_adapter_recovery_reopens_exhausted_issue_with_alternative_adapter(tmp_path: Path, monkeypatch) -> None:
+    """RUN-003: continuation exhaustion swaps the agent to another connected
+    adapter, reopens the issue and wakes the agent — exactly once."""
+    from aiteam.project_adapters import write_project_adapter_policy
+    from aiteam.user_config import store_secret
+
+    user_cfg = tmp_path / "user-config"
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(user_cfg))
+    store_secret(provider="google", name="default", secret="gemini-key")
+
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type) VALUES (?, ?, ?, ?, ?)",
+            ("agent-1", "engineer", "Engineer", "standard", "openai_api"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, assignee_agent_id, role) VALUES (?, ?, ?, ?, ?, ?)",
+            ("issue-1", "g1", "Implement", "in_progress", "agent-1", "engineer"),
+        )
+        conn.commit()
+    # Project allowlist without CLI profiles so reconcile cannot pre-upgrade.
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+
+    class _PlanOnlyOpenAIRuntime:
+        descriptor = AdapterDescriptor(adapter_type="openai_api", channel="api", provider="openai")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(status="completed", output="Plan detallado, sin archivos.", actions={})
+
+    registry = AdapterRegistry([_PlanOnlyOpenAIRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="agent-1", source="test", reason="liveness_continuation",
+        payload={"issue_id": "issue-1", "wake_reason": "liveness_continuation", "continuation_attempt": 2},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="agent-1")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        agent = conn.execute("SELECT adapter_type FROM agents WHERE id = 'agent-1'").fetchone()
+        issue = conn.execute("SELECT status FROM issues WHERE id = 'issue-1'").fetchone()
+        recoveries = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'issue.adapter_recovery' AND target_id = 'issue-1'"
+        ).fetchone()
+        wakeup = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id = 'agent-1' AND source = 'adapter_recovery' AND status = 'queued'"
+        ).fetchone()
+
+    assert agent["adapter_type"] == "gemini_api"
+    assert issue["status"] == "todo"
+    assert int(recoveries[0]) == 1
+    assert int(wakeup[0]) == 1
+
+    # Second exhaustion on the same issue must NOT trigger another recovery.
+    assert executor._attempt_adapter_recovery(
+        issue_id="issue-1",
+        agent_id="agent-1",
+        run_id="run:x",
+        failed_adapter_type="gemini_api",
+        agent_role="engineer",
+        liveness_reason="plan_only_exhausted_at_attempt_2",
+    ) is False
+
+
+def test_adapter_recovery_noop_without_alternative_adapter(tmp_path: Path, monkeypatch) -> None:
+    from aiteam.project_adapters import write_project_adapter_policy
+
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type) VALUES (?, ?, ?, ?, ?)",
+            ("agent-1", "engineer", "Engineer", "standard", "openai_api"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, assignee_agent_id, role) VALUES (?, ?, ?, ?, ?, ?)",
+            ("issue-1", "g1", "Implement", "blocked", "agent-1", "engineer"),
+        )
+        conn.commit()
+    # Only the failed adapter in the allowlist, and no secret stored → no candidates.
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api"])
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    recovered = executor._attempt_adapter_recovery(
+        issue_id="issue-1",
+        agent_id="agent-1",
+        run_id="run:x",
+        failed_adapter_type="openai_api",
+        agent_role="engineer",
+        liveness_reason="plan_only_exhausted_at_attempt_2",
+    )
+
+    assert recovered is False
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute("SELECT status FROM issues WHERE id = 'issue-1'").fetchone()
+    assert row[0] == "blocked"
+
+
 def test_file_ops_do_not_delete_provider_convention_files(tmp_path: Path) -> None:
     from aiteam.heartbeat.executor import _execute_file_ops
 
