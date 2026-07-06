@@ -255,3 +255,70 @@ def test_reconcile_stale_wakeups_requeues_claim_without_run(tmp_path: Path) -> N
     assert row["status"] == "queued"
     assert row["claimed_at"] is None
     assert row["error"] == "requeued_stale_claim"
+
+
+def test_enqueue_wakeup_coalesces_by_agent_and_issue(tmp_path: Path) -> None:
+    """One live wakeup per (agent, issue) even with distinct idempotency keys."""
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+
+    first = enqueue_wakeup(
+        db_path,
+        agent_id="role:engineer",
+        source="reconcile",
+        reason="assignment",
+        payload={"issue_id": "i1", "wake_reason": "assignment"},
+        idempotency_key="assignment:i1:role:engineer",
+    )
+    second = enqueue_wakeup(
+        db_path,
+        agent_id="role:engineer",
+        source="unblock",
+        reason="lead_directive",
+        payload={"issue_id": "i1", "wake_reason": "lead_directive", "instruction": "haz X"},
+        idempotency_key="unblock:i1:role:engineer",
+    )
+
+    assert first["id"] == second["id"]
+    assert second["coalesced_count"] == 1
+    assert second["reason"] == "lead_directive"
+    assert json.loads(second["payload_json"])["instruction"] == "haz X"
+    with sqlite3.connect(str(db_path)) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM wakeup_requests").fetchone()[0]
+    assert count == 1
+
+
+def test_enqueue_wakeup_does_not_coalesce_across_issues(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+
+    first = enqueue_wakeup(
+        db_path, agent_id="role:engineer", source="a", reason="assignment",
+        payload={"issue_id": "i1"},
+    )
+    second = enqueue_wakeup(
+        db_path, agent_id="role:engineer", source="a", reason="assignment",
+        payload={"issue_id": "i2"},
+    )
+
+    assert first["id"] != second["id"]
+
+
+def test_enqueue_wakeup_does_not_coalesce_into_claimed(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+
+    first = enqueue_wakeup(
+        db_path, agent_id="role:engineer", source="a", reason="assignment",
+        payload={"issue_id": "i1"},
+    )
+    claimed = claim_next_wakeup(db_path, agent_id="role:engineer")
+    assert claimed is not None and claimed["id"] == first["id"]
+
+    second = enqueue_wakeup(
+        db_path, agent_id="role:engineer", source="a", reason="assignment",
+        payload={"issue_id": "i1"},
+    )
+
+    assert second["id"] != first["id"]
+    assert second["status"] == "queued"

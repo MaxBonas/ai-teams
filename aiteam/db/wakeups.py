@@ -21,7 +21,43 @@ def enqueue_wakeup(
     trigger_detail: str | None = None,
     wakeup_id: str | None = None,
 ) -> dict[str, Any]:
+    payload_issue_id = str(
+        (payload or {}).get("issue_id") or (payload or {}).get("task_id") or ""
+    ).strip()
     with contextlib.closing(_connect(db_path)) as conn:
+        # ── Invariant: at most one live wakeup per (agent, issue) ────────────
+        # Multiple sources (reconciler, lead directives, retries) enqueue for
+        # the same agent+issue with different idempotency keys; each extra
+        # wakeup becomes a redundant run that re-reads the same DB state.
+        # Coalesce into the existing queued wakeup — the newest payload wins,
+        # exactly like the idempotency-key upsert below.
+        if payload_issue_id:
+            row = conn.execute(
+                """
+                UPDATE wakeup_requests
+                SET payload_json = ?,
+                    source = ?,
+                    reason = ?,
+                    trigger_detail = COALESCE(?, trigger_detail),
+                    coalesced_count = coalesced_count + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = (
+                    SELECT id FROM wakeup_requests
+                    WHERE agent_id = ?
+                      AND status = 'queued'
+                      AND COALESCE(
+                              json_extract(payload_json, '$.issue_id'),
+                              json_extract(payload_json, '$.task_id')
+                          ) = ?
+                    ORDER BY requested_at ASC, id ASC
+                    LIMIT 1
+                )
+                RETURNING *
+                """,
+                (_json(payload), source, reason, trigger_detail, agent_id, payload_issue_id),
+            ).fetchone()
+            if row:
+                return dict(row)
         try:
             row = conn.execute(
                 """
