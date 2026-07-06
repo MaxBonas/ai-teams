@@ -15,6 +15,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from aiteam.provider_governor import GOVERNOR, provider_for_url
+
 RETRYABLE_STATUS = {429, 500, 502, 503, 504, 529}
 MAX_ATTEMPTS = 4
 MAX_TOTAL_SLEEP_SECONDS = 90.0
@@ -29,6 +31,7 @@ def post_json(url: str, body: dict[str, Any], *, headers: dict[str, str], timeou
     raise ``RuntimeError`` with the status and response excerpt.
     """
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    provider = provider_for_url(url)
     slept = 0.0
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -41,7 +44,10 @@ def post_json(url: str, body: dict[str, Any], *, headers: dict[str, str], timeou
         try:
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 parsed = json.loads(response.read().decode("utf-8"))
-                return parsed if isinstance(parsed, dict) else {}
+                data = parsed if isinstance(parsed, dict) else {}
+                GOVERNOR.record_success(provider)
+                GOVERNOR.record_usage(provider, _extract_total_tokens(data))
+                return data
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:1000]
             error = RuntimeError(f"HTTP {exc.code}: {detail}")
@@ -49,6 +55,8 @@ def post_json(url: str, body: dict[str, Any], *, headers: dict[str, str], timeou
                 raise error from exc
             last_error = error
             delay = _retry_delay(exc.headers.get("Retry-After") if exc.headers else None, detail, attempt)
+            if exc.code == 429:
+                GOVERNOR.record_rate_limit(provider, delay)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = exc
             delay = _retry_delay(None, "", attempt)
@@ -74,3 +82,21 @@ def _retry_delay(retry_after_header: str | None, detail: str, attempt: int) -> f
         except ValueError:
             pass
     return min(2.0 ** attempt, 30.0)
+
+
+def _extract_total_tokens(data: dict[str, Any]) -> int:
+    usage = data.get("usage")
+    if isinstance(usage, dict):
+        try:
+            total = int(usage.get("total_tokens") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        if total:
+            return total
+    meta = data.get("usageMetadata")
+    if isinstance(meta, dict):
+        try:
+            return int(meta.get("totalTokenCount") or 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0

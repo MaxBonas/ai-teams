@@ -16,6 +16,7 @@ from aiteam.db.interactions import list_interactions
 from aiteam.db.issues import create_issue, get_issue, list_issues, update_issue
 from aiteam.db.liveness import diagnose_issue
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
+from aiteam.provider_governor import GOVERNOR
 from aiteam.run_profiles import normalize_run_profile, LEAD_QUORUM
 
 router = APIRouter()
@@ -380,12 +381,16 @@ async def get_loop_health(request: Request):
             for row in at_risk_rows
         ]
 
-        requires_attention = bool(detected_loops) or any(r["skip_count"] >= 2 for r in at_risk)
+        providers = GOVERNOR.snapshot()
+        providers_degraded = sorted(key for key, info in providers.items() if info.get("degraded"))
+        requires_attention = bool(detected_loops) or any(r["skip_count"] >= 2 for r in at_risk) or bool(providers_degraded)
         return {
             "success": True,
             "detected_loops": detected_loops,
             "at_risk": at_risk,
             "thin_delegations_last_24h": thin_count,
+            "providers": providers,
+            "providers_degraded": providers_degraded,
             "summary": {
                 "total_loops": len(detected_loops),
                 "total_at_risk": len(at_risk),

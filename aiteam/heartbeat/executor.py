@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from aiteam.db.wakeups import enqueue_wakeup, finish_wakeup
 from aiteam.heartbeat.scheduler import DispatchResult
 from aiteam.lead_intake import apply_accepted_team_proposal, build_team_proposal, format_team_proposal
 from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
+from aiteam.provider_governor import GOVERNOR
 from aiteam.run_liveness import (
     MAX_CONTINUATION_ATTEMPTS,
     LivenessResult,
@@ -44,6 +46,13 @@ from aiteam.workspace_evidence import WorkspaceDelta, diff_snapshots, snapshot_w
 
 
 _TERMINAL_EXEC_STATUSES = {"completed", "failed", "skipped"}
+
+_LLM_ADAPTER_TYPES = {"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"}
+
+
+def _is_rate_limit_error(error: str | None) -> bool:
+    text = str(error or "").lower()
+    return "429" in text or "rate limit" in text or "rate_limit" in text
 
 _COMMENT_BODY_MAX = 4096  # hard limit stored in DB
 _AGENT_REPORT_MARKER = "---AGENT-REPORT---"
@@ -135,6 +144,34 @@ class RunExecutor:
                     runtime = GeminiApiRuntime(runtime.descriptor, model=override_model)
             elif adapter_type == "subscription_cli" and isinstance(runtime, ClaudeSubscriptionCliRuntime):
                 runtime = runtime.with_config(adapter_cfg)
+        # ── Provider degradation fallback (opt-in) ───────────────────────────
+        # When the provider is degraded (repeated 429s) and the operator has
+        # configured a fallback adapter, worker roles switch to it for this run
+        # instead of hammering a saturated provider. Lead/senior keep their
+        # adapter — quality of top-level decisions must not silently degrade.
+        _fallback_adapter_type = os.environ.get("AITEAM_PROVIDER_FALLBACK_ADAPTER", "").strip()
+        if (
+            _fallback_adapter_type
+            and runtime is not None
+            and adapter_type in _LLM_ADAPTER_TYPES
+            and agent_role not in {"lead", "team_lead"}
+            and GOVERNOR.is_degraded(runtime.descriptor.provider)
+        ):
+            _fallback_runtime = self.registry.get(_fallback_adapter_type)
+            if _fallback_runtime is not None:
+                record_tool_access(
+                    self.db_path,
+                    run_id=run_id,
+                    agent_id=agent_id,
+                    issue_id=str(run.get("issue_id") or "") or None,
+                    tool_name=f"adapter:{_fallback_adapter_type}",
+                    decision="allowed",
+                    reason=f"provider {runtime.descriptor.provider} degraded — fallback adapter engaged",
+                    metadata={"original_adapter_type": adapter_type, "fallback_adapter_type": _fallback_adapter_type},
+                )
+                runtime = _fallback_runtime
+                adapter_type = _fallback_adapter_type
+                adapter_cfg = {}
         if runtime is None:
             record_tool_access(
                 self.db_path,
@@ -525,6 +562,24 @@ class RunExecutor:
         # Expose workspace root so CLI adapters (codex, claude, gemini) know
         # which directory to operate in when cwd is not explicitly configured.
         env = {**env, "AITEAM_WORKSPACE_ROOT": str(workspace_root)}
+        # ── Provider pacing gate ─────────────────────────────────────────────
+        # Runs execute sequentially and share each provider's TPM budget; wait
+        # out any active cooldown (learned from 429s) before spending tokens.
+        if adapter_type in _LLM_ADAPTER_TYPES:
+            _paced_seconds = GOVERNOR.acquire(runtime.descriptor.provider)
+            if _paced_seconds > 0.5:
+                log_activity(
+                    self.db_path,
+                    action="run.provider_paced",
+                    target_type="run",
+                    target_id=run_id,
+                    actor_agent_id=agent_id,
+                    run_id=run_id,
+                    payload={
+                        "provider": runtime.descriptor.provider,
+                        "waited_seconds": round(_paced_seconds, 2),
+                    },
+                )
         before_workspace = snapshot_workspace(workspace_root)
         result: ExecutionResult
         try:
@@ -540,6 +595,15 @@ class RunExecutor:
                 result = runtime.execute(run, env)
         except Exception as exc:
             result = ExecutionResult(status="failed", error=str(exc), exit_code=1)
+
+        # Feed provider health: adapters that bypass http_retry (Anthropic SDK)
+        # still surface rate limits here through the error text.
+        if (
+            adapter_type in _LLM_ADAPTER_TYPES
+            and result.status == "failed"
+            and _is_rate_limit_error(result.error)
+        ):
+            GOVERNOR.record_rate_limit(runtime.descriptor.provider)
 
         # ── Execute file ops from LLM result BEFORE snapshotting workspace ───
         # API-only adapters (openai_api, anthropic_api, gemini_api) return
