@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from aiteam.tools.catalog import default_capabilities_for_role
-from aiteam.user_config import ROLE_CAPABILITY_PROFILES, load_adapter_profiles, model_options, model_options_for_role
+from aiteam.user_config import ROLE_CAPABILITY_PROFILES, load_adapter_profiles, model_options, model_options_for_role, profile_is_connected
 
 
 PROJECT_CONFIG_NAME = "project_config.json"
@@ -15,6 +16,9 @@ SENIOR_ROLES = {"lead", "team_lead", "reviewer", "quorum_senior", "quorum_audito
 # Tier 3 cheap specialists — prefer budget/local adapters.
 # file_scout and context_curator benefit from workspace access but can fall back to API.
 JUNIOR_ROLES = {"engineer", "test_runner", "worker", "file_scout", "web_scout", "context_curator"}
+# Tier 3 mechanical roles — under AITEAM_ENFORCE_COST_POLICY they must never
+# bill per-token while a connected zero-cost channel exists.
+TIER3_ROLES = {"file_scout", "web_scout", "context_curator", "test_runner"}
 
 # API-only adapters cannot write workspace files — they will immediately block
 # when assigned to junior roles that require file writes (engineer, worker).
@@ -90,6 +94,7 @@ def choose_adapter_for_role(role: str, seniority: str | None, profiles: list[dic
         key=lambda profile: _profile_score(profile, needs_senior=needs_senior),
         reverse=True,
     )
+    ranked = _apply_cost_policy(role_key, ranked)
     profile = ranked[0]
     model = _choose_model(str(profile.get("id") or ""), role=role_key, needs_senior=needs_senior)
     config = {"profile_id": profile.get("id")}
@@ -101,6 +106,31 @@ def choose_adapter_for_role(role: str, seniority: str | None, profiles: list[dic
         "adapter_profile_id": profile.get("id"),
         "model": model,
     }
+
+
+def _cost_policy_enforced() -> bool:
+    return os.environ.get("AITEAM_ENFORCE_COST_POLICY", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _apply_cost_policy(role_key: str, ranked: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Opt-in hard enforcement: Tier 3 roles never bill per-token while a
+    connected zero-cost channel (local / subscription) exists in the project.
+
+    Reorders *ranked* so connected zero-cost profiles come first when the
+    scoring picked a per-token API profile for a Tier 3 role.
+    """
+    if not ranked or not _cost_policy_enforced() or role_key not in TIER3_ROLES:
+        return ranked
+    if str(ranked[0].get("channel") or "") != "api":
+        return ranked
+    zero_cost = [
+        p for p in ranked
+        if str(p.get("channel") or "") in {"local", "subscription"} and profile_is_connected(p)
+    ]
+    if not zero_cost:
+        return ranked
+    remainder = [p for p in ranked if p not in zero_cost]
+    return zero_cost + remainder
 
 
 def apply_adapter_policy_to_member(member: dict[str, Any], profiles: list[dict[str, Any]]) -> dict[str, Any]:

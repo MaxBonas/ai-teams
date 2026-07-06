@@ -157,3 +157,96 @@ def test_hiring_decision_no_deviation_for_senior_roles(tmp_path: Path, isolated_
     )
 
     assert payload["policy_deviation"] is None
+
+
+# ── A3: deviations scan + enforcement ─────────────────────────────────────────
+
+def test_detect_policy_deviations_lists_premium_workers(tmp_path: Path, isolated_user_config: Path) -> None:
+    db = tmp_path / "aiteam.db"
+    _init_db(db, agent_adapter="openai_api")
+    store_secret(provider="openai", name="default", secret="sk-test")
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api"])
+
+    deviations = hiring_economics.detect_policy_deviations(db)
+
+    assert len(deviations) == 1
+    assert deviations[0]["agent_id"] == "agent-1"
+    assert deviations[0]["role"] == "engineer"
+    assert deviations[0]["estimated_cost_cents_per_run"] > 0
+    assert deviations[0]["reason"] == "no_zero_cost_channel_connected"
+
+
+def test_detect_policy_deviations_ignores_zero_cost_workers(tmp_path: Path, isolated_user_config: Path) -> None:
+    db = tmp_path / "aiteam.db"
+    _init_db(db, agent_adapter="subscription_cli", adapter_config={"profile_id": "local_qwen_ollama"})
+
+    assert hiring_economics.detect_policy_deviations(db) == []
+
+
+def _profile(profile_id: str, *, channel: str, adapter_type: str, health: str = "ok") -> dict:
+    return {
+        "id": profile_id,
+        "adapter_type": adapter_type,
+        "channel": channel,
+        "provider": "openai" if channel == "api" else "ollama",
+        "config": {},
+        "health": {"status": health},
+    }
+
+
+def test_cost_policy_enforcement_reorders_tier3(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aiteam.project_adapters import _apply_cost_policy
+
+    monkeypatch.setenv("AITEAM_ENFORCE_COST_POLICY", "1")
+    premium = _profile("openai_api", channel="api", adapter_type="openai_api")
+    local = _profile("local_qwen", channel="local", adapter_type="subscription_cli")
+
+    reordered = _apply_cost_policy("file_scout", [premium, local])
+    assert reordered[0]["id"] == "local_qwen"
+
+    # Non-Tier-3 roles keep the scoring order even under enforcement.
+    assert _apply_cost_policy("engineer", [premium, local])[0]["id"] == "openai_api"
+
+
+def test_cost_policy_enforcement_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aiteam.project_adapters import _apply_cost_policy
+
+    monkeypatch.delenv("AITEAM_ENFORCE_COST_POLICY", raising=False)
+    premium = _profile("openai_api", channel="api", adapter_type="openai_api")
+    local = _profile("local_qwen", channel="local", adapter_type="subscription_cli")
+
+    assert _apply_cost_policy("file_scout", [premium, local])[0]["id"] == "openai_api"
+
+
+def test_cost_policy_enforcement_requires_connected_zero_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aiteam.project_adapters import _apply_cost_policy
+
+    monkeypatch.setenv("AITEAM_ENFORCE_COST_POLICY", "1")
+    premium = _profile("openai_api", channel="api", adapter_type="openai_api")
+    local = _profile("local_qwen", channel="local", adapter_type="subscription_cli", health="untested")
+
+    assert _apply_cost_policy("file_scout", [premium, local])[0]["id"] == "openai_api"
+
+
+def test_cost_policy_warning_comment_is_idempotent(tmp_path: Path, isolated_user_config: Path) -> None:
+    from aiteam.lead_intake import _warn_cost_policy_deviation
+
+    db = tmp_path / "aiteam.db"
+    _init_db(db, agent_adapter="openai_api")
+    decisions = [{
+        "role": "engineer", "model": "gpt-4.1",
+        "estimated_cost_cents": 2, "policy_deviation": "no_zero_cost_channel_connected",
+    }]
+
+    _warn_cost_policy_deviation(db, parent_issue_id="i1", decisions=decisions)
+    _warn_cost_policy_deviation(db, parent_issue_id="i1", decisions=decisions)
+
+    with sqlite3.connect(str(db)) as conn:
+        comments = conn.execute(
+            "SELECT COUNT(*) FROM issue_comments WHERE issue_id = 'i1' AND body LIKE '%Política de costes%'"
+        ).fetchone()
+        events = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'cost_policy.warning' AND target_id = 'i1'"
+        ).fetchone()
+    assert comments[0] == 1
+    assert events[0] == 1

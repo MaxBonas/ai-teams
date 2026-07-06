@@ -163,6 +163,48 @@ def log_hiring_decision(
     return payload
 
 
+def detect_policy_deviations(db_path: Path) -> list[dict[str, Any]]:
+    """Live scan: active worker-role agents currently billing per-token.
+
+    Returns one entry per deviating agent with its estimated cost per run and
+    the actionable reason, for /api/loop-health and UI warnings.
+    """
+    try:
+        with contextlib.closing(_connect(db_path)) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, role, adapter_type, adapter_config_json
+                FROM agents
+                WHERE status IN ('active', 'idle', 'running')
+                ORDER BY id ASC
+                """
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    deviations: list[dict[str, Any]] = []
+    zero_cost_available: bool | None = None
+    for row in rows:
+        role = str(row["role"] or "").strip().lower()
+        if role not in JUNIOR_ROLES:
+            continue
+        provider, model = provider_and_model_for(str(row["adapter_type"] or ""), _decode_json(row["adapter_config_json"]))
+        input_tokens, output_tokens = typical_tokens_for_role(db_path, role)
+        estimated = estimate_cost_cents(provider, model, input_tokens, output_tokens)
+        if estimated <= 0:
+            continue
+        if zero_cost_available is None:
+            zero_cost_available = _zero_cost_channel_connected(db_path)
+        deviations.append({
+            "agent_id": str(row["id"]),
+            "role": role,
+            "provider": provider,
+            "model": model,
+            "estimated_cost_cents_per_run": estimated,
+            "reason": "scoring_preferred_premium" if zero_cost_available else "no_zero_cost_channel_connected",
+        })
+    return deviations
+
+
 def _zero_cost_channel_connected(db_path: Path) -> bool:
     try:
         profiles = project_profiles(Path(db_path).parent)

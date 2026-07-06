@@ -576,10 +576,11 @@ def apply_accepted_team_proposal(
 
     # Audit each adapter assignment with its economics (cost policy, A2).
     created_agent_ids = set(created_agents)
+    deviating: list[dict[str, Any]] = []
     for member in proposal.get("proposed_team") or []:
         member_id = str(member.get("id") or "")
         if member_id in created_agent_ids:
-            log_hiring_decision(
+            decision = log_hiring_decision(
                 db_path,
                 agent_id=member_id,
                 role=str(member.get("role") or ""),
@@ -589,8 +590,71 @@ def apply_accepted_team_proposal(
                 source="lead_intake",
                 run_id=source_run_id or None,
             )
+            if decision.get("policy_deviation"):
+                deviating.append(decision)
+
+    # One-time cost-policy warning in the intake thread (A3).
+    if deviating:
+        _warn_cost_policy_deviation(db_path, parent_issue_id=parent_issue_id, decisions=deviating)
 
     return {"created_agents": created_agents, "created_issues": created_issues}
+
+
+def _warn_cost_policy_deviation(
+    db_path: Path,
+    *,
+    parent_issue_id: str,
+    decisions: list[dict[str, Any]],
+) -> None:
+    """Post a single system comment when workers land on per-token models."""
+    from aiteam.db.comments import create_comment
+
+    with contextlib.closing(_connect(db_path)) as conn:
+        already = conn.execute(
+            """
+            SELECT COUNT(*) FROM activity_log
+            WHERE action = 'cost_policy.warning' AND target_id = ?
+            """,
+            (parent_issue_id,),
+        ).fetchone()
+    if already and int(already[0]) > 0:
+        return
+    total_per_cycle = sum(int(d.get("estimated_cost_cents") or 0) for d in decisions)
+    roles = ", ".join(
+        f"{d.get('role')} → {d.get('model')} (~{d.get('estimated_cost_cents')}¢/run)" for d in decisions
+    )
+    no_channel = any(d.get("policy_deviation") == "no_zero_cost_channel_connected" for d in decisions)
+    hint = (
+        "Conecta un canal local (Ollama/LM Studio) o una suscripción CLI y los workers pasarán a coste 0."
+        if no_channel
+        else "Hay un canal de coste 0 conectado pero el scoring eligió premium — revisa la selección de adapters."
+    )
+    try:
+        create_comment(
+            db_path,
+            issue_id=parent_issue_id,
+            author_agent_id=None,
+            body=(
+                f"⚠ Política de costes: hay roles worker en modelos de pago por token ({roles}). "
+                f"Sobrecoste estimado ~{total_per_cycle}¢ por ronda de runs. {hint}"
+            ),
+            metadata={"source": "cost_policy_warning"},
+        )
+    except Exception:
+        logger.warning("cost_policy warning comment failed for %s", parent_issue_id, exc_info=True)
+    try:
+        from aiteam.db.activity_log import log_activity
+
+        log_activity(
+            db_path,
+            action="cost_policy.warning",
+            target_type="issue",
+            target_id=parent_issue_id,
+            actor_agent_id=None,
+            payload={"decisions": decisions},
+        )
+    except Exception:
+        logger.warning("cost_policy warning activity failed for %s", parent_issue_id, exc_info=True)
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
