@@ -55,6 +55,20 @@ def _is_rate_limit_error(error: str | None) -> bool:
     text = str(error or "").lower()
     return "429" in text or "rate limit" in text or "rate_limit" in text
 
+
+def _cost_breaker_threshold_cents() -> int:
+    """Spend allowed per subtree without workspace progress before escalating.
+
+    Configurable via AITEAM_COST_BREAKER_CENTS; 0 (or negative) disables.
+    """
+    raw = os.environ.get("AITEAM_COST_BREAKER_CENTS", "").strip()
+    if not raw:
+        return 300
+    try:
+        return int(raw)
+    except ValueError:
+        return 300
+
 _COMMENT_BODY_MAX = 4096  # hard limit stored in DB
 _AGENT_REPORT_MARKER = "---AGENT-REPORT---"
 
@@ -905,6 +919,14 @@ class RunExecutor:
                 amount_cents=result.actual_cost_cents,
                 metadata={"source": "run_executor"},
             )
+        # ── Cost circuit breaker ──────────────────────────────────────────────
+        # Spend without workspace progress is the economic twin of a loop:
+        # escalate before the subtree silently burns the budget.
+        if issue_id_str:
+            try:
+                self._check_cost_breaker(issue_id=issue_id_str, run_id=run_id, agent_id=agent_id)
+            except Exception:
+                logger.warning("cost breaker check failed for issue %s", issue_id_str, exc_info=True)
 
         wakeup_terminal = "finished" if final_status in {"completed", "skipped"} else "failed"
         finish_wakeup(
@@ -2956,6 +2978,152 @@ class RunExecutor:
             issue_id, failed_adapter_type, new_adapter_type, liveness_reason,
         )
         return True
+
+    def _root_issue_id(self, issue_id: str) -> str:
+        current = str(issue_id)
+        for _ in range(10):
+            issue = get_issue(self.db_path, issue_id=current)
+            parent = str((issue or {}).get("parent_id") or "").strip()
+            if not parent:
+                return current
+            current = parent
+        return current
+
+    def _check_cost_breaker(self, *, issue_id: str, run_id: str, agent_id: str) -> None:
+        """Escalate when a subtree accumulates spend without workspace progress.
+
+        The epoch restarts at the last run that materialized files (file_ops /
+        workspace_evidence with changes) or at the last resolved breaker
+        interaction. Accept = keep going (resets the counter); reject = cancel
+        the subtree's open children (applied here, deterministically, on the
+        next run after the rejection).
+        """
+        threshold = _cost_breaker_threshold_cents()
+        if threshold <= 0:
+            return
+        root_id = self._root_issue_id(issue_id)
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            subtree_ids = [root_id] + [
+                str(row["id"])
+                for row in conn.execute("SELECT id FROM issues WHERE parent_id = ?", (root_id,)).fetchall()
+            ]
+            placeholders = ", ".join("?" for _ in subtree_ids)
+            breaker = conn.execute(
+                """
+                SELECT id, status, resolved_at, created_at
+                FROM issue_thread_interactions
+                WHERE issue_id = ?
+                  AND idempotency_key LIKE 'cost_breaker:%'
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (root_id,),
+            ).fetchone()
+            if breaker and str(breaker["status"]) not in {"accepted", "rejected", "cancelled", "expired", "answered"}:
+                return  # pending — the user has not decided yet
+            rejected_unapplied = False
+            if breaker and str(breaker["status"]) == "rejected":
+                applied = conn.execute(
+                    "SELECT COUNT(*) FROM activity_log WHERE action = 'cost_breaker.children_cancelled' AND target_id = ?",
+                    (str(breaker["id"]),),
+                ).fetchone()
+                rejected_unapplied = not (applied and int(applied[0]) > 0)
+            progress_row = conn.execute(
+                f"""
+                SELECT MAX(e.created_at) AS at
+                FROM run_events e
+                JOIN runs r ON r.id = e.run_id
+                WHERE r.issue_id IN ({placeholders})
+                  AND (
+                        e.event_type = 'file_ops'
+                     OR (e.event_type = 'workspace_evidence' AND json_extract(e.payload_json, '$.changed') = 1)
+                  )
+                """,
+                subtree_ids,
+            ).fetchone()
+            epoch_candidates = [
+                str(progress_row["at"]) if progress_row and progress_row["at"] else None,
+                str(breaker["resolved_at"]) if breaker and breaker["resolved_at"] else None,
+            ]
+            epoch = max((c for c in epoch_candidates if c), default=None)
+            if epoch:
+                spend_row = conn.execute(
+                    f"SELECT COALESCE(SUM(actual_cost_cents), 0) FROM runs WHERE issue_id IN ({placeholders}) AND created_at > ?",
+                    (*subtree_ids, epoch),
+                ).fetchone()
+            else:
+                spend_row = conn.execute(
+                    f"SELECT COALESCE(SUM(actual_cost_cents), 0) FROM runs WHERE issue_id IN ({placeholders})",
+                    subtree_ids,
+                ).fetchone()
+            spend = int(spend_row[0] or 0) if spend_row else 0
+            open_children = [
+                str(row["id"])
+                for row in conn.execute(
+                    "SELECT id FROM issues WHERE parent_id = ? AND status NOT IN ('done', 'cancelled')",
+                    (root_id,),
+                ).fetchall()
+            ]
+
+        # Rejected breaker: cancel the subtree's open children exactly once.
+        if rejected_unapplied and breaker is not None:
+            for child_id in open_children:
+                try:
+                    update_issue(self.db_path, issue_id=child_id, status="cancelled")
+                except Exception:
+                    logger.warning("cost_breaker: failed to cancel child %s", child_id, exc_info=True)
+            log_activity(
+                self.db_path,
+                action="cost_breaker.children_cancelled",
+                target_type="interaction",
+                target_id=str(breaker["id"]),
+                actor_agent_id=None,
+                run_id=run_id,
+                payload={"root_issue_id": root_id, "cancelled": open_children},
+            )
+            return
+
+        if spend < threshold:
+            return
+        try:
+            create_interaction(
+                self.db_path,
+                issue_id=root_id,
+                kind="request_confirmation",
+                payload={
+                    "version": 1,
+                    "reason": "cost_breaker_tripped",
+                    "root_issue_id": root_id,
+                    "spend_cents": spend,
+                    "threshold_cents": threshold,
+                    "epoch": epoch,
+                },
+                continuation_policy="wake_assignee",
+                idempotency_key=f"cost_breaker:{root_id}:{epoch or 'genesis'}",
+                source_run_id=run_id,
+                created_by_agent_id=agent_id,
+                title=f"Freno de coste — {spend}¢ gastados sin avance en el workspace",
+                summary=(
+                    f"El equipo lleva {spend}¢ gastados (umbral {threshold}¢) sin producir "
+                    "cambios nuevos en el workspace. Acepta para continuar (el contador se "
+                    "reinicia). Rechaza para cancelar las issues abiertas del ciclo y parar el gasto."
+                ),
+            )
+            log_activity(
+                self.db_path,
+                action="cost_breaker.tripped",
+                target_type="issue",
+                target_id=root_id,
+                actor_agent_id=agent_id,
+                run_id=run_id,
+                payload={"spend_cents": spend, "threshold_cents": threshold, "epoch": epoch},
+            )
+            logger.warning(
+                "cost_breaker.tripped: issue %s spent %d cents without workspace progress (threshold %d)",
+                root_id, spend, threshold,
+            )
+        except Exception:
+            logger.warning("cost_breaker: failed to create escalation for %s", root_id, exc_info=True)
 
     def _workspace_verification_lines(self) -> list[str]:
         """Scan the workspace for emptiness and stub/placeholder deliverables."""

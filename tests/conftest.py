@@ -37,6 +37,8 @@ _TEST_ENV_OVERRIDES = {
     # real; sin esto los tests leen LOCALAPPDATA/AI Teams si existe.
     "AITEAM_USER_CONFIG_DIR": str(Path(__file__).resolve().parent.parent / ".pytest-user-config-tmp"),
     "AITEAM_PROJECTS_ROOT": "",
+    # El cost breaker se prueba en tests dedicados; apagado para el resto.
+    "AITEAM_COST_BREAKER_CENTS": "0",
 }
 _PREVIOUS_TEST_ENV: dict[str, str | None] = {}
 
