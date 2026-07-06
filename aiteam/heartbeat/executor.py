@@ -27,6 +27,7 @@ from aiteam.db.wake_payload import build_wake_payload, _parse_agent_report
 from aiteam.db.wakeups import enqueue_wakeup, finish_wakeup
 from aiteam.heartbeat.scheduler import DispatchResult
 from aiteam.lead_intake import apply_accepted_team_proposal, build_team_proposal, format_team_proposal
+from aiteam.hiring_economics import log_hiring_decision
 from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
 from aiteam.provider_governor import GOVERNOR
 from aiteam.run_liveness import (
@@ -2315,6 +2316,16 @@ class RunExecutor:
                 actor_agent_id=supervisor_agent_id or None,
                 run_id=source_run_id or None,
                 payload={"role": role_key, "source": "llm_create_issue"},
+            )
+            log_hiring_decision(
+                self.db_path,
+                agent_id=str(row["id"]),
+                role=role_key,
+                adapter_type=str((selection or {}).get("adapter_type") or "role_builtin"),
+                adapter_config=(selection or {}).get("adapter_config") or {},
+                adapter_profile_id=(selection or {}).get("adapter_profile_id"),
+                source="llm_create_issue",
+                run_id=source_run_id or None,
             )
             return str(row["id"])
         except Exception:

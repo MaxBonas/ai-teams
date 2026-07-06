@@ -11,6 +11,7 @@ from typing import Any
 from aiteam.db.dependencies import unresolved_blockers
 from aiteam.db.runs import create_run
 from aiteam.db.wakeups import claim_next_wakeup, enqueue_wakeup, finish_wakeup
+from aiteam.hiring_economics import estimate_run_economics
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,17 @@ class HeartbeatScheduler:
                 context_snapshot[key] = _clean_optional(payload.get(key))
         if issue_id:
             context_snapshot["issue_id"] = issue_id
+        estimated_cost_cents = _safe_int(payload.get("estimated_cost_cents"))
+        estimated_savings_cents = _safe_int(payload.get("estimated_savings_cents"))
+        if estimated_cost_cents == 0 and estimated_savings_cents == 0:
+            # Wake sources rarely carry economics — compute them here so every
+            # run lands in the DB with a real estimate and savings figure.
+            try:
+                estimated_cost_cents, estimated_savings_cents = estimate_run_economics(
+                    self.db_path, str(wakeup["agent_id"])
+                )
+            except Exception:
+                pass
         run = create_run(
             self.db_path,
             run_id=run_id,
@@ -119,8 +131,8 @@ class HeartbeatScheduler:
             context_snapshot=context_snapshot,
             delegation_reason=_clean_optional(payload.get("delegation_reason")),
             complexity=_clean_optional(payload.get("complexity")),
-            estimated_cost_cents=_safe_int(payload.get("estimated_cost_cents")),
-            estimated_savings_cents=_safe_int(payload.get("estimated_savings_cents")),
+            estimated_cost_cents=estimated_cost_cents,
+            estimated_savings_cents=estimated_savings_cents,
         )
         self._mark_wakeup_running(wakeup["id"], run["id"])
         wakeup["status"] = "running"

@@ -10,6 +10,7 @@ from typing import Any
 from aiteam.action_routing import pick_role_for_routing, route_action
 from aiteam.db.dependencies import sync_default_child_dependencies
 from aiteam.db.wakeups import enqueue_wakeup
+from aiteam.hiring_economics import log_hiring_decision
 from aiteam.project_adapters import apply_adapter_policy_to_member
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES
 from aiteam.run_profiles import (
@@ -572,6 +573,22 @@ def apply_accepted_team_proposal(
         )
 
     sync_default_child_dependencies(db_path, parent_issue_id=parent_issue_id)
+
+    # Audit each adapter assignment with its economics (cost policy, A2).
+    created_agent_ids = set(created_agents)
+    for member in proposal.get("proposed_team") or []:
+        member_id = str(member.get("id") or "")
+        if member_id in created_agent_ids:
+            log_hiring_decision(
+                db_path,
+                agent_id=member_id,
+                role=str(member.get("role") or ""),
+                adapter_type=str(member.get("adapter_type") or "manual"),
+                adapter_config=member.get("adapter_config") or {},
+                adapter_profile_id=member.get("adapter_profile_id"),
+                source="lead_intake",
+                run_id=source_run_id or None,
+            )
 
     return {"created_agents": created_agents, "created_issues": created_issues}
 
