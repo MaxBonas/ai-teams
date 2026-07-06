@@ -2548,3 +2548,40 @@ def test_llm_lead_cycle_close_gets_machine_verification(tmp_path: Path) -> None:
     assert "Verificación automática del sistema" in summary
     assert "approved" in summary
     assert "stub" in summary.lower()
+
+
+def test_file_ops_reject_provider_convention_filenames(tmp_path: Path) -> None:
+    """AI Teams must never create AGENTS.md/CLAUDE.md/etc. in managed projects."""
+    from aiteam.heartbeat.executor import _execute_file_ops
+
+    touched = _execute_file_ops(
+        [
+            {"op": "write_file", "path": "CLAUDE.md", "body": "x"},
+            {"op": "write_file", "path": "docs/AGENTS.md", "body": "x"},
+            {"op": "append_file", "path": "gemini.md", "body": "x"},
+            {"op": "write_file", "path": ".aiteam/instructions.md", "body": "persistent"},
+            {"op": "write_file", "path": "README.md", "body": "ok"},
+        ],
+        tmp_path,
+    )
+
+    assert touched == [".aiteam/instructions.md", "README.md"]
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / "docs" / "AGENTS.md").exists()
+    assert not (tmp_path / "gemini.md").exists()
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "ok"
+
+
+def test_file_ops_do_not_delete_provider_convention_files(tmp_path: Path) -> None:
+    from aiteam.heartbeat.executor import _execute_file_ops
+
+    existing = tmp_path / "AGENTS.md"
+    existing.write_text("user-owned", encoding="utf-8")
+
+    touched = _execute_file_ops(
+        [{"op": "delete_file", "path": "AGENTS.md"}],
+        tmp_path,
+    )
+
+    assert touched == []
+    assert existing.read_text(encoding="utf-8") == "user-owned"

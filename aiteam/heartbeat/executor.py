@@ -3955,6 +3955,14 @@ def _list_workspace_files(workspace_root: Path) -> list[dict[str, Any]]:
     return result
 
 
+# AI Teams must never create (or touch) provider-convention instruction files
+# inside managed projects — the correct namespace is .aiteam/instructions.md.
+# See docs/NAMING_COLLISION_INVESTIGATION.md.
+_FORBIDDEN_FILE_BASENAMES = frozenset({
+    "agents.md", "claude.md", "gemini.md", "codex.md", "copilot.md",
+})
+
+
 def _execute_file_ops(
     file_ops: list[dict[str, Any]],
     workspace_root: Path,
@@ -3962,8 +3970,9 @@ def _execute_file_ops(
     """Materialize write_file / append_file / delete_file ops on disk.
 
     Paths are resolved relative to *workspace_root*.  Any op that would
-    escape the workspace (path traversal) is silently skipped.  Returns
-    a list of relative paths that were actually touched.
+    escape the workspace (path traversal) is silently skipped, as is any op
+    targeting a provider-convention filename (AGENTS.md, CLAUDE.md, …).
+    Returns a list of relative paths that were actually touched.
 
     This runs BEFORE :func:`diff_snapshots` so the resulting workspace
     changes are counted as real evidence — enabling API-only adapters
@@ -3994,6 +4003,17 @@ def _execute_file_ops(
             target.relative_to(workspace_root)
         except ValueError:
             logger.warning("file_op skipped — path escapes workspace: %s", rel_path)
+            continue
+
+        # Naming-collision guard: provider-convention instruction files are
+        # off-limits in managed projects; persistent instructions belong in
+        # .aiteam/instructions.md.
+        if target.name.lower() in _FORBIDDEN_FILE_BASENAMES:
+            logger.warning(
+                "file_op rejected — provider-convention filename %r is forbidden; "
+                "use .aiteam/instructions.md instead",
+                rel_path,
+            )
             continue
 
         try:
