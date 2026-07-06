@@ -2441,3 +2441,37 @@ def test_update_child_issue_empty_body_requeue_rejected(tmp_path: Path) -> None:
             "SELECT status FROM issues WHERE id = ?", ("issue:child",)
         ).fetchone()
     assert dict(child)["status"] == "blocked"
+
+
+class _FailingLeadRuntime:
+    """Simulates a Lead run that dies at the provider transport layer (429)."""
+
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="failed",
+            error="HTTP 429: rate limit reached",
+            error_code="api_error",
+            exit_code=1,
+        )
+
+
+def test_circuit_breaker_ignores_failed_lead_runs(tmp_path: Path) -> None:
+    """Infra failures are not Lead decisions: no unblock_skipped, no breaker."""
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    registry = AdapterRegistry([_FailingLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    for i in range(4):
+        _enqueue_blocked_child_wake(db_path, idempotency_key=f"cb_fail_{i}")
+        dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+        if dispatch is not None:
+            executor.execute(dispatch)
+    assert _count_activity(db_path, "lead.unblock_skipped", "issue:child") == 0
+    assert _count_activity(db_path, "loop.detected", "issue:child") == 0
+    assert _count_cb_interactions(db_path, "issue:intake") == 0
+    assert _count_activity(db_path, "lead.unblock_run_failed", "issue:child") == 4

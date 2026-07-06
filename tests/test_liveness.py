@@ -192,3 +192,43 @@ def test_reconcile_unassigned_role_issue_idempotent(tmp_path):
 
     assert first == ["i1"]
     assert second == []
+
+
+# --- infra backoff (api_error) ---
+
+def _insert_finished_run(db: Path, *, run_id: str, issue_id: str, status: str, error_code: str | None, finished_at_sql: str, created_at_sql: str = "datetime('now')"):
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO runs (id, agent_id, issue_id, status, invocation_source, error_code, finished_at, created_at) "
+            f"VALUES (?, 'a1', ?, ?, 'test', ?, {finished_at_sql}, {created_at_sql})",
+            (run_id, issue_id, status, error_code),
+        )
+
+
+def test_reconcile_backs_off_recent_api_error(tmp_path):
+    db = _init(tmp_path)
+    _insert_issue(db, issue_id="i1", status="in_progress")
+    _insert_finished_run(db, run_id="r1", issue_id="i1", status="failed", error_code="api_error", finished_at_sql="datetime('now')")
+    assert reconcile_unqueued_assigned_issues(db) == []
+
+
+def test_reconcile_requeues_after_backoff_window(tmp_path):
+    db = _init(tmp_path)
+    _insert_issue(db, issue_id="i1", status="in_progress")
+    _insert_finished_run(db, run_id="r1", issue_id="i1", status="failed", error_code="api_error", finished_at_sql="datetime('now', '-5 minutes')", created_at_sql="datetime('now', '-5 minutes')")
+    assert reconcile_unqueued_assigned_issues(db) == ["i1"]
+
+
+def test_reconcile_not_blocked_by_old_failure_with_newer_success(tmp_path):
+    db = _init(tmp_path)
+    _insert_issue(db, issue_id="i1", status="in_progress")
+    _insert_finished_run(db, run_id="r1", issue_id="i1", status="failed", error_code="api_error", finished_at_sql="datetime('now')", created_at_sql="datetime('now', '-2 minutes')")
+    _insert_finished_run(db, run_id="r2", issue_id="i1", status="completed", error_code=None, finished_at_sql="datetime('now')", created_at_sql="datetime('now', '-1 minute')")
+    assert reconcile_unqueued_assigned_issues(db) == ["i1"]
+
+
+def test_reconcile_backs_off_only_api_errors(tmp_path):
+    db = _init(tmp_path)
+    _insert_issue(db, issue_id="i1", status="in_progress")
+    _insert_finished_run(db, run_id="r1", issue_id="i1", status="failed", error_code="tool_parse_error", finished_at_sql="datetime('now')")
+    assert reconcile_unqueued_assigned_issues(db) == ["i1"]

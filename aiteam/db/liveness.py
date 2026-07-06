@@ -150,6 +150,20 @@ def reconcile_unqueued_assigned_issues(db_path: Path) -> list[str]:
                   WHERE d.issue_id = issues.id
                     AND dep.status NOT IN ('done', 'cancelled')
               )
+              -- Infra backoff: if the most recent run for this issue failed at
+              -- the provider transport layer (api_error: 429 / timeout / 5xx),
+              -- hold the requeue for 2 minutes instead of hammering every tick.
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM runs r
+                  WHERE r.issue_id = issues.id
+                    AND r.status = 'failed'
+                    AND r.error_code = 'api_error'
+                    AND r.finished_at >= datetime('now', '-120 seconds')
+                    AND r.created_at = (
+                        SELECT MAX(r2.created_at) FROM runs r2 WHERE r2.issue_id = issues.id
+                    )
+              )
             ORDER BY priority DESC, created_at ASC, id ASC
             """
         ).fetchall()

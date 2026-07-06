@@ -672,12 +672,31 @@ class RunExecutor:
             agent_role in {"lead", "team_lead"}
             and adapter_type not in _BUILTIN_ADAPTERS
         )
-        if (
+        _is_unblock_wake = (
             _is_llm_lead
             and _wake_reason_for_audit == "child_report"
             and _blocked_child_id_audit
             and str(ctx.get("child_issue_status") or "") == "blocked"
-        ):
+        )
+        # A failed run is not a Lead decision: the model never got to speak
+        # (rate limit, timeout, transport error). Counting it as a skip blames
+        # the Lead for infra problems and trips the circuit breaker with noise.
+        if _is_unblock_wake and result.status != "completed":
+            log_activity(
+                self.db_path,
+                action="lead.unblock_run_failed",
+                target_type="issue",
+                target_id=_blocked_child_id_audit,
+                actor_agent_id=agent_id,
+                run_id=run_id,
+                payload={
+                    "parent_issue_id": issue_id_str,
+                    "blocked_child_id": _blocked_child_id_audit,
+                    "run_status": result.status,
+                    "error_code": str(result.error_code or ""),
+                },
+            )
+        elif _is_unblock_wake:
             _acted_on_child = any(
                 str(u.get("child_issue_id") or "") == _blocked_child_id_audit
                 for u in (result.actions or {}).get("update_child_issues") or []
