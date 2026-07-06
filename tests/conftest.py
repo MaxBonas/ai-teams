@@ -33,6 +33,10 @@ _TEST_ENV_OVERRIDES = {
     "GOOGLE_API_KEY": "",
     "GEMINI_API_KEY": "",
     "GROQ_API_KEY": "",
+    # Aisla la config de usuario (settings.json, projects_root) de la maquina
+    # real; sin esto los tests leen LOCALAPPDATA/AI Teams si existe.
+    "AITEAM_USER_CONFIG_DIR": str(Path(__file__).resolve().parent.parent / ".pytest-user-config-tmp"),
+    "AITEAM_PROJECTS_ROOT": "",
 }
 _PREVIOUS_TEST_ENV: dict[str, str | None] = {}
 
