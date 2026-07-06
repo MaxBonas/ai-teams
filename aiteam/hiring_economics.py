@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from aiteam.db.activity_log import log_activity
-from aiteam.pricing import estimate_cost_cents, typical_tokens_for_role
+from aiteam.pricing import estimate_cost_cents, price_per_mtok, typical_tokens_for_role
 from aiteam.project_adapters import JUNIOR_ROLES, choose_adapter_for_role, project_profiles
 from aiteam.user_config import load_adapter_profiles, profile_is_connected, resolve_adapter_config
 
@@ -129,7 +129,9 @@ def log_hiring_decision(
     premium = premium_alternative_cents(db_path, role, input_tokens, output_tokens)
 
     deviation: str | None = None
-    if str(role or "").strip().lower() in JUNIOR_ROLES and estimated > 0:
+    # Per-token billing is the deviation signal, not the rounded estimate —
+    # cheap "mini" models cost <1¢/run and would escape an `estimated > 0` check.
+    if str(role or "").strip().lower() in JUNIOR_ROLES and price_per_mtok(provider, model) != (0, 0):
         deviation = (
             "scoring_preferred_premium"
             if _zero_cost_channel_connected(db_path)
@@ -188,10 +190,10 @@ def detect_policy_deviations(db_path: Path) -> list[dict[str, Any]]:
         if role not in JUNIOR_ROLES:
             continue
         provider, model = provider_and_model_for(str(row["adapter_type"] or ""), _decode_json(row["adapter_config_json"]))
+        if price_per_mtok(provider, model) == (0, 0):
+            continue
         input_tokens, output_tokens = typical_tokens_for_role(db_path, role)
         estimated = estimate_cost_cents(provider, model, input_tokens, output_tokens)
-        if estimated <= 0:
-            continue
         if zero_cost_available is None:
             zero_cost_available = _zero_cost_channel_connected(db_path)
         deviations.append({
