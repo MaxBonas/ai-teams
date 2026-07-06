@@ -61,7 +61,7 @@ class OpenAIResponsesRuntime:
             status=status if status in {"completed", "failed", "skipped"} else "completed",
             output=str(work.get("summary") or "") or None,
             usage=usage,
-            actual_cost_cents=0,
+            actual_cost_cents=_estimate_cost_cents(model, usage),
             actions=ops_to_actions([op for op in ops if isinstance(op, dict)]),
         )
 
@@ -80,6 +80,31 @@ def _user_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         f"Issue: {env.get('AITEAM_TASK_ID', run.get('issue_id') or '')}\n\n"
         f"{payload or '{}'}"
     )
+
+
+# Cost estimates (cents per 1M tokens) for common models — update as pricing changes
+_COST_TABLE: dict[str, tuple[int, int]] = {
+    "gpt-4.1-nano": (10, 40),
+    "gpt-4.1-mini": (40, 160),
+    "gpt-4.1":      (200, 800),
+    "gpt-4o-mini":  (15, 60),
+    "gpt-4o":       (250, 1000),
+    "o4-mini":      (110, 440),
+    "o3":           (200, 800),
+}
+
+
+def _estimate_cost_cents(model: str, usage: dict[str, Any] | None) -> int:
+    if not isinstance(usage, dict):
+        return 0
+    try:
+        input_tokens = int(usage.get("input_tokens") or 0)
+        output_tokens = int(usage.get("output_tokens") or 0)
+    except (TypeError, ValueError):
+        return 0
+    key = next((k for k in _COST_TABLE if model.startswith(k)), "gpt-4.1")
+    in_price, out_price = _COST_TABLE[key]
+    return max(0, (input_tokens * in_price + output_tokens * out_price) // 1_000_000)
 
 
 def _openai_output_text(data: dict[str, Any]) -> str:
