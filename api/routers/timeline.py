@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -212,37 +213,58 @@ def _failed_run_title(cause: str, count: int) -> str:
     return f"{base} (x{count})" if count > 1 else base
 
 
-def _collapse_failed_runs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse consecutive failed runs of the same issue/cause into one item.
+_COLLAPSE_WINDOW_SECONDS = 3600.0
 
-    A provider outage produces a burst of identical "Run fallida" cards that
-    drowns the actual story of the run. The collapsed item carries ``count``
-    and a cause-labelled title ("rate limit del proveedor (x15)").
+
+def _parse_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _collapse_failed_runs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse bursts of failed runs of the same issue/cause into one item.
+
+    A provider outage produces many identical "Run fallida" cards interleaved
+    with other events, drowning the actual story of the run. Failed runs with
+    the same issue and cause within a 1-hour rolling window merge into the
+    first item seen, which carries ``count`` and a cause-labelled title
+    ("rate limit del proveedor (x15)"). Other items keep their position.
     """
     out: list[dict[str, Any]] = []
-    last_cause: str | None = None
+    groups: dict[tuple[Any, str], dict[str, Any]] = {}
     for item in items:
         if item.get("type") == "run" and item.get("status") == "failed":
             cause = _failed_run_cause(str(item.get("detail") or ""))
-            prev = out[-1] if out else None
-            if (
-                prev is not None
-                and prev.get("type") == "run"
-                and prev.get("status") == "failed"
-                and prev.get("issue_id") == item.get("issue_id")
-                and last_cause == cause
-            ):
-                prev["count"] = int(prev.get("count") or 1) + 1
-                prev["title"] = _failed_run_title(cause, prev["count"])
-                continue
+            key = (item.get("issue_id"), cause)
+            kept = groups.get(key)
+            if kept is not None:
+                kept_time = _parse_time(kept.get("_window_edge"))
+                item_time = _parse_time(item.get("time"))
+                in_window = (
+                    kept_time is None
+                    or item_time is None
+                    or abs((kept_time - item_time).total_seconds()) <= _COLLAPSE_WINDOW_SECONDS
+                )
+                if in_window:
+                    kept["count"] = int(kept.get("count") or 1) + 1
+                    kept["title"] = _failed_run_title(cause, kept["count"])
+                    kept["_window_edge"] = item.get("time")
+                    continue
             grouped = dict(item)
             grouped["count"] = 1
             grouped["title"] = _failed_run_title(cause, 1)
+            grouped["_window_edge"] = item.get("time")
             out.append(grouped)
-            last_cause = cause
+            groups[key] = grouped
         else:
             out.append(item)
-            last_cause = None
+    for grouped in groups.values():
+        grouped.pop("_window_edge", None)
     return out
 
 
