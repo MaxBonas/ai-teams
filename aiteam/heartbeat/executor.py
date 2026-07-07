@@ -650,6 +650,11 @@ class RunExecutor:
         workspace_delta = diff_snapshots(before_workspace, snapshot_workspace(workspace_root))
 
         # ── Step 1: Write output comment to DB (before evidence collection) ─
+        # A failed run's `output` is raw stdout (for CLI adapters, the echoed
+        # prompt) — keep it as a run event for debugging in the Runs tab, but
+        # never post it as a chat comment: it spams the user with the full
+        # prompt on every failure. The failure is surfaced by the run status
+        # and the timeline instead.
         if result.output:
             append_run_event(
                 self.db_path,
@@ -658,7 +663,7 @@ class RunExecutor:
                 stream="stdout",
                 payload={"text": _safe_truncate_output(result.output)},
             )
-            if issue_id_str:
+            if issue_id_str and result.status != "failed":
                 comment = create_comment(
                     self.db_path,
                     issue_id=issue_id_str,

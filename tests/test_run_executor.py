@@ -2313,6 +2313,50 @@ class _NoOpLeadRuntime:
         return ExecutionResult(status="completed", output="Engineer desbloqueado.", actions={})
 
 
+class _FailingRawOutputRuntime:
+    """A CLI run that fails and returns raw stdout (echoed prompt) as output."""
+
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="failed",
+            output="=== Instrucciones ===\nEres un ORQUESTADOR...\n" + "x" * 4000,
+            error="exit code 1",
+            error_code="subscription_cli_nonzero_exit",
+        )
+
+
+def test_failed_run_output_not_posted_as_chat_comment(tmp_path: Path) -> None:
+    """A failed run's raw stdout must not become a chat comment (it spams the
+    user with the echoed prompt), but the run event is still recorded."""
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    registry = AdapterRegistry([_FailingRawOutputRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        comments = conn.execute(
+            "SELECT COUNT(*) FROM issue_comments WHERE issue_id = 'issue:intake' AND body LIKE '%ORQUESTADOR%'"
+        ).fetchone()
+        events = conn.execute(
+            "SELECT COUNT(*) FROM run_events WHERE event_type = 'output'"
+        ).fetchone()
+    assert comments[0] == 0            # chat is clean
+    assert events[0] >= 1              # but the raw output is kept for debugging
+
+
 def _count_activity(db_path: Path, action: str, target_id: str) -> int:
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
