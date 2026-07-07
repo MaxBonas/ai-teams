@@ -47,6 +47,11 @@ _BUILTIN_ADAPTERS: frozenset[str] = frozenset(
 
 _ENGINEERING_ROLES: frozenset[str] = frozenset({"engineer", "software_engineer"})
 
+# One-shot Tier 3 scouts: inspect and report in a single run. Once they produce
+# output their issue is done — without this the issue lingers 'in_progress' and
+# the reconciler re-wakes the scout forever (observed: 24 runs on one issue).
+_ONE_SHOT_SCOUT_ROLES: frozenset[str] = frozenset({"file_scout", "web_scout", "test_runner"})
+
 MAX_CONTINUATION_ATTEMPTS: int = 2
 
 
@@ -209,10 +214,22 @@ def classify_run_liveness(
     #    (Text output from a lead/reviewer/qa is the expected delivery format.)
     if not is_engineering:
         if useful_output or evidence.has_concrete_action_evidence:
+            # One-shot scouts finish in a single run — close the issue so the
+            # reconciler stops re-waking them. Only when the agent didn't
+            # already declare its own status via a set_status op.
+            override: dict = {}
+            if role in _ONE_SHOT_SCOUT_ROLES and not has_explicit_issue_status:
+                override = {
+                    "issue_status": "done",
+                    "notify_supervisor": True,
+                    "_liveness_state": "advanced",
+                    "_liveness_reason": "scout_one_shot_report_complete",
+                }
             return LivenessResult(
                 state="advanced",
                 reason="non_engineering_role_with_output_or_evidence",
                 needs_continuation=False,
+                actions_override=override,
             )
         return _continuable_or_exhausted(
             state_name="empty_response",

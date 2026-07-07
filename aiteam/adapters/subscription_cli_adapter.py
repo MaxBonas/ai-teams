@@ -11,25 +11,33 @@ from typing import Any
 
 from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
 from aiteam.adapters.work_contract import (
+    OPENAI_SUBMIT_WORK_SCHEMA,
     SUBMIT_WORK_SCHEMA,
     build_execution_contract,
     ops_to_actions,
     parse_submit_work,
 )
 
-# Simplified output schema for Codex CLI.
-# OpenAI structured output requires ALL properties in `required` when
-# additionalProperties=False — the full SUBMIT_WORK_SCHEMA with nested
-# OP_SCHEMA violates this because OP_SCHEMA only requires "type".
-# We ask Codex for a flat object and synthesise ops on our side.
+# Output schema for Codex CLI. Includes an `ops` array so codex agents can
+# delegate and manage work (create_issue, set_status, create_interaction, …)
+# exactly like the API adapters — not just comment. Without ops an orchestrator
+# role (the Lead) can only comment or edit files directly, which forces it to
+# code instead of delegate.
+#
+# Codex passes --output-schema straight to OpenAI structured outputs, which
+# demands STRICT mode: every object needs additionalProperties=false and ALL
+# properties in `required` (optionals expressed as nullable). We reuse the
+# already-strict ops item schema from work_contract rather than hand-rolling
+# one — a non-strict schema fails the request with HTTP 400 invalid_json_schema.
 CODEX_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "status": {"type": "string", "enum": ["completed", "failed", "skipped"]},
         "summary": {"type": "string"},
         "add_comment": {"type": "string"},
+        "ops": OPENAI_SUBMIT_WORK_SCHEMA["properties"]["ops"],
     },
-    "required": ["status", "summary", "add_comment"],
+    "required": ["status", "summary", "add_comment", "ops"],
     "additionalProperties": False,
 }
 
@@ -225,6 +233,10 @@ class ClaudeSubscriptionCliRuntime:
         command = raw
         command.extend(["exec", "--skip-git-repo-check", "--ephemeral"])
         command.extend(["--sandbox", self.sandbox])
+        # Neutralize the user's interactive turn-ended notifier: a headless run
+        # must not trigger ~/.codex/config.toml's `notify` hook, which spawns a
+        # computer-use helper that kills the run's process tree mid-flight.
+        command.extend(["-c", "notify=[]"])
         command.extend(["--output-schema", schema_path, "--output-last-message", output_path])
         if self.model:
             if self.oss or self.local_provider:
@@ -258,22 +270,39 @@ def _build_system_prompt(env: dict[str, str]) -> str:
     return base + build_execution_contract()
 
 
-def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
-    """Single consolidated prompt for Codex CLI.
+# Roles that orchestrate rather than implement: they must delegate via ops
+# (create_issue, update_child_issue, create_interaction, set_status) and must
+# NOT edit workspace files themselves. Everything else is an executor.
+_ORCHESTRATION_ROLES = frozenset({"lead", "team_lead"})
+# Tier 3 scouts inspect/report only — they never edit files.
+_READ_ONLY_ROLES = frozenset({"file_scout", "web_scout", "context_curator"})
 
-    Codex is a code-first agent: no system/user split, one task-focused prompt.
-    We embed role, workspace path, wake context and output format instructions
-    so the agent knows exactly what to do and where to report.
+
+def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
+    """Single consolidated prompt for Codex CLI, tailored to the agent's role.
+
+    The agent's own skill (AITEAM_AGENT_SKILL) is injected verbatim so codex
+    follows the role contract — critically, so the Lead orchestrates and
+    delegates instead of coding. Orchestration roles get the ops delegation
+    vocabulary and are told NOT to edit files; executor roles keep the
+    implement-by-editing instructions.
     """
     role = env.get("AITEAM_AGENT_ROLE", "").strip() or "engineer"
+    role_key = role.lower()
+    is_orchestrator = role_key in _ORCHESTRATION_ROLES
+    is_read_only = is_orchestrator or role_key in _READ_ONLY_ROLES
+    skill = env.get("AITEAM_AGENT_SKILL", "").strip()
     workspace = env.get("AITEAM_WORKSPACE_ROOT", "").strip()
     payload = env.get("AITEAM_WAKE_PAYLOAD_JSON", "").strip()
     if not payload:
         payload = json.dumps({"issue_id": run.get("issue_id")}, ensure_ascii=False)
 
-    parts = [
+    parts: list[str | None] = [
         f"Eres el agente {role.upper()} de un equipo de IA (AI Teams).",
-        "Tu trabajo: implementar la tarea delegada leyendo y editando archivos en el workspace.",
+    ]
+    if skill:
+        parts += ["", "=== Tu rol (instrucciones vinculantes) ===", skill]
+    parts += [
         "",
         f"Workspace root: {workspace}" if workspace else "",
         f"Issue ID:       {env.get('AITEAM_TASK_ID', '')}",
@@ -283,14 +312,41 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         payload,
         "",
         "=== Instrucciones ===",
-        "1. Lee los archivos relevantes del workspace para entender el estado actual.",
-        "2. Implementa los cambios necesarios usando tus herramientas nativas (escritura/edición de archivos).",
-        "3. Si necesitas ejecutar comandos (instalar dependencias, tests, etc.), usa el shell.",
-        "4. Cuando termines, responde EXACTAMENTE con un JSON que siga el output schema:",
-        '   {"status": "completed", "summary": "<qué hiciste>", "add_comment": "<detalle para el equipo>"}',
-        "   — status: completed si la tarea está hecha, failed si no fue posible, skipped si no aplica.",
-        "   — summary: descripción concisa de los cambios realizados (1-3 frases).",
-        "   — add_comment: información adicional para el Team Lead / Reviewer (puede ser vacío '').",
+    ]
+
+    if is_orchestrator:
+        parts += [
+            "Eres un ORQUESTADOR, no un implementador. NO escribas ni edites código ni archivos tú mismo.",
+            "Tu trabajo es planificar y DELEGAR mediante `ops` en tu respuesta JSON:",
+            "  - Para implementación de código → crea un sub-issue: "
+            '{"type":"create_issue","title":"...","description":"<spec concreta: tecnología, archivos, criterios de aceptación>","role":"engineer","complexity":"low|medium|high"}',
+            "  - Para revisión → create_issue con role:reviewer.",
+            "  - Para leer archivos o investigar → create_issue con role:file_scout / web_scout (NUNCA lo hagas tú).",
+            "  - Para preguntar al usuario → "
+            '{"type":"create_interaction","kind":"request_confirmation","title":"...","summary":"...","payload":{"reason":"..."}}',
+            "  - Para dirigir a un hijo bloqueado → update_child_issue. Para cerrar la issue → "
+            '{"type":"set_status","status":"done"}.',
+            "Solo escribe un comentario (add_comment) para dejar constancia; el trabajo real va en `ops`.",
+        ]
+    elif is_read_only:
+        parts += [
+            "Eres un SCOUT de solo lectura. Inspecciona y reporta; NO edites archivos.",
+            "1. Lee los archivos indicados y responde con un resumen conciso en `add_comment`.",
+            "2. Cierra tu tarea añadiendo el op {\"type\":\"set_status\",\"status\":\"done\"} — tu trabajo es de un solo tiro.",
+        ]
+    else:
+        parts += [
+            "1. Lee los archivos relevantes del workspace para entender el estado actual.",
+            "2. Implementa los cambios necesarios usando tus herramientas nativas (escritura/edición de archivos).",
+            "3. Si necesitas ejecutar comandos (instalar dependencias, tests, etc.), usa el shell.",
+        ]
+
+    parts += [
+        "",
+        "=== Formato de salida (obligatorio) ===",
+        "Responde EXACTAMENTE con un JSON que siga el output schema:",
+        '  {"status":"completed|failed|skipped", "summary":"<1-3 frases>", "add_comment":"<detalle para el equipo, puede ser \'\'>", "ops":[...]}',
+        "  — `ops` es una lista de acciones estructuradas (vacía [] si no aplica).",
     ]
     return "\n".join(p for p in parts if p is not None)
 

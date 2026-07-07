@@ -50,6 +50,11 @@ _TERMINAL_EXEC_STATUSES = {"completed", "failed", "skipped"}
 
 _LLM_ADAPTER_TYPES = {"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"}
 
+# Roles that must not edit workspace files when running a coding CLI: the Lead
+# delegates via ops, scouts inspect and report. Execution roles (engineer,
+# lead_executor) are intentionally excluded so they keep workspace-write.
+_NON_EDITING_ROLES = {"lead", "team_lead", "file_scout", "web_scout", "context_curator"}
+
 
 def _is_rate_limit_error(error: str | None) -> bool:
     text = str(error or "").lower()
@@ -158,6 +163,11 @@ class RunExecutor:
                 if isinstance(runtime, GeminiApiRuntime):
                     runtime = GeminiApiRuntime(runtime.descriptor, model=override_model)
             elif adapter_type == "subscription_cli" and isinstance(runtime, ClaudeSubscriptionCliRuntime):
+                # Orchestration/scout roles run the coding CLI read-only so they
+                # cannot edit files — they must delegate (Lead) or report
+                # (scouts) via structured ops instead of implementing directly.
+                if agent_role.lower() in _NON_EDITING_ROLES:
+                    adapter_cfg = {**adapter_cfg, "sandbox": "read-only"}
                 runtime = runtime.with_config(adapter_cfg)
         # ── Provider degradation fallback (opt-in) ───────────────────────────
         # When the provider is degraded (repeated 429s) and the operator has

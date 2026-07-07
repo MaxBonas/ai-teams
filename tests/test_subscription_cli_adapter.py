@@ -13,6 +13,7 @@ import pytest
 from aiteam.adapters.subscription_cli_adapter import (
     CODEX_OUTPUT_SCHEMA,
     ClaudeSubscriptionCliRuntime,
+    _build_codex_prompt,
     _parse_codex_output,
     _resolve_cli_cmd,
 )
@@ -143,6 +144,93 @@ def _make_runtime(*, model: str | None = None, oss: bool = False, local_provider
     )
 
 
+class TestReadOnlySandboxForOrchestrators:
+    def test_lead_codex_run_uses_read_only_sandbox(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """A lead running the codex CLI must get --sandbox read-only so it can't
+        edit files — forcing it to delegate."""
+        from aiteam.adapters.registry import AdapterRegistry
+        from aiteam.db.wakeups import enqueue_wakeup
+        from aiteam.heartbeat.executor import RunExecutor
+        from aiteam.heartbeat.scheduler import HeartbeatScheduler
+
+        db = tmp_path / "aiteam.db"
+        with sqlite3.connect(str(db)) as conn:
+            conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            conn.execute("INSERT INTO goals (id, title) VALUES ('g1','G')")
+            conn.execute(
+                "INSERT INTO agents (id, role, name, adapter_type, adapter_config_json) "
+                "VALUES ('role:lead','lead','Lead','subscription_cli', ?)",
+                (json.dumps({"cli_kind": "codex", "command": ["codex"], "sandbox": "workspace-write"}),),
+            )
+            conn.execute(
+                "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) "
+                "VALUES ('issue:intake','g1','T','in_progress','lead','role:lead')"
+            )
+            conn.commit()
+
+        captured: dict[str, Any] = {}
+
+        def fake_run(*args: Any, **kwargs: Any):
+            captured["command"] = args[0] if args else kwargs.get("args")
+            proc = MagicMock()
+            proc.returncode = 0
+            proc.stdout = json.dumps({"status": "completed", "summary": "ok", "add_comment": "", "ops": []})
+            proc.stderr = ""
+            return proc
+
+        registry = AdapterRegistry.__new__(AdapterRegistry)
+        from aiteam.adapters.registry import build_default_registry
+        registry = build_default_registry()
+        executor = RunExecutor(db, registry)
+        enqueue_wakeup(db, agent_id="role:lead", source="manual", reason="manual",
+                       payload={"issue_id": "issue:intake", "wake_reason": "manual"})
+        dispatch = HeartbeatScheduler(db).dispatch_next(agent_id="role:lead")
+        assert dispatch is not None
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+            executor.execute(dispatch)
+
+        cmd = captured.get("command") or []
+        assert "--sandbox" in cmd
+        assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+
+
+class TestCodexOutputSchema:
+    def test_schema_includes_ops_so_agents_can_delegate(self):
+        assert "ops" in CODEX_OUTPUT_SCHEMA["properties"]
+        assert "ops" in CODEX_OUTPUT_SCHEMA["required"]
+        item = CODEX_OUTPUT_SCHEMA["properties"]["ops"]["items"]
+        assert "create_issue" in item["properties"]["type"]["enum"]
+        assert "set_status" in item["properties"]["type"]["enum"]
+
+
+class TestBuildCodexPrompt:
+    def _env(self, role: str, *, skill: str = "") -> dict[str, str]:
+        return {
+            "AITEAM_AGENT_ROLE": role,
+            "AITEAM_AGENT_SKILL": skill,
+            "AITEAM_WORKSPACE_ROOT": "/ws",
+            "AITEAM_TASK_ID": "issue:x",
+            "AITEAM_WAKE_PAYLOAD_JSON": '{"issue_id":"issue:x"}',
+        }
+
+    def test_lead_prompt_delegates_and_forbids_editing(self):
+        prompt = _build_codex_prompt(self._env("lead", skill="SKILL-LEAD-MARKER"), {"issue_id": "issue:x"})
+        assert "SKILL-LEAD-MARKER" in prompt          # role skill injected
+        assert "ORQUESTADOR" in prompt
+        assert "create_issue" in prompt
+        assert "NO escribas ni edites" in prompt
+
+    def test_engineer_prompt_keeps_implement_instructions(self):
+        prompt = _build_codex_prompt(self._env("engineer"), {"issue_id": "issue:x"})
+        assert "ORQUESTADOR" not in prompt
+        assert "edici" in prompt.lower()  # implement by editing files
+
+    def test_scout_prompt_is_read_only_and_closes(self):
+        prompt = _build_codex_prompt(self._env("file_scout"), {"issue_id": "issue:x"})
+        assert "solo lectura" in prompt.lower()
+        assert "set_status" in prompt
+
+
 class TestBuildCodexCommand:
     def test_no_ask_for_approval_flag(self):
         rt = _make_runtime()
@@ -163,8 +251,13 @@ class TestBuildCodexCommand:
         """No model configured → no -c model override; codex uses config.toml default."""
         rt = _make_runtime(model=None)
         cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
-        assert "-c" not in cmd
+        assert not any(str(a).startswith("model=") for a in cmd)
         assert "--model" not in cmd
+
+    def test_notify_hook_disabled_for_headless_runs(self):
+        rt = _make_runtime()
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert "notify=[]" in cmd
 
     def test_prompt_read_from_stdin_not_argv(self):
         """The prompt must not be an argv element (Windows command-line length

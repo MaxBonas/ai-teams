@@ -438,6 +438,39 @@ class TestNonEngineeringRoles:
         assert result.state == "advanced"
         assert result.needs_continuation is False
 
+    @pytest.mark.parametrize("role", ["file_scout", "web_scout", "test_runner"])
+    def test_one_shot_scout_auto_closes_its_issue(self, role: str):
+        result = classify_run_liveness(
+            run_status="completed",
+            evidence=_empty_evidence(issue_comments_created=1),
+            adapter_type="subscription_cli",
+            agent_role=role,
+            useful_output=True,
+        )
+        assert result.state == "advanced"
+        assert result.actions_override.get("issue_status") == "done"
+
+    def test_scout_does_not_auto_close_when_it_set_its_own_status(self):
+        result = classify_run_liveness(
+            run_status="completed",
+            evidence=_empty_evidence(issue_comments_created=1),
+            adapter_type="subscription_cli",
+            agent_role="file_scout",
+            useful_output=True,
+            has_explicit_issue_status=True,
+        )
+        assert result.actions_override.get("issue_status") is None
+
+    def test_lead_is_not_auto_closed_like_a_scout(self):
+        result = classify_run_liveness(
+            run_status="completed",
+            evidence=_empty_evidence(issue_comments_created=1),
+            adapter_type="subscription_cli",
+            agent_role="lead",
+            useful_output=True,
+        )
+        assert result.actions_override.get("issue_status") is None
+
     def test_non_engineering_no_output_no_evidence_is_empty_response(self):
         result = classify_run_liveness(
             run_status="completed",
