@@ -166,6 +166,15 @@ class TestBuildCodexCommand:
         assert "-c" not in cmd
         assert "--model" not in cmd
 
+    def test_prompt_read_from_stdin_not_argv(self):
+        """The prompt must not be an argv element (Windows command-line length
+        limit); codex reads it from stdin via the "-" positional."""
+        rt = _make_runtime()
+        prompt = "x" * 20000
+        cmd = rt._build_codex_command(prompt, schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert prompt not in cmd
+        assert cmd[-1] == "-"
+
     def test_model_passed_for_oss_mode(self):
         rt = _make_runtime(model="qwen2.5-coder:14b", oss=True)
         cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
@@ -350,6 +359,36 @@ class TestExecuteCodexPath:
                 rt.execute({"issue_id": "issue-1"}, env)
 
         assert captured_kwargs.get("stdin") == _subprocess.DEVNULL
+
+    def test_prompt_piped_via_stdin_input(self, tmp_path):
+        """When the command context provides stdin_input, it is piped to the
+        subprocess via `input` (and stdin=DEVNULL is not set)."""
+        import subprocess as _subprocess
+        output = json.dumps({"status": "completed", "summary": "ok", "add_comment": ""})
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+        captured_kwargs: dict[str, Any] = {}
+
+        def fake_run(*args: Any, **kwargs: Any) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_proc
+
+        big_prompt = "y" * 20000
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={"command": ["codex", "-"], "read_output": lambda proc: output, "stdin_input": big_prompt},
+            ):
+                rt.execute({"issue_id": "issue-1"}, env)
+
+        assert captured_kwargs.get("input") == big_prompt
+        assert captured_kwargs.get("stdin") != _subprocess.DEVNULL
+        # Non-ASCII prompts require UTF-8; cp1252 (Windows default) makes codex
+        # reject the stdin prompt as invalid UTF-8.
+        assert captured_kwargs.get("encoding") == "utf-8"
 
     def test_effective_cwd_passed_to_subprocess(self, tmp_path):
         """subprocess.run must receive the resolved workspace as cwd."""

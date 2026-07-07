@@ -95,15 +95,28 @@ class ClaudeSubscriptionCliRuntime:
 
         try:
             with _command_context(self, env, run, effective_cwd=effective_cwd) as spec:
-                proc = subprocess.run(
-                    spec["command"],
+                stdin_input = spec.get("stdin_input")
+                run_kwargs: dict[str, Any] = dict(
                     env=merged_env,
                     cwd=effective_cwd,
                     capture_output=True,
-                    text=True,
+                    # Force UTF-8 for stdin/stdout: the prompt carries non-ASCII
+                    # (Spanish accents) and codex reads/writes UTF-8. Without this
+                    # Windows uses cp1252 → codex rejects the stdin prompt
+                    # ("input is not valid UTF-8") and stdout comes back mojibake.
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=self.timeout_sec,
-                    stdin=subprocess.DEVNULL,  # prevent CLI from blocking waiting for keyboard input
                 )
+                if stdin_input is not None:
+                    # Prompt goes through stdin to dodge the OS command-line
+                    # length limit; subprocess opens a pipe for `input`.
+                    run_kwargs["input"] = stdin_input
+                else:
+                    # No stdin payload — close it so the CLI never blocks
+                    # waiting for keyboard input.
+                    run_kwargs["stdin"] = subprocess.DEVNULL
+                proc = subprocess.run(spec["command"], **run_kwargs)
                 raw_output = spec["read_output"](proc)
         except subprocess.TimeoutExpired as exc:
             stdout = _coerce_output(exc.stdout)
@@ -225,7 +238,12 @@ class ClaudeSubscriptionCliRuntime:
         # Always set --cd so codex's sandbox root matches where subprocess runs.
         if effective_cwd:
             command.extend(["--cd", effective_cwd])
-        command.append(prompt)
+        # Read the prompt from stdin ("-") rather than argv. Large prompts
+        # (skill + wake payload + injected workspace files) blow past the
+        # Windows command-line length limit (~8191 chars via cmd.exe /
+        # codex.cmd), which fails the run instantly with "command line too
+        # long". _command_context pipes the prompt to the subprocess stdin.
+        command.append("-")
         return command
 
 
@@ -434,7 +452,7 @@ class _command_context:
                     pass
             return (proc.stdout or "") + (proc.stderr or "")
 
-        return {"command": command, "read_output": read_output}
+        return {"command": command, "read_output": read_output, "stdin_input": prompt}
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         if self._tmpdir is not None:
