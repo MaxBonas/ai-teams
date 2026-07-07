@@ -195,9 +195,13 @@ class ClaudeSubscriptionCliRuntime:
 
         Key decisions:
         - --ask-for-approval removed (not a valid flag in codex 0.128)
-        - -m/--model only passed for OSS/local_provider; ChatGPT-subscription mode
-          uses ~/.codex/config.toml to select the model — passing -m triggers a
-          different auth path that rejects most model names
+        - Model selection depends on the auth path:
+            * OSS / local_provider → pass `--model <slug>` (accepts -m directly).
+            * ChatGPT subscription → pass `-c model="<slug>"` (the config-override
+              syntax that shares the subscription auth path). Passing `-m`/`--model`
+              here routes through an API-key auth path that rejects subscription
+              model names. When no model is configured, codex falls back to the
+              default in ~/.codex/config.toml.
         - --cd always set to the resolved workspace root so the sandbox boundary
           matches the directory the subprocess is started in
         """
@@ -209,9 +213,11 @@ class ClaudeSubscriptionCliRuntime:
         command.extend(["exec", "--skip-git-repo-check", "--ephemeral"])
         command.extend(["--sandbox", self.sandbox])
         command.extend(["--output-schema", schema_path, "--output-last-message", output_path])
-        # Only pass --model for OSS/local_provider paths.
-        if self.model and (self.oss or self.local_provider):
-            command.extend(["--model", self.model])
+        if self.model:
+            if self.oss or self.local_provider:
+                command.extend(["--model", self.model])
+            else:
+                command.extend(["-c", f'model="{self.model}"'])
         if self.oss:
             command.append("--oss")
         if self.local_provider:

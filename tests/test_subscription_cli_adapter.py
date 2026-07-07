@@ -149,12 +149,22 @@ class TestBuildCodexCommand:
         cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
         assert "--ask-for-approval" not in cmd
 
-    def test_model_not_passed_for_subscription_mode(self):
-        """Subscription mode: -m must NOT be passed (breaks ChatGPT auth)."""
-        rt = _make_runtime(model="gpt-4.1")
+    def test_model_routed_via_config_override_for_subscription_mode(self):
+        """Subscription mode: model applied via `-c model="<slug>"`, never -m/--model
+        (which would route through the API-key auth path and reject the model)."""
+        rt = _make_runtime(model="gpt-5.5")
         cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
         assert "--model" not in cmd
         assert "-m" not in cmd
+        assert "-c" in cmd
+        assert 'model="gpt-5.5"' in cmd
+
+    def test_no_model_override_when_unset_for_subscription_mode(self):
+        """No model configured → no -c model override; codex uses config.toml default."""
+        rt = _make_runtime(model=None)
+        cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
+        assert "-c" not in cmd
+        assert "--model" not in cmd
 
     def test_model_passed_for_oss_mode(self):
         rt = _make_runtime(model="qwen2.5-coder:14b", oss=True)

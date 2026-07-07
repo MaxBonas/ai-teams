@@ -22,10 +22,10 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "config": {
             "cli_kind": "codex",
             "command": ["codex"],
-            # model intentionally omitted for ChatGPT-subscription mode:
-            # passing -m triggers a different auth path that breaks for most models.
-            # The model is determined by ~/.codex/config.toml in subscription mode.
-            # Set model here only when using oss/local_provider (Ollama, LM Studio).
+            # model omitted by default → codex uses ~/.codex/config.toml's model.
+            # A per-agent model override (e.g. the picker choosing gpt-5.5 for the
+            # Lead) is applied via `-c model="<slug>"` in _build_codex_command,
+            # which keeps the ChatGPT-subscription auth path.
             "sandbox": "workspace-write",
             "approval_policy": "never",
             "api_key_ref": "secret:openai:default",
@@ -145,33 +145,27 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
 MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
     # Codex subscription: model is selected by ~/.codex/config.toml, not -m.
     # These options are informational for OSS/local_provider paths and the UI picker.
+    # Codex ChatGPT subscription. The model is applied via `-c model="<slug>"`
+    # (see subscription_cli_adapter._build_codex_command). Slugs mirror codex's
+    # own model catalog (~/.codex/models_cache.json). Flat-rate plan → no
+    # per-token cost; the cost policy treats this channel as zero-cost.
     "codex_subscription": [
         {
-            "value": "gpt-4.1", "label": "GPT-4.1",
-            "tier": "premium", "caps": ["coding", "synthesis", "reasoning"],
-            "best_for": ["lead", "quorum_auditor", "quorum_senior"],
-            "price_note": "Flagship general · Tier 1",
+            "value": "gpt-5.5", "label": "GPT-5.5",
+            "tier": "premium", "caps": ["coding", "reasoning", "synthesis", "long_ctx"],
+            "best_for": ["lead", "quorum_auditor", "quorum_senior", "reviewer"],
+            "price_note": "Frontier agentic coding · Tier 1 Lead/Quorum",
         },
         {
-            "value": "o3", "label": "o3",
+            "value": "gpt-5.4", "label": "GPT-5.4",
             "tier": "premium", "caps": ["coding", "reasoning", "synthesis"],
-            "best_for": ["quorum_senior", "quorum_auditor"],
-            "price_note": "Reasoning especializado · alternativa Tier 1",
+            "best_for": ["engineer", "reviewer", "quorum_senior"],
+            "price_note": "Alta capacidad · Tier 1/2",
         },
         {
-            "value": "o4-mini", "label": "o4-mini",
-            "tier": "standard", "caps": ["coding", "reasoning"], "best_for": ["engineer"],
-            "price_note": "Reasoning+coding · Tier 2 Engineer",
-        },
-        {
-            "value": "codex-mini-latest", "label": "Codex Mini (latest)",
-            "tier": "standard", "caps": ["coding"], "best_for": ["engineer"],
-            "price_note": "Optimizado para código · Tier 2",
-        },
-        {
-            "value": "gpt-4.1-mini", "label": "GPT-4.1 Mini",
+            "value": "gpt-5.4-mini", "label": "GPT-5.4 Mini",
             "tier": "budget", "caps": ["coding", "synthesis"],
-            "best_for": ["file_scout", "web_scout", "context_curator", "qa", "worker"],
+            "best_for": ["file_scout", "web_scout", "context_curator", "test_runner", "worker"],
             "price_note": "Económico · Tier 3 Scouts/Worker",
         },
     ],
