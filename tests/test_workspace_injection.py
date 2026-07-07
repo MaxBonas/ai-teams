@@ -146,8 +146,29 @@ class TestReadWorkspaceFiles:
         for i in range(20):
             (tmp_path / f"file{i:02d}.txt").write_text("a" * 2000, encoding="utf-8")
         result = _read_workspace_files(tmp_path, max_per_file_bytes=2000, max_total_bytes=8000)
-        # Should stop after ~4 files (4 * 2000 = 8000 bytes)
-        assert len(result) <= 5
+        # Every file is still LISTED (existence must always be visible)…
+        assert len(result) == 20
+        # …but only ~4 carry real content (4 * 2000 = 8000 bytes budget);
+        # the rest are marked omitted rather than dropped.
+        with_content = [f for f in result if not f["content"].startswith("[content omitted")]
+        assert len(with_content) <= 5
+        assert any(f["content"].startswith("[content omitted") for f in result)
+
+    def test_readme_content_not_starved_by_alphabetical_order(self, tmp_path: Path) -> None:
+        """Regression: README.md sorts after a large Assets/ tree; the byte
+        budget must not exhaust before it, or the reviewer can't see it exists
+        (which trapped reviewer↔engineer in an endless 'README missing' loop)."""
+        assets = tmp_path / "Assets" / "Scripts"
+        assets.mkdir(parents=True)
+        for i in range(10):
+            (assets / f"Script{i:02d}.cs" ).write_text("// code\n" + "x" * 4000, encoding="utf-8")
+        (tmp_path / "README.md").write_text("# How to run the game\nPress Play.\n", encoding="utf-8")
+
+        result = _read_workspace_files(tmp_path, max_per_file_bytes=4096, max_total_bytes=16384)
+        readme = next((f for f in result if f["path"] == "README.md"), None)
+
+        assert readme is not None, "README.md must always be listed"
+        assert "How to run the game" in readme["content"], "README content must be included, not starved"
 
     def test_empty_directory(self, tmp_path: Path) -> None:
         assert _read_workspace_files(tmp_path) == []

@@ -4192,47 +4192,63 @@ class RunExecutor:
 _SKIP_DIRS: frozenset[str] = frozenset({".aiteam", ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next"})
 
 
+def _workspace_file_priority(rel: Path) -> int:
+    """Ordering key so review-relevant files get their content within budget.
+
+    A reviewer's first question is usually "does the deliverable + its docs
+    exist?" — so READMEs, docs, manifests and scene files must never be
+    starved by alphabetical ordering (e.g. README.md sorting after a large
+    Assets/ tree).
+    """
+    name = rel.name.lower()
+    suffix = rel.suffix.lower()
+    if name.startswith("readme"):
+        return 0
+    if suffix in {".md", ".txt", ".rst"}:
+        return 1
+    if "manifest" in name or "projectversion" in name or name in {"package.json", "pyproject.toml"}:
+        return 2
+    if suffix in {".unity", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini"}:
+        return 3
+    return 4
+
+
 def _read_workspace_files(
     workspace_root: Path,
     *,
     max_per_file_bytes: int = 8192,
     max_total_bytes: int = 32768,
 ) -> list[dict[str, Any]]:
-    """Return a list of ``{path, content, size_bytes}`` for workspace files.
+    """Return ``{path, size_bytes, content?}`` for every workspace file.
 
-    Used to inject real file contents into the wake payload for reviewer/QA
-    runs so they can perform genuine reviews rather than hallucinating based
-    on the engineer's description alone.
+    Injected into the wake payload for reviewer/QA/scout runs so they review
+    real files instead of hallucinating from the engineer's description.
 
-    Files are read up to *max_per_file_bytes* each; collection stops when
-    *max_total_bytes* of content has been gathered.  Binary files and files
-    inside hidden/noisy directories are skipped.  Results are sorted by path
-    for reproducibility.
+    Every non-binary, non-hidden file ALWAYS appears in the result (path +
+    size) so existence questions ("is there a README?") are answerable. File
+    *content* is included in priority order (READMEs, docs, manifests, scenes,
+    then sources) until *max_total_bytes* is reached; files past the budget
+    still appear with a "content omitted" marker rather than being dropped.
+    Dropping them (the old behaviour) made alphabetically-late files like
+    README.md invisible, which trapped reviewer↔engineer in an endless
+    "README missing" fix loop.
     """
     workspace_root = workspace_root.resolve()
-    result: list[dict[str, Any]] = []
-    total_bytes = 0
 
     try:
-        all_files = sorted(
-            (p for p in workspace_root.rglob("*") if p.is_file()),
-            key=lambda p: str(p),
-        )
+        all_files = list(p for p in workspace_root.rglob("*") if p.is_file())
     except Exception:
-        return result
+        return []
 
+    candidates: list[tuple[Path, bytes]] = []
     for entry in all_files:
-        if total_bytes >= max_total_bytes:
-            break
         try:
             rel = entry.relative_to(workspace_root)
         except ValueError:
             continue
-        # Skip files inside hidden or noisy directories
         parts = rel.parts
         if any(part.startswith(".") or part in _SKIP_DIRS for part in parts[:-1]):
             continue
-        # Skip hidden files themselves
         if parts[-1].startswith("."):
             continue
         try:
@@ -4245,14 +4261,29 @@ def _read_workspace_files(
             non_text = sum(1 for b in sample if b < 9 or (13 < b < 32) or b == 127)
             if non_text / len(sample) > 0.15:
                 continue
-        truncated = len(raw) > max_per_file_bytes
-        content = raw[:max_per_file_bytes].decode("utf-8", errors="replace")
-        if truncated:
-            content += f"\n… [truncated — {len(raw)} bytes total]"
-        path_str = str(rel).replace("\\", "/")
-        result.append({"path": path_str, "content": content, "size_bytes": len(raw)})
-        total_bytes += len(content.encode("utf-8", errors="replace"))
+        candidates.append((rel, raw))
 
+    # Priority first (so key docs get content), then alphabetical within a tier.
+    candidates.sort(key=lambda item: (_workspace_file_priority(item[0]), str(item[0])))
+
+    result: list[dict[str, Any]] = []
+    total_bytes = 0
+    for rel, raw in candidates:
+        path_str = str(rel).replace("\\", "/")
+        item: dict[str, Any] = {"path": path_str, "size_bytes": len(raw)}
+        if total_bytes < max_total_bytes:
+            truncated = len(raw) > max_per_file_bytes
+            content = raw[:max_per_file_bytes].decode("utf-8", errors="replace")
+            if truncated:
+                content += f"\n… [truncated — {len(raw)} bytes total]"
+            item["content"] = content
+            total_bytes += len(content.encode("utf-8", errors="replace"))
+        else:
+            item["content"] = "[content omitted — payload budget reached; file exists on disk]"
+        result.append(item)
+
+    # Present chronologically-stable path order for the consumer.
+    result.sort(key=lambda it: it["path"])
     return result
 
 
