@@ -109,48 +109,55 @@ async def post_chat_message(body: ChatMessageRequest, request: Request):
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _load_chat(db: Path, *, limit: int = 120) -> list[dict[str, Any]]:
+    # Select the NEWEST `limit` items (inner ORDER BY … DESC), then present
+    # them chronologically (outer ORDER BY … ASC). Ordering ASC before the
+    # LIMIT would return the OLDEST items and freeze the chat once the thread
+    # grows past `limit` — the Lead's latest replies would never appear.
     sql = """
-        SELECT
-            'comment:' || c.id          AS id,
-            c.id                         AS source_id,
-            'message'                    AS item_type,
-            CASE
-                WHEN c.author_user_id IS NOT NULL THEN 'user'
-                ELSE 'agent'
-            END                          AS sender,
-            COALESCE(c.author_user_id, c.author_agent_id, 'sistema') AS author,
-            c.body                       AS body,
-            NULL                         AS title,
-            NULL                         AS summary,
-            NULL                         AS kind,
-            NULL                         AS interaction_status,
-            NULL                         AS payload_json,
-            c.issue_id                   AS issue_id,
-            c.source_run_id              AS source_run_id,
-            c.created_at                 AS created_at
-        FROM issue_comments c
+        SELECT * FROM (
+            SELECT
+                'comment:' || c.id          AS id,
+                c.id                         AS source_id,
+                'message'                    AS item_type,
+                CASE
+                    WHEN c.author_user_id IS NOT NULL THEN 'user'
+                    ELSE 'agent'
+                END                          AS sender,
+                COALESCE(c.author_user_id, c.author_agent_id, 'sistema') AS author,
+                c.body                       AS body,
+                NULL                         AS title,
+                NULL                         AS summary,
+                NULL                         AS kind,
+                NULL                         AS interaction_status,
+                NULL                         AS payload_json,
+                c.issue_id                   AS issue_id,
+                c.source_run_id              AS source_run_id,
+                c.created_at                 AS created_at
+            FROM issue_comments c
 
-        UNION ALL
+            UNION ALL
 
-        SELECT
-            'interaction:' || i.id       AS id,
-            i.id                         AS source_id,
-            'interaction'                AS item_type,
-            'agent'                      AS sender,
-            COALESCE(i.created_by_agent_id, 'sistema') AS author,
-            COALESCE(i.summary, i.kind)  AS body,
-            i.title                      AS title,
-            i.summary                    AS summary,
-            i.kind                       AS kind,
-            i.status                     AS interaction_status,
-            i.payload_json               AS payload_json,
-            i.issue_id                   AS issue_id,
-            i.source_run_id              AS source_run_id,
-            i.created_at                 AS created_at
-        FROM issue_thread_interactions i
+            SELECT
+                'interaction:' || i.id       AS id,
+                i.id                         AS source_id,
+                'interaction'                AS item_type,
+                'agent'                      AS sender,
+                COALESCE(i.created_by_agent_id, 'sistema') AS author,
+                COALESCE(i.summary, i.kind)  AS body,
+                i.title                      AS title,
+                i.summary                    AS summary,
+                i.kind                       AS kind,
+                i.status                     AS interaction_status,
+                i.payload_json               AS payload_json,
+                i.issue_id                   AS issue_id,
+                i.source_run_id              AS source_run_id,
+                i.created_at                 AS created_at
+            FROM issue_thread_interactions i
 
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+        )
         ORDER BY created_at ASC, id ASC
-        LIMIT ?
     """
     with contextlib.closing(sqlite3.connect(str(db), timeout=20.0)) as conn:
         conn.row_factory = sqlite3.Row
