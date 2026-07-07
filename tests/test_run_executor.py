@@ -2313,6 +2313,36 @@ class _NoOpLeadRuntime:
         return ExecutionResult(status="completed", output="Engineer desbloqueado.", actions={})
 
 
+def test_non_editing_role_writing_files_logs_role_violation(tmp_path: Path) -> None:
+    """A Lead/scout that produces workspace changes is recorded as a role
+    violation (they must delegate/report, never edit files)."""
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+
+    class _CodingLeadRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id, "AITEAM_WORKSPACE_ROOT": str(tmp_path)}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            # Simulate the Lead editing a file directly (role violation).
+            (tmp_path / "sneaky.cs").write_text("// lead wrote this", encoding="utf-8")
+            return ExecutionResult(status="completed", output="Lo implementé yo mismo.", actions={})
+
+    registry = AdapterRegistry([_CodingLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    assert _count_activity(db_path, "role.violation", dispatch.run["id"]) == 1
+
+
 class _FailingRawOutputRuntime:
     """A CLI run that fails and returns raw stdout (echoed prompt) as output."""
 

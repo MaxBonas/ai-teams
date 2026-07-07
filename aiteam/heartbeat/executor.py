@@ -899,6 +899,35 @@ class RunExecutor:
                 liveness_result=liveness_result,
             )
 
+        # ── Role-contract audit ──────────────────────────────────────────────
+        # Orchestrator/scout roles must delegate/report, never edit files. They
+        # run the coding CLI read-only, but a misconfigured adapter (or a future
+        # regression) could let them write. Record any workspace change by a
+        # non-editing role as an auditable violation so role adherence is
+        # observable, not just prompted.
+        if workspace_delta.changed and str(agent_role or "").strip().lower() in _NON_EDITING_ROLES:
+            logger.warning(
+                "role.violation: non-editing role %r (%s) produced workspace changes: %s",
+                agent_role, agent_id, workspace_delta.to_dict(),
+            )
+            try:
+                log_activity(
+                    self.db_path,
+                    action="role.violation",
+                    target_type="run",
+                    target_id=run_id,
+                    actor_agent_id=agent_id,
+                    run_id=run_id,
+                    payload={
+                        "role": agent_role,
+                        "reason": "non_editing_role_edited_workspace",
+                        "delta": workspace_delta.to_dict(),
+                        "issue_id": issue_id_str or None,
+                    },
+                )
+            except Exception:
+                logger.warning("role.violation log failed for run %s", run_id, exc_info=True)
+
         final_status = result.status if result.status in _TERMINAL_EXEC_STATUSES else "completed"
         finished = finish_run(
             self.db_path,
