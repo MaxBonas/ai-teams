@@ -498,6 +498,12 @@ function statusLabel(status: string): string {
   return labels[status] || status.replaceAll('_', ' ');
 }
 
+// Terminal statuses = the issue is closed (no more work expected).
+const CLOSED_ISSUE_STATUSES = new Set(['done', 'cancelled', 'completed']);
+function isClosedIssue(status: string): boolean {
+  return CLOSED_ISSUE_STATUSES.has(status);
+}
+
 function shortPath(path: string): string {
   const parts = path.replaceAll('\\', '/').split('/');
   return parts.slice(-2).join('/');
@@ -548,6 +554,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [planDocument, setPlanDocument] = useState<PlanDocument | null>(null);
   const [timelineTypeFilter, setTimelineTypeFilter] = useState<TimelineType | ''>('');
+  const [issueFilter, setIssueFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [commentDraft, setCommentDraft] = useState('');
   const [newTaskDraft, setNewTaskDraft] = useState('');
   const [runId, setRunId] = useState('');
@@ -2068,25 +2075,60 @@ export default function App() {
               <ListChecks size={14} />
               <span>Issues</span>
             </div>
-            <div className="issue-list">
-              {issues.map((issue) => (
-                <button
-                  className={issue.id === selectedIssue?.id ? 'issue-button active' : 'issue-button'}
-                  key={issue.id}
-                  onClick={() => {
-                    setSelectedIssueId(issue.id);
-                    setViewMode('issue');
-                    void loadPlanDocument(issue.id);
-                  }}
-                >
-                  <div className="issue-title-row">
-                    <span>{issue.title}</span>
-                    {issuesWithPending.has(issue.id) && <span className="pending-dot" title="Decisión pendiente" />}
+            {(() => {
+              const openCount = issues.filter((i) => !isClosedIssue(i.status)).length;
+              const closedCount = issues.length - openCount;
+              const filters: Array<{ key: 'all' | 'open' | 'closed'; label: string; count: number }> = [
+                { key: 'all', label: 'Todas', count: issues.length },
+                { key: 'open', label: 'Abiertas', count: openCount },
+                { key: 'closed', label: 'Cerradas', count: closedCount },
+              ];
+              const visible = issues.filter((i) =>
+                issueFilter === 'all' ? true : issueFilter === 'closed' ? isClosedIssue(i.status) : !isClosedIssue(i.status),
+              );
+              return (
+                <>
+                  <div className="issue-filter">
+                    {filters.map((f) => (
+                      <button
+                        key={f.key}
+                        className={`issue-filter-btn${issueFilter === f.key ? ' active' : ''}`}
+                        onClick={() => setIssueFilter(f.key)}
+                      >
+                        {f.label} <span className="issue-filter-count">{f.count}</span>
+                      </button>
+                    ))}
                   </div>
-                  <small>{statusLabel(issue.status)} · {issue.assignee_agent_id || 'sin owner'}</small>
-                </button>
-              ))}
-            </div>
+                  <div className="issue-list">
+                    {visible.map((issue) => {
+                      const closed = isClosedIssue(issue.status);
+                      return (
+                        <button
+                          className={`issue-button${issue.id === selectedIssue?.id ? ' active' : ''}${closed ? ' issue-closed' : ' issue-open'}`}
+                          key={issue.id}
+                          onClick={() => {
+                            setSelectedIssueId(issue.id);
+                            setViewMode('issue');
+                            void loadPlanDocument(issue.id);
+                          }}
+                        >
+                          <div className="issue-title-row">
+                            <span className={`issue-state-dot state-${issue.status}`} title={statusLabel(issue.status)} />
+                            <span className={closed ? 'issue-title-closed' : undefined}>{issue.title}</span>
+                            {issuesWithPending.has(issue.id) && <span className="pending-dot" title="Decisión pendiente" />}
+                          </div>
+                          <small>
+                            <span className={`issue-status-tag tag-${closed ? 'closed' : 'open'}`}>{statusLabel(issue.status)}</span>
+                            {' · '}{issue.assignee_agent_id || 'sin owner'}
+                          </small>
+                        </button>
+                      );
+                    })}
+                    {visible.length === 0 && <p className="issue-empty">No hay issues {issueFilter === 'open' ? 'abiertas' : issueFilter === 'closed' ? 'cerradas' : ''}.</p>}
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
           {budgets.length > 0 && (

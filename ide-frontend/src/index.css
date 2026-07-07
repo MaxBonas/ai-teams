@@ -461,6 +461,70 @@ h2 { font-size: 1rem; }
   white-space: nowrap;
 }
 
+/* ── Issue open/closed marking + filter ─────────────────────────────────────── */
+.issue-button.issue-closed { opacity: 0.62; }
+.issue-button.issue-closed:hover { opacity: 0.85; }
+.issue-title-closed { text-decoration: line-through; text-decoration-thickness: 1px; }
+
+.issue-state-dot {
+  flex: 0 0 auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.issue-state-dot.state-in_progress,
+.issue-state-dot.state-running  { background: #d29922; }
+.issue-state-dot.state-todo,
+.issue-state-dot.state-backlog  { background: #58a6ff; }
+.issue-state-dot.state-in_review { background: #a371f7; }
+.issue-state-dot.state-blocked  { background: #f85149; }
+.issue-state-dot.state-done,
+.issue-state-dot.state-completed { background: #3fb950; }
+.issue-state-dot.state-cancelled { background: var(--text-dim); }
+
+.issue-status-tag {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.issue-status-tag.tag-open   { background: rgba(88,166,255,0.16); color: #58a6ff; }
+.issue-status-tag.tag-closed { background: rgba(63,185,80,0.14); color: #3fb950; }
+
+.issue-filter {
+  display: flex;
+  gap: 4px;
+  padding: 0 2px 6px;
+}
+.issue-filter-btn {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 5px;
+  padding: 3px 4px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.issue-filter-btn:hover { background: var(--surface-hover); }
+.issue-filter-btn.active { background: var(--accent-bg); border-color: var(--accent-dim); color: var(--accent-text); }
+.issue-filter-count {
+  font-size: 0.6rem;
+  opacity: 0.7;
+  background: var(--surface-hover);
+  border-radius: 8px;
+  padding: 0 4px;
+}
+.issue-empty { color: var(--text-dim); font-size: 0.72rem; padding: 6px 4px; }
+
 /* ── Sidebar nueva tarea ───────────────────────────────────────────────────── */
 .sidebar-new-task {
   display: flex;
