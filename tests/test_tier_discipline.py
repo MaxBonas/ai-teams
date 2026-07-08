@@ -72,17 +72,36 @@ class TestFilterForbiddenOps:
             assert dropped == [], f"role={role} should not drop {ops}"
             assert len(allowed) == 3
 
-    def test_filter_forbidden_ops_no_effect_on_tier2_engineer(self) -> None:
-        """Engineers (Tier 2) must NOT be filtered — they need write_file etc."""
+    def test_filter_tier2_keeps_work_ops_drops_lead_levers(self) -> None:
+        """Tier 2 keeps its work vocabulary (write_file, set_status,
+        create_interaction) but must not pull Lead levers: create_issue,
+        update_child_issue, update_plan collapse the hierarchy."""
         ops = [
             {"type": "write_file", "path": "src/app.py", "body": "x = 1"},
             {"type": "create_issue", "title": "Sub-task", "role": "reviewer"},
+            {"type": "update_child_issue", "path": "child-1", "status": "todo"},
+            {"type": "update_plan", "title": "Plan", "body": "..."},
+            {"type": "set_status", "status": "done"},
+            {"type": "add_comment", "body": "done"},
+        ]
+        for role in ("engineer", "reviewer", "software_engineer", "code_reviewer"):
+            allowed, dropped = filter_forbidden_ops_for_role(ops, role=role)
+            dropped_types = sorted(op["type"] for op in dropped)
+            assert dropped_types == ["create_issue", "update_child_issue", "update_plan"], f"role={role}"
+            assert {op["type"] for op in allowed} == {"write_file", "set_status", "add_comment"}
+
+    def test_filter_no_effect_on_lead_tier1(self) -> None:
+        """Tier 1 keeps the full vocabulary — it orchestrates."""
+        ops = [
+            {"type": "create_issue", "title": "Sub-task", "role": "engineer"},
+            {"type": "update_child_issue", "path": "child-1", "status": "todo"},
+            {"type": "update_plan", "title": "Plan", "body": "..."},
             {"type": "set_status", "status": "done"},
         ]
-        for role in ("engineer", "reviewer", "lead", "software_engineer"):
+        for role in ("lead", "team_lead", "lead_executor"):
             allowed, dropped = filter_forbidden_ops_for_role(ops, role=role)
             assert dropped == [], f"role={role} should pass all ops through"
-            assert len(allowed) == 3
+            assert len(allowed) == 4
 
     def test_filter_forbidden_ops_drops_create_interaction_for_web_scout(self) -> None:
         ops = [

@@ -2313,6 +2313,43 @@ class _NoOpLeadRuntime:
         return ExecutionResult(status="completed", output="Engineer desbloqueado.", actions={})
 
 
+def test_lead_file_ops_on_api_adapter_blocked_preventively(tmp_path: Path) -> None:
+    """A Lead on an API adapter (no CLI sandbox) emitting file_ops must be
+    blocked BEFORE materialization, not just flagged after."""
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+
+    class _FileWritingLeadRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id, "AITEAM_WORKSPACE_ROOT": str(tmp_path)}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Implemento yo mismo vía ops",
+                actions={"file_ops": [{"op": "write_file", "path": "hack.cs", "body": "// lead"}]},
+            )
+
+    registry = AdapterRegistry([_FileWritingLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    assert not (tmp_path / "hack.cs").exists()  # never materialized
+    with sqlite3.connect(str(db_path)) as conn:
+        denied = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'role.op_denied'"
+        ).fetchone()
+    assert denied[0] >= 1
+
+
 def test_non_editing_role_writing_files_logs_role_violation(tmp_path: Path) -> None:
     """A Lead/scout that produces workspace changes is recorded as a role
     violation (they must delegate/report, never edit files)."""

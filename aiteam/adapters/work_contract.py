@@ -219,8 +219,20 @@ def build_execution_contract() -> str:
 
 # ── Tier 3 op filter ─────────────────────────────────────────────────────────
 
+# Declarative RBAC for structured ops: each tier gets a DENYLIST of op types it
+# must never emit, enforced in code (executor) regardless of what the prompt
+# said. Hierarchy rationale:
+#   Tier 1 (lead/team_lead/lead_executor) — full vocabulary: they orchestrate.
+#   Tier 2 (engineer/reviewer)            — do the work and report; they do NOT
+#       hire (create_issue), direct siblings (update_child_issue) or rewrite
+#       the plan (update_plan). Those are the Lead's levers; letting a worker
+#       pull them collapses the hierarchy.
+#   Tier 3 (scouts/curator/test_runner)   — read-and-report only.
 _TIER3_ROLES_FOR_VALIDATION: frozenset[str] = frozenset(
     {"file_scout", "web_scout", "context_curator", "test_runner"}
+)
+_TIER2_ROLES_FOR_VALIDATION: frozenset[str] = frozenset(
+    {"engineer", "software_engineer", "reviewer", "code_reviewer", "qa", "worker"}
 )
 _OPS_FORBIDDEN_FOR_TIER3: frozenset[str] = frozenset(
     {
@@ -233,24 +245,39 @@ _OPS_FORBIDDEN_FOR_TIER3: frozenset[str] = frozenset(
         "delete_file",
     }
 )
+_OPS_FORBIDDEN_FOR_TIER2: frozenset[str] = frozenset(
+    {
+        "create_issue",
+        "update_plan",
+        "update_child_issue",
+    }
+)
+
+
+def forbidden_ops_for_role(role: str) -> frozenset[str]:
+    role_key = str(role or "").strip().lower()
+    if role_key in _TIER3_ROLES_FOR_VALIDATION:
+        return _OPS_FORBIDDEN_FOR_TIER3
+    if role_key in _TIER2_ROLES_FOR_VALIDATION:
+        return _OPS_FORBIDDEN_FOR_TIER2
+    return frozenset()
 
 
 def filter_forbidden_ops_for_role(
     ops: list[dict[str, Any]], role: str
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return (allowed_ops, dropped_ops).
+    """Return (allowed_ops, dropped_ops) per the role permission matrix.
 
-    Tier 3 roles (file_scout, web_scout, context_curator, test_runner) may not
-    create issues, interactions, update the plan, or write/delete workspace files.
-    Any such op is silently removed before the executor processes the op list.
-    Non-Tier-3 roles pass through unchanged.
+    Any op outside the role's vocabulary is silently removed before the
+    executor processes the op list, and returned for auditing.
     """
-    if role.lower() not in _TIER3_ROLES_FOR_VALIDATION:
+    forbidden = forbidden_ops_for_role(role)
+    if not forbidden:
         return ops, []
     allowed: list[dict[str, Any]] = []
     dropped: list[dict[str, Any]] = []
     for op in ops:
-        if str(op.get("type", "")) in _OPS_FORBIDDEN_FOR_TIER3:
+        if str(op.get("type", "")) in forbidden:
             dropped.append(op)
         else:
             allowed.append(op)

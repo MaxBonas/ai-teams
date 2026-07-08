@@ -648,8 +648,35 @@ class RunExecutor:
         # API-only adapters (openai_api, anthropic_api, gemini_api) return
         # write_file / append_file / delete_file ops in their structured output.
         # Materializing them here lets workspace_delta see them as real changes.
+        # Preventive role gate: non-editing roles (Lead, scouts) must never
+        # materialize file ops. The CLI sandbox already blocks them for codex
+        # runs; this covers API adapters, which have no sandbox. Detection via
+        # role.violation stays as the backstop — this makes it preventive.
+        _requested_file_ops = (result.actions or {}).get("file_ops") or []
+        if _requested_file_ops and str(agent_role or "").strip().lower() in _NON_EDITING_ROLES:
+            logger.warning(
+                "role.op_denied: non-editing role %r (%s) emitted %d file op(s) — dropped",
+                agent_role, agent_id, len(_requested_file_ops),
+            )
+            try:
+                log_activity(
+                    self.db_path,
+                    action="role.op_denied",
+                    target_type="run",
+                    target_id=run_id,
+                    actor_agent_id=agent_id,
+                    run_id=run_id,
+                    payload={
+                        "role": agent_role,
+                        "action_group": "file_ops",
+                        "count": len(_requested_file_ops),
+                    },
+                )
+            except Exception:
+                pass
+            _requested_file_ops = []
         file_ops_applied = _execute_file_ops(
-            file_ops=(result.actions or {}).get("file_ops") or [],
+            file_ops=_requested_file_ops,
             workspace_root=workspace_root,
         )
         if file_ops_applied:
@@ -1764,30 +1791,48 @@ class RunExecutor:
         if not issue_id:
             return
 
-        # ── Tier 3 op filter ─────────────────────────────────────────────────
-        # Tier 3 scout roles may not create issues, interactions, update plans,
-        # or write workspace files.  We normalise the agent_role and drop any
-        # action groups that are forbidden.  filter_forbidden_ops_for_role
-        # operates on raw ops, so we reconstruct a minimal ops list, filter it,
-        # and rebuild the actions dict from the surviving ops only.
-        _FORBIDDEN_ACTION_KEYS_FOR_TIER3 = {
-            "create_issues",
-            "interactions",
-            "update_plan",
-            "update_child_issues",
-            "file_ops",
+        # ── Role permission matrix (op filter) ───────────────────────────────
+        # Drop action groups outside the role's vocabulary, per the declarative
+        # matrix in work_contract (Tier 3: read-and-report only; Tier 2: work
+        # and report, but never hire/direct/replan — those are Lead levers).
+        # Enforced in code so a prompt drift or model whim cannot collapse the
+        # hierarchy. Dropped groups are logged as auditable role violations.
+        _OP_TYPE_TO_ACTION_KEY = {
+            "create_issue": "create_issues",
+            "create_interaction": "interactions",
+            "update_plan": "update_plan",
+            "update_child_issue": "update_child_issues",
+            "write_file": "file_ops",
+            "append_file": "file_ops",
+            "delete_file": "file_ops",
         }
-        from aiteam.adapters.work_contract import _TIER3_ROLES_FOR_VALIDATION
-        if agent_role.lower() in _TIER3_ROLES_FOR_VALIDATION:
-            for _forbidden_key in _FORBIDDEN_ACTION_KEYS_FOR_TIER3:
-                if _forbidden_key in actions:
-                    logger.warning(
-                        "Dropped forbidden action group %r for Tier 3 role %r (issue %s)",
-                        _forbidden_key,
-                        agent_role,
-                        issue_id,
+        from aiteam.adapters.work_contract import forbidden_ops_for_role
+        _forbidden_action_keys = {
+            _OP_TYPE_TO_ACTION_KEY[op_type]
+            for op_type in forbidden_ops_for_role(agent_role)
+            if op_type in _OP_TYPE_TO_ACTION_KEY
+        }
+        for _forbidden_key in _forbidden_action_keys:
+            if _forbidden_key in actions:
+                logger.warning(
+                    "Dropped forbidden action group %r for role %r (issue %s)",
+                    _forbidden_key,
+                    agent_role,
+                    issue_id,
+                )
+                try:
+                    log_activity(
+                        self.db_path,
+                        action="role.op_denied",
+                        target_type="issue",
+                        target_id=issue_id,
+                        actor_agent_id=agent_id,
+                        run_id=str(run.get("id")),
+                        payload={"role": agent_role, "action_group": _forbidden_key},
                     )
-                    actions = {k: v for k, v in actions.items() if k != _forbidden_key}
+                except Exception:
+                    pass
+                actions = {k: v for k, v in actions.items() if k != _forbidden_key}
 
         # ── Interaction gate: max 1 pending interaction per issue at a time ─────
         # Presenting multiple confirmation popups simultaneously confuses users:
