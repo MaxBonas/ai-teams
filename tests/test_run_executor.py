@@ -2646,6 +2646,188 @@ def test_file_ops_reject_provider_convention_filenames(tmp_path: Path) -> None:
     assert (tmp_path / "README.md").read_text(encoding="utf-8") == "ok"
 
 
+def test_file_ops_absolute_workspace_path_relativized(tmp_path: Path) -> None:
+    """An agent emitting the FULL workspace path must write to the right spot,
+    not re-root it as a nested 'Users/.../workspace/' tree (observed bug)."""
+    from aiteam.heartbeat.executor import _execute_file_ops
+
+    absolute_inside = str(tmp_path / "notes" / "context.md")
+    touched = _execute_file_ops(
+        [{"op": "write_file", "path": absolute_inside, "body": "hola"}],
+        tmp_path,
+    )
+
+    assert touched == [str(Path("notes") / "context.md")]
+    assert (tmp_path / "notes" / "context.md").read_text(encoding="utf-8") == "hola"
+    # The old drive-strip behaviour would have created e.g. Users/... under tmp_path.
+    stray_roots = [p.name for p in tmp_path.iterdir() if p.is_dir() and p.name not in {"notes"}]
+    assert stray_roots == []
+
+
+def test_file_ops_absolute_path_outside_workspace_skipped(tmp_path: Path) -> None:
+    from aiteam.heartbeat.executor import _execute_file_ops
+
+    outside = str(tmp_path.parent / "fuera.md")
+    touched = _execute_file_ops(
+        [{"op": "write_file", "path": outside, "body": "no"}],
+        tmp_path,
+    )
+
+    assert touched == []
+    assert not Path(outside).exists()
+    # And no re-rooted copy inside the workspace either.
+    assert list(tmp_path.rglob("fuera.md")) == []
+
+
+def test_file_ops_leading_slash_still_means_workspace_root(tmp_path: Path) -> None:
+    from aiteam.heartbeat.executor import _execute_file_ops
+
+    touched = _execute_file_ops(
+        [{"op": "write_file", "path": "/docs/guide.md", "body": "g"}],
+        tmp_path,
+    )
+
+    assert touched == ["docs/guide.md"]
+    assert (tmp_path / "docs" / "guide.md").read_text(encoding="utf-8") == "g"
+
+
+# ── Delegation churn breaker ──────────────────────────────────────────────────
+
+def _seed_churn_children(db_path: Path, parent: str, role: str, n: int) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        for i in range(n):
+            conn.execute(
+                "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id)"
+                " VALUES (?, 'goal-1', ?, ?, 'cancelled', ?, 'role:reviewer')",
+                (f"churn-{role}-{i}", parent, f"Revisar intento {i}", role),
+            )
+        conn.commit()
+
+
+class _ChurnLeadRuntime:
+    """Lead that keeps creating yet another reviewer fix-cycle issue."""
+
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="completed",
+            output="Creo otra revisión",
+            actions={
+                "create_issues": [
+                    {
+                        "title": "Revisar de nuevo el fix",
+                        "description": "Revisión del último fix con criterios de aceptación claros y evidencia por archivo. " * 3,
+                        "role": "reviewer",
+                        "complexity": "medium",
+                    }
+                ]
+            },
+        )
+
+
+def test_delegation_churn_blocks_and_escalates_once(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_DELEGATION_CHURN_LIMIT", "8")
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _seed_churn_children(db_path, "issue:intake", "reviewer", 8)
+
+    registry = AdapterRegistry([_ChurnLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    for i in range(2):
+        enqueue_wakeup(
+            db_path, agent_id="role:lead", source="manual", reason="manual",
+            payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+            idempotency_key=f"churn-wake-{i}",
+        )
+        dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+        if dispatch is not None:
+            executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        created = conn.execute(
+            "SELECT COUNT(*) FROM issues WHERE parent_id = 'issue:intake' AND title = 'Revisar de nuevo el fix'"
+        ).fetchone()
+        escalations = conn.execute(
+            "SELECT COUNT(*) FROM issue_thread_interactions WHERE idempotency_key LIKE 'delegation_churn:%'"
+        ).fetchone()
+        blocked_events = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'delegation.churn_blocked'"
+        ).fetchone()
+    assert created[0] == 0            # no more churn issues created
+    assert escalations[0] == 1        # exactly one escalation (idempotent)
+    assert blocked_events[0] == 2     # both attempts audited
+
+
+def test_delegation_churn_allows_below_limit(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_DELEGATION_CHURN_LIMIT", "8")
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _seed_churn_children(db_path, "issue:intake", "reviewer", 3)
+
+    registry = AdapterRegistry([_ChurnLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        created = conn.execute(
+            "SELECT COUNT(*) FROM issues WHERE parent_id = 'issue:intake' AND title = 'Revisar de nuevo el fix'"
+        ).fetchone()
+    assert created[0] == 1
+
+
+def test_delegation_churn_accept_allows_another_round(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_DELEGATION_CHURN_LIMIT", "8")
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _seed_churn_children(db_path, "issue:intake", "reviewer", 8)
+
+    registry = AdapterRegistry([_ChurnLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)  # trips the breaker
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        interaction = conn.execute(
+            "SELECT id FROM issue_thread_interactions WHERE idempotency_key LIKE 'delegation_churn:%'"
+        ).fetchone()
+    assert interaction is not None
+    resolve_interaction(
+        db_path, interaction_id=interaction["id"], action="accept", resolved_by_user_id="user",
+    )
+
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+        idempotency_key="churn-after-accept",
+    )
+    dispatch2 = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch2 is not None
+    executor.execute(dispatch2)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        created = conn.execute(
+            "SELECT COUNT(*) FROM issues WHERE parent_id = 'issue:intake' AND title = 'Revisar de nuevo el fix'"
+        ).fetchone()
+    assert created[0] == 1  # accepted → a new round is allowed
+
+
 def test_adapter_recovery_reopens_exhausted_issue_with_alternative_adapter(tmp_path: Path, monkeypatch) -> None:
     """RUN-003: continuation exhaustion swaps the agent to another connected
     adapter, reopens the issue and wakes the agent — exactly once."""

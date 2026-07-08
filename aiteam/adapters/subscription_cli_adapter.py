@@ -322,6 +322,7 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
             '{"type":"create_issue","title":"...","description":"<spec concreta: tecnología, archivos, criterios de aceptación>","role":"engineer","complexity":"low|medium|high"}',
             "  - Para revisión → create_issue con role:reviewer.",
             "  - Para leer archivos o investigar → create_issue con role:file_scout / web_scout (NUNCA lo hagas tú).",
+            "  - Para curar/comprimir contexto de un thread largo → create_issue con role:context_curator (NO role:engineer).",
             "  - Para preguntar al usuario → "
             '{"type":"create_interaction","kind":"request_confirmation","title":"...","summary":"...","payload":{"reason":"..."}}',
             "  - Para dirigir a un hijo bloqueado → update_child_issue. Para cerrar la issue → "

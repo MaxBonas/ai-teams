@@ -74,6 +74,20 @@ def _cost_breaker_threshold_cents() -> int:
     except ValueError:
         return 300
 
+
+def _delegation_churn_limit() -> int:
+    """Same-role children allowed under one parent per window before escalating.
+
+    Configurable via AITEAM_DELEGATION_CHURN_LIMIT; 0 (or negative) disables.
+    """
+    raw = os.environ.get("AITEAM_DELEGATION_CHURN_LIMIT", "").strip()
+    if not raw:
+        return 8
+    try:
+        return int(raw)
+    except ValueError:
+        return 8
+
 _COMMENT_BODY_MAX = 4096  # hard limit stored in DB
 _AGENT_REPORT_MARKER = "---AGENT-REPORT---"
 
@@ -2124,6 +2138,21 @@ class RunExecutor:
         try:
             role_for_issue = str(spec.get("role") or "engineer")
 
+            # ── Delegation churn breaker ──────────────────────────────────────
+            # The automatic fix-cycle cap only counts the auto-created path; a
+            # Lead that cancels reviewers and hand-creates new engineer/reviewer
+            # pairs bypasses it (observed: 13+ cycles in one evening). Cap the
+            # rate of same-role children under one parent and escalate instead
+            # of letting the churn run forever.
+            if self._delegation_churn_blocked(
+                parent_issue_id=issue_id,
+                role_for_issue=role_for_issue,
+                agent_id=agent_id,
+                run_id=str(run.get("id")),
+                title=title_val,
+            ):
+                return None
+
             # ── Pre-flight delegation quality check ───────────────────────────
             # Sparse descriptions produce blocked or wrong engineer runs.
             # Log a structured warning so it's visible in activity and metrics.
@@ -3022,6 +3051,124 @@ class RunExecutor:
             issue_id, failed_adapter_type, new_adapter_type, liveness_reason,
         )
         return True
+
+    _CHURN_ROLES = frozenset({"engineer", "software_engineer", "reviewer", "code_reviewer"})
+    _CHURN_WINDOW_HOURS = 6
+
+    def _delegation_churn_blocked(
+        self,
+        *,
+        parent_issue_id: str,
+        role_for_issue: str,
+        agent_id: str,
+        run_id: str,
+        title: str,
+    ) -> bool:
+        """Return True when creating another same-role child would feed a loop.
+
+        Counts same-role siblings (any status — cancelled ones are precisely
+        the churn signature) created under *parent_issue_id* within the last
+        _CHURN_WINDOW_HOURS and after the user's last breaker decision. At the
+        limit, creation is blocked and ONE idempotent escalation interaction is
+        raised: accept = allow another round; reject = keep blocked for the
+        rest of the window.
+        """
+        limit = _delegation_churn_limit()
+        role_key = str(role_for_issue or "").strip().lower()
+        if limit <= 0 or role_key not in self._CHURN_ROLES or not parent_issue_id:
+            return False
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            breaker = conn.execute(
+                """
+                SELECT id, status, resolved_at, created_at
+                FROM issue_thread_interactions
+                WHERE issue_id = ?
+                  AND idempotency_key LIKE 'delegation_churn:%'
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (parent_issue_id,),
+            ).fetchone()
+            if breaker and str(breaker["status"]) not in {"accepted", "rejected", "cancelled", "expired", "answered"}:
+                blocked = True  # pending — the user has not decided yet
+                epoch = None
+            else:
+                epoch = str(breaker["resolved_at"]) if breaker and breaker["resolved_at"] else None
+                if breaker and str(breaker["status"]) == "rejected":
+                    recent = conn.execute(
+                        "SELECT 1 FROM issue_thread_interactions WHERE id = ? AND resolved_at >= datetime('now', ?)",
+                        (str(breaker["id"]), f"-{self._CHURN_WINDOW_HOURS} hours"),
+                    ).fetchone()
+                    if recent:
+                        self._log_churn_block(parent_issue_id, agent_id, run_id, role_key, title, reason="user_rejected")
+                        return True
+                params: list[Any] = [parent_issue_id, role_key, f"-{self._CHURN_WINDOW_HOURS} hours"]
+                epoch_filter = ""
+                if epoch:
+                    epoch_filter = "AND created_at > ?"
+                    params.append(epoch)
+                count_row = conn.execute(
+                    f"""
+                    SELECT COUNT(*) FROM issues
+                    WHERE parent_id = ?
+                      AND LOWER(role) = ?
+                      AND created_at >= datetime('now', ?)
+                      {epoch_filter}
+                    """,
+                    params,
+                ).fetchone()
+                blocked = int(count_row[0] or 0) >= limit
+            if not blocked:
+                return False
+        try:
+            create_interaction(
+                self.db_path,
+                issue_id=parent_issue_id,
+                kind="request_confirmation",
+                payload={
+                    "version": 1,
+                    "reason": "delegation_churn_limit",
+                    "parent_issue_id": parent_issue_id,
+                    "role": role_key,
+                    "limit": limit,
+                    "window_hours": self._CHURN_WINDOW_HOURS,
+                },
+                continuation_policy="wake_assignee",
+                idempotency_key=f"delegation_churn:{parent_issue_id}:{epoch or 'genesis'}",
+                source_run_id=run_id,
+                created_by_agent_id=agent_id,
+                title=f"Freno de delegación — {limit}+ issues de {role_key} bajo la misma tarea",
+                summary=(
+                    f"El Lead lleva {limit} o más issues de rol `{role_key}` creadas bajo la misma "
+                    f"tarea en {self._CHURN_WINDOW_HOURS}h — patrón de bucle corrección↔revisión. "
+                    "Acepta para permitir otra ronda de intentos. Rechaza para parar la creación "
+                    "automática y decidir tú el siguiente paso."
+                ),
+            )
+        except Exception:
+            logger.warning("delegation churn escalation failed for %s", parent_issue_id, exc_info=True)
+        self._log_churn_block(parent_issue_id, agent_id, run_id, role_key, title, reason="limit_reached")
+        return True
+
+    def _log_churn_block(
+        self, parent_issue_id: str, agent_id: str, run_id: str, role_key: str, title: str, *, reason: str
+    ) -> None:
+        logger.warning(
+            "delegation.churn_blocked (%s): parent=%s role=%s title=%r",
+            reason, parent_issue_id, role_key, title,
+        )
+        try:
+            log_activity(
+                self.db_path,
+                action="delegation.churn_blocked",
+                target_type="issue",
+                target_id=parent_issue_id,
+                actor_agent_id=agent_id,
+                run_id=run_id,
+                payload={"role": role_key, "title": title, "reason": reason},
+            )
+        except Exception:
+            logger.warning("churn block activity failed for %s", parent_issue_id, exc_info=True)
 
     def _root_issue_id(self, issue_id: str) -> str:
         current = str(issue_id)
@@ -4386,11 +4533,31 @@ def _execute_file_ops(
         if not rel_path or op_type not in ("write_file", "append_file", "delete_file"):
             continue
 
-        # Strip leading slashes / drive letters to force relative resolution
-        rel_path = rel_path.lstrip("/\\")
-        # Remove any Windows-style drive prefix (e.g. "C:")
-        if len(rel_path) >= 2 and rel_path[1] == ":":
-            rel_path = rel_path[2:].lstrip("/\\")
+        # Truly absolute paths (drive-prefixed / UNC / POSIX-absolute): agents
+        # sometimes emit the full workspace path ("C:\Users\...\proyecto\x.md").
+        # Stripping just the drive letter used to re-root it as a RELATIVE
+        # path, silently creating a nested "Users/.../proyecto/" tree inside
+        # the workspace. Resolve them properly: inside the workspace → use the
+        # true relative part; outside → skip.
+        # A bare leading "/" or "\" (no drive) is LLM shorthand for the
+        # workspace root — keep treating that as relative.
+        is_drive_prefixed = len(rel_path) >= 2 and rel_path[1] == ":"
+        is_unc = rel_path.startswith(("\\\\", "//"))
+        is_posix_absolute = os.name != "nt" and rel_path.startswith("/")
+        if is_drive_prefixed or is_unc or is_posix_absolute:
+            try:
+                resolved_abs = Path(rel_path).resolve()
+                rel_path = str(resolved_abs.relative_to(workspace_root))
+            except (ValueError, OSError):
+                if is_posix_absolute:
+                    # Ambiguous: a bare "/README.md" is usually LLM shorthand
+                    # for the workspace root — fall back to relative.
+                    rel_path = rel_path.lstrip("/")
+                else:
+                    logger.warning("file_op skipped — absolute path outside workspace: %s", rel_path)
+                    continue
+        else:
+            rel_path = rel_path.lstrip("/\\")
 
         target = (workspace_root / rel_path).resolve()
 
