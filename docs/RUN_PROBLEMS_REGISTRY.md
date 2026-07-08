@@ -89,7 +89,7 @@ El diseño original de `_enqueue_liveness_continuation` fue conservador (1 inten
 
 ---
 
-### RUN-003 · ABIERTO — Engineer API-only ejecutó 9 runs sin workspace changes; sistema antiguo bloqueó tarde
+### RUN-003 · RESUELTO — Engineer API-only ejecutó 9 runs sin workspace changes; sistema antiguo bloqueó tarde
 
 **Detectado:** 2026-05-05  
 **Run ID(s):** `acff3337`, `65efb49a`, `25afe004`, `1753ef54`, `0f48191d`, `47851c3e`, `4885c3dd`, `15599c6d`, `5c88f0fb` (9 runs consecutivas)  
@@ -116,9 +116,11 @@ El nuevo `classify_run_liveness()` bloquea en run 1 para API-only engineers sin 
 
 **Verificación pendiente:** Resetear proyecto y confirmar que run 1 del engineer ya bloquea con `liveness_reason = "api_only_engineer_no_workspace_changes"`.
 
+**Cierre (2026-07-06):** La pieza que faltaba — "ruta de recuperación automática" — está implementada: `_attempt_adapter_recovery` (executor). Cuando una issue agota continuaciones sin evidencia de workspace, el executor busca otro adapter **conectado y distinto** en el allowlist del proyecto, cambia el adapter del agente, reabre la issue en `todo` y despierta al agente — máximo 1 vez por issue (auditado con `issue.adapter_recovery`). Complementa el upgrade automático de `reconcile_project_agent_policy` (que no reabría issues ya bloqueadas). Tests: `test_adapter_recovery_reopens_exhausted_issue_with_alternative_adapter`, `test_adapter_recovery_noop_without_alternative_adapter`.
+
 ---
 
-### RUN-004 · ABIERTO — Lead en loop de skip por falta de notificación ante engineer bloqueado
+### RUN-004 · RESUELTO — Lead en loop de skip por falta de notificación ante engineer bloqueado
 
 **Detectado:** 2026-05-05  
 **Run ID(s):** `9bec8e8f`, `b76c4bed`, `a797a48c`, `f1b994c0`, `67ef65e7` (últimas 5 runs del lead)  
@@ -156,6 +158,8 @@ El nuevo `classify_run_liveness()` bloquea en run 1 para API-only engineers sin 
 Test existente `test_child_reports_to_same_lead_are_coalesced` sigue pasando (coalescing de 3 hijos en 1 wakeup preservado).
 
 **Pendiente:** El prompt del lead todavía no usa activamente `child_issue_status` del payload para decidir escalar vs esperar. Esto requiere cambio en el prompt/skill del lead.
+
+**Cierre (2026-07-08):** El pendiente quedó cubierto por tres piezas posteriores: (1) inyección de `unblock_action_required` + `mandatory_instruction` en el payload cuando un hijo reporta blocked (el Lead no puede "no darse cuenta"); (2) el contrato de orquestación del codex CLI dirige explícitamente hijos bloqueados a `update_child_issue`; (3) taxonomía de errores: runs del Lead fallidos por infra (`api_error`) ya no cuentan como `lead.unblock_skipped` — se registran como `lead.unblock_run_failed` y no disparan el circuit breaker (test `test_circuit_breaker_ignores_failed_lead_runs`).
 
 ---
 
@@ -205,6 +209,50 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 - Nuevos métodos: `_blocked_child_rows(issue_id)`, `_format_blocked_escalation(blocked_rows)`.
 
 **Verificación:** Tests del executor + tests de liveness pasan sin regresión.
+
+---
+
+### RUN-007 · RESUELTO — Bucle reviewer↔engineer por starvation de workspace_files (README "invisible")
+
+**Detectado:** 2026-07-07  
+**Run ID(s):** ~28 ciclos bajo `a0539b99` ("acaba suficientemente el juego…"), 08:36–12:33  
+**Proyecto:** Nuevo Proyecto AI Teams  
+**Síntomas:**  
+- El reviewer repetía *"`README.md` no aparece en `workspace_files`"* y `changes_requested`, con el README presente en disco.
+- El Lead cancelaba el reviewer, creaba un engineer de "fix" que re-creaba el archivo ya existente, y un reviewer nuevo que seguía sin verlo. 13+ ciclos la primera tarde; el patrón se reanudó tras cada wake.
+- El cap automático de fix-cycles no aplicaba: el Lead creaba los pares engineer/reviewer a mano (vía `create_issue`), esquivando `_MAX_FIX_CYCLES`.
+
+**Causa raíz:**  
+1. `_read_workspace_files` ordenaba alfabéticamente y **descartaba** todos los archivos tras agotar el presupuesto de 32 KB. `README.md` ordena después de `Assets/` (~30 KB) → nunca entraba al payload. El reviewer decidía correctamente sobre datos falsos.
+2. Sin cap para el churn *manual* de delegación del Lead.
+
+**Fix aplicado (2026-07-07):**  
+- `_read_workspace_files`: **todos** los archivos se listan siempre (path + tamaño); el contenido se incluye por prioridad (README/docs/manifests/escenas → fuentes) hasta el presupuesto; los que exceden llevan marcador `[content omitted — file exists]`. Test de regresión: `test_readme_content_not_starved_by_alphabetical_order`.
+- **Freno de churn de delegación**: máx. `AITEAM_DELEGATION_CHURN_LIMIT` (8) issues del mismo rol bajo el mismo parent por ventana de 6 h; al límite, la creación se bloquea y se escala una interacción idempotente (accept = otra ronda; reject = bloqueado el resto de la ventana). Tests en `test_run_executor.py`.
+
+**Verificación:** Post-fix, el reviewer lee el YAML real de la escena y contrasta contra `README.md` (comentarios de las 12:32) — rechaza ahora por motivos legítimos (escena stub), no por ceguera.
+
+---
+
+### RUN-008 · RESUELTO — file_ops con ruta absoluta crea árbol anidado `Users/...` dentro del workspace
+
+**Detectado:** 2026-07-08 (artefacto creado 2026-07-07 03:53)  
+**Proyecto:** Nuevo Proyecto AI Teams  
+**Síntomas:** Árbol fantasma `Users/she__/Documents/AI Teams Projects/Nuevo Proyecto AI Teams/.aiteam/issue-intake-context.md` anidado dentro del propio workspace.  
+**Causa raíz:** Un agente emitió la ruta absoluta completa en un file_op; `_execute_file_ops` le quitaba solo la unidad (`C:`) y trataba el resto como relativo → re-rooteo silencioso.  
+**Fix aplicado (2026-07-07):** Rutas con unidad/UNC se resuelven de verdad: dentro del workspace → parte relativa correcta; fuera → rechazadas con warning. El `/` inicial a secas sigue significando raíz del workspace (shorthand LLM). Tests: `test_file_ops_absolute_workspace_path_relativized`, `test_file_ops_absolute_path_outside_workspace_skipped`, `test_file_ops_leading_slash_still_means_workspace_root`.  
+**Nota:** El artefacto basura sigue en el workspace del proyecto (borrado manual pendiente — capa 2).
+
+---
+
+### RUN-009 · RESUELTO — codex CLI: prompt por argv supera el límite de línea de Windows; stdin cp1252 rechazado
+
+**Detectado:** 2026-07-07  
+**Run ID(s):** 6 runs fallidos 00:20–00:21 (`subscription_cli_nonzero_exit`, "La línea de comandos es demasiado larga"), 2 más 00:30 ("input is not valid UTF-8")  
+**Proyecto:** Nuevo Proyecto AI Teams  
+**Causa raíz:** (1) El prompt completo (skill + payload + workspace_files) iba como argumento de línea de comandos; `codex.cmd` corre vía cmd.exe (~8 191 chars máx). (2) Al pasar a stdin, Python codificaba en cp1252 (default Windows) y codex espera UTF-8 — además del mojibake en stdout.  
+**Fix aplicado (2026-07-07):** Prompt por stdin (`codex exec … -`) + `encoding="utf-8"` en el subproceso. Además, los runs fallidos ya no publican su stdout crudo (el prompt ecoado) como comentario del chat.  
+**Verificación:** Runs reales de file_scout/lead completando con acentos correctos; tests `test_prompt_read_from_stdin_not_argv`, `test_prompt_piped_via_stdin_input`, `test_failed_run_output_not_posted_as_chat_comment`.
 
 ---
 
@@ -305,6 +353,22 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 **Detección:** `SELECT a.adapter_type FROM agents a WHERE a.id = 'role:lead_executor'` difiere de `SELECT adapter_type FROM agents WHERE id = 'role:lead'`.  
 **Acción (2026-05-13):** `_ensure_role_agent` en executor: caso especial para `lead_executor` — lee `adapter_type` y `adapter_config_json` del Lead desde DB y los hereda directamente. `seniority='senior'`. Tests: `tests/test_lead_executor.py` (11 tests).
 
+### P-17: Payload de archivos con starvation (existencia invisible para el reviewer)
+**Síntoma:** Reviewer afirma que un archivo "no existe" cuando está en disco; bucle de fixes que re-crean archivos presentes.  
+**Causa:** Cualquier inyección de contexto que trunca por presupuesto **descartando** entradas en vez de degradarlas a "existe, contenido omitido". La existencia y el contenido son garantías distintas: la existencia debe ser total.  
+**Detección:** Comentarios del reviewer citando `workspace_files` sin un archivo que `ls` sí muestra.  
+**Acción (2026-07-07):** `_read_workspace_files` lista siempre todo; contenido por prioridad; ver RUN-007.
+
+### P-18: Churn de delegación manual (el Lead esquiva los caps automáticos)
+**Síntoma:** El mismo parent acumula pares engineer/reviewer creados y cancelados en ráfaga; los caps de fix-cycle no saltan porque cuentan solo la vía automática.  
+**Detección:** `delegation.churn_blocked` en activity_log; o ≥8 issues del mismo rol bajo un parent en <6 h.  
+**Acción (2026-07-07):** Freno de churn en `_create_delegated_issue` con escalación idempotente (`delegation_churn_limit`). Env: `AITEAM_DELEGATION_CHURN_LIMIT`.
+
+### P-19: file_ops con rutas absolutas re-rooteadas
+**Síntoma:** Árbol espejo del path del workspace anidado dentro del workspace (`Users/.../proyecto/...`).  
+**Detección:** Directorios de primer nivel inesperados que replican la estructura del filesystem.  
+**Acción (2026-07-07):** Resolución estricta de rutas absolutas en `_execute_file_ops`; ver RUN-008.
+
 ---
 
 ## Historial de cambios al sistema de evidencia
@@ -333,6 +397,17 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 | 2026-05-05 | `build_wake_payload` añade `children` con estado de issues hijas y liveness | `aiteam/db/wake_payload.py` |
 | 2026-05-05 | `lead.md` skill: instrucción explícita de escalación ante hijos bloqueados | `skills/lead.md` |
 | 2026-05-05 | `_has_non_terminal_children` → `_has_progressing_children`: excluye `blocked` del guard de skip | `aiteam/heartbeat/executor.py` |
+| 2026-07-06 | Retry 429/5xx/timeout en adapters API + provider governor (pacing TPM, cooldown, degraded) | `aiteam/adapters/http_retry.py`, `aiteam/provider_governor.py` |
+| 2026-07-06 | Runs fallidos por infra no cuentan como `lead.unblock_skipped`; backoff 2 min del reconciler tras `api_error` | `aiteam/heartbeat/executor.py`, `aiteam/db/liveness.py` |
+| 2026-07-06 | Verificación automática adjunta a cierres de Lead LLM (veredicto reviewer + scan stubs + coste) | `aiteam/heartbeat/executor.py` |
+| 2026-07-06 | Recuperación RUN-003: `_attempt_adapter_recovery` reabre issue agotada con adapter alternativo | `aiteam/heartbeat/executor.py` |
+| 2026-07-06 | Cost breaker por subtree (gasto sin avance → escalación) + dedupe wakeups por (agente, issue) | `aiteam/heartbeat/executor.py`, `aiteam/db/wakeups.py` |
+| 2026-07-07 | codex CLI: prompt por stdin + UTF-8; modelo por `-c model=`; catálogo GPT-5.x | `aiteam/adapters/subscription_cli_adapter.py`, `aiteam/user_config.py` |
+| 2026-07-07 | `_read_workspace_files` sin starvation (existencia total, contenido por prioridad) | `aiteam/heartbeat/executor.py` |
+| 2026-07-07 | Freno de churn de delegación + rutas absolutas estrictas en file_ops + curación → context_curator | `aiteam/heartbeat/executor.py`, `aiteam/adapters/subscription_cli_adapter.py` |
+| 2026-07-08 | Matriz RBAC de ops por tier + gate preventivo de file_ops para roles no-editores | `aiteam/adapters/work_contract.py`, `aiteam/heartbeat/executor.py` |
+| 2026-07-08 | AGENT-REPORT como artefacto validado con procedencia (tabla `agent_reports`) | `aiteam/db/agent_reports.py`, `aiteam/db/schema.sql` |
+| 2026-07-08 | Documentados RUN-007/008/009, P-17/18/19; RUN-003/004 cerrados | `docs/RUN_PROBLEMS_REGISTRY.md` |
 | 2026-05-05 | Check pre-propuesta: escalación si hay hijos bloqueados (fuera del branch `child_report`) | `aiteam/heartbeat/executor.py` |
 | 2026-05-05 | `reconcile_stalled_subtrees`: detecta subtrees all-blocked y enqola wakeup al supervisor | `aiteam/db/liveness.py` |
 | 2026-05-05 | `HeartbeatLoop.run_once`: registrado `reconcile_stalled_subtrees` en cada tick | `aiteam/heartbeat/loop.py` |

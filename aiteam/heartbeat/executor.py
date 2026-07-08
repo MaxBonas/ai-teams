@@ -1987,6 +1987,21 @@ class RunExecutor:
         for body in actions.get("add_comments") or []:
             if not isinstance(body, str) or not body.strip():
                 continue
+            # Codex-style adapters put the AGENT-REPORT block in add_comment
+            # (result.output is just the short summary) — capture it here too.
+            _comment_report = _parse_agent_report(body)
+            if _comment_report:
+                try:
+                    record_agent_report(
+                        self.db_path,
+                        issue_id=issue_id,
+                        agent_id=agent_id,
+                        run_id=str(run.get("id")),
+                        agent_role=agent_role,
+                        parsed=_comment_report,
+                    )
+                except Exception:
+                    logger.warning("agent report persistence (add_comment) failed for issue %s", issue_id, exc_info=True)
             try:
                 comment = create_comment(
                     self.db_path,

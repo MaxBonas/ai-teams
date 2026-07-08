@@ -109,6 +109,54 @@ def test_missing_table_returns_none(tmp_path: Path) -> None:
     assert latest_agent_report(db, issue_id="i1") is None
 
 
+def test_report_in_add_comment_is_recorded(tmp_path: Path) -> None:
+    """Codex-style adapters carry the AGENT-REPORT in add_comment (not in
+    result.output) — the executor must capture it from that path too."""
+    import sqlite3 as _sqlite3
+    from aiteam.adapters.registry import AdapterDescriptor, AdapterRegistry, ExecutionResult
+    from aiteam.db.wakeups import enqueue_wakeup
+    from aiteam.heartbeat.executor import RunExecutor
+    from aiteam.heartbeat.scheduler import HeartbeatScheduler
+    from typing import Any
+
+    db = tmp_path / "aiteam.db"
+    _init(db)
+    with _sqlite3.connect(str(db)) as conn:
+        conn.execute("UPDATE agents SET adapter_type = 'subscription_cli' WHERE id = 'role:reviewer'")
+        conn.commit()
+
+    class _ReviewerRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Revisión completada.",  # short summary — no marker here
+                actions={
+                    "add_comments": [
+                        "Findings...\n---AGENT-REPORT---\nrole: reviewer\nresult: changes_requested\nblocker: escena vacía\n"
+                    ]
+                },
+            )
+
+    executor = RunExecutor(db, AdapterRegistry([_ReviewerRuntime()]))
+    enqueue_wakeup(
+        db, agent_id="role:reviewer", source="manual", reason="manual",
+        payload={"issue_id": "i1", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db).dispatch_next(agent_id="role:reviewer")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    report = latest_agent_report(db, issue_id="i1")
+    assert report is not None
+    assert report["result"] == "changes_requested"
+    assert report["blocker"] == "escena vacía"
+
+
 def test_report_survives_lead_directive_being_last_comment(tmp_path: Path) -> None:
     """Integration: the wake payload's child report must come from the
     validated record, not from whatever comment is last on the thread.
