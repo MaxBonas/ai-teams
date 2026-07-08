@@ -14,10 +14,12 @@ PROJECT_CONFIG_NAME = "project_config.json"
 # Role tiers for the hiring policy live in aiteam.policies (fase 5) —
 # aliases kept here for existing imports.
 from aiteam.policies import (  # noqa: E402
+    AUTONOMY_MODES,
     JUNIOR_ROLES,
     SENIOR_ROLES,
     TIER3_ROLES,
     cost_policy_enforced as _cost_policy_enforced,
+    default_autonomy,
 )
 
 # API-only adapters cannot write workspace files — they will immediately block
@@ -60,6 +62,29 @@ def read_project_adapter_policy(runtime_dir: Path) -> dict[str, Any]:
     except Exception:
         return {"version": 1, "adapter_profile_ids": [], "adapter_policy": {}}
     return parsed if isinstance(parsed, dict) else {"version": 1, "adapter_profile_ids": [], "adapter_policy": {}}
+
+
+def project_autonomy(runtime_dir: Path) -> str:
+    """Autonomy mode for a project: 'supervised' (default) or 'autonomous'.
+
+    Stored in project_config.json under 'autonomy'; falls back to the
+    machine-wide AITEAM_AUTONOMY env default when unset/invalid.
+    """
+    mode = str(read_project_adapter_policy(runtime_dir).get("autonomy") or "").strip().lower()
+    return mode if mode in AUTONOMY_MODES else default_autonomy()
+
+
+def set_project_autonomy(runtime_dir: Path, mode: str) -> dict[str, Any]:
+    """Persist the autonomy mode, preserving the rest of project_config.json."""
+    mode_key = str(mode or "").strip().lower()
+    if mode_key not in AUTONOMY_MODES:
+        raise ValueError(f"autonomy must be one of {sorted(AUTONOMY_MODES)}")
+    config = read_project_adapter_policy(runtime_dir)
+    config["autonomy"] = mode_key
+    path = Path(runtime_dir) / PROJECT_CONFIG_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return config
 
 
 def available_project_profiles(profile_ids: list[str]) -> list[dict[str, Any]]:

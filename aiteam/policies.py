@@ -105,6 +105,48 @@ def cost_policy_enforced() -> bool:
     return _env_flag("AITEAM_ENFORCE_COST_POLICY")
 
 
+# ── Política de autonomía (P5) ───────────────────────────────────────────────
+# supervised  — every escalation waits for the user (default).
+# autonomous  — OPERATIONAL escalations self-resolve with their safe default,
+#               once per (issue, reason); a repeat of the same escalation means
+#               the default didn't work and promotes to the user. PRODUCT
+#               decisions (cycle close, scope, team approval) always wait.
+
+AUTONOMY_SUPERVISED = "supervised"
+AUTONOMY_AUTONOMOUS = "autonomous"
+AUTONOMY_MODES = frozenset({AUTONOMY_SUPERVISED, AUTONOMY_AUTONOMOUS})
+
+# reason → safe default action. Anything NOT in this map is a product decision.
+OPERATIONAL_INTERACTION_DEFAULTS: dict[str, str] = {
+    "lead_engineer_loop_detected": "accept",    # one more guided attempt
+    "reviewer_fix_cycle_limit": "accept",       # new engineer with full spec
+    "delegation_churn_limit": "accept",         # one more bounded round
+    "cost_breaker_tripped": "accept",           # reset counter, keep going
+    "child_blocked_requires_action": "accept",  # lead final attempt
+    "lead_wants_file_read": "accept",           # harmless context injection
+    "subtree_stalled": "accept",                # wake supervisor to unblock
+}
+
+
+def operational_interaction_default(reason: str) -> str | None:
+    """Safe default action for an operational escalation, or None if the
+    reason is a product decision that must always reach the user."""
+    return OPERATIONAL_INTERACTION_DEFAULTS.get(str(reason or "").strip().lower())
+
+
+def default_autonomy() -> str:
+    """Machine-wide default autonomy (AITEAM_AUTONOMY); project config wins."""
+    raw = os.environ.get("AITEAM_AUTONOMY", "").strip().lower()
+    return raw if raw in AUTONOMY_MODES else AUTONOMY_SUPERVISED
+
+
+def interaction_ttl_minutes() -> int:
+    """In supervised mode, operational escalations older than this take their
+    safe default instead of freezing the subtree. AITEAM_INTERACTION_TTL_MINUTES;
+    0 (default) disables expiration."""
+    return _env_int("AITEAM_INTERACTION_TTL_MINUTES", 0)
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name, "").strip()
     if not raw:

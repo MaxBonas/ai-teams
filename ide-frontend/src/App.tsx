@@ -360,6 +360,7 @@ interface PlanDocument {
 interface ProjectStatePayload {
   success?: boolean;
   detail?: string;
+  autonomy?: string;
   cursor?: string | null;
   issues?: Issue[];
   agents?: Agent[];
@@ -598,6 +599,12 @@ export default function App() {
   const [projectList, setProjectList] = useState<Array<{ name: string; path: string; current: boolean }>>([]);
   const [projectListOpen, setProjectListOpen] = useState(false);
   const [loopHealth, setLoopHealth] = useState<LoopHealth | null>(null);
+  // Autonomy policy (P5): supervised (default) | autonomous
+  const [autonomyMode, setAutonomyMode] = useState<string>('supervised');
+  const [autonomySaving, setAutonomySaving] = useState(false);
+  // In-flight guard: the 20 s baseline and 2 s active-run intervals overlap;
+  // skip a poll tick while the previous /api/project/state is still pending.
+  const projectStatePollBusy = useRef(false);
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedIssueId) || issues[0] || null,
@@ -803,6 +810,7 @@ export default function App() {
     setComments(json.comments || []);
     setInteractions(json.interactions || []);
     setPlanDocument(json.plan_document || null);
+    if (json.autonomy) setAutonomyMode(json.autonomy);
     setSelectedIssueId(nextSelected);
     void loadChat();
     void loadWsFiles();
@@ -810,6 +818,27 @@ export default function App() {
     void loadBudgets();
     void loadCostSummary();
     void loadLoopHealth();
+  };
+
+  const saveAutonomy = async (mode: string) => {
+    if (mode === autonomyMode || autonomySaving) return;
+    setAutonomySaving(true);
+    const previous = autonomyMode;
+    setAutonomyMode(mode); // optimistic; revert on failure
+    try {
+      const res = await apiFetch('/api/project/autonomy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      const json = (await res.json()) as { success?: boolean; autonomy?: string; detail?: string };
+      if (!res.ok || !json.success) throw new Error(json.detail || `autonomy:${res.status}`);
+      setAutonomyMode(json.autonomy || mode);
+    } catch {
+      setAutonomyMode(previous);
+    } finally {
+      setAutonomySaving(false);
+    }
   };
 
   /**
@@ -878,11 +907,26 @@ export default function App() {
     void refresh();
   }, []);
 
+  // Shared poll entry for both intervals: while a /api/project/state request
+  // is still pending, later ticks are dropped instead of stacking requests
+  // (the 20 s and 2 s intervals otherwise fire concurrently during runs).
+  const pollProjectData = async (issueId: string, typeFilter: string) => {
+    if (projectStatePollBusy.current) return;
+    projectStatePollBusy.current = true;
+    try {
+      await loadProjectData(issueId, typeFilter);
+    } catch {
+      // transient poll errors are ignored; next tick retries
+    } finally {
+      projectStatePollBusy.current = false;
+    }
+  };
+
   // Auto-refresh every 20 s when a project is open (idle baseline)
   useEffect(() => {
     if (!workspaceConfigured) return undefined;
     const id = setInterval(() => {
-      void loadProjectData(selectedIssueId, timelineTypeFilter).catch(() => {});
+      void pollProjectData(selectedIssueId, timelineTypeFilter);
     }, 20_000);
     return () => clearInterval(id);
     // deps intentionally limited: restart interval only when project or filter changes
@@ -895,7 +939,7 @@ export default function App() {
   useEffect(() => {
     if (!workspaceConfigured || !hasActiveRun) return undefined;
     const id = setInterval(() => {
-      void loadProjectData(selectedIssueId, timelineTypeFilter).catch(() => {});
+      void pollProjectData(selectedIssueId, timelineTypeFilter);
     }, 2_000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2822,6 +2866,39 @@ export default function App() {
                       </button>
                     </div>
                   </details>
+                </div>
+
+                {/* Autonomía (P5) */}
+                <div className="config-subsection">
+                  <div className="config-subsection-label">
+                    Autonomía
+                    <InfoTip
+                      tip="Supervisado: todas las escalaciones esperan tu decisión. Autónomo: las escalaciones operativas (breakers, bucles, hijos bloqueados) se auto-resuelven con su opción segura una vez por issue; las decisiones de producto (cierre de ciclo, alcance, preguntas) siempre te esperan."
+                      wide
+                    />
+                  </div>
+                  <div className="config-field-row">
+                    <button
+                      className={autonomyMode === 'supervised' ? 'config-inline-btn' : 'secondary-button'}
+                      onClick={() => void saveAutonomy('supervised')}
+                      disabled={autonomySaving || !workspaceConfigured}
+                    >
+                      Supervisado
+                    </button>
+                    <button
+                      className={autonomyMode === 'autonomous' ? 'config-inline-btn' : 'secondary-button'}
+                      onClick={() => void saveAutonomy('autonomous')}
+                      disabled={autonomySaving || !workspaceConfigured}
+                    >
+                      Autónomo
+                    </button>
+                  </div>
+                  <p className="config-hint">
+                    Modo actual: <code>{autonomyMode}</code>
+                    {autonomyMode === 'autonomous'
+                      ? ' — las interacciones operativas se resuelven solas (una vez por issue y motivo).'
+                      : ' — el equipo se detiene en cada escalación hasta que respondas.'}
+                  </p>
                 </div>
               </div>
 

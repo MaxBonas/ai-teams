@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from aiteam.adapters.registry import AdapterRegistry
+from aiteam.autonomy import auto_resolve_operational_interactions
 from aiteam.db.liveness import reconcile_stalled_subtrees, reconcile_unassigned_role_issues, reconcile_unqueued_assigned_issues
 from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
@@ -88,6 +89,16 @@ class HeartbeatLoop:
                 logger.info("liveness: escalated %d stalled subtree(s) to supervisor: %s", len(stalled), stalled)
         except Exception:
             logger.exception("liveness reconciler failed")
+
+        try:
+            auto_resolved = await loop.run_in_executor(None, auto_resolve_operational_interactions, self.db_path)
+            if auto_resolved:
+                logger.info(
+                    "autonomy: auto-resolved %d operational interaction(s): %s",
+                    len(auto_resolved), auto_resolved,
+                )
+        except Exception:
+            logger.exception("autonomy reconciler failed")
 
         dispatched = 0
         while True:

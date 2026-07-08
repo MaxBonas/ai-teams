@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from api.routers.timeline import list_timeline
 from api.utils import (
@@ -16,9 +17,11 @@ from api.utils import (
     get_current_workspace,
     resolve_runtime_dir,
 )
+from aiteam.db.activity_log import log_activity
 from aiteam.db.agents import list_agents
 from aiteam.db.documents import get_document
 from aiteam.db.issues import list_issues
+from aiteam.project_adapters import project_autonomy, set_project_autonomy
 
 router = APIRouter()
 
@@ -65,6 +68,7 @@ async def get_project_state(
         "success": True,
         "workspace": str(workspace.as_posix()) if workspace.resolve() != PROJECT_ROOT.resolve() else "",
         "configured": workspace.resolve() != PROJECT_ROOT.resolve(),
+        "autonomy": project_autonomy(db.parent),
         "cursor": _state_cursor(issues=issues, agents=agents, runs=runs, timeline=timeline),
         "issues": issues,
         "agents": agents,
@@ -75,6 +79,38 @@ async def get_project_state(
         "selected_issue_id": selected_id,
         "plan_document": plan_document,
     }
+
+
+class AutonomyRequest(BaseModel):
+    mode: str
+
+
+@router.post("/api/project/autonomy")
+async def post_project_autonomy(body: AutonomyRequest, request: Request):
+    """Switch the project between supervised and autonomous escalation handling."""
+    _require_api_auth_request(request)
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    if workspace.resolve() == PROJECT_ROOT.resolve():
+        raise HTTPException(status_code=409, detail="No workspace configured")
+    runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
+    try:
+        set_project_autonomy(runtime_dir, body.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db = runtime_dir / "aiteam.db"
+    if db.exists():
+        try:
+            log_activity(
+                db,
+                action="project.autonomy_changed",
+                target_type="project",
+                target_id=str(workspace.as_posix()),
+                actor_user_id="user",
+                payload={"mode": body.mode.strip().lower()},
+            )
+        except sqlite3.OperationalError:
+            pass  # config saved; audit entry is best-effort
+    return {"success": True, "autonomy": project_autonomy(runtime_dir)}
 
 
 def _fetch_runs(db: Path, *, limit: int) -> list[dict[str, Any]]:

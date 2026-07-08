@@ -121,3 +121,23 @@ def test_project_state_returns_cockpit_snapshot(tmp_path: Path) -> None:
     assert payload["plan_document"]["id"] == "doc-1"
     assert payload["timeline"]
     assert payload["cursor"]
+    assert payload["autonomy"] == "supervised"
+
+
+def test_project_autonomy_endpoint_roundtrip(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _init_db(workspace)
+    client, previous = _client_for_workspace(workspace)
+    try:
+        bad = client.post("/api/project/autonomy", json={"mode": "yolo"})
+        assert bad.status_code == 400
+
+        response = client.post("/api/project/autonomy", json={"mode": "autonomous"})
+        assert response.status_code == 200
+        assert response.json()["autonomy"] == "autonomous"
+
+        state = client.get("/api/project/state")
+        assert state.json()["autonomy"] == "autonomous"
+    finally:
+        set_current_workspace(previous)
