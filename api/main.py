@@ -30,6 +30,7 @@ from api.routers import documents as documents_router
 from api.routers import goals as goals_router
 from api.routers import interactions as interactions_router
 from api.routers import issues as issues_router
+from api.routers import project_state as project_state_router
 from api.routers import runs as runs_router
 from api.routers import timeline as timeline_router
 from api.routers import tool_access as tool_access_router
@@ -150,6 +151,7 @@ app.include_router(interactions_router.router)
 app.include_router(goals_router.router)
 app.include_router(agents_router.router)
 app.include_router(issues_router.router)
+app.include_router(project_state_router.router)
 app.include_router(runs_router.router)
 app.include_router(comments_router.router)
 app.include_router(dependencies_router.router)

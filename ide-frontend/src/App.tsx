@@ -278,22 +278,6 @@ function InfoTip({ tip, wide }: { tip: string; wide?: boolean }) {
   );
 }
 
-// Adapter types registered in the backend (aiteam/adapters/registry.py build_default_registry).
-// 'manual' exists but no human-facing notification/task system is implemented yet → disabled.
-const ADAPTER_OPTIONS: Array<{ value: string; label: string; disabled?: boolean; note?: string }> = [
-  { value: 'role_builtin',      label: 'Builtin simulado — sin llamada LLM real' },
-  { value: 'anthropic_sonnet',  label: 'Claude Sonnet 4.5 · API Anthropic' },
-  { value: 'anthropic_api',     label: 'Claude Opus 4.5 · API Anthropic' },
-  { value: 'openai_api',        label: 'GPT-4.1 · API OpenAI' },
-  { value: 'gemini_api',        label: 'Gemini 2.5 Flash · API Google' },
-  { value: 'subscription_cli',  label: 'CLI de suscripción (Codex / Claude Code / Gemini CLI)' },
-  {
-    value: 'manual', disabled: true,
-    label: '👤 Manual / humano — próximamente',
-    note: 'El agente queda asignado a un humano que recibe la tarea y reporta via comentarios. Requiere sistema de notificación y vista de tarea humana aún no implementados.',
-  },
-];
-
 const PROFILE_OPTIONS = [
   { value: 'full_team', label: 'Equipo completo', desc: 'Lead + Engineer + Reviewer' },
   { value: 'lead_quorum', label: 'Lead + Quorum', desc: 'Lead con auditores senior para planificación' },
@@ -371,6 +355,20 @@ interface PlanDocument {
   current_revision_id: string;
   updated_at?: string;
   created_at?: string;
+}
+
+interface ProjectStatePayload {
+  success?: boolean;
+  detail?: string;
+  cursor?: string | null;
+  issues?: Issue[];
+  agents?: Agent[];
+  runs?: Run[];
+  timeline?: TimelineItem[];
+  comments?: Comment[];
+  interactions?: Interaction[];
+  selected_issue_id?: string;
+  plan_document?: PlanDocument | null;
 }
 
 type TimelineType = 'issue' | 'comment' | 'interaction' | 'run' | 'activity' | 'cost' | 'tool';
@@ -566,7 +564,7 @@ export default function App() {
   // Team profile for new tasks
   const [newTaskProfile, setNewTaskProfile] = useState<string>('full_team');
   // Agent config inline edit (sidebar)
-  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [, setEditingAgentId] = useState<string | null>(null);
   const [agentDraft, setAgentDraft] = useState<Partial<Agent>>({});
   // Agent config modal (team panel)
   const [configModalAgent, setConfigModalAgent] = useState<Agent | null>(null);
@@ -785,57 +783,27 @@ export default function App() {
     }
   };
 
-  const loadIssueThreads = async (nextIssues: Issue[]) => {
-    const settled = await Promise.all(
-      nextIssues.map(async (issue) => {
-        const [commentsResponse, interactionsResponse] = await Promise.all([
-          apiFetch(`/api/issues/${encodeURIComponent(issue.id)}/comments`),
-          apiFetch(`/api/issues/${encodeURIComponent(issue.id)}/interactions`),
-        ]);
-        const commentsJson = (await commentsResponse.json()) as { comments?: Comment[]; detail?: string };
-        const interactionsJson = (await interactionsResponse.json()) as { interactions?: Interaction[]; detail?: string };
-        if (!commentsResponse.ok) throw new Error(commentsJson.detail || `comments:${commentsResponse.status}`);
-        if (!interactionsResponse.ok) throw new Error(interactionsJson.detail || `interactions:${interactionsResponse.status}`);
-        return {
-          comments: (commentsJson.comments || []).map((comment) => ({ ...comment, issue_id: comment.issue_id || issue.id })),
-          interactions: (interactionsJson.interactions || []).map((interaction) => ({
-            ...interaction,
-            issue_id: interaction.issue_id || issue.id,
-          })),
-        };
-      }),
-    );
-    setComments(settled.flatMap((entry) => entry.comments));
-    setInteractions(settled.flatMap((entry) => entry.interactions));
-  };
-
   const loadProjectData = async (issueId = selectedIssueId, typeFilter = timelineTypeFilter) => {
-    const timelineParams = new URLSearchParams({ limit: '300', order: 'desc' });
-    if (typeFilter) timelineParams.set('type', typeFilter);
-    const [issuesResponse, agentsResponse, runsResponse, timelineResponse] = await Promise.all([
-      apiFetch('/api/issues'),
-      apiFetch('/api/agents'),
-      apiFetch('/api/runs?limit=100'),
-      apiFetch(`/api/timeline?${timelineParams}`),
-    ]);
-    const issuesJson = (await issuesResponse.json()) as { issues?: Issue[]; detail?: string };
-    const agentsJson = (await agentsResponse.json()) as { agents?: Agent[]; detail?: string };
-    const runsJson = (await runsResponse.json()) as { runs?: Run[]; detail?: string };
-    const timelineJson = (await timelineResponse.json()) as { items?: TimelineItem[]; detail?: string };
-    if (!issuesResponse.ok) throw new Error(issuesJson.detail || `issues:${issuesResponse.status}`);
-    if (!agentsResponse.ok) throw new Error(agentsJson.detail || `agents:${agentsResponse.status}`);
-    if (!runsResponse.ok) throw new Error(runsJson.detail || `runs:${runsResponse.status}`);
-    if (!timelineResponse.ok) throw new Error(timelineJson.detail || `timeline:${timelineResponse.status}`);
+    const params = new URLSearchParams({
+      timeline_limit: '300',
+      runs_limit: '100',
+    });
+    if (issueId) params.set('selected_issue_id', issueId);
+    if (typeFilter) params.set('timeline_type', typeFilter);
+    const response = await apiFetch(`/api/project/state?${params}`);
+    const json = (await response.json()) as ProjectStatePayload;
+    if (!response.ok) throw new Error(json.detail || `project-state:${response.status}`);
 
-    const nextIssues = issuesJson.issues || [];
-    const nextSelected = nextIssues.find((issue) => issue.id === issueId)?.id || nextIssues[0]?.id || '';
+    const nextIssues = json.issues || [];
+    const nextSelected = json.selected_issue_id || nextIssues.find((issue) => issue.id === issueId)?.id || nextIssues[0]?.id || '';
     setIssues(nextIssues);
-    setAgents(agentsJson.agents || []);
-    setRuns(runsJson.runs || []);
-    setTimelineItems((timelineJson.items || []).map((item) => ({ ...item, detail: clip(item.detail || '') })));
+    setAgents(json.agents || []);
+    setRuns(json.runs || []);
+    setTimelineItems((json.timeline || []).map((item) => ({ ...item, detail: clip(item.detail || '') })));
+    setComments(json.comments || []);
+    setInteractions(json.interactions || []);
+    setPlanDocument(json.plan_document || null);
     setSelectedIssueId(nextSelected);
-    await loadIssueThreads(nextIssues);
-    if (nextSelected) await loadPlanDocument(nextSelected);
     void loadChat();
     void loadWsFiles();
     void loadProjectList();
