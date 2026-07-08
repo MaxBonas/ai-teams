@@ -287,6 +287,29 @@ CREATE TABLE IF NOT EXISTS learning_facts (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Structured, provenance-carrying agent reports (validated AGENT-REPORT).
+-- One row per report emitted by a run; consumers must only trust rows with
+-- valid=1 AND is_assignee=1 (written by the issue's own assignee).
+CREATE TABLE IF NOT EXISTS agent_reports (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    agent_role TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL DEFAULT '',
+    issue_status TEXT,
+    next_owner TEXT,
+    tech_match TEXT,
+    blocker TEXT,
+    evidence TEXT,
+    valid INTEGER NOT NULL DEFAULT 0,
+    is_assignee INTEGER NOT NULL DEFAULT 0,
+    raw_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_reports_issue ON agent_reports(issue_id, created_at);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency
     ON wakeup_requests(agent_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;

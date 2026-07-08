@@ -96,9 +96,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     executor = RunExecutor(db_path, registry)
     task: asyncio.Task[None] | None = None
 
-    # Auto-migrate: apply schema if tables are missing (idempotent — uses IF NOT EXISTS).
-    if not _has_control_plane_schema(db_path):
-        logger.info("control-plane schema missing at %s — applying schema.sql", db_path)
+    # Auto-migrate: schema.sql is fully IF NOT EXISTS — applying it on every
+    # startup is idempotent and lets existing DBs pick up newly added tables
+    # (e.g. agent_reports) without a manual migration step.
+    if db_path.exists() or not _has_control_plane_schema(db_path):
         _apply_schema(db_path)
 
     if _has_control_plane_schema(db_path):

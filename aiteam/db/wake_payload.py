@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from aiteam.db.agent_reports import latest_agent_report
+
 
 def _parse_agent_report(body: str) -> dict[str, str] | None:
     """Extract the ---AGENT-REPORT--- structured block from a comment body.
@@ -195,7 +197,12 @@ def build_wake_payload(
         children_summary = []
         for r in children_rows:
             last_body = r["last_comment_body"] or ""
-            agent_report = _parse_agent_report(last_body)
+            # Prefer the validated report (written by the child's assignee);
+            # fall back to last-comment parsing only for pre-migration data.
+            agent_report = (
+                latest_agent_report(db_path, issue_id=str(r["id"]))
+                or _parse_agent_report(last_body)
+            )
             children_summary.append({
                 "id": r["id"],
                 "title": r["title"],

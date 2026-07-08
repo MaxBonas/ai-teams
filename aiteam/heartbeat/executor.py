@@ -23,6 +23,7 @@ from aiteam.db.interactions import create_interaction, get_interaction, list_int
 from aiteam.db.issues import get_issue, update_issue
 from aiteam.db.runs import append_run_event, finish_run, mark_run_running
 from aiteam.db.tool_access import record_tool_access
+from aiteam.db.agent_reports import latest_agent_report, record_agent_report
 from aiteam.db.wake_payload import build_wake_payload, _parse_agent_report
 from aiteam.db.wakeups import enqueue_wakeup, finish_wakeup
 from aiteam.heartbeat.scheduler import DispatchResult
@@ -728,6 +729,23 @@ class RunExecutor:
                     run_id=run_id,
                     body=result.output,
                 )
+                # ── Persist the AGENT-REPORT as a validated artifact ──────────
+                # Provenance is captured at the source (this run, this agent)
+                # so downstream gates read a trustworthy record instead of
+                # re-parsing whatever comment happens to be last on the thread.
+                _parsed_report = _parse_agent_report(result.output)
+                if _parsed_report:
+                    try:
+                        record_agent_report(
+                            self.db_path,
+                            issue_id=issue_id_str,
+                            agent_id=agent_id,
+                            run_id=run_id,
+                            agent_role=agent_role,
+                            parsed=_parsed_report,
+                        )
+                    except Exception:
+                        logger.warning("agent report persistence failed for run %s", run_id, exc_info=True)
 
         # ── Step 2: Apply the adapter's own result actions ───────────────────
         self._apply_result_actions(run=run, agent_id=agent_id, agent_role=agent_role, result=result)
@@ -4220,7 +4238,13 @@ class RunExecutor:
         result: list[dict[str, Any]] = []
         for row in rows:
             d = dict(row)
-            d["last_agent_report"] = _parse_agent_report(str(d.get("last_comment_body") or ""))
+            # Prefer the validated, provenance-checked report; fall back to
+            # parsing the last comment only for legacy data recorded before
+            # the agent_reports table existed.
+            d["last_agent_report"] = (
+                latest_agent_report(self.db_path, issue_id=str(d.get("id") or ""))
+                or _parse_agent_report(str(d.get("last_comment_body") or ""))
+            )
             result.append(d)
         return result
 
