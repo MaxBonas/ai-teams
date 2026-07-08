@@ -68,7 +68,8 @@ def build_wake_payload(
         issue_row = conn.execute(
             """
             SELECT id, title, description, status, role, complexity, criticality,
-                   assignee_agent_id, parent_id, priority, created_at, updated_at
+                   assignee_agent_id, parent_id, priority, created_at, updated_at,
+                   metadata_json
             FROM issues WHERE id = ?
             """,
             (issue_id,),
@@ -78,6 +79,15 @@ def build_wake_payload(
             return {"issue_id": issue_id, "error": "issue_not_found", "fallback_fetch_needed": True}
 
         issue = dict(issue_row)
+        # Surface structured acceptance criteria (set at delegation time) so
+        # the assignee sees the explicit done-bar in every wake.
+        try:
+            _issue_meta = json.loads(issue.pop("metadata_json", None) or "{}")
+        except (TypeError, ValueError):
+            _issue_meta = {}
+        acceptance_criteria = [
+            str(item) for item in (_issue_meta.get("acceptance_criteria") or []) if str(item).strip()
+        ]
 
         # Comments: most recent first, capped
         comment_rows = conn.execute(
@@ -245,6 +255,7 @@ def build_wake_payload(
             "parent_id": issue.get("parent_id"),
             "created_at": issue.get("created_at"),
             "updated_at": issue.get("updated_at"),
+            "acceptance_criteria": acceptance_criteria,
         },
         "parent": parent_summary,
         "comments": comments,

@@ -319,7 +319,9 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
             "Eres un ORQUESTADOR, no un implementador. NO escribas ni edites código ni archivos tú mismo.",
             "Tu trabajo es planificar y DELEGAR mediante `ops` en tu respuesta JSON:",
             "  - Para implementación de código → crea un sub-issue: "
-            '{"type":"create_issue","title":"...","description":"<spec concreta: tecnología, archivos, criterios de aceptación>","role":"engineer","complexity":"low|medium|high"}',
+            '{"type":"create_issue","title":"...","description":"<spec concreta: tecnología, archivos>","role":"engineer","complexity":"low|medium|high",'
+            '"acceptance_criteria":["criterio verificable 1","criterio 2"]}'
+            " — los acceptance_criteria son la vara de done: el reviewer juzgará contra esa lista.",
             "  - Para revisión → create_issue con role:reviewer.",
             "  - Para leer archivos o investigar → create_issue con role:file_scout / web_scout (NUNCA lo hagas tú).",
             "  - Para curar/comprimir contexto de un thread largo → create_issue con role:context_curator (NO role:engineer).",

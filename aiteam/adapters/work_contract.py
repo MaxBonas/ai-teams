@@ -321,6 +321,13 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
                 issue_spec["criticality"] = str(op["criticality"])
             if op.get("action_type"):
                 issue_spec["action_type"] = str(op["action_type"])
+            # Structured done-bar: list of verifiable acceptance criteria the
+            # assignee must meet and the reviewer judges against.
+            raw_criteria = op.get("acceptance_criteria")
+            if isinstance(raw_criteria, list):
+                criteria = [str(c).strip() for c in raw_criteria if str(c).strip()]
+                if criteria:
+                    issue_spec["acceptance_criteria"] = criteria
             create_issues.append(issue_spec)
         elif op_type == "create_interaction":
             # Merge agent-supplied payload (must include 'reason') with version sentinel.

@@ -2313,6 +2313,77 @@ class _NoOpLeadRuntime:
         return ExecutionResult(status="completed", output="Engineer desbloqueado.", actions={})
 
 
+def test_acceptance_criteria_pipeline(tmp_path: Path) -> None:
+    """Criteria set at delegation land in the child's metadata, surface in its
+    wake payload, and appear as coverage in the close verification."""
+    from aiteam.db.wake_payload import build_wake_payload
+
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        # Close the fixture's engineer child so the same-role idempotency
+        # check doesn't swallow the new delegation.
+        conn.execute("UPDATE issues SET status = 'done' WHERE id = 'issue:child'")
+        conn.commit()
+
+    class _DelegatingLeadRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Delego con criterios",
+                actions={
+                    "create_issues": [
+                        {
+                            "title": "Implementar inventario",
+                            "description": "Clase Inventory en C# con añadir/quitar items y cantidades. " * 3,
+                            "role": "engineer",
+                            "complexity": "medium",
+                            "acceptance_criteria": [
+                                "Inventory.AddItem incrementa cantidad",
+                                "Inventory.RemoveItem falla sin stock",
+                            ],
+                        }
+                    ]
+                },
+            )
+
+    registry = AdapterRegistry([_DelegatingLeadRuntime()])
+    executor = RunExecutor(db_path, registry)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        child = conn.execute(
+            "SELECT id, metadata_json FROM issues WHERE title = 'Implementar inventario'"
+        ).fetchone()
+    assert child is not None
+    meta = json.loads(child["metadata_json"])
+    assert meta["acceptance_criteria"] == [
+        "Inventory.AddItem incrementa cantidad",
+        "Inventory.RemoveItem falla sin stock",
+    ]
+
+    # The child's wake payload surfaces the done-bar…
+    payload = build_wake_payload(db_path, issue_id=str(child["id"]))
+    assert payload["issue"]["acceptance_criteria"] == meta["acceptance_criteria"]
+
+    # …and the close verification reports coverage.
+    verification = executor._machine_close_verification("issue:intake")
+    assert "Criterios de aceptación" in verification
+    assert "2 definidos" in verification
+
+
 def _make_status_runtime(target_status: str):
     class _StatusRuntime:
         descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")

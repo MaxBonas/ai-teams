@@ -2368,6 +2368,17 @@ class RunExecutor:
                 source_run_id=str(run.get("id") or ""),
             )
             parent_issue = get_issue(self.db_path, issue_id=issue_id)
+            # Structured acceptance criteria travel with the issue so the
+            # engineer knows the done-bar and the reviewer can judge against
+            # an explicit list instead of re-deriving it from prose.
+            _criteria = [
+                str(item).strip()
+                for item in (spec.get("acceptance_criteria") or [])
+                if isinstance(item, str) and str(item).strip()
+            ]
+            _issue_metadata: dict[str, Any] = {"source": metadata_source, "parent_issue_id": issue_id}
+            if _criteria:
+                _issue_metadata["acceptance_criteria"] = _criteria[:12]
             new_issue = create_issue(
                 self.db_path,
                 title=title_val,
@@ -2378,7 +2389,7 @@ class RunExecutor:
                 role=role_for_issue,
                 complexity=str(spec.get("complexity") or "medium") or None,
                 assignee_agent_id=assignee_agent_id,
-                metadata={"source": metadata_source, "parent_issue_id": issue_id},
+                metadata=_issue_metadata,
             )
             log_activity(
                 self.db_path,
@@ -3530,6 +3541,18 @@ class RunExecutor:
             "Veredicto del reviewer (report estructurado): "
             + (", ".join(verdicts) if verdicts else "sin report estructurado")
         )
+        # Acceptance-criteria coverage: explicit done-bar vs assignee evidence.
+        for row in rows:
+            meta = _decode_json(row.get("metadata_json") or "{}")
+            criteria = [str(c) for c in (meta.get("acceptance_criteria") or []) if str(c).strip()]
+            if not criteria:
+                continue
+            report = row.get("last_agent_report") or {}
+            evidence = str(report.get("evidence") or "").strip()
+            lines.append(
+                f"Criterios de aceptación «{str(row.get('title') or '')[:40]}»: {len(criteria)} definidos — "
+                + (f"evidencia del assignee: {evidence[:120]}" if evidence else "SIN evidencia reportada")
+            )
         lines.extend(self._workspace_verification_lines())
         cost_line = self._cycle_cost_line(issue_id)
         if cost_line:
@@ -4304,6 +4327,7 @@ class RunExecutor:
             rows = conn.execute(
                 """
                 SELECT i.id, i.title, i.status, i.role, i.assignee_agent_id, i.priority,
+                       i.metadata_json,
                        (SELECT body FROM issue_comments
                         WHERE issue_id = i.id
                         ORDER BY created_at DESC, rowid DESC
