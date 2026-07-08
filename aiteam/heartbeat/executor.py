@@ -1935,6 +1935,30 @@ class RunExecutor:
                 except Exception:
                     pass
                 issue_status = None
+            if issue_status == "done" and str(agent_role or "").strip().lower() in {"lead", "team_lead"}:
+                _quality_denied_reason = self._quality_close_denied(issue_id=issue_id)
+                if _quality_denied_reason:
+                    logger.warning(
+                        "quality_gate.denied (issue_status): role=%r issue=%s target=%r reason=%s",
+                        agent_role, issue_id, issue_status, _quality_denied_reason,
+                    )
+                    try:
+                        log_activity(
+                            self.db_path,
+                            action="quality_gate.denied",
+                            target_type="issue",
+                            target_id=issue_id,
+                            actor_agent_id=agent_id,
+                            run_id=str(run.get("id")),
+                            payload={
+                                "role": agent_role,
+                                "target_status": issue_status,
+                                "reason": _quality_denied_reason,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    issue_status = None
         if isinstance(issue_status, str) and issue_status:
             update_issue(self.db_path, issue_id=issue_id, status=issue_status)
             log_activity(
@@ -3495,6 +3519,111 @@ class RunExecutor:
             logger.warning("workspace verification scan failed", exc_info=True)
         return warnings
 
+    def _workspace_has_test_signals(self) -> bool:
+        """Return True when the workspace contains files that imply a test suite."""
+        try:
+            root = workspace_root_for_db(self.db_path)
+            if not root.exists() or not root.is_dir():
+                return False
+            marker_files = {
+                "pytest.ini",
+                "tox.ini",
+                "noxfile.py",
+                "package.json",
+                "vitest.config.js",
+                "vitest.config.ts",
+                "jest.config.js",
+                "jest.config.ts",
+                "playwright.config.js",
+                "playwright.config.ts",
+            }
+            for rel_path in snapshot_workspace(root):
+                path_key = str(rel_path).replace("\\", "/")
+                name = path_key.rsplit("/", 1)[-1]
+                if path_key.startswith(("tests/", "test/")) and name:
+                    return True
+                if name in marker_files:
+                    return True
+                if name.startswith("test_") and name.endswith(".py"):
+                    return True
+                if name.endswith((".test.js", ".test.ts", ".spec.js", ".spec.ts", "_test.py")):
+                    return True
+                if name == "pyproject.toml":
+                    try:
+                        content = (root / rel_path).read_text(encoding="utf-8", errors="ignore").lower()
+                        if "[tool.pytest" in content or "pytest" in content:
+                            return True
+                    except Exception:
+                        return True
+        except Exception:
+            logger.warning("test signal scan failed", exc_info=True)
+        return False
+
+    def _test_runner_gate_line(self, rows: list[dict[str, Any]]) -> str | None:
+        if not self._workspace_has_test_signals():
+            return None
+
+        runner_reports: list[dict[str, Any]] = []
+        for row in rows:
+            if str(row.get("role") or "").strip().lower() != "test_runner":
+                continue
+            report = row.get("last_agent_report") or {}
+            if report:
+                runner_reports.append(report)
+
+        for report in runner_reports:
+            result = str(report.get("result") or "").strip().lower()
+            evidence = str(report.get("evidence") or "").strip().lower()
+            exit_code = str(report.get("exit_code") or report.get("exit code") or "").strip()
+            if exit_code == "0" or (result in {"passed", "pass", "approved", "done"} and "exit 0" in evidence):
+                return "Test runner: suite detectada y report aprobatorio con exit 0."
+
+        if runner_reports:
+            return (
+                "BLOQUEANTE: hay tests en el workspace, pero ningun test_runner reporta exit 0. "
+                "No cerrar hasta ejecutar la suite y registrar evidencia."
+            )
+        return (
+            "BLOQUEANTE: hay tests en el workspace, pero no existe report de test_runner. "
+            "No cerrar hasta delegar ejecucion de tests y obtener exit 0."
+        )
+
+    def _quality_close_denied(self, *, issue_id: str) -> str | None:
+        try:
+            rows = self._child_issue_rows(issue_id)
+        except Exception:
+            return None
+        test_gate = self._test_runner_gate_line(rows)
+        if test_gate and test_gate.startswith("BLOQUEANTE:"):
+            return "test_runner_exit_zero_required"
+        return None
+
+    def _acceptance_criteria_lines(self, rows: list[dict[str, Any]]) -> list[str]:
+        lines: list[str] = []
+        for row in rows:
+            meta = _decode_json(row.get("metadata_json") or "{}")
+            criteria = [str(c).strip() for c in (meta.get("acceptance_criteria") or []) if str(c).strip()]
+            if not criteria:
+                continue
+            report = row.get("last_agent_report") or {}
+            evidence = str(report.get("evidence") or "").strip()
+            evidence_lc = evidence.lower()
+            covered = sum(1 for criterion in criteria if criterion.lower() in evidence_lc)
+            lines.append(
+                f"Criterios de aceptacion \"{str(row.get('title') or '')[:40]}\": "
+                f"{covered}/{len(criteria)} con evidencia especifica del assignee"
+            )
+            for criterion in criteria[:8]:
+                status = "cubierto" if criterion.lower() in evidence_lc else "pendiente"
+                lines.append(f"Criterio {status}: {criterion[:140]}")
+            if len(criteria) > 8:
+                lines.append(f"{len(criteria) - 8} criterios adicionales no listados")
+            if evidence and covered < len(criteria):
+                lines.append(f"Evidencia general del assignee: {evidence[:160]}")
+            elif not evidence:
+                lines.append("SIN evidencia reportada por el assignee")
+        return lines
+
     def _machine_close_verification(self, issue_id: str) -> str:
         """Verification block appended to cycle-close proposals, computed from
         structured child reports and a workspace scan — never from the Lead's
@@ -3516,23 +3645,56 @@ class RunExecutor:
             "Veredicto del reviewer (report estructurado): "
             + (", ".join(verdicts) if verdicts else "sin report estructurado")
         )
-        # Acceptance-criteria coverage: explicit done-bar vs assignee evidence.
-        for row in rows:
-            meta = _decode_json(row.get("metadata_json") or "{}")
-            criteria = [str(c) for c in (meta.get("acceptance_criteria") or []) if str(c).strip()]
-            if not criteria:
-                continue
-            report = row.get("last_agent_report") or {}
-            evidence = str(report.get("evidence") or "").strip()
-            lines.append(
-                f"Criterios de aceptación «{str(row.get('title') or '')[:40]}»: {len(criteria)} definidos — "
-                + (f"evidencia del assignee: {evidence[:120]}" if evidence else "SIN evidencia reportada")
-            )
+        lines.extend(self._acceptance_criteria_lines(rows))
+        sod_line = self._separation_of_duties_line(rows)
+        if sod_line:
+            lines.append(sod_line)
+        test_gate_line = self._test_runner_gate_line(rows)
+        if test_gate_line:
+            lines.append(test_gate_line)
         lines.extend(self._workspace_verification_lines())
         cost_line = self._cycle_cost_line(issue_id)
         if cost_line:
             lines.append(cost_line)
         return "\n".join(f"- {line}" for line in lines)
+
+    def _separation_of_duties_line(self, rows: list[dict[str, Any]]) -> str | None:
+        """Signal when maker and checker share the same provider.
+
+        A reviewer running on the same provider/model family as the engineer
+        it audits shares that model's blind spots — the review is weaker than
+        it looks. Signal only (no blocking); quorum with a different provider
+        is the recommended remedy for critical closes.
+        """
+        try:
+            from aiteam.hiring_economics import provider_and_model_for
+            engineer_roles = {"engineer", "software_engineer"}
+            reviewer_roles = {"reviewer", "code_reviewer"}
+            providers: dict[str, set[str]] = {"engineer": set(), "reviewer": set()}
+            for row in rows:
+                role = str(row.get("role") or "").strip().lower()
+                bucket = "engineer" if role in engineer_roles else "reviewer" if role in reviewer_roles else None
+                if bucket is None:
+                    continue
+                agent = self._agent_info(str(row.get("assignee_agent_id") or ""))
+                if not agent:
+                    continue
+                provider, _model = provider_and_model_for(
+                    str(agent.get("adapter_type") or ""),
+                    _decode_json(agent.get("adapter_config_json") or "{}"),
+                )
+                if provider:
+                    providers[bucket].add(provider)
+            shared = providers["engineer"] & providers["reviewer"]
+            if shared:
+                return (
+                    f"Separation of duties: engineer y reviewer comparten proveedor ({', '.join(sorted(shared))}); "
+                    "la revision hereda los puntos ciegos del mismo modelo. Para cierres criticos, "
+                    "considera un quorum auditor con proveedor distinto."
+                )
+        except Exception:
+            logger.warning("separation-of-duties check failed", exc_info=True)
+        return None
 
     def _cycle_cost_line(self, issue_id: str) -> str | None:
         """Real spend and estimated savings for the issue's subtree runs."""

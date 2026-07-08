@@ -2313,6 +2313,104 @@ class _NoOpLeadRuntime:
         return ExecutionResult(status="completed", output="Engineer desbloqueado.", actions={})
 
 
+def test_sod_signal_when_engineer_and_reviewer_share_provider(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        # Engineer + reviewer both on openai_api -> shared provider.
+        conn.execute("UPDATE agents SET adapter_type = 'openai_api' WHERE id = 'role:engineer'")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id)"
+            " VALUES ('role:reviewer', 'reviewer', 'R', 'standard', 'openai_api', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id)"
+            " VALUES ('issue:rev', 'goal-1', 'issue:intake', 'Review', 'done', 'reviewer', 'role:reviewer')"
+        )
+        conn.commit()
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    verification = executor._machine_close_verification("issue:intake")
+
+    assert "Separation of duties" in verification
+    assert "openai" in verification
+
+
+def test_no_sod_signal_with_distinct_providers(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET adapter_type = 'openai_api' WHERE id = 'role:engineer'")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id)"
+            " VALUES ('role:reviewer', 'reviewer', 'R', 'standard', 'gemini_api', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id)"
+            " VALUES ('issue:rev', 'goal-1', 'issue:intake', 'Review', 'done', 'reviewer', 'role:reviewer')"
+        )
+        conn.commit()
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    verification = executor._machine_close_verification("issue:intake")
+
+    assert "Separation of duties" not in verification
+
+
+def test_close_verification_blocks_tests_without_test_runner(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_inventory.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    verification = executor._machine_close_verification("issue:intake")
+
+    assert "BLOQUEANTE" in verification
+    assert "no existe report de test_runner" in verification
+
+
+def test_close_verification_accepts_test_runner_exit_zero(tmp_path: Path) -> None:
+    from aiteam.db.agent_reports import record_agent_report
+
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_inventory.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id)"
+            " VALUES ('role:test_runner', 'test_runner', 'T', 'cheap', 'subscription_cli', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id)"
+            " VALUES ('issue:tests', 'goal-1', 'issue:intake', 'Run tests', 'done', 'test_runner', 'role:test_runner')"
+        )
+        conn.commit()
+    record_agent_report(
+        db_path,
+        issue_id="issue:tests",
+        agent_id="role:test_runner",
+        run_id=None,
+        agent_role="test_runner",
+        parsed={
+            "role": "test_runner",
+            "result": "done",
+            "issue_status": "done",
+            "evidence": "pytest -q finished with exit 0",
+        },
+    )
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    verification = executor._machine_close_verification("issue:intake")
+
+    assert "Test runner: suite detectada" in verification
+    assert "BLOQUEANTE" not in verification
+
+
 def test_acceptance_criteria_pipeline(tmp_path: Path) -> None:
     """Criteria set at delegation land in the child's metadata, surface in its
     wake payload, and appear as coverage in the close verification."""
@@ -2380,8 +2478,9 @@ def test_acceptance_criteria_pipeline(tmp_path: Path) -> None:
 
     # …and the close verification reports coverage.
     verification = executor._machine_close_verification("issue:intake")
-    assert "Criterios de aceptación" in verification
-    assert "2 definidos" in verification
+    assert "Criterios de aceptacion" in verification
+    assert "0/2 con evidencia especifica" in verification
+    assert "Criterio pendiente: Inventory.AddItem incrementa cantidad" in verification
 
 
 def _make_status_runtime(target_status: str):
@@ -2468,6 +2567,24 @@ def test_lead_keeps_full_status_authority(tmp_path: Path) -> None:
     _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="todo")
 
     assert _issue_status(db_path, "issue:intake") == "todo"
+
+
+def test_lead_cannot_close_when_tests_lack_test_runner_exit_zero(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_inventory.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="done")
+
+    assert _issue_status(db_path, "issue:intake") == "in_progress"
+    with sqlite3.connect(str(db_path)) as conn:
+        denied = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'quality_gate.denied'"
+            " AND json_extract(payload_json, '$.reason') = 'test_runner_exit_zero_required'"
+        ).fetchone()
+    assert denied[0] == 1
 
 
 def test_lead_file_ops_on_api_adapter_blocked_preventively(tmp_path: Path) -> None:
