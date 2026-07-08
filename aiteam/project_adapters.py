@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -12,13 +11,14 @@ from aiteam.user_config import ROLE_CAPABILITY_PROFILES, load_adapter_profiles, 
 
 PROJECT_CONFIG_NAME = "project_config.json"
 
-SENIOR_ROLES = {"lead", "team_lead", "reviewer", "quorum_senior", "quorum_auditor", "architect"}
-# Tier 3 cheap specialists — prefer budget/local adapters.
-# file_scout and context_curator benefit from workspace access but can fall back to API.
-JUNIOR_ROLES = {"engineer", "test_runner", "worker", "file_scout", "web_scout", "context_curator"}
-# Tier 3 mechanical roles — under AITEAM_ENFORCE_COST_POLICY they must never
-# bill per-token while a connected zero-cost channel exists.
-TIER3_ROLES = {"file_scout", "web_scout", "context_curator", "test_runner"}
+# Role tiers for the hiring policy live in aiteam.policies (fase 5) —
+# aliases kept here for existing imports.
+from aiteam.policies import (  # noqa: E402
+    JUNIOR_ROLES,
+    SENIOR_ROLES,
+    TIER3_ROLES,
+    cost_policy_enforced as _cost_policy_enforced,
+)
 
 # API-only adapters cannot write workspace files — they will immediately block
 # when assigned to junior roles that require file writes (engineer, worker).
@@ -106,10 +106,6 @@ def choose_adapter_for_role(role: str, seniority: str | None, profiles: list[dic
         "adapter_profile_id": profile.get("id"),
         "model": model,
     }
-
-
-def _cost_policy_enforced() -> bool:
-    return os.environ.get("AITEAM_ENFORCE_COST_POLICY", "").strip().lower() in {"1", "true", "yes"}
 
 
 def _apply_cost_policy(role_key: str, ranked: list[dict[str, Any]]) -> list[dict[str, Any]]:

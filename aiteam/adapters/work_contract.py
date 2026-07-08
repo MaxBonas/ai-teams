@@ -219,48 +219,15 @@ def build_execution_contract() -> str:
 
 # ── Tier 3 op filter ─────────────────────────────────────────────────────────
 
-# Declarative RBAC for structured ops: each tier gets a DENYLIST of op types it
-# must never emit, enforced in code (executor) regardless of what the prompt
-# said. Hierarchy rationale:
-#   Tier 1 (lead/team_lead/lead_executor) — full vocabulary: they orchestrate.
-#   Tier 2 (engineer/reviewer)            — do the work and report; they do NOT
-#       hire (create_issue), direct siblings (update_child_issue) or rewrite
-#       the plan (update_plan). Those are the Lead's levers; letting a worker
-#       pull them collapses the hierarchy.
-#   Tier 3 (scouts/curator/test_runner)   — read-and-report only.
-_TIER3_ROLES_FOR_VALIDATION: frozenset[str] = frozenset(
-    {"file_scout", "web_scout", "context_curator", "test_runner"}
+# The per-tier op permission matrix lives in aiteam.policies (fase 5) —
+# aliases kept here for existing imports/tests.
+from aiteam.policies import (  # noqa: E402
+    OPS_FORBIDDEN_FOR_TIER2 as _OPS_FORBIDDEN_FOR_TIER2,
+    OPS_FORBIDDEN_FOR_TIER3 as _OPS_FORBIDDEN_FOR_TIER3,
+    TIER2_ROLES as _TIER2_ROLES_FOR_VALIDATION,
+    TIER3_ROLES as _TIER3_ROLES_FOR_VALIDATION,
+    forbidden_ops_for_role,
 )
-_TIER2_ROLES_FOR_VALIDATION: frozenset[str] = frozenset(
-    {"engineer", "software_engineer", "reviewer", "code_reviewer", "qa", "worker"}
-)
-_OPS_FORBIDDEN_FOR_TIER3: frozenset[str] = frozenset(
-    {
-        "create_issue",
-        "create_interaction",
-        "update_plan",
-        "update_child_issue",
-        "write_file",
-        "append_file",
-        "delete_file",
-    }
-)
-_OPS_FORBIDDEN_FOR_TIER2: frozenset[str] = frozenset(
-    {
-        "create_issue",
-        "update_plan",
-        "update_child_issue",
-    }
-)
-
-
-def forbidden_ops_for_role(role: str) -> frozenset[str]:
-    role_key = str(role or "").strip().lower()
-    if role_key in _TIER3_ROLES_FOR_VALIDATION:
-        return _OPS_FORBIDDEN_FOR_TIER3
-    if role_key in _TIER2_ROLES_FOR_VALIDATION:
-        return _OPS_FORBIDDEN_FOR_TIER2
-    return frozenset()
 
 
 def filter_forbidden_ops_for_role(

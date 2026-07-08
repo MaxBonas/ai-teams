@@ -49,45 +49,20 @@ from aiteam.workspace_evidence import WorkspaceDelta, diff_snapshots, snapshot_w
 
 _TERMINAL_EXEC_STATUSES = {"completed", "failed", "skipped"}
 
-_LLM_ADAPTER_TYPES = {"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"}
-
-# Roles that must not edit workspace files when running a coding CLI: the Lead
-# delegates via ops, scouts inspect and report. Execution roles (engineer,
-# lead_executor) are intentionally excluded so they keep workspace-write.
-_NON_EDITING_ROLES = {"lead", "team_lead", "file_scout", "web_scout", "context_curator"}
+# Role/flow policies (tiers, ops matrix, breakers, ventanas) viven en
+# aiteam.policies (fase 5) — alias locales para los call sites existentes.
+from aiteam.policies import (  # noqa: E402
+    LLM_ADAPTER_TYPES as _LLM_ADAPTER_TYPES,
+    NON_EDITING_ROLES as _NON_EDITING_ROLES,
+    cost_breaker_threshold_cents as _cost_breaker_threshold_cents,
+    delegation_churn_limit as _delegation_churn_limit,
+)
 
 
 def _is_rate_limit_error(error: str | None) -> bool:
     text = str(error or "").lower()
     return "429" in text or "rate limit" in text or "rate_limit" in text
 
-
-def _cost_breaker_threshold_cents() -> int:
-    """Spend allowed per subtree without workspace progress before escalating.
-
-    Configurable via AITEAM_COST_BREAKER_CENTS; 0 (or negative) disables.
-    """
-    raw = os.environ.get("AITEAM_COST_BREAKER_CENTS", "").strip()
-    if not raw:
-        return 300
-    try:
-        return int(raw)
-    except ValueError:
-        return 300
-
-
-def _delegation_churn_limit() -> int:
-    """Same-role children allowed under one parent per window before escalating.
-
-    Configurable via AITEAM_DELEGATION_CHURN_LIMIT; 0 (or negative) disables.
-    """
-    raw = os.environ.get("AITEAM_DELEGATION_CHURN_LIMIT", "").strip()
-    if not raw:
-        return 8
-    try:
-        return int(raw)
-    except ValueError:
-        return 8
 
 _COMMENT_BODY_MAX = 4096  # hard limit stored in DB
 _AGENT_REPORT_MARKER = "---AGENT-REPORT---"
@@ -3172,14 +3147,12 @@ class RunExecutor:
         )
         return True
 
-    # ── Issue state machine per role ─────────────────────────────────────────
-    # Target statuses a worker (non-lead) may set on its OWN issue. `todo` and
-    # `backlog` are excluded: a worker re-queueing itself is loop fuel — only
-    # the Lead re-queues work. `cancelled` stays allowed because liveness
-    # honours it as a deliberate terminal declaration (rule 6).
-    _WORKER_ALLOWED_TARGET_STATUSES = frozenset({"in_progress", "in_review", "done", "blocked", "cancelled"})
-    _TERMINAL_ISSUE_STATUSES = frozenset({"done", "cancelled"})
-    _LEAD_TIER_ROLES = frozenset({"lead", "team_lead", "lead_executor"})
+    # ── Issue state machine per role (datos en aiteam.policies) ─────────────
+    from aiteam.policies import (
+        LEAD_TIER_ROLES as _LEAD_TIER_ROLES,
+        TERMINAL_ISSUE_STATUSES as _TERMINAL_ISSUE_STATUSES,
+        WORKER_ALLOWED_TARGET_STATUSES as _WORKER_ALLOWED_TARGET_STATUSES,
+    )
 
     def _issue_status_transition_denied(
         self, *, issue_id: str, agent_role: str, new_status: str
@@ -3205,8 +3178,10 @@ class RunExecutor:
             return "cannot_reopen_terminal_issue"
         return None
 
-    _CHURN_ROLES = frozenset({"engineer", "software_engineer", "reviewer", "code_reviewer"})
-    _CHURN_WINDOW_HOURS = 6
+    from aiteam.policies import (
+        DELEGATION_CHURN_ROLES as _CHURN_ROLES,
+        DELEGATION_CHURN_WINDOW_HOURS as _CHURN_WINDOW_HOURS,
+    )
 
     def _delegation_churn_blocked(
         self,
