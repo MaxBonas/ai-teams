@@ -182,6 +182,11 @@ def _connect(db: Path) -> sqlite3.Connection:
 
 
 def _schema_err(exc: sqlite3.OperationalError) -> HTTPException:
-    if "no such table" in str(exc).lower():
+    text = str(exc).lower()
+    if "no such table" in text:
         return HTTPException(status_code=503, detail="Schema not available")
+    if "locked" in text or "busy" in text:
+        # Transient write contention from the heartbeat — the poller retries
+        # in seconds; 503 signals "try again" instead of a scary 500.
+        return HTTPException(status_code=503, detail="Database busy — retry")
     return HTTPException(status_code=500, detail=str(exc))
