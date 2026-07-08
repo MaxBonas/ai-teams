@@ -2313,6 +2313,92 @@ class _NoOpLeadRuntime:
         return ExecutionResult(status="completed", output="Engineer desbloqueado.", actions={})
 
 
+def _make_status_runtime(target_status: str):
+    class _StatusRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(status="completed", output="ok", actions={"issue_status": target_status})
+
+    return _StatusRuntime()
+
+
+def _run_status_transition(tmp_path: Path, *, agent_id: str, issue_id: str, target: str) -> None:
+    registry = AdapterRegistry([_make_status_runtime(target)])
+    executor = RunExecutor(tmp_path / "aiteam.db", registry)
+    enqueue_wakeup(
+        tmp_path / "aiteam.db", agent_id=agent_id, source="manual", reason="manual",
+        payload={"issue_id": issue_id, "wake_reason": "manual"},
+        idempotency_key=f"sm-{agent_id}-{target}",
+    )
+    dispatch = HeartbeatScheduler(tmp_path / "aiteam.db").dispatch_next(agent_id=agent_id)
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+
+def _issue_status(db_path: Path, issue_id: str) -> str:
+    with sqlite3.connect(str(db_path)) as conn:
+        return conn.execute("SELECT status FROM issues WHERE id = ?", (issue_id,)).fetchone()[0]
+
+
+def test_worker_cannot_requeue_own_issue(tmp_path: Path) -> None:
+    """A worker setting its own issue back to `todo` is loop fuel — denied."""
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET adapter_type = 'subscription_cli' WHERE id = 'role:engineer'")
+        conn.execute("UPDATE issues SET status = 'in_progress' WHERE id = 'issue:child'")
+        conn.commit()
+
+    _run_status_transition(tmp_path, agent_id="role:engineer", issue_id="issue:child", target="todo")
+
+    assert _issue_status(db_path, "issue:child") == "in_progress"  # unchanged
+    with sqlite3.connect(str(db_path)) as conn:
+        denied = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'role.op_denied'"
+            " AND json_extract(payload_json, '$.action_group') = 'issue_status'"
+        ).fetchone()
+    assert denied[0] == 1
+
+
+def test_worker_can_close_own_issue(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET adapter_type = 'subscription_cli' WHERE id = 'role:engineer'")
+        conn.execute("UPDATE issues SET status = 'in_progress' WHERE id = 'issue:child'")
+        conn.commit()
+
+    _run_status_transition(tmp_path, agent_id="role:engineer", issue_id="issue:child", target="done")
+
+    assert _issue_status(db_path, "issue:child") == "done"
+
+
+def test_worker_cannot_resurrect_terminal_issue(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET adapter_type = 'subscription_cli' WHERE id = 'role:engineer'")
+        conn.execute("UPDATE issues SET status = 'cancelled' WHERE id = 'issue:child'")
+        conn.commit()
+
+    _run_status_transition(tmp_path, agent_id="role:engineer", issue_id="issue:child", target="in_progress")
+
+    assert _issue_status(db_path, "issue:child") == "cancelled"  # stays terminal
+
+
+def test_lead_keeps_full_status_authority(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+
+    _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="todo")
+
+    assert _issue_status(db_path, "issue:intake") == "todo"
+
+
 def test_lead_file_ops_on_api_adapter_blocked_preventively(tmp_path: Path) -> None:
     """A Lead on an API adapter (no CLI sandbox) emitting file_ops must be
     blocked BEFORE materialization, not just flagged after."""

@@ -1930,6 +1930,37 @@ class RunExecutor:
             )
         issue_status = actions.get("issue_status")
         if isinstance(issue_status, str) and issue_status:
+            # ── Issue state machine per role (fase 4) ────────────────────────
+            # Workers may progress/close their OWN issue but not re-queue it
+            # (todo/backlog fuels self-continuation loops) nor resurrect a
+            # terminal one. The Lead tier keeps full transition authority.
+            _denied_reason = self._issue_status_transition_denied(
+                issue_id=issue_id, agent_role=agent_role, new_status=issue_status
+            )
+            if _denied_reason:
+                logger.warning(
+                    "role.op_denied (issue_status): role=%r issue=%s target=%r reason=%s",
+                    agent_role, issue_id, issue_status, _denied_reason,
+                )
+                try:
+                    log_activity(
+                        self.db_path,
+                        action="role.op_denied",
+                        target_type="issue",
+                        target_id=issue_id,
+                        actor_agent_id=agent_id,
+                        run_id=str(run.get("id")),
+                        payload={
+                            "role": agent_role,
+                            "action_group": "issue_status",
+                            "target_status": issue_status,
+                            "reason": _denied_reason,
+                        },
+                    )
+                except Exception:
+                    pass
+                issue_status = None
+        if isinstance(issue_status, str) and issue_status:
             update_issue(self.db_path, issue_id=issue_id, status=issue_status)
             log_activity(
                 self.db_path,
@@ -3129,6 +3160,39 @@ class RunExecutor:
             issue_id, failed_adapter_type, new_adapter_type, liveness_reason,
         )
         return True
+
+    # ── Issue state machine per role ─────────────────────────────────────────
+    # Target statuses a worker (non-lead) may set on its OWN issue. `todo` and
+    # `backlog` are excluded: a worker re-queueing itself is loop fuel — only
+    # the Lead re-queues work. `cancelled` stays allowed because liveness
+    # honours it as a deliberate terminal declaration (rule 6).
+    _WORKER_ALLOWED_TARGET_STATUSES = frozenset({"in_progress", "in_review", "done", "blocked", "cancelled"})
+    _TERMINAL_ISSUE_STATUSES = frozenset({"done", "cancelled"})
+    _LEAD_TIER_ROLES = frozenset({"lead", "team_lead", "lead_executor"})
+
+    def _issue_status_transition_denied(
+        self, *, issue_id: str, agent_role: str, new_status: str
+    ) -> str | None:
+        """Return a denial reason when *agent_role* may not set *new_status*.
+
+        None means the transition is allowed. Lead-tier roles keep full
+        authority; system paths (reconcilers, breakers, reopen-for-chat) call
+        update_issue directly and are not gated here.
+        """
+        role_key = str(agent_role or "").strip().lower()
+        if role_key in self._LEAD_TIER_ROLES:
+            return None
+        target = str(new_status or "").strip().lower()
+        if target not in self._WORKER_ALLOWED_TARGET_STATUSES:
+            return "target_status_not_allowed_for_role"
+        try:
+            issue = get_issue(self.db_path, issue_id=issue_id)
+        except Exception:
+            return None  # can't verify — don't block on read failure
+        current = str((issue or {}).get("status") or "").strip().lower()
+        if current in self._TERMINAL_ISSUE_STATUSES and target != current:
+            return "cannot_reopen_terminal_issue"
+        return None
 
     _CHURN_ROLES = frozenset({"engineer", "software_engineer", "reviewer", "code_reviewer"})
     _CHURN_WINDOW_HOURS = 6
