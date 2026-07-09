@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -53,10 +54,13 @@ _TERMINAL_EXEC_STATUSES = {"completed", "failed", "skipped"}
 # Role/flow policies (tiers, ops matrix, breakers, ventanas) viven en
 # aiteam.policies (fase 5) — alias locales para los call sites existentes.
 from aiteam.policies import (  # noqa: E402
+    LEAD_TIER_ROLES as _LEAD_TIER_ROLES_P,
     LLM_ADAPTER_TYPES as _LLM_ADAPTER_TYPES,
     NON_EDITING_ROLES as _NON_EDITING_ROLES,
+    TERMINAL_ISSUE_STATUSES as _TERMINAL_ISSUE_STATUSES_P,
     cost_breaker_threshold_cents as _cost_breaker_threshold_cents,
     delegation_churn_limit as _delegation_churn_limit,
+    operational_interaction_default as _operational_interaction_default,
     rereview_limit as _rereview_limit,
     workspace_file_max_bytes as _ws_file_max_bytes,
     workspace_files_budget_bytes as _ws_files_budget_bytes,
@@ -483,28 +487,40 @@ class RunExecutor:
             )
             return
 
-        # ── Re-review churn gate ───────────────────────────────────────────
-        # The Lead can re-wake a reviewer on the same issue indefinitely
-        # ("review again with what you have") without changing anything about
-        # its evidence — capa-2 burned 6 reviewer runs on one issue in 15 min.
-        # After N completed runs on a reviewer/QA issue, further wakes escalate
-        # to an operational interaction instead of executing. A wake caused by
-        # a resolved interaction (the user/autonomy just authorised a round)
-        # always passes.
-        if self._rereview_capped(issue_id=issue_id_str, agent_role=agent_role, ctx=ctx, run_id=run_id, agent_id=agent_id):
+        # ── Preflight loop guards ──────────────────────────────────────────
+        # Silent-dedupe guards first (no escalation cards — nothing for the
+        # user to answer), then the re-review cap which escalates:
+        #   issue_terminal            — the wake targets a done/cancelled issue
+        #                               (dependency fan-out zombies).
+        #   awaiting_user_decision    — a PRODUCT decision is pending on this
+        #                               subtree's root; burning fix/review runs
+        #                               before the user answers only feeds the
+        #                               loop the user is being asked about.
+        #   rereview_limit_reached    — reviewer churn cap (escalates once).
+        #   review_evidence_unchanged — same workspace state as the reviewer's
+        #                               last completed run → same verdict; skip.
+        skip_reason = self._preflight_skip_reason(
+            issue_id=issue_id_str,
+            agent_role=agent_role,
+            ctx=ctx,
+            run_id=run_id,
+            agent_id=agent_id,
+            workspace_root=workspace_root,
+        )
+        if skip_reason:
             finish_run(
                 self.db_path,
                 run_id=run_id,
                 status="skipped",
-                error="rereview_limit_reached",
-                error_code="rereview_limit_reached",
+                error=skip_reason,
+                error_code=skip_reason,
             )
             finish_wakeup(
                 self.db_path,
                 wakeup_id=wakeup_id,
                 status="skipped",
                 run_id=run_id,
-                error="rereview_limit_reached",
+                error=skip_reason,
             )
             return
 
@@ -3374,6 +3390,127 @@ class RunExecutor:
 
     _REREVIEW_ROLES = frozenset({"reviewer", "code_reviewer", "qa"})
 
+    def _preflight_skip_reason(
+        self,
+        *,
+        issue_id: str,
+        agent_role: str,
+        ctx: dict[str, Any],
+        run_id: str,
+        agent_id: str,
+        workspace_root: Path,
+    ) -> str | None:
+        """Return an error_code when this wake should be skipped, else None."""
+        role_key = str(agent_role or "").strip().lower()
+        is_lead = role_key in _LEAD_TIER_ROLES_P
+        wake_reason = str(ctx.get("wake_reason") or "")
+
+        if issue_id and not is_lead:
+            issue = get_issue(self.db_path, issue_id=issue_id)
+            if issue is not None and str(issue.get("status") or "") in _TERMINAL_ISSUE_STATUSES_P:
+                logger.info("preflight: issue %s is terminal — skipping wake for %s", issue_id, agent_id)
+                return "issue_terminal"
+            if wake_reason != "interaction_resolved" and self._pending_product_decision(issue_id):
+                logger.info(
+                    "preflight: product decision pending on root of %s — pausing %s until the user answers",
+                    issue_id, agent_id,
+                )
+                return "awaiting_user_decision"
+
+        if self._rereview_capped(issue_id=issue_id, agent_role=agent_role, ctx=ctx, run_id=run_id, agent_id=agent_id):
+            return "rereview_limit_reached"
+
+        if (
+            issue_id
+            and role_key in self._REREVIEW_ROLES
+            and wake_reason not in {"interaction_resolved", "liveness_continuation"}
+            and self._review_evidence_unchanged(issue_id=issue_id, workspace_root=workspace_root, current_run_id=run_id)
+        ):
+            logger.info(
+                "preflight: workspace unchanged since last completed review of %s — skipping duplicate review",
+                issue_id,
+            )
+            return "review_evidence_unchanged"
+        return None
+
+    def _pending_product_decision(self, issue_id: str) -> bool:
+        """True when the subtree's ROOT has a pending PRODUCT interaction.
+
+        While the user is being asked a product question (cycle close, scope,
+        which option to take), fix/review runs under that root only feed the
+        loop the question is about. Operational escalations (breakers) do NOT
+        pause work — they resolve via autonomy or a quick accept.
+        """
+        try:
+            root_id = self._root_issue_id(issue_id)
+        except Exception:
+            return False
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json FROM issue_thread_interactions
+                WHERE issue_id = ? AND status = 'pending'
+                """,
+                (root_id,),
+            ).fetchall()
+        for row in rows:
+            payload = _decode_json(row["payload_json"])
+            reason = str(payload.get("reason") or payload.get("escalation_reason") or "")
+            if _operational_interaction_default(reason) is None:
+                return True
+        return False
+
+    def _review_evidence_unchanged(self, *, issue_id: str, workspace_root: Path, current_run_id: str) -> bool:
+        """True when the workspace fingerprint matches the one recorded at the
+        reviewer's last run on this issue AND that run completed — same files,
+        same verdict, nothing to add.
+
+        The fingerprint is recorded (activity_log ``review.evidence``) for every
+        review run that is allowed to execute; nothing is recorded for skips, so
+        a workspace change always re-enables exactly one review round. A failed
+        last run always re-enables the retry regardless of the fingerprint.
+        """
+        try:
+            snapshot = snapshot_workspace(workspace_root)
+        except Exception:
+            return False
+        digest = hashlib.sha256(
+            json.dumps(sorted(snapshot.items()), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            prev = conn.execute(
+                """
+                SELECT payload_json FROM activity_log
+                WHERE action = 'review.evidence' AND target_id = ?
+                ORDER BY created_at DESC, rowid DESC LIMIT 1
+                """,
+                (issue_id,),
+            ).fetchone()
+            # Most recent run BEFORE the one being preflighted (which already
+            # exists in the table — exclude it by id, its status varies).
+            last_run = conn.execute(
+                """
+                SELECT status FROM runs
+                WHERE issue_id = ? AND id != ?
+                ORDER BY created_at DESC, rowid DESC LIMIT 1
+                """,
+                (issue_id, current_run_id),
+            ).fetchone()
+        prev_digest = str(_decode_json(prev["payload_json"]).get("fingerprint") or "") if prev else ""
+        last_status = str(last_run["status"]) if last_run else ""
+        if prev_digest == digest and last_status == "completed":
+            return True
+        # Different (or first) evidence, or a failed last attempt — record the
+        # fingerprint and let the run execute.
+        log_activity(
+            self.db_path,
+            action="review.evidence",
+            target_type="issue",
+            target_id=issue_id,
+            payload={"fingerprint": digest, "files": len(snapshot)},
+        )
+        return False
+
     def _rereview_capped(
         self, *, issue_id: str, agent_role: str, ctx: dict[str, Any], run_id: str, agent_id: str
     ) -> bool:
@@ -3400,6 +3537,28 @@ class RunExecutor:
         completed = int(row[0]) if row else 0
         if completed < limit:
             return False
+        # One pending re-review card at a time: N parallel review issues over
+        # the same workspace tripping together must not flood the user with N
+        # identical cards (capa-2 got 3 at once). The run is still skipped.
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            pending_same = conn.execute(
+                """
+                SELECT COUNT(*) FROM issue_thread_interactions
+                WHERE status = 'pending'
+                  AND payload_json LIKE '%"reason": "rereview_limit_reached"%'
+                """
+            ).fetchone()
+        if pending_same and int(pending_same[0] or 0) > 0:
+            log_activity(
+                self.db_path,
+                action="rereview.capped",
+                target_type="issue",
+                target_id=issue_id,
+                actor_agent_id=agent_id,
+                run_id=run_id,
+                payload={"completed_runs": completed, "limit": limit, "agent_role": agent_role, "deduped": True},
+            )
+            return True
         try:
             create_interaction(
                 self.db_path,

@@ -202,6 +202,10 @@ def resolve_blocker_wakeups(
         assignee = row.get("assignee_agent_id")
         if not assignee:
             continue
+        # A terminal dependent has nothing left to do — waking it produced
+        # zombie runs posting verdicts on done issues (capa-2 fan-out bursts).
+        if str(row.get("blocked_status") or "") in {"done", "cancelled"}:
+            continue
         if not all_blockers_resolved(db_path, issue_id=blocked_issue_id):
             continue
         enqueue_wakeup(

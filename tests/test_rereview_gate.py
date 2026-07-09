@@ -129,6 +129,40 @@ def test_user_authorised_round_bypasses_gate(tmp_path: Path) -> None:
     assert runtime.calls == 1
 
 
+def test_parallel_capped_issues_share_one_card(tmp_path: Path) -> None:
+    """3 review issues tripping together must not flood the user with 3
+    identical cards — one pending rereview escalation at a time."""
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path, completed_runs=4)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id)"
+            " VALUES ('issue:review2', 'goal-1', 'Revisar otra entrega', 'in_progress', 'reviewer', 'role:reviewer')"
+        )
+        for i in range(4):
+            conn.execute(
+                "INSERT INTO runs (id, agent_id, issue_id, invocation_source, status)"
+                " VALUES (?, 'role:reviewer', 'issue:review2', 'heartbeat', 'completed')",
+                (f"run-b-{i}",),
+            )
+        conn.commit()
+    runtime = _ReviewRuntime()
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+
+    executor.execute(_dispatch(db_path))  # issue:review → creates the card
+    enqueue_wakeup(
+        db_path,
+        agent_id="role:reviewer",
+        source="manual",
+        reason="review_requested",
+        payload={"issue_id": "issue:review2"},
+    )
+    executor.execute(HeartbeatScheduler(db_path).dispatch_next(agent_id="role:reviewer"))
+
+    assert runtime.calls == 0
+    assert len(_pending_rereview_interactions(db_path)) == 1
+
+
 def test_engineer_issues_not_capped(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init_db(db_path, completed_runs=10)
