@@ -170,6 +170,7 @@ OPERATIONAL_INTERACTION_DEFAULTS: dict[str, str] = {
     "lead_wants_file_read": "accept",           # harmless context injection
     "subtree_stalled": "accept",                # wake supervisor to unblock
     "rereview_limit_reached": "accept",         # one more authorised review round
+    "parent_closed_child_open": "accept",       # wake lead to close the gap
 }
 
 

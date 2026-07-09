@@ -439,6 +439,105 @@ def reconcile_stalled_subtrees(db_path: Path) -> list[str]:
     return enqueued
 
 
+def reconcile_orphaned_children_of_closed_parents(db_path: Path) -> list[str]:
+    """Escalate open children left behind when their parent already closed.
+
+    Live gap: reconcile_stalled_subtrees only watches parents that are still
+    in_progress/in_review. Once a supervisor issue itself reaches done/
+    cancelled — while a child is still open (a reviewer left 'blocked' with a
+    genuine unresolved finding, say) — nothing escalates it any more. The
+    Lead keeps answering "no blocked children" truthfully about its OWN
+    issue (which really is empty) and never learns the orphaned child under
+    an already-closed parent exists at all.
+
+    Escalates once per (parent, open-child-set) to the parent's supervisor
+    (falls back to the Lead) via the SAME durable-interaction pattern as
+    reconcile_stalled_subtrees, attached to the parent's issue_id so
+    resolving it wakes the right agent.
+    """
+    enqueued: list[str] = []
+
+    with contextlib.closing(_connect(db_path)) as conn:
+        parent_rows = conn.execute(
+            """
+            SELECT DISTINCT p.id, p.assignee_agent_id, p.status AS parent_status, p.title AS parent_title
+            FROM issues p
+            WHERE p.status IN ('done', 'cancelled')
+              AND EXISTS (
+                  SELECT 1 FROM issues c WHERE c.parent_id = p.id AND c.status NOT IN ('done', 'cancelled')
+              )
+            ORDER BY p.updated_at ASC
+            """
+        ).fetchall()
+        lead_agent_id = _lead_agent_id(conn)
+
+    for parent_row in parent_rows:
+        parent_id = str(parent_row["id"])
+        parent_status = str(parent_row["parent_status"])
+        supervisor_id = str(parent_row["assignee_agent_id"] or lead_agent_id or "")
+        if not supervisor_id:
+            continue
+
+        with contextlib.closing(_connect(db_path)) as conn:
+            open_rows = conn.execute(
+                "SELECT id FROM issues WHERE parent_id = ? AND status NOT IN ('done', 'cancelled') ORDER BY id ASC",
+                (parent_id,),
+            ).fetchall()
+        open_ids = sorted(str(r["id"]) for r in open_rows)
+        if not open_ids:
+            continue
+
+        idempotency_key = f"parent_closed_child_open:{parent_id}:{parent_status}:{','.join(open_ids)}"
+
+        with contextlib.closing(_connect(db_path)) as conn:
+            already_raised = conn.execute(
+                "SELECT 1 FROM issue_thread_interactions WHERE issue_id = ? AND idempotency_key = ? LIMIT 1",
+                (parent_id, idempotency_key),
+            ).fetchone()
+            other_pending = conn.execute(
+                "SELECT 1 FROM issue_thread_interactions WHERE issue_id = ? AND status = 'pending' LIMIT 1",
+                (parent_id,),
+            ).fetchone()
+        if already_raised is not None or other_pending is not None:
+            continue
+
+        enqueue_wakeup(
+            db_path,
+            agent_id=supervisor_id,
+            source="reconcile",
+            reason="parent_closed_child_open",
+            trigger_detail=f"parent_{parent_status}_child_open:{parent_id}",
+            payload={
+                "issue_id": parent_id,
+                "wake_reason": "child_report",
+                "open_child_ids": open_ids,
+                "escalation_reason": "parent_closed_child_open",
+            },
+            idempotency_key=idempotency_key,
+        )
+        create_interaction(
+            db_path,
+            issue_id=parent_id,
+            kind="request_confirmation",
+            payload={
+                "open_child_ids": open_ids,
+                "escalation_reason": "parent_closed_child_open",
+                "supervisor_id": supervisor_id,
+            },
+            continuation_policy="wake_assignee",
+            idempotency_key=idempotency_key,
+            title=f"Padre {parent_status} con {len(open_ids)} hijo(s) abierto(s)",
+            summary=(
+                f"«{parent_row['parent_title']}» ya está {parent_status}, pero "
+                f"{len(open_ids)} issue(s) hija(s) siguen abiertas. Ciérralas (con la evidencia "
+                "disponible) o reabre el padre para seguir trabajando en ellas."
+            ),
+        )
+        enqueued.append(parent_id)
+
+    return enqueued
+
+
 def reconcile_orphaned_interactions(db_path: Path) -> list[str]:
     """Cancel pending interactions whose question no longer applies.
 
@@ -470,18 +569,30 @@ def reconcile_orphaned_interactions(db_path: Path) -> list[str]:
             str(r["id"])
             for r in conn.execute("SELECT id FROM issues WHERE status = 'blocked'").fetchall()
         }
+        open_now = {
+            str(r["id"])
+            for r in conn.execute("SELECT id FROM issues WHERE status NOT IN ('done', 'cancelled')").fetchall()
+        }
 
     for row in rows:
         issue_status = str(row["issue_status"] or "")
         payload = _decode_json(row["payload_json"])
         reason = str(payload.get("reason") or payload.get("escalation_reason") or "")
         orphan_why = ""
-        if issue_status in _TERMINAL:
+        # parent_closed_child_open is DELIBERATELY attached to a terminal
+        # issue_id (the closed parent, so wake-on-resolve targets the right
+        # supervisor) — a terminal issue_status is the whole premise here,
+        # not staleness. Every other reason keys off a still-open issue.
+        if issue_status in _TERMINAL and reason != "parent_closed_child_open":
             orphan_why = f"issue_{issue_status}"
         elif reason == "subtree_stalled":
             child_ids = [str(c) for c in (payload.get("blocked_child_ids") or [])]
             if child_ids and not any(c in blocked_now for c in child_ids):
                 orphan_why = "children_no_longer_blocked"
+        elif reason == "parent_closed_child_open":
+            child_ids = [str(c) for c in (payload.get("open_child_ids") or [])]
+            if child_ids and not any(c in open_now for c in child_ids):
+                orphan_why = "children_resolved"
         if not orphan_why:
             continue
         try:

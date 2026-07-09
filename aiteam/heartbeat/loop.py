@@ -9,6 +9,7 @@ from typing import Callable
 from aiteam.adapters.registry import AdapterRegistry
 from aiteam.autonomy import auto_resolve_operational_interactions
 from aiteam.db.liveness import (
+    reconcile_orphaned_children_of_closed_parents,
     reconcile_orphaned_interactions,
     reconcile_stalled_subtrees,
     reconcile_unassigned_role_issues,
@@ -87,11 +88,17 @@ class HeartbeatLoop:
             materialized = await loop.run_in_executor(None, reconcile_unassigned_role_issues, self.db_path)
             recovered = await loop.run_in_executor(None, reconcile_unqueued_assigned_issues, self.db_path)
             stalled = await loop.run_in_executor(None, reconcile_stalled_subtrees, self.db_path)
+            reopened_gap = await loop.run_in_executor(None, reconcile_orphaned_children_of_closed_parents, self.db_path)
             recovered = [*materialized, *recovered]
             if recovered:
                 logger.info("liveness: re-enqueued %d orphaned issue(s): %s", len(recovered), recovered)
             if stalled:
                 logger.info("liveness: escalated %d stalled subtree(s) to supervisor: %s", len(stalled), stalled)
+            if reopened_gap:
+                logger.info(
+                    "liveness: escalated %d closed-parent/open-child gap(s): %s",
+                    len(reopened_gap), reopened_gap,
+                )
         except Exception:
             logger.exception("liveness reconciler failed")
 
