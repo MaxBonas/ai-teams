@@ -35,6 +35,29 @@ NON_EDITING_ROLES = frozenset({"lead", "team_lead", "file_scout", "web_scout", "
 # Adapter types that call a remote LLM in-process (as opposed to CLI/builtin).
 LLM_ADAPTER_TYPES = frozenset({"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"})
 
+# ── Directorios de ruido a excluir en cualquier escaneo del workspace ──────────
+# Auto-generados por herramientas/VCS — nunca código del proyecto. Antes vivía
+# triplicado (workspace_evidence.py, executor.py, api/routers/workspace.py) sin
+# entradas de Unity, lo que hacía que un package.json dentro de
+# Library/PackageCache/ (cache interna de Unity, no un proyecto Node) disparase
+# el quality gate "hay tests en el workspace" indefinidamente — issue:intake
+# nunca podía cerrarse porque no existe (ni puede existir) un test_runner real
+# para una suite que no existe. También inflaba el listado de archivos y el
+# presupuesto de workspace_files con cientos de ficheros de caché irrelevantes.
+WORKSPACE_NOISE_DIRS = frozenset({
+    # control de versiones
+    ".git", ".hg", ".svn",
+    # control plane de AI Teams
+    ".aiteam",
+    # Python
+    "__pycache__", ".venv", "venv", ".pytest_cache",
+    # JS/Node
+    "node_modules", "dist", "build", ".next",
+    # Unity — carpetas auto-generadas, nunca fuente del proyecto
+    "Library", "Temp", "Logs", "Obj", "obj", "UserSettings", "Build", "Builds",
+    ".vs",
+})
+
 # ── Matriz RBAC de ops ────────────────────────────────────────────────────────
 # DENYLIST per tier, enforced in code regardless of what the prompt said:
 #   Tier 1 — full vocabulary (orchestrates).

@@ -2587,6 +2587,28 @@ def test_lead_cannot_close_when_tests_lack_test_runner_exit_zero(tmp_path: Path)
     assert denied[0] == 1
 
 
+def test_lead_can_close_despite_unity_library_package_json(tmp_path: Path) -> None:
+    """Live capa-2 bug: Library/PackageCache/**/package.json (Unity's own
+    dependency cache, hundreds of files) was mistaken for a JS test suite,
+    permanently blocking issue:intake's closure since no real test_runner
+    could ever exist for a suite that doesn't exist."""
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    package_cache = tmp_path / "Library" / "PackageCache" / "com.unity.modules.ai@1.0.0"
+    package_cache.mkdir(parents=True)
+    (package_cache / "package.json").write_text('{"name": "com.unity.modules.ai"}', encoding="utf-8")
+
+    _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="done")
+
+    assert _issue_status(db_path, "issue:intake") == "done"
+    with sqlite3.connect(str(db_path)) as conn:
+        denied = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'quality_gate.denied'"
+            " AND json_extract(payload_json, '$.reason') = 'test_runner_exit_zero_required'"
+        ).fetchone()
+    assert denied[0] == 0
+
+
 def test_lead_file_ops_on_api_adapter_blocked_preventively(tmp_path: Path) -> None:
     """A Lead on an API adapter (no CLI sandbox) emitting file_ops must be
     blocked BEFORE materialization, not just flagged after."""

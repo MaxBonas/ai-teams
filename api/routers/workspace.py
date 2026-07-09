@@ -24,6 +24,7 @@ from api.utils import (
     set_current_workspace,
 )
 from aiteam.db.migration import SCHEMA_PATH
+from aiteam.policies import WORKSPACE_NOISE_DIRS as _WS_SKIP_DIRS
 from aiteam.project_adapters import (
     available_project_profiles,
     choose_adapter_for_role,
@@ -276,9 +277,6 @@ def _remove_readonly(function, path, _exc_info) -> None:
         raise
 
 
-_WS_SKIP_DIRS: frozenset[str] = frozenset({
-    ".aiteam", ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next",
-})
 _WS_MAX_READ_BYTES = 256 * 1024  # 256 KB per file for the API
 
 

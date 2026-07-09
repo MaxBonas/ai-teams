@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
+from aiteam.policies import WORKSPACE_NOISE_DIRS as _EXCLUDED_NAMES
+
 
 class WorkspaceDelta(NamedTuple):
     created: list[str]
@@ -19,21 +21,6 @@ class WorkspaceDelta(NamedTuple):
             "modified": self.modified,
             "deleted": self.deleted,
         }
-
-
-_EXCLUDED_NAMES = {
-    ".aiteam",
-    ".git",
-    ".hg",
-    ".svn",
-    "node_modules",
-    "venv",
-    ".venv",
-    "__pycache__",
-    ".pytest_cache",
-    "dist",
-    "build",
-}
 
 
 def workspace_root_for_db(db_path: Path) -> Path:

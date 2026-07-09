@@ -58,6 +58,7 @@ from aiteam.policies import (  # noqa: E402
     LLM_ADAPTER_TYPES as _LLM_ADAPTER_TYPES,
     NON_EDITING_ROLES as _NON_EDITING_ROLES,
     TERMINAL_ISSUE_STATUSES as _TERMINAL_ISSUE_STATUSES_P,
+    WORKSPACE_NOISE_DIRS as _SKIP_DIRS,
     cost_breaker_threshold_cents as _cost_breaker_threshold_cents,
     delegation_churn_limit as _delegation_churn_limit,
     operational_interaction_default as _operational_interaction_default,
@@ -4940,7 +4941,6 @@ class RunExecutor:
             return dict(row) if row else None
 
 
-_SKIP_DIRS: frozenset[str] = frozenset({".aiteam", ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next"})
 
 
 def _workspace_file_priority(rel: Path) -> int:
