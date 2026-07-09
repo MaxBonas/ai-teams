@@ -105,6 +105,27 @@ def cost_policy_enforced() -> bool:
     return _env_flag("AITEAM_ENFORCE_COST_POLICY")
 
 
+def workspace_files_budget_bytes() -> int:
+    """Total bytes of file CONTENT injected as workspace_files into a wake
+    payload (every file always appears with path+size; content stops here).
+    AITEAM_WS_FILES_BUDGET_BYTES; default 49152 (48 KB)."""
+    return _env_int("AITEAM_WS_FILES_BUDGET_BYTES", 49152)
+
+
+def workspace_file_max_bytes() -> int:
+    """Per-file content cap inside workspace_files.
+    AITEAM_WS_FILE_MAX_BYTES; default 8192."""
+    return _env_int("AITEAM_WS_FILE_MAX_BYTES", 8192)
+
+
+def rereview_limit() -> int:
+    """Completed runs on one reviewer/QA issue before another wake escalates
+    to the user instead of executing (the Lead can otherwise re-wake the
+    reviewer indefinitely without changing anything about its evidence).
+    AITEAM_REREVIEW_LIMIT; 0 (or negative) disables. Default 4."""
+    return _env_int("AITEAM_REREVIEW_LIMIT", 4)
+
+
 # ── Política de autonomía (P5) ───────────────────────────────────────────────
 # supervised  — every escalation waits for the user (default).
 # autonomous  — OPERATIONAL escalations self-resolve with their safe default,
@@ -125,6 +146,7 @@ OPERATIONAL_INTERACTION_DEFAULTS: dict[str, str] = {
     "child_blocked_requires_action": "accept",  # lead final attempt
     "lead_wants_file_read": "accept",           # harmless context injection
     "subtree_stalled": "accept",                # wake supervisor to unblock
+    "rereview_limit_reached": "accept",         # one more authorised review round
 }
 
 

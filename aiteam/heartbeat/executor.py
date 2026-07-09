@@ -4,9 +4,10 @@ import contextlib
 import json
 import logging
 import os
+import re
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,9 @@ from aiteam.policies import (  # noqa: E402
     NON_EDITING_ROLES as _NON_EDITING_ROLES,
     cost_breaker_threshold_cents as _cost_breaker_threshold_cents,
     delegation_churn_limit as _delegation_churn_limit,
+    rereview_limit as _rereview_limit,
+    workspace_file_max_bytes as _ws_file_max_bytes,
+    workspace_files_budget_bytes as _ws_files_budget_bytes,
 )
 
 
@@ -227,8 +231,19 @@ class RunExecutor:
                 # API-only reviewers and QA agents cannot read files themselves; inject
                 # the actual workspace content into the wake payload so they work with
                 # real code rather than hallucinating based on the engineer's comment.
+                # Files the issue explicitly mentions (title/description/criteria/
+                # recent comments) get content FIRST — a reviewer must never receive
+                # the files under review as "content omitted" while unrelated docs
+                # consume the budget (the capa-2 lead↔reviewer ping-pong).
+                _issue_meta = payload.get("issue") or {}
+                _focus_paths = _extract_focus_paths([
+                    str(_issue_meta.get("title") or ""),
+                    str(_issue_meta.get("description") or ""),
+                    *[str(c) for c in (_issue_meta.get("acceptance_criteria") or [])],
+                    *[str((c or {}).get("body") or "") for c in (payload.get("comments") or [])[-6:]],
+                ])
                 if agent_role in _WORKSPACE_READER_ROLES:
-                    ws_files = _read_workspace_files(workspace_root)
+                    ws_files = _read_workspace_files(workspace_root, focus_paths=_focus_paths)
                     if ws_files:
                         payload["workspace_files"] = ws_files
                 # ── Workspace files for lead self-rescue (user approved) ─────────
@@ -246,7 +261,7 @@ class RunExecutor:
                             _int = get_interaction(self.db_path, interaction_id=_int_id)
                             _int_payload = _decode_json((_int or {}).get("payload_json"))
                             if str(_int_payload.get("reason") or "") == "lead_wants_file_read":
-                                ws_files = _read_workspace_files(workspace_root)
+                                ws_files = _read_workspace_files(workspace_root, focus_paths=_focus_paths)
                                 if ws_files:
                                     payload["workspace_files"] = ws_files
                         except Exception:
@@ -465,6 +480,31 @@ class RunExecutor:
                 status="failed",
                 run_id=run_id,
                 error="budget_rejected",
+            )
+            return
+
+        # ── Re-review churn gate ───────────────────────────────────────────
+        # The Lead can re-wake a reviewer on the same issue indefinitely
+        # ("review again with what you have") without changing anything about
+        # its evidence — capa-2 burned 6 reviewer runs on one issue in 15 min.
+        # After N completed runs on a reviewer/QA issue, further wakes escalate
+        # to an operational interaction instead of executing. A wake caused by
+        # a resolved interaction (the user/autonomy just authorised a round)
+        # always passes.
+        if self._rereview_capped(issue_id=issue_id_str, agent_role=agent_role, ctx=ctx, run_id=run_id, agent_id=agent_id):
+            finish_run(
+                self.db_path,
+                run_id=run_id,
+                status="skipped",
+                error="rereview_limit_reached",
+                error_code="rereview_limit_reached",
+            )
+            finish_wakeup(
+                self.db_path,
+                wakeup_id=wakeup_id,
+                status="skipped",
+                run_id=run_id,
+                error="rereview_limit_reached",
             )
             return
 
@@ -3332,6 +3372,73 @@ class RunExecutor:
             current = parent
         return current
 
+    _REREVIEW_ROLES = frozenset({"reviewer", "code_reviewer", "qa"})
+
+    def _rereview_capped(
+        self, *, issue_id: str, agent_role: str, ctx: dict[str, Any], run_id: str, agent_id: str
+    ) -> bool:
+        """True when this reviewer/QA wake should escalate instead of running.
+
+        Trips after AITEAM_REREVIEW_LIMIT completed runs on the same issue.
+        The escalation interaction is idempotent per (issue, round count), so
+        an accepted round raises the count and arms a fresh escalation for
+        the next burst — repeated bursts keep reaching the user (or the
+        autonomy policy) instead of silently freezing reviews.
+        """
+        if not issue_id or str(agent_role or "").strip().lower() not in self._REREVIEW_ROLES:
+            return False
+        if str(ctx.get("wake_reason") or "") == "interaction_resolved":
+            return False  # the user (or autonomy) just authorised this round
+        limit = _rereview_limit()
+        if limit <= 0:
+            return False
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE issue_id = ? AND status = 'completed'",
+                (issue_id,),
+            ).fetchone()
+        completed = int(row[0]) if row else 0
+        if completed < limit:
+            return False
+        try:
+            create_interaction(
+                self.db_path,
+                issue_id=issue_id,
+                kind="request_confirmation",
+                continuation_policy="wake_assignee",
+                payload={
+                    "version": 1,
+                    "reason": "rereview_limit_reached",
+                    "completed_runs": completed,
+                    "limit": limit,
+                },
+                source_run_id=run_id,
+                created_by_agent_id=agent_id,
+                idempotency_key=f"rereview:{issue_id}:{completed}",
+                title=f"Freno de re-revisión — {completed} runs de review sobre la misma issue",
+                summary=(
+                    f"El reviewer ya ejecutó {completed} runs sobre esta issue (límite {limit}) "
+                    "sin que cambie su evidencia. Acepta para autorizar una ronda más; "
+                    "rechaza para dejar la issue como está y que el Lead decida otra vía."
+                ),
+            )
+            log_activity(
+                self.db_path,
+                action="rereview.capped",
+                target_type="issue",
+                target_id=issue_id,
+                actor_agent_id=agent_id,
+                run_id=run_id,
+                payload={"completed_runs": completed, "limit": limit, "agent_role": agent_role},
+            )
+            logger.warning(
+                "rereview.capped: issue %s already has %d completed review runs (limit %d) — escalating",
+                issue_id, completed, limit,
+            )
+        except Exception:
+            logger.warning("rereview gate: failed to create escalation for %s", issue_id, exc_info=True)
+        return True
+
     def _check_cost_breaker(self, *, issue_id: str, run_id: str, agent_id: str) -> None:
         """Escalate when a subtree accumulates spend without workspace progress.
 
@@ -4698,11 +4805,38 @@ def _workspace_file_priority(rel: Path) -> int:
     return 4
 
 
+# Tokens that look like file paths inside issue text: "Assets/Scripts/Foo.cs",
+# "TestSceneManager.cs.meta", "docs\\plan.md"… Requires a dot-extension so
+# plain prose words don't match; version-like tokens ("5.5") are filtered
+# out below because their extension has no letters.
+_FOCUS_PATH_RE = re.compile(r"[A-Za-z0-9_\-./\\]*[A-Za-z0-9_\-]\.[A-Za-z0-9.]{1,12}\b")
+
+
+def _extract_focus_paths(texts: Iterable[str]) -> frozenset[str]:
+    """File-path-looking tokens mentioned in issue text, normalised for matching.
+
+    Used to give the files an issue is actually ABOUT top priority in the
+    workspace_files content budget (see :func:`_read_workspace_files`).
+    """
+    tokens: set[str] = set()
+    for text in texts:
+        for match in _FOCUS_PATH_RE.findall(str(text or "")):
+            token = match.replace("\\", "/").lstrip("./").rstrip(".").lower()
+            if not token or "." not in token:
+                continue
+            ext = token.rsplit(".", 1)[-1]
+            if not re.search(r"[a-z]", ext):
+                continue  # "5.5", "v1.2" — versions, not files
+            tokens.add(token)
+    return frozenset(tokens)
+
+
 def _read_workspace_files(
     workspace_root: Path,
     *,
-    max_per_file_bytes: int = 8192,
-    max_total_bytes: int = 32768,
+    max_per_file_bytes: int | None = None,
+    max_total_bytes: int | None = None,
+    focus_paths: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Return ``{path, size_bytes, content?}`` for every workspace file.
 
@@ -4711,13 +4845,19 @@ def _read_workspace_files(
 
     Every non-binary, non-hidden file ALWAYS appears in the result (path +
     size) so existence questions ("is there a README?") are answerable. File
-    *content* is included in priority order (READMEs, docs, manifests, scenes,
-    then sources) until *max_total_bytes* is reached; files past the budget
-    still appear with a "content omitted" marker rather than being dropped.
-    Dropping them (the old behaviour) made alphabetically-late files like
-    README.md invisible, which trapped reviewer↔engineer in an endless
-    "README missing" fix loop.
+    *content* is included in priority order until *max_total_bytes* is
+    reached: first the files the issue explicitly mentions (*focus_paths* —
+    a reviewer must never receive the files under review as "content
+    omitted"), then READMEs, docs, manifests, scenes, then sources. Files
+    past the budget still appear with a "content omitted" marker rather than
+    being dropped. Dropping them (the old behaviour) made alphabetically-late
+    files like README.md invisible, which trapped reviewer↔engineer in an
+    endless "README missing" fix loop.
     """
+    if max_per_file_bytes is None:
+        max_per_file_bytes = _ws_file_max_bytes()
+    if max_total_bytes is None:
+        max_total_bytes = _ws_files_budget_bytes()
     workspace_root = workspace_root.resolve()
 
     try:
@@ -4748,14 +4888,32 @@ def _read_workspace_files(
                 continue
         candidates.append((rel, raw))
 
-    # Priority first (so key docs get content), then alphabetical within a tier.
-    candidates.sort(key=lambda item: (_workspace_file_priority(item[0]), str(item[0])))
+    def _is_focused(rel: Path) -> bool:
+        if not focus_paths:
+            return False
+        rel_posix = str(rel).replace("\\", "/").lower()
+        name = rel.name.lower()
+        return any(
+            rel_posix == token or rel_posix.endswith("/" + token) or name == token
+            for token in focus_paths
+        )
+
+    # Focused files first (the issue names them explicitly), then priority
+    # tiers (so key docs get content), then alphabetical within a tier.
+    candidates.sort(
+        key=lambda item: (
+            -1 if _is_focused(item[0]) else _workspace_file_priority(item[0]),
+            str(item[0]),
+        )
+    )
 
     result: list[dict[str, Any]] = []
     total_bytes = 0
     for rel, raw in candidates:
         path_str = str(rel).replace("\\", "/")
         item: dict[str, Any] = {"path": path_str, "size_bytes": len(raw)}
+        if _is_focused(rel):
+            item["focus"] = True
         if total_bytes < max_total_bytes:
             truncated = len(raw) > max_per_file_bytes
             content = raw[:max_per_file_bytes].decode("utf-8", errors="replace")

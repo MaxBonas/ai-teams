@@ -8,7 +8,7 @@ from typing import Any
 
 from aiteam.db.activity_log import log_activity
 from aiteam.db.agents import create_agent
-from aiteam.db.interactions import create_interaction
+from aiteam.db.interactions import ConflictError, create_interaction, resolve_interaction
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
 from aiteam.tools.catalog import default_capabilities_for_role
@@ -386,6 +386,73 @@ def reconcile_stalled_subtrees(db_path: Path) -> list[str]:
         enqueued.append(parent_id)
 
     return enqueued
+
+
+def reconcile_orphaned_interactions(db_path: Path) -> list[str]:
+    """Cancel pending interactions whose question no longer applies.
+
+    Two orphan cases seen in real runs (a stale "Subtree stalled" card asked
+    the user to decide about a child that had been *cancelled* a day earlier):
+
+    1. The interaction's own issue reached a terminal status — nobody is
+       waiting for the answer any more.
+    2. A ``subtree_stalled`` escalation whose ``blocked_child_ids`` are all
+       out of 'blocked' by now (unblocked, done or cancelled) — the stall
+       resolved itself.
+
+    Cancelling (instead of accepting) never enqueues a wakeup, so this is
+    pure hygiene: the card disappears from the pending list and the audit
+    trail records why.
+    """
+    cancelled: list[str] = []
+    with contextlib.closing(_connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT it.id, it.issue_id, it.kind, it.payload_json, i.status AS issue_status
+            FROM issue_thread_interactions it
+            LEFT JOIN issues i ON i.id = it.issue_id
+            WHERE it.status = 'pending'
+            ORDER BY it.created_at ASC
+            """
+        ).fetchall()
+        blocked_now = {
+            str(r["id"])
+            for r in conn.execute("SELECT id FROM issues WHERE status = 'blocked'").fetchall()
+        }
+
+    for row in rows:
+        issue_status = str(row["issue_status"] or "")
+        payload = _decode_json(row["payload_json"])
+        reason = str(payload.get("reason") or payload.get("escalation_reason") or "")
+        orphan_why = ""
+        if issue_status in _TERMINAL:
+            orphan_why = f"issue_{issue_status}"
+        elif reason == "subtree_stalled":
+            child_ids = [str(c) for c in (payload.get("blocked_child_ids") or [])]
+            if child_ids and not any(c in blocked_now for c in child_ids):
+                orphan_why = "children_no_longer_blocked"
+        if not orphan_why:
+            continue
+        try:
+            resolve_interaction(
+                db_path,
+                interaction_id=str(row["id"]),
+                action="cancel",
+                resolution_data={"auto_cancelled": True, "orphan_reason": orphan_why},
+                resolved_by_user_id="system",
+            )
+        except (ConflictError, LookupError, ValueError):
+            continue
+        log_activity(
+            db_path,
+            action="interaction.auto_cancelled",
+            target_type="interaction",
+            target_id=str(row["id"]),
+            actor_user_id="system",
+            payload={"issue_id": str(row["issue_id"]), "reason": reason, "orphan_reason": orphan_why},
+        )
+        cancelled.append(str(row["id"]))
+    return cancelled
 
 
 def _live_issue_ids(db_path: Path) -> set[str]:
