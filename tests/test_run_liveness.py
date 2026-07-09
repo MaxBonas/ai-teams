@@ -744,3 +744,55 @@ class TestReconcileStalledSubtrees:
         enqueued = reconcile_stalled_subtrees(db)
 
         assert not enqueued
+
+    def test_escalates_even_when_supervisor_has_unrelated_live_wakeup(self, tmp_path: Path):
+        """Live bug: a root issue kept receiving child_report wakeups that
+        never produced a lead.unblock_attempted for the specific blocked
+        child. The old gate ('any wakeup pointing at the parent') treated
+        that churn as 'being handled' and silenced the escalation for 24h+.
+        The gate must be 'is THIS stall's escalation already pending', not
+        'does the supervisor have any wakeup at all'."""
+        from aiteam.db.interactions import create_interaction
+        from aiteam.db.liveness import reconcile_stalled_subtrees
+        from aiteam.db.wakeups import enqueue_wakeup
+
+        db = _make_stall_db(tmp_path)
+        # A live wakeup exists for the parent for a COMPLETELY unrelated
+        # reason (e.g. a fresh child_report re-enqueued by another
+        # reconciler) — the old code treated this as "already handled".
+        enqueue_wakeup(
+            db, agent_id="role:lead", source="reconcile", reason="child_report",
+            payload={"issue_id": "issue:intake", "wake_reason": "child_report"},
+        )
+
+        enqueued = reconcile_stalled_subtrees(db)
+
+        assert "issue:intake" in enqueued
+        with sqlite3.connect(str(db)) as conn:
+            conn.row_factory = sqlite3.Row
+            interaction = conn.execute(
+                "SELECT status FROM issue_thread_interactions WHERE issue_id = 'issue:intake'"
+            ).fetchone()
+        assert interaction is not None and interaction["status"] == "pending"
+
+    def test_second_call_after_resolution_does_not_re_escalate_same_stall(self, tmp_path: Path):
+        """Idempotency still holds: resolving the escalation must not cause
+        an infinite re-escalation loop for the identical blocked-id set."""
+        from aiteam.db.interactions import resolve_interaction
+        from aiteam.db.liveness import reconcile_stalled_subtrees
+
+        db = _make_stall_db(tmp_path)
+        first = reconcile_stalled_subtrees(db)
+        assert first
+        with sqlite3.connect(str(db)) as conn:
+            conn.row_factory = sqlite3.Row
+            interaction_id = conn.execute(
+                "SELECT id FROM issue_thread_interactions WHERE issue_id = 'issue:intake'"
+            ).fetchone()["id"]
+        resolve_interaction(db, interaction_id=interaction_id, action="accept", resolved_by_user_id="user")
+
+        second = reconcile_stalled_subtrees(db)
+
+        # Same blocked_ids → same idempotency_key → create_interaction returns
+        # the existing (now resolved) row instead of a fresh pending one.
+        assert not second

@@ -295,10 +295,16 @@ def reconcile_stalled_subtrees(db_path: Path) -> list[str]:
     subtrees and creates escalation issues automatically.
 
     Idempotency: one ``subtree_stalled`` wakeup per supervisor per stall cycle
-    (keyed on the set of blocked child ids so new children re-trigger it).
+    (keyed on the set of blocked child ids so new children re-trigger it). The
+    gate is "is an escalation for THIS exact stall already pending" — not
+    "does the supervisor have any wakeup at all". A supervisor can receive
+    child_report wakeups indefinitely without ever producing an
+    ``lead.unblock_attempted`` for the specific blocked child (observed live:
+    a root issue got a burst of wakeups, then 24h of total silence with zero
+    unblock attempts) — treating "has a wakeup" as "is handling it" let that
+    stall go unescalated forever.
     """
     enqueued: list[str] = []
-    live_issue_ids = _live_issue_ids(db_path)
 
     with contextlib.closing(_connect(db_path)) as conn:
         # Find parent issues in_progress/in_review that have at least one child
@@ -345,8 +351,30 @@ def reconcile_stalled_subtrees(db_path: Path) -> list[str]:
 
         idempotency_key = f"subtree_stalled:{parent_id}:{','.join(blocked_ids)}"
 
-        # Don't re-escalate if supervisor already has a live wakeup for this issue
-        if parent_id in live_issue_ids:
+        # Two, and only two, reasons to hold off:
+        #   (a) THIS exact stall (same parent + same blocked-id set) was
+        #       already raised — pending or resolved, since blocked_ids only
+        #       changes when something actually moved.
+        #   (b) the parent already has a DIFFERENT pending interaction — the
+        #       user already has a card for this issue; piling on a second
+        #       one is redundant noise, not a missed escalation.
+        # Do NOT skip just because the supervisor has some unrelated
+        # wakeup/run in flight — that gate let a real stall (child_report
+        # wakeups firing with zero unblock_attempted) go unescalated 24h+.
+        with contextlib.closing(_connect(db_path)) as conn:
+            already_raised = conn.execute(
+                """
+                SELECT 1 FROM issue_thread_interactions
+                WHERE issue_id = ? AND idempotency_key = ?
+                LIMIT 1
+                """,
+                (parent_id, idempotency_key),
+            ).fetchone()
+            other_pending = conn.execute(
+                "SELECT 1 FROM issue_thread_interactions WHERE issue_id = ? AND status = 'pending' LIMIT 1",
+                (parent_id,),
+            ).fetchone()
+        if already_raised is not None or other_pending is not None:
             continue
 
         enqueue_wakeup(
