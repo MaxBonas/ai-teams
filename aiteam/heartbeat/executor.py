@@ -26,7 +26,7 @@ from aiteam.db.issues import get_issue, update_issue
 from aiteam.db.runs import append_run_event, finish_run, mark_run_running
 from aiteam.db.tool_access import record_tool_access
 from aiteam.db.agent_reports import latest_agent_report, record_agent_report
-from aiteam.db.wake_payload import build_wake_payload, _parse_agent_report
+from aiteam.db.wake_payload import build_wake_payload, project_open_issues, _parse_agent_report
 from aiteam.db.wakeups import enqueue_wakeup, finish_wakeup
 from aiteam.heartbeat.scheduler import DispatchResult
 from aiteam.lead_intake import apply_accepted_team_proposal, build_team_proposal, format_team_proposal
@@ -251,6 +251,19 @@ class RunExecutor:
                     ws_files = _read_workspace_files(workspace_root, focus_paths=_focus_paths)
                     if ws_files:
                         payload["workspace_files"] = ws_files
+                # ── Global open-issues view for the Lead ──────────────────────
+                # The payload is scoped to ONE issue's subtree; with several
+                # root issues (each user task can start a new root), a Lead
+                # woken on a finished root truthfully answered "no hay issues
+                # abiertas" while other trees had live work. Project-level
+                # claims need project-level data.
+                if agent_role in _LEAD_TIER_ROLES_P:
+                    try:
+                        payload["project_open_issues"] = project_open_issues(
+                            self.db_path, exclude_issue_id=issue_id_str
+                        )
+                    except Exception:
+                        logger.warning("Failed to inject project_open_issues", exc_info=True)
                 # ── Workspace files for lead self-rescue (user approved) ─────────
                 # When the user approves a lead_wants_file_read request, inject
                 # real workspace content so an LLM lead can summarise files without

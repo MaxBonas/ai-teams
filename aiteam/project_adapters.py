@@ -221,11 +221,32 @@ def reconcile_project_agent_policy(db_path: Path) -> list[str]:
                 and current_adapter in _API_ONLY_ADAPTER_TYPES
                 and selected_adapter == "subscription_cli"
             )
-            if is_placeholder or is_api_only_junior:
+            # A subscription_cli agent whose config lost its profile_id falls
+            # back to the runtime's default binary ('claude'), which may not be
+            # installed at all — observed live: 89 straight failed runs with
+            # "command not found: 'claude'" on the one agent missing profile_id
+            # while every sibling carried codex_subscription. Re-select so the
+            # config carries the project's actual connected profile again.
+            try:
+                _current_config = json.loads(str(row["adapter_config_json"] or "{}"))
+            except (TypeError, ValueError):
+                _current_config = {}
+            if not isinstance(_current_config, dict):
+                _current_config = {}
+            is_cli_missing_profile = (
+                current_adapter == "subscription_cli"
+                and not str(_current_config.get("profile_id") or "").strip()
+                and selected_adapter == "subscription_cli"
+            )
+            if is_placeholder or is_api_only_junior or is_cli_missing_profile:
+                new_config = dict(selection.get("adapter_config") or {})
+                # Keep an explicitly chosen model when only the profile was lost.
+                if is_cli_missing_profile and str(_current_config.get("model") or "").strip():
+                    new_config["model"] = _current_config["model"]
                 sets.extend(["adapter_type = ?", "adapter_config_json = ?"])
                 params.extend([
                     selected_adapter or current_adapter or "manual",
-                    json.dumps(selection.get("adapter_config") or {}, ensure_ascii=False, sort_keys=True),
+                    json.dumps(new_config, ensure_ascii=False, sort_keys=True),
                 ])
             caps = _decode_list(row["capabilities_json"])
             if not caps:

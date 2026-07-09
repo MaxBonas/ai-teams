@@ -324,6 +324,11 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
     if is_orchestrator:
         parts += [
             "Eres un ORQUESTADOR, no un implementador. NO escribas ni edites código ni archivos tú mismo.",
+            "VISIÓN GLOBAL: `payload.project_open_issues` lista TODAS las issues abiertas del proyecto "
+            "(todas las raíces, no solo los hijos de tu issue actual). Cualquier afirmación tipo "
+            "'no hay issues abiertas / no queda trabajo' debe basarse en esa lista. Si tu issue está "
+            "terminada o vacía pero esa lista NO está vacía, tu acción útil de este heartbeat es "
+            "atender esas issues (dirigir, desbloquear o delegar allí).",
             "Tu trabajo es planificar y DELEGAR mediante `ops` en tu respuesta JSON:",
             "  - Para implementación de código → crea un sub-issue: "
             '{"type":"create_issue","title":"...","description":"<spec concreta: tecnología, archivos>","role":"engineer","complexity":"low|medium|high",'

@@ -274,6 +274,36 @@ def build_wake_payload(
     }
 
 
+_PROJECT_OPEN_ISSUES_LIMIT = 40
+
+
+def project_open_issues(db_path: Path, *, exclude_issue_id: str | None = None) -> list[dict[str, Any]]:
+    """Every non-terminal issue in the project, across ALL roots, newest first.
+
+    The wake payload is scoped to one issue's subtree — correct for workers,
+    but the Lead answers project-level questions ("is there open work?") from
+    it. With several root issues (each user task can start a new root), a Lead
+    woken on a finished root truthfully reported "no open issues" while other
+    trees had live, even failing, work. Injected for lead-tier roles so global
+    claims come from global data.
+    """
+    with contextlib.closing(_connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, title, status, role, parent_id, assignee_agent_id, updated_at
+            FROM issues
+            WHERE status NOT IN ('done', 'cancelled')
+            ORDER BY updated_at DESC, rowid DESC
+            LIMIT ?
+            """,
+            (_PROJECT_OPEN_ISSUES_LIMIT,),
+        ).fetchall()
+    return [
+        dict(row) for row in rows
+        if str(row["id"]) != str(exclude_issue_id or "")
+    ]
+
+
 _USER_DIRECTIVES_LIMIT = 5
 _DIRECTIVE_SUMMARY_MAX = 400
 

@@ -60,6 +60,47 @@ def test_reconcile_project_agent_policy_repairs_builtin_agents_only(tmp_path: Pa
     assert rows["role:reviewer"]["supervisor_agent_id"] == "role:lead"
 
 
+def test_reconcile_repairs_subscription_cli_missing_profile_id(tmp_path: Path) -> None:
+    """Live bug: one agent's adapter_config was {"model": "gpt-5.4"} with no
+    profile_id — the subscription_cli runtime fell back to its default binary
+    ('claude', not installed) and racked up 89 straight failed runs while
+    every sibling carried codex_subscription."""
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executemany(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, adapter_config_json, capabilities_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("role:lead", "lead", "Lead", "lead", "subscription_cli",
+                 json.dumps({"profile_id": "codex_subscription", "model": "gpt-5.5"}), '["skill_run"]'),
+                ("role:engineer", "engineer", "Engineer", "standard", "subscription_cli",
+                 json.dumps({"model": "gpt-5.4"}), '["repo_write"]'),
+            ],
+        )
+        conn.commit()
+    (tmp_path / "project_config.json").write_text(
+        json.dumps({"version": 1, "adapter_profile_ids": ["codex_subscription"]}),
+        encoding="utf-8",
+    )
+
+    repaired = reconcile_project_agent_policy(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        config = json.loads(conn.execute(
+            "SELECT adapter_config_json FROM agents WHERE id = 'role:engineer'"
+        ).fetchone()["adapter_config_json"])
+        lead_config = json.loads(conn.execute(
+            "SELECT adapter_config_json FROM agents WHERE id = 'role:lead'"
+        ).fetchone()["adapter_config_json"])
+
+    assert "role:engineer" in repaired
+    assert config.get("profile_id") == "codex_subscription"
+    assert config.get("model") == "gpt-5.4"  # explicit model choice preserved
+    assert lead_config.get("model") == "gpt-5.5"  # healthy config untouched
+
+
 # ---------------------------------------------------------------------------
 # _profile_score — junior role scoring prefers CLI over API-only
 # ---------------------------------------------------------------------------
