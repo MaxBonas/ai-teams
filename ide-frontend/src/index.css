@@ -1994,6 +1994,47 @@ dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 0.8rem; color:
   color: var(--text-muted);
 }
 
+/* ── Chat: botón "ir al final" (aparece al scrollear hacia arriba) ────────── */
+.chat-panel-main { position: relative; }
+.chat-jump-bottom {
+  position: absolute;
+  right: 22px;
+  bottom: 64px;
+  z-index: 5;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-dim);
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+  opacity: 0.85;
+}
+.chat-jump-bottom:hover { opacity: 1; color: var(--text-bright); border-color: var(--accent); }
+
+/* ── Popup de decisiones pendientes ──────────────────────────────────────── */
+.pending-modal { width: 620px; max-width: 96vw; }
+.pending-modal-body {
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.pending-modal-card {
+  border: 1px solid var(--pending, var(--border-strong));
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--pending-bg, var(--surface));
+  display: flex; flex-direction: column; gap: 8px;
+}
+.pending-modal-card .chat-card-header { display: flex; align-items: center; gap: 6px; }
+.pending-modal-card .chat-card-header svg { color: var(--pending); flex-shrink: 0; }
+.pending-modal-card .chat-card-header strong { flex: 1; font-size: 0.85rem; color: var(--text-bright); }
+.pending-modal-card .chat-card-body { margin: 0; font-size: 0.82rem; white-space: pre-wrap; }
+.pending-modal-card .interaction-note-area textarea { width: 100%; }
+.pending-modal-issue { font-size: 0.74rem; color: var(--text-dim); }
+.pending-modal-hiring-note { margin: 0; font-size: 0.78rem; }
+
 /* ── Responsive ────────────────────────────────────────────────────────────── */
 @media (max-width: 960px) {
   .workspace-grid { grid-template-columns: 240px minmax(0,1fr); }

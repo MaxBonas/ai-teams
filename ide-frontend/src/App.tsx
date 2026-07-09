@@ -3,6 +3,7 @@ import { ThreadView } from './components/ThreadView';
 import {
   Activity,
   AlertCircle,
+  ArrowDown,
   Bell,
   CheckCircle2,
   Clock3,
@@ -19,6 +20,7 @@ import {
   RefreshCcw,
   Send,
   Users,
+  X,
 } from 'lucide-react';
 import { apiFetch, getWorkspacePath, setWorkspacePath } from './lib/api';
 
@@ -590,6 +592,12 @@ export default function App() {
   const [chatDraft, setChatDraft] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const chatFeedRef = useRef<HTMLDivElement>(null);
+  // Auto-scroll only while the user is already at the bottom of the feed;
+  // scrolling up "unsticks" it so reading old messages isn't interrupted.
+  const chatStickToBottomRef = useRef(true);
+  const [chatJumpVisible, setChatJumpVisible] = useState(false);
+  // Popup de decisiones pendientes (respuesta sin depender del scroll del chat)
+  const [pendingPopupOpen, setPendingPopupOpen] = useState(false);
   // Workspace files browser
   const [wsFiles, setWsFiles] = useState<Array<{ path: string; size_bytes: number; mime: string }>>([]);
   const [wsSelectedFile, setWsSelectedFile] = useState<string | null>(null);
@@ -954,15 +962,38 @@ export default function App() {
     } catch { /* ignore */ }
   };
 
-  // Auto-scroll chat feed to bottom whenever messages change or chat tab becomes active
+  const scrollChatToBottom = () => {
+    const el = chatFeedRef.current;
+    // instant: the feed has scroll-behavior smooth in CSS, and a smooth
+    // animation gets cancelled by the re-render this click triggers.
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'instant' });
+    chatStickToBottomRef.current = true;
+    setChatJumpVisible(false);
+  };
+
+  const handleChatScroll = () => {
+    const el = chatFeedRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    chatStickToBottomRef.current = atBottom;
+    setChatJumpVisible(!atBottom);
+  };
+
+  // Auto-scroll on new messages ONLY while stuck to the bottom — if the user
+  // scrolled up to read something, the feed stays put (the jump button brings
+  // them back). Entering the chat tab always starts at the bottom.
   useEffect(() => {
     if (viewMode !== 'chat') return;
     // requestAnimationFrame so the panel is painted before we scroll
     requestAnimationFrame(() => {
-      const el = chatFeedRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (chatStickToBottomRef.current) scrollChatToBottom();
     });
   }, [chatMessages, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'chat') chatStickToBottomRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode]);
 
   const loadWsFiles = async () => {
     try {
@@ -1046,6 +1077,8 @@ export default function App() {
     if (!body) return;
     setChatSending(true);
     setChatDraft('');
+    // Sending re-sticks the feed so the user sees their own message land.
+    chatStickToBottomRef.current = true;
     try {
       const issueId = selectedIssue?.id || 'issue:intake';
       const res = await apiFetch('/api/chat/message', {
@@ -1652,15 +1685,20 @@ export default function App() {
     }
   }
 
-  const resolveInteraction = async (interaction: Interaction, action: 'accept' | 'reject', note?: string) => {
+  const resolveInteraction = async (interaction: Interaction, intent: 'accept' | 'reject', note?: string) => {
     setLoading(true);
     setError('');
     try {
       const hiringTeam = hiringDrafts[interaction.id];
+      // ask_user_questions only supports answer/cancel at the API — map the
+      // accept/reject buttons onto the vocabulary each kind actually allows.
+      const action = interaction.kind === 'ask_user_questions'
+        ? (intent === 'accept' ? 'answer' : 'cancel')
+        : intent;
       const body: Record<string, unknown> = { action, resolved_by_user_id: 'user' };
-      if (action === 'accept' && hiringTeam && interaction.kind === 'suggest_tasks') {
+      if (intent === 'accept' && hiringTeam && interaction.kind === 'suggest_tasks') {
         body.resolution_data = { proposed_team: hiringTeam };
-      } else if (action === 'accept' && note && note.trim() && interaction.kind === 'request_confirmation') {
+      } else if (intent === 'accept' && note && note.trim() && interaction.kind !== 'suggest_tasks') {
         // Carry the user's free-text answer so the Lead can read it from result.resolution_data.user_note
         body.resolution_data = { user_note: note.trim() };
       }
@@ -1672,9 +1710,7 @@ export default function App() {
       const json = await response.json();
       if (!response.ok) throw new Error(json.detail || `interaction:${response.status}`);
       // Clear the note after successful submission
-      if (interaction.kind === 'request_confirmation') {
-        setInteractionNotes((prev) => { const next = { ...prev }; delete next[interaction.id]; return next; });
-      }
+      setInteractionNotes((prev) => { const next = { ...prev }; delete next[interaction.id]; return next; });
       const runOnceJson = await runControlPlane();
       setLastResult({ interaction: json, run_once: runOnceJson });
       await loadProjectData(interaction.issue_id || selectedIssueId);
@@ -1997,8 +2033,8 @@ export default function App() {
           {hasPending && (
             <button
               className="secondary-button pending-alert-button"
-              onClick={() => setViewMode('chat')}
-              title="Hay decisiones pendientes"
+              onClick={() => setPendingPopupOpen(true)}
+              title="Hay decisiones pendientes — clic para verlas y responder"
             >
               <Bell size={16} />
               Pendiente
@@ -2022,6 +2058,85 @@ export default function App() {
       </header>
 
       {error ? <div className="banner error">{error}</div> : null}
+
+      {pendingPopupOpen && (
+        <div className="modal-overlay" onClick={() => setPendingPopupOpen(false)}>
+          <div className="modal-card pending-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-header-info">
+                <h3 className="modal-title">Decisiones pendientes</h3>
+                <span className="modal-subtitle">
+                  {pendingInteractions.length > 0
+                    ? 'El equipo espera tu respuesta — puedes contestar desde aquí.'
+                    : 'No hay nada pendiente ahora mismo.'}
+                </span>
+              </div>
+              <button className="modal-close" onClick={() => setPendingPopupOpen(false)} title="Cerrar">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="pending-modal-body">
+              {pendingInteractions.length === 0 && (
+                <p className="muted">Todo respondido. Las nuevas preguntas del equipo aparecerán aquí y en el chat.</p>
+              )}
+              {pendingInteractions.map((interaction) => {
+                const issue = issues.find((item) => item.id === interaction.issue_id);
+                const isHiring = interaction.kind === 'suggest_tasks';
+                const isQuestion = interaction.kind === 'ask_user_questions';
+                return (
+                  <div key={interaction.id} className="pending-modal-card">
+                    <div className="chat-card-header">
+                      <AlertCircle size={13} />
+                      <strong>{interaction.title || interaction.kind}</strong>
+                      <time className="chat-time">{formatTime(interaction.created_at)}</time>
+                    </div>
+                    {issue && <div className="pending-modal-issue">Issue: {issue.title}</div>}
+                    {interaction.summary && <p className="chat-card-body">{interaction.summary}</p>}
+                    {isHiring ? (
+                      <p className="muted pending-modal-hiring-note">
+                        Propuesta de equipo — ábrela en el chat para ajustar adapters y modelos antes de contratar.
+                      </p>
+                    ) : (
+                      <div className="interaction-note-area">
+                        <textarea
+                          placeholder="Escribe tu respuesta... (opcional — si no escribes nada, se enviará solo Aceptar)"
+                          value={interactionNotes[interaction.id] || ''}
+                          onChange={(event) => setInteractionNotes((prev) => ({ ...prev, [interaction.id]: event.target.value }))}
+                          rows={3}
+                          disabled={loading}
+                        />
+                      </div>
+                    )}
+                    <div className="actions">
+                      <button
+                        onClick={() => void resolveInteraction(interaction, 'accept', isHiring ? undefined : interactionNotes[interaction.id])}
+                        disabled={loading}
+                      >
+                        {isQuestion ? 'Responder' : isHiring ? 'Contratar equipo' : 'Aceptar'}
+                      </button>
+                      <button
+                        className="danger-button"
+                        onClick={() => void resolveInteraction(interaction, 'reject')}
+                        disabled={loading}
+                      >
+                        {isQuestion ? 'Descartar' : 'Rechazar'}
+                      </button>
+                      {isHiring && (
+                        <button
+                          className="secondary-button"
+                          onClick={() => { setPendingPopupOpen(false); setViewMode('chat'); }}
+                        >
+                          Ver en chat
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="workspace-grid">
         <aside className="nav-column">
@@ -2435,7 +2550,7 @@ export default function App() {
                   <span>El Lead espera tu respuesta</span>
                 </div>
               )}
-              <div className="chat-feed chat-feed-main" ref={chatFeedRef}>
+              <div className="chat-feed chat-feed-main" ref={chatFeedRef} onScroll={handleChatScroll}>
                 {chatMessages.length === 0 && (
                   <p className="muted chat-empty">Sin mensajes aún. Escribe algo al Lead o despiértalo para empezar.</p>
                 )}
@@ -2578,6 +2693,11 @@ export default function App() {
                   );
                 })}
               </div>
+              {chatJumpVisible && (
+                <button className="chat-jump-bottom" onClick={scrollChatToBottom} title="Ir al final del chat">
+                  <ArrowDown size={15} />
+                </button>
+              )}
               <div className="chat-input-row chat-input-row-main">
                 <input
                   type="text"
