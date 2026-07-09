@@ -36,6 +36,70 @@ def test_basic_payload(tmp_path):
     assert payload["plan_document"] is None
 
 
+def _resolve(db: Path, interaction_id: str, *, action: str, note: str | None = None, resolver: str = "user") -> None:
+    from aiteam.db.interactions import resolve_interaction
+
+    resolve_interaction(
+        db,
+        interaction_id=interaction_id,
+        action=action,
+        resolution_data={"user_note": note} if note else None,
+        resolved_by_user_id=resolver,
+    )
+
+
+def test_user_directives_surface_user_decisions(tmp_path):
+    """The capa-2 gap: the user answered 'B' to the prototype-close question
+    and the decision evaporated after one lead run — reviewers kept enforcing
+    the standard the user had overruled. Directives must reach EVERY wake."""
+    from aiteam.db.interactions import create_interaction
+
+    db = _init(tmp_path)
+    decided = create_interaction(
+        db, issue_id="i1", kind="request_confirmation",
+        payload={"reason": "decide_prototype_close"},
+        title="Decidir cierre del prototipo",
+        summary="Opciones: (A) escena materializada; (B) prototipo por generador; (C) cancelar.",
+        interaction_id="int-decision",
+    )
+    _resolve(db, decided["id"], action="accept", note="B")
+    rejected = create_interaction(
+        db, issue_id="i1", kind="request_confirmation",
+        payload={"reason": "delegation_churn_limit"},
+        title="Freno de delegación",
+        interaction_id="int-churn",
+    )
+    _resolve(db, rejected["id"], action="reject")
+    # Machine resolutions and note-less accepts are NOT directives
+    machine = create_interaction(
+        db, issue_id="i1", kind="request_confirmation",
+        payload={"reason": "lead_wants_file_read"}, interaction_id="int-machine",
+    )
+    _resolve(db, machine["id"], action="accept", note="ignored", resolver="autonomy")
+    plain = create_interaction(
+        db, issue_id="i1", kind="request_confirmation",
+        payload={"reason": "child_blocked_requires_action"}, interaction_id="int-plain",
+    )
+    _resolve(db, plain["id"], action="accept")
+
+    payload = build_wake_payload(db, issue_id="i1")
+
+    directives = payload["user_directives"]
+    titles = [d["title"] for d in directives]
+    assert titles == ["Freno de delegación", "Decidir cierre del prototipo"]
+    decision = directives[1]
+    assert decision["user_note"] == "B"
+    assert decision["decision"] == "accepted"
+    assert "generador" in decision["question_summary"]
+    assert directives[0]["decision"] == "rejected"
+
+
+def test_user_directives_empty_without_decisions(tmp_path):
+    db = _init(tmp_path)
+    payload = build_wake_payload(db, issue_id="i1")
+    assert payload["user_directives"] == []
+
+
 def test_payload_not_found(tmp_path):
     db = _init(tmp_path)
     payload = build_wake_payload(db, issue_id="missing")

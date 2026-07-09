@@ -239,9 +239,13 @@ def build_wake_payload(
         if synth_found:
             comments = filtered
 
+    with contextlib.closing(_connect(db_path)) as conn:
+        user_directives = _user_directives(conn)
+
     return {
         "issue_id": issue_id,
         "run_id": run_id,
+        "user_directives": user_directives,
         "issue": {
             "id": issue["id"],
             "title": issue["title"],
@@ -268,6 +272,64 @@ def build_wake_payload(
         "trigger_comment_id": comment_id,
         "children": children_summary,
     }
+
+
+_USER_DIRECTIVES_LIMIT = 5
+_DIRECTIVE_SUMMARY_MAX = 400
+
+# Resolver ids that are NOT the human: their resolutions are plumbing, not
+# product direction.
+_MACHINE_RESOLVERS = {"autonomy", "system"}
+
+
+def _user_directives(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Decisions the human took on this project, newest first (capped).
+
+    A user-resolved interaction with a ``user_note`` (e.g. answering "B" to
+    "Decidir cierre del prototipo") — or an outright rejection — is a BINDING
+    project directive, not a one-shot message for whoever woke next. Injected
+    into every wake payload so the Lead encodes it into new issues' acceptance
+    criteria and reviewers review against it instead of against earlier,
+    now-superseded standards.
+    """
+    rows = conn.execute(
+        """
+        SELECT title, summary, status, result_json, resolved_at, resolved_by_user_id
+        FROM issue_thread_interactions
+        WHERE resolved_by_user_id IS NOT NULL
+          AND status IN ('accepted', 'answered', 'rejected')
+        ORDER BY resolved_at DESC, rowid DESC
+        LIMIT 40
+        """
+    ).fetchall()
+    directives: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        # Machine resolutions (autonomy/system) are plumbing, not direction.
+        if str(item.get("resolved_by_user_id") or "") in _MACHINE_RESOLVERS:
+            continue
+        try:
+            result = json.loads(str(item.get("result_json") or "{}"))
+        except (TypeError, ValueError):
+            result = {}
+        if not isinstance(result, dict):
+            result = {}
+        resolution = result.get("resolution_data") or {}
+        note = str((resolution or {}).get("user_note") or "").strip()
+        status = str(item.get("status") or "")
+        if not note and status != "rejected":
+            continue  # a plain accept without a note carries no direction
+        summary = str(item.get("summary") or "").strip()
+        directives.append({
+            "resolved_at": item.get("resolved_at"),
+            "title": str(item.get("title") or "").strip(),
+            "decision": status,
+            "user_note": note,
+            "question_summary": summary[:_DIRECTIVE_SUMMARY_MAX] + ("…" if len(summary) > _DIRECTIVE_SUMMARY_MAX else ""),
+        })
+        if len(directives) >= _USER_DIRECTIVES_LIMIT:
+            break
+    return directives
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:

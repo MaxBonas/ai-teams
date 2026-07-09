@@ -311,6 +311,13 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         "=== Contexto de delegación (AITEAM_WAKE_PAYLOAD_JSON) ===",
         payload,
         "",
+        "=== Directivas del usuario (payload.user_directives) ===",
+        "Si el payload incluye `user_directives`, son decisiones VINCULANTES del dueño del proyecto",
+        "y prevalecen sobre cualquier estándar o criterio anterior que las contradiga:",
+        "  - Lead: refleja cada directiva vigente en los acceptance_criteria de las issues nuevas.",
+        "  - Reviewer/QA: juzga contra las directivas; NO exijas nada que una directiva haya descartado.",
+        "  - Todos: si una directiva vuelve tu tarea innecesaria, ciérrala y dilo en el comentario.",
+        "",
         "=== Instrucciones ===",
     ]
 
