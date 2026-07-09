@@ -306,11 +306,26 @@ def reconcile_stalled_subtrees(db_path: Path) -> list[str]:
     """
     enqueued: list[str] = []
 
+    # A child counts toward the stall if it is EXPLICITLY blocked, or if it is
+    # non-terminal and depends on something that's explicitly blocked (a
+    # 'todo' reviewer waiting on 31 siblings — one of them permanently
+    # blocked — is exactly as stuck as a directly-blocked child; without this
+    # it never resolves because its blocker never reaches done/cancelled).
+    _CHILD_STUCK_SQL = """
+        c.status = 'blocked'
+        OR EXISTS (
+            SELECT 1 FROM issue_dependencies d
+            JOIN issues dep ON dep.id = d.depends_on_issue_id
+            WHERE d.issue_id = c.id AND dep.status = 'blocked'
+        )
+    """
+
     with contextlib.closing(_connect(db_path)) as conn:
         # Find parent issues in_progress/in_review that have at least one child
-        # and ALL non-terminal children are blocked
+        # and ALL non-terminal children are stuck (blocked, directly or via a
+        # dependency on something blocked).
         parent_rows = conn.execute(
-            """
+            f"""
             SELECT DISTINCT i.id, i.assignee_agent_id, i.parent_id
             FROM issues i
             WHERE i.status IN ('in_progress', 'in_review')
@@ -320,12 +335,14 @@ def reconcile_stalled_subtrees(db_path: Path) -> list[str]:
               AND NOT EXISTS (
                   SELECT 1 FROM issues c
                   WHERE c.parent_id = i.id
-                    AND c.status NOT IN ('done', 'cancelled', 'blocked')
+                    AND c.status NOT IN ('done', 'cancelled')
+                    AND NOT ({_CHILD_STUCK_SQL})
               )
               AND EXISTS (
                   SELECT 1 FROM issues c
                   WHERE c.parent_id = i.id
-                    AND c.status = 'blocked'
+                    AND c.status NOT IN ('done', 'cancelled')
+                    AND ({_CHILD_STUCK_SQL})
               )
             ORDER BY i.created_at ASC
             """
@@ -339,10 +356,16 @@ def reconcile_stalled_subtrees(db_path: Path) -> list[str]:
         if not supervisor_id:
             continue
 
-        # Collect blocked child ids for idempotency key
+        # Collect stuck child ids for idempotency key — same definition as above.
         with contextlib.closing(_connect(db_path)) as conn:
             blocked_rows = conn.execute(
-                "SELECT id FROM issues WHERE parent_id = ? AND status = 'blocked' ORDER BY id ASC",
+                f"""
+                SELECT c.id FROM issues c
+                WHERE c.parent_id = ?
+                  AND c.status NOT IN ('done', 'cancelled')
+                  AND ({_CHILD_STUCK_SQL})
+                ORDER BY c.id ASC
+                """,
                 (parent_id,),
             ).fetchall()
         blocked_ids = sorted(str(r["id"]) for r in blocked_rows)

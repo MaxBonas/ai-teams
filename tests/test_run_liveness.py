@@ -775,6 +775,42 @@ class TestReconcileStalledSubtrees:
             ).fetchone()
         assert interaction is not None and interaction["status"] == "pending"
 
+    def test_escalates_when_sibling_depends_on_the_blocked_child(self, tmp_path: Path):
+        """Live bug: an orphan root had one child explicitly 'blocked' and a
+        second, 'todo' reviewer child depending on 31 siblings — including
+        the blocked one. Since not ALL children were literally status=
+        'blocked', the old condition never matched, and the 'todo' child
+        could never unblock either (its dependency never reaches done/
+        cancelled on its own). A child stuck via a blocked dependency must
+        count the same as a directly-blocked child."""
+        from aiteam.db.liveness import reconcile_stalled_subtrees
+
+        db = _make_stall_db(tmp_path)
+        with sqlite3.connect(str(db)) as conn:
+            conn.execute(
+                """
+                INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id)
+                VALUES ('issue:intake:review', 'goal-1', 'issue:intake',
+                        'Review', 'todo', 'reviewer', 'role:reviewer')
+                """
+            )
+            conn.execute(
+                "INSERT INTO issue_dependencies (issue_id, depends_on_issue_id, relation_type) "
+                "VALUES ('issue:intake:review', 'issue:intake:build', 'blocks')"
+            )
+            conn.commit()
+
+        enqueued = reconcile_stalled_subtrees(db)
+
+        assert "issue:intake" in enqueued
+        with sqlite3.connect(str(db)) as conn:
+            conn.row_factory = sqlite3.Row
+            wakeup = conn.execute(
+                "SELECT payload_json FROM wakeup_requests WHERE reason = 'subtree_stalled'"
+            ).fetchone()
+        payload = __import__("json").loads(wakeup["payload_json"])
+        assert set(payload["blocked_child_ids"]) == {"issue:intake:build", "issue:intake:review"}
+
     def test_second_call_after_resolution_does_not_re_escalate_same_stall(self, tmp_path: Path):
         """Idempotency still holds: resolving the escalation must not cause
         an infinite re-escalation loop for the identical blocked-id set."""
