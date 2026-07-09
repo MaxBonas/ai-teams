@@ -1147,7 +1147,7 @@ class RunExecutor:
                                 "El Lead debe simplificar el alcance, reducir el contexto, o usar un adapter con "
                                 "mayor límite de tiempo."
                             ),
-                            author_agent_id="system",
+                            author_user_id="system",
                         )
                     except Exception:
                         logger.warning("timeout_retry: failed to block issue %s", issue_id_str, exc_info=True)
@@ -2358,11 +2358,53 @@ class RunExecutor:
                             self.db_path,
                             issue_id=issue_id,
                             body=_rejection_body,
-                            author_agent_id="system",
+                            author_user_id="system",
                         )
                     except Exception:
                         logger.warning("failed to post thin-delegation rejection comment on %s", issue_id)
                     return None
+
+            # ── Role-vs-work mismatch: read-only role, editing task ────────────
+            # Live bug: the Lead delegated an exact, well-specified code fix
+            # ("Files to modify: ...") with role=file_scout instead of engineer.
+            # file_scout is Tier-3/read-only by design (NON_EDITING_ROLES) — it
+            # read the file, confirmed the same diagnosis, and closed done
+            # WITHOUT changing anything, because that IS its whole contract
+            # ("read and report, close in the same run"). The Lead read that as
+            # "fix delegated" and moved on, leaving the review permanently
+            # blocked on a fix that was never materialized. "Files to modify:"
+            # is unambiguous editing intent — no read-only role can satisfy it.
+            if role_for_issue in _NON_EDITING_ROLES and _FILE_EDIT_SIGNAL_RE.search(_desc_val):
+                logger.warning(
+                    "delegation_role_mismatch: issue %r delegated to read-only role=%r "
+                    "but description requests file edits — rejecting.",
+                    title_val, role_for_issue,
+                )
+                log_activity(
+                    self.db_path,
+                    action="delegation.role_mismatch",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id")),
+                    payload={"title": title_val, "role": role_for_issue},
+                )
+                _mismatch_body = (
+                    f"⚙ Sistema: delegación rechazada para «{title_val}» — "
+                    f"role={role_for_issue} es de solo lectura (Tier 3, no puede escribir archivos) "
+                    "pero la descripción pide modificar un archivo. Vuelve a delegar con "
+                    "role=engineer (o software_engineer) para que el cambio se materialice de verdad."
+                )
+                try:
+                    create_comment(
+                        self.db_path,
+                        issue_id=issue_id,
+                        body=_mismatch_body,
+                        author_user_id="system",
+                    )
+                except Exception:
+                    logger.warning("failed to post role-mismatch rejection comment on %s", issue_id)
+                return None
 
             # ── Action routing override ───────────────────────────────────────
             # If the spec includes criticality + action_type, apply route_action()
@@ -4969,6 +5011,13 @@ def _workspace_file_priority(rel: Path) -> int:
 # plain prose words don't match; version-like tokens ("5.5") are filtered
 # out below because their extension has no letters.
 _FOCUS_PATH_RE = re.compile(r"[A-Za-z0-9_\-./\\]*[A-Za-z0-9_\-]\.[A-Za-z0-9.]{1,12}\b")
+
+# Unambiguous editing intent in a delegation description — no read-only
+# (Tier 3 / NON_EDITING_ROLES) role can satisfy this, see _create_delegated_issue.
+_FILE_EDIT_SIGNAL_RE = re.compile(
+    r"files? to modify|archivos? a modificar|file to change|archivo a cambiar",
+    re.IGNORECASE,
+)
 
 
 def _extract_focus_paths(texts: Iterable[str]) -> frozenset[str]:
