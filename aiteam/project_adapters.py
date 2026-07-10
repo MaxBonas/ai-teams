@@ -223,10 +223,14 @@ def reconcile_project_agent_policy(db_path: Path) -> list[str]:
             )
             # A subscription_cli agent whose config lost its profile_id falls
             # back to the runtime's default binary ('claude'), which may not be
-            # installed at all — observed live: 89 straight failed runs with
+            # installed at all — observed live: 95 straight failed runs with
             # "command not found: 'claude'" on the one agent missing profile_id
-            # while every sibling carried codex_subscription. Re-select so the
-            # config carries the project's actual connected profile again.
+            # while every sibling carried codex_subscription. Repair source, in
+            # order: the project selection (when it picks a CLI profile), else
+            # a sibling agent's working subscription_cli profile — the project
+            # allowlist can drift (observed: only openai_api listed while the
+            # whole team runs codex), and the siblings are the ground truth of
+            # what actually works on this machine.
             try:
                 _current_config = json.loads(str(row["adapter_config_json"] or "{}"))
             except (TypeError, ValueError):
@@ -236,17 +240,29 @@ def reconcile_project_agent_policy(db_path: Path) -> list[str]:
             is_cli_missing_profile = (
                 current_adapter == "subscription_cli"
                 and not str(_current_config.get("profile_id") or "").strip()
-                and selected_adapter == "subscription_cli"
             )
-            if is_placeholder or is_api_only_junior or is_cli_missing_profile:
-                new_config = dict(selection.get("adapter_config") or {})
+            _cli_repair_config: dict[str, Any] | None = None
+            if is_cli_missing_profile:
+                if selected_adapter == "subscription_cli":
+                    _cli_repair_config = dict(selection.get("adapter_config") or {})
+                else:
+                    _sibling_profile = _sibling_cli_profile_id(conn, exclude_agent_id=str(row["id"]))
+                    if _sibling_profile:
+                        _cli_repair_config = {"profile_id": _sibling_profile}
                 # Keep an explicitly chosen model when only the profile was lost.
-                if is_cli_missing_profile and str(_current_config.get("model") or "").strip():
-                    new_config["model"] = _current_config["model"]
+                if _cli_repair_config is not None and str(_current_config.get("model") or "").strip():
+                    _cli_repair_config["model"] = _current_config["model"]
+            if is_placeholder or is_api_only_junior:
                 sets.extend(["adapter_type = ?", "adapter_config_json = ?"])
                 params.extend([
                     selected_adapter or current_adapter or "manual",
-                    json.dumps(new_config, ensure_ascii=False, sort_keys=True),
+                    json.dumps(selection.get("adapter_config") or {}, ensure_ascii=False, sort_keys=True),
+                ])
+            elif _cli_repair_config is not None:
+                sets.extend(["adapter_type = ?", "adapter_config_json = ?"])
+                params.extend([
+                    "subscription_cli",
+                    json.dumps(_cli_repair_config, ensure_ascii=False, sort_keys=True),
                 ])
             caps = _decode_list(row["capabilities_json"])
             if not caps:
@@ -444,6 +460,34 @@ def ensure_tier3_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> lis
                 created.append(agent_id)
         conn.commit()
     return created
+
+
+def _sibling_cli_profile_id(conn: sqlite3.Connection, *, exclude_agent_id: str) -> str | None:
+    """profile_id from another active subscription_cli agent whose config has one.
+
+    When a CLI agent's config lost its profile_id and the project allowlist
+    can't supply a CLI profile (allowlist drift), the siblings that ARE
+    running successfully are the ground truth of what works on this machine.
+    """
+    rows = conn.execute(
+        """
+        SELECT adapter_config_json FROM agents
+        WHERE adapter_type = 'subscription_cli'
+          AND status IN ('active', 'idle', 'running')
+          AND id != ?
+        ORDER BY updated_at DESC
+        """,
+        (exclude_agent_id,),
+    ).fetchall()
+    for row in rows:
+        try:
+            config = json.loads(str(row["adapter_config_json"] or "{}"))
+        except (TypeError, ValueError):
+            continue
+        profile_id = str((config or {}).get("profile_id") or "").strip()
+        if profile_id:
+            return profile_id
+    return None
 
 
 def _lead_agent_id(conn: sqlite3.Connection) -> str | None:

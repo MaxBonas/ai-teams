@@ -15,6 +15,7 @@ from aiteam.db.liveness import (
     reconcile_unassigned_role_issues,
     reconcile_unqueued_assigned_issues,
 )
+from aiteam.db.runs import reconcile_stale_runs
 from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
 
@@ -83,6 +84,22 @@ class HeartbeatLoop:
             await loop.run_in_executor(None, self._scheduler.tick_timers, now)
         except Exception:
             logger.exception("tick_timers failed")
+
+        # Stale-run recovery on EVERY tick, not just startup. A backend restart
+        # mid-run leaves a 'running' zombie that is too fresh for the startup
+        # sweep (seconds old at boot) and is never re-checked afterwards — the
+        # zombie makes its issue look "live", so no reconciler ever re-enqueues
+        # it and the whole subtree freezes (observed: frozen overnight). 15 min
+        # is far beyond any legitimate CLI run, so concurrent UI-triggered runs
+        # are safe.
+        try:
+            stale = await loop.run_in_executor(
+                None, lambda: reconcile_stale_runs(self.db_path, max_age_sec=900)
+            )
+            if stale:
+                logger.warning("tick: reconciled %d stale run(s): %s", len(stale), stale)
+        except Exception:
+            logger.exception("stale-run reconciler failed")
 
         try:
             materialized = await loop.run_in_executor(None, reconcile_unassigned_role_issues, self.db_path)

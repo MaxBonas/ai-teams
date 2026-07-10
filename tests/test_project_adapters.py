@@ -101,6 +101,43 @@ def test_reconcile_repairs_subscription_cli_missing_profile_id(tmp_path: Path) -
     assert lead_config.get("model") == "gpt-5.5"  # healthy config untouched
 
 
+def test_reconcile_borrows_profile_from_sibling_when_allowlist_drifted(tmp_path: Path) -> None:
+    """The live variant that the selection-based repair missed: the project
+    allowlist only lists openai_api (drift) while the whole team actually runs
+    subscription_cli/codex. The broken agent must borrow a sibling's working
+    profile_id instead of staying on the runtime's default 'claude' binary."""
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executemany(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, adapter_config_json, capabilities_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("role:lead", "lead", "Lead", "lead", "subscription_cli",
+                 json.dumps({"profile_id": "codex_subscription", "model": "gpt-5.5"}), '["skill_run"]'),
+                ("role:engineer", "engineer", "Engineer", "standard", "subscription_cli",
+                 json.dumps({"model": "gpt-5.4"}), '["repo_write"]'),
+            ],
+        )
+        conn.commit()
+    (tmp_path / "project_config.json").write_text(
+        json.dumps({"version": 1, "adapter_profile_ids": ["openai_api"]}),  # drifted
+        encoding="utf-8",
+    )
+
+    reconcile_project_agent_policy(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT adapter_type, adapter_config_json FROM agents WHERE id = 'role:engineer'"
+        ).fetchone()
+    config = json.loads(row["adapter_config_json"])
+    assert row["adapter_type"] == "subscription_cli"
+    assert config.get("profile_id") == "codex_subscription"  # borrowed from the lead
+    assert config.get("model") == "gpt-5.4"
+
+
 # ---------------------------------------------------------------------------
 # _profile_score — junior role scoring prefers CLI over API-only
 # ---------------------------------------------------------------------------
