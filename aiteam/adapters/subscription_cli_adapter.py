@@ -339,6 +339,13 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
             "  - Para curar/comprimir contexto de un thread largo → create_issue con role:context_curator (NO role:engineer).",
             "  - Para preguntar al usuario → "
             '{"type":"create_interaction","kind":"request_confirmation","title":"...","summary":"...","payload":{"reason":"..."}}',
+            "  - Para proponer una herramienta MCP (solo tú, el Lead — nunca un worker) → "
+            '{"type":"create_interaction","kind":"request_confirmation","title":"Proponer MCP: <nombre>",'
+            '"summary":"<qué, por qué, riesgos>","payload":{"reason":"extension_install_requested",'
+            '"name":"<slug>","source":"<comando con versión pineada>","justification":"<evidencia concreta>",'
+            '"applies_to_roles":["engineer","reviewer"]}}'
+            " — instalar código de terceros SIEMPRE espera al owner, nunca se auto-acepta. "
+            "Antes de proponer, revisa si ya existe una propuesta/investigación igual (no dupliques research).",
             "  - Para dirigir a un hijo bloqueado → update_child_issue. Para cerrar la issue → "
             '{"type":"set_status","status":"done"}.',
             "Solo escribe un comentario (add_comment) para dejar constancia; el trabajo real va en `ops`.",

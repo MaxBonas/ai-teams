@@ -69,3 +69,23 @@ def test_patch_missing_skill_404(tmp_path: Path) -> None:
         assert client.patch("/api/project/skills/nope", json={"status": "active"}).status_code == 404
     finally:
         set_current_workspace(previous)
+
+
+def test_mcp_servers_listing_empty_then_populated(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    client, previous = _client(workspace)
+    try:
+        assert client.get("/api/project/extensions/mcp").json()["mcp_servers"] == []
+
+        from aiteam.extensions import approve_mcp_server
+        approve_mcp_server(
+            workspace / ".aiteam", name="unity", source="npx -y unity-mcp@1.2.0",
+            applies_to_roles=["engineer"], justification="test", approved_by="user",
+        )
+        listed = client.get("/api/project/extensions/mcp").json()["mcp_servers"]
+        assert len(listed) == 1
+        assert listed[0]["name"] == "unity"
+        assert listed[0]["status"] == "approved"
+    finally:
+        set_current_workspace(previous)

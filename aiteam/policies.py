@@ -174,6 +174,14 @@ OPERATIONAL_INTERACTION_DEFAULTS: dict[str, str] = {
 }
 
 
+# Installing an MCP server runs third-party code — this reason is
+# DELIBERATELY absent from OPERATIONAL_INTERACTION_DEFAULTS above: autonomy
+# must never auto-accept it, regardless of project autonomy mode. See
+# DESIGN_SELF_EXTENSION.md §1: "instalar herramientas = ejecutar código de
+# terceros" — always a product decision for the human owner.
+EXTENSION_PROPOSAL_REASON = "extension_install_requested"
+
+
 def operational_interaction_default(reason: str) -> str | None:
     """Safe default action for an operational escalation, or None if the
     reason is a product decision that must always reach the user."""

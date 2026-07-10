@@ -21,6 +21,24 @@ def test_consecutive_rate_limit_failures_collapse() -> None:
     assert "rate limit del proveedor (x3)" in out[0]["title"]
 
 
+def test_mixed_naive_and_aware_timestamps_do_not_crash() -> None:
+    """Live 500: DB timestamps are UTC in two shapes — naive (SQLite
+    CURRENT_TIMESTAMP, 'runs'/'issues' rows) and offset-aware (Python
+    isoformat, activity_log/comments rows). A burst spanning both shapes
+    crashed the whole /api/project/state response with
+    'can't subtract offset-naive and offset-aware datetimes'."""
+    items = [
+        _failed_run("a", time="2026-07-05 21:30:00"),  # naive
+        _failed_run("b", time="2026-07-05T21:30:05+00:00"),  # aware
+        _failed_run("c", time="2026-07-05T21:30:10Z"),  # aware, Z-suffixed
+    ]
+
+    out = _collapse_failed_runs(items)  # must not raise
+
+    assert len(out) == 1
+    assert out[0]["count"] == 3
+
+
 def test_interleaved_items_do_not_break_the_group() -> None:
     # Real bursts come interleaved with comments/activity — they still merge.
     items = [_failed_run("a"), _comment("x"), _failed_run("b")]

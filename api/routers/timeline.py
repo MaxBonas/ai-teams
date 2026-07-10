@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -221,9 +221,17 @@ def _parse_time(value: Any) -> datetime | None:
     if not text:
         return None
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
+    # DB timestamps are UTC in two shapes: naive (SQLite CURRENT_TIMESTAMP,
+    # "2026-07-10 13:50:18") and offset-aware (Python isoformat, "...+00:00").
+    # Subtracting a naive from an aware datetime raises TypeError — tag naive
+    # parses as UTC so every comparison downstream is apples-to-apples (same
+    # root cause as the frontend clock bug, fixed there for rendering).
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _collapse_failed_runs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -24,6 +24,10 @@ SKILLS_DIRNAME = "skills"
 SKILL_ORIGINS = frozenset({"owner", "learned", "catalog"})
 SKILL_STATUSES = frozenset({"active", "proposed", "retired"})
 
+# MCP server lifecycle (PR2: propose/approve/reject only — no install/health
+# check yet, that lands in PR3 and moves an approved entry toward "active").
+MCP_STATUSES = frozenset({"approved", "rejected", "active", "failed", "retired"})
+
 # A skill name becomes a filename and a JSON key — keep it a safe slug so it
 # can never traverse out of .aiteam/skills/.
 _SLUG_RE = re.compile(r"[^a-z0-9._-]+")
@@ -216,3 +220,79 @@ def delete_project_skill(runtime_dir: Path, *, name: str) -> bool:
         except (ValueError, OSError):
             pass
     return True
+
+
+# ── MCP servers ────────────────────────────────────────────────────────────────
+# PR2 scope: propose → owner gate (via the existing interaction popup) →
+# approve/reject bookkeeping. Nothing here launches a process or talks MCP —
+# that is PR3 (mcp_launcher.py + health check), which moves an "approved"
+# entry toward "active" once it has actually been verified to work.
+#
+# Deliberately no "proposed" registry state: a proposal lives ONLY as a
+# pending issue_thread_interaction (single source of truth) until the owner
+# decides — nothing is written here until approve_mcp_server or
+# reject_mcp_server is called on resolution. This avoids two places that can
+# drift (the interaction and a shadow "proposed" registry row).
+
+def list_mcp_servers(runtime_dir: Path) -> list[dict[str, Any]]:
+    registry = read_extensions(runtime_dir)
+    return [
+        {"name": name, **entry}
+        for name, entry in sorted(registry["mcp_servers"].items())
+        if isinstance(entry, dict)
+    ]
+
+
+def approve_mcp_server(
+    runtime_dir: Path,
+    *,
+    name: str,
+    source: str,
+    args: list[str] | None = None,
+    env_required: list[str] | None = None,
+    applies_to_roles: list[str] | None = None,
+    justification: str = "",
+    approved_by: str,
+) -> dict[str, Any]:
+    """Record an owner-approved MCP server proposal. status='approved' —
+    NOT running yet; PR3's installer/health-check promotes it to 'active'.
+    """
+    slug = slugify_skill_name(name)  # same safe-slug rules apply to MCP names
+    registry = read_extensions(runtime_dir)
+    existing = registry["mcp_servers"].get(slug) if isinstance(registry["mcp_servers"].get(slug), dict) else {}
+    entry = {
+        "source": str(source or "").strip(),
+        "args": [str(a) for a in (args or [])],
+        "env_required": [str(e) for e in (env_required or [])],
+        "applies_to_roles": [_normalize_role(r) for r in (applies_to_roles or []) if str(r).strip()],
+        "justification": str(justification or "").strip(),
+        "status": "approved",
+        "approved_by": approved_by,
+        "created_at": existing.get("created_at") or _now(),
+        "updated_at": _now(),
+    }
+    registry["mcp_servers"][slug] = entry
+    _write_extensions(runtime_dir, registry)
+    return {"name": slug, **entry}
+
+
+def reject_mcp_server(runtime_dir: Path, *, name: str, justification: str = "") -> dict[str, Any]:
+    """Record that a proposal was rejected — for audit/history only; nothing
+    is granted, nothing runs."""
+    slug = slugify_skill_name(name)
+    return {"name": slug, "status": "rejected", "justification": str(justification or "").strip()}
+
+
+def set_mcp_server_status(runtime_dir: Path, *, name: str, status: str) -> dict[str, Any] | None:
+    if status not in MCP_STATUSES:
+        raise ValueError(f"status must be one of {sorted(MCP_STATUSES)}")
+    slug = slugify_skill_name(name)
+    registry = read_extensions(runtime_dir)
+    entry = registry["mcp_servers"].get(slug)
+    if not isinstance(entry, dict):
+        return None
+    entry["status"] = status
+    entry["updated_at"] = _now()
+    registry["mcp_servers"][slug] = entry
+    _write_extensions(runtime_dir, registry)
+    return {"name": slug, **entry}

@@ -64,6 +64,16 @@ interface ProjectSkill {
   updated_at?: string;
 }
 
+interface McpServer {
+  name: string;
+  source?: string;
+  applies_to_roles?: string[];
+  status?: string;
+  approved_by?: string;
+  justification?: string;
+  updated_at?: string;
+}
+
 interface WorkspacePayload {
   workspace?: string;
   configured?: boolean;
@@ -631,6 +641,8 @@ export default function App() {
   const [projectSkills, setProjectSkills] = useState<ProjectSkill[]>([]);
   const [skillDraft, setSkillDraft] = useState<{ name: string; roles: string; body: string }>({ name: '', roles: '', body: '' });
   const [skillSaving, setSkillSaving] = useState(false);
+  // MCP server proposals (self-extension PR2) — read-only; approve/reject via the Pendientes popup
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   // In-flight guard: the 20 s baseline and 2 s active-run intervals overlap;
   // skip a poll tick while the previous /api/project/state is still pending.
   const projectStatePollBusy = useRef(false);
@@ -879,6 +891,15 @@ export default function App() {
     } catch { /* ignore */ }
   };
 
+  const loadMcpServers = async () => {
+    try {
+      const res = await apiFetch('/api/project/extensions/mcp');
+      if (!res.ok) return;
+      const json = (await res.json()) as { mcp_servers?: McpServer[] };
+      setMcpServers(json.mcp_servers || []);
+    } catch { /* ignore */ }
+  };
+
   const saveProjectSkill = async () => {
     const name = skillDraft.name.trim();
     const body = skillDraft.body.trim();
@@ -1075,9 +1096,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
-  // Lazy-load project skills only when the Config tab is open.
+  // Lazy-load project skills + MCP servers only when the Config tab is open.
   useEffect(() => {
-    if (viewMode === 'config' && workspaceConfigured) void loadProjectSkills();
+    if (viewMode === 'config' && workspaceConfigured) {
+      void loadProjectSkills();
+      void loadMcpServers();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, workspaceConfigured]);
 
@@ -3165,6 +3189,40 @@ export default function App() {
                       {skillSaving ? 'Guardando…' : 'Guardar skill'}
                     </button>
                   </div>
+                </div>
+
+                {/* Extensiones MCP — solo lectura (self-extension PR2) */}
+                <div className="config-subsection">
+                  <div className="config-subsection-label">
+                    Extensiones MCP
+                    <InfoTip
+                      tip="El Lead propone integrar un servidor MCP (herramientas externas, p.ej. control de Unity) cuando el equipo se topa con un límite real. Instalar código de terceros SIEMPRE espera tu aprobación — responde la tarjeta en el chip 'Pendiente'. Aquí solo se listan las ya aprobadas/rechazadas."
+                      wide
+                    />
+                  </div>
+                  {mcpServers.length === 0 ? (
+                    <p className="config-hint">
+                      Ninguna todavía. Cuando el Lead identifique una necesidad real, te llegará una propuesta al chip &quot;Pendiente&quot;.
+                    </p>
+                  ) : (
+                    <div className="skill-list">
+                      {mcpServers.map((server) => (
+                        <div key={server.name} className={`skill-item${server.status === 'active' ? '' : ''}`}>
+                          <div className="skill-item-head">
+                            <strong>{server.name}</strong>
+                            <span className="skill-roles">
+                              {(server.applies_to_roles && server.applies_to_roles.length > 0)
+                                ? server.applies_to_roles.join(', ')
+                                : 'sin roles asignados'}
+                            </span>
+                            <span className="skill-badge">{server.status || 'approved'}</span>
+                          </div>
+                          {server.source && <p className="config-hint" style={{ margin: 0 }}><code>{server.source}</code></p>}
+                          {server.justification && <p className="config-hint" style={{ margin: 0 }}>{server.justification}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

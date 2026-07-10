@@ -1,0 +1,209 @@
+"""Extension proposals (self-extension PR2): the Lead formally requests an
+MCP server via the existing create_interaction op with
+reason='extension_install_requested'. Installing third-party code is ALWAYS
+a product decision — Tier 2/3 cannot propose, autonomy cannot auto-accept,
+an incomplete payload is rejected before it ever reaches the owner.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+from aiteam.adapters.registry import AdapterDescriptor, AdapterRegistry, ExecutionResult
+from aiteam.db.interactions import resolve_interaction
+from aiteam.db.migration import SCHEMA_PATH
+from aiteam.db.wakeups import enqueue_wakeup
+from aiteam.extensions import list_mcp_servers
+from aiteam.heartbeat.executor import RunExecutor
+from aiteam.heartbeat.scheduler import HeartbeatScheduler
+from aiteam.policies import EXTENSION_PROPOSAL_REASON, operational_interaction_default
+
+_VALID_PAYLOAD = {
+    "reason": EXTENSION_PROPOSAL_REASON,
+    "name": "Unity MCP",
+    "source": "npx -y unity-mcp@1.2.0",
+    "justification": "Reviewer cannot verify Play Mode from static YAML — 6 blocked review rounds.",
+    "applies_to_roles": ["engineer", "reviewer"],
+}
+
+
+def _init_db(db_path: Path, *, proposer_role: str = "lead", proposer_id: str = "role:lead") -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("INSERT INTO goals (id, title) VALUES ('goal-1', 'Goal')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type) VALUES (?, ?, ?, ?, ?)",
+            (proposer_id, proposer_role, proposer_role.title(), "standard", "openai_api"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id)"
+            " VALUES ('issue:intake', 'goal-1', 'Build', 'in_progress', ?, ?)",
+            (proposer_role, proposer_id),
+        )
+        conn.commit()
+
+
+class _ProposeRuntime:
+    descriptor = AdapterDescriptor(adapter_type="openai_api", channel="api", provider="openai")
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="completed",
+            output="propuesta",
+            actions={"interactions": [{
+                "kind": "request_confirmation",
+                "payload": self._payload,
+                "title": "Proponer MCP: unity",
+                "summary": "Habilita verificación real de Play Mode.",
+            }]},
+        )
+
+
+def _dispatch(db_path: Path, *, agent_id: str) -> Any:
+    enqueue_wakeup(
+        db_path, agent_id=agent_id, source="test", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    return HeartbeatScheduler(db_path).dispatch_next(agent_id=agent_id)
+
+
+def _pending_interactions(db_path: Path) -> list[dict[str, Any]]:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM issue_thread_interactions WHERE status='pending'").fetchall()
+    return [dict(r) for r in rows]
+
+
+def test_reason_excluded_from_autonomy_defaults() -> None:
+    """Installing third-party code must never auto-accept, in any mode."""
+    assert operational_interaction_default(EXTENSION_PROPOSAL_REASON) is None
+
+
+def test_lead_proposal_creates_pending_interaction(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_VALID_PAYLOAD)]))
+
+    executor.execute(_dispatch(db_path, agent_id="role:lead"))
+
+    pending = _pending_interactions(db_path)
+    assert len(pending) == 1
+    payload = json.loads(pending[0]["payload_json"])
+    assert payload["reason"] == EXTENSION_PROPOSAL_REASON
+    assert payload["name"] == "Unity MCP"
+
+
+def test_engineer_cannot_propose(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path, proposer_role="engineer", proposer_id="role:engineer")
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_VALID_PAYLOAD)]))
+
+    executor.execute(_dispatch(db_path, agent_id="role:engineer"))
+
+    assert _pending_interactions(db_path) == []
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        denied = conn.execute(
+            "SELECT payload_json FROM activity_log WHERE action = 'role.op_denied'"
+        ).fetchone()
+    assert denied is not None
+    assert json.loads(denied["payload_json"])["action_group"] == "extension_proposal"
+
+
+def test_reviewer_cannot_propose(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path, proposer_role="reviewer", proposer_id="role:reviewer")
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_VALID_PAYLOAD)]))
+
+    executor.execute(_dispatch(db_path, agent_id="role:reviewer"))
+
+    assert _pending_interactions(db_path) == []
+
+
+def test_missing_required_fields_rejected(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    incomplete = {"reason": EXTENSION_PROPOSAL_REASON, "name": "unity"}  # no source, no justification
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(incomplete)]))
+
+    executor.execute(_dispatch(db_path, agent_id="role:lead"))
+
+    assert _pending_interactions(db_path) == []
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        comment = conn.execute(
+            "SELECT body FROM issue_comments WHERE author_user_id = 'system'"
+        ).fetchone()
+    assert comment is not None
+    assert "source" in comment["body"] and "justification" in comment["body"]
+
+
+def test_accept_writes_approved_registry_entry(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_VALID_PAYLOAD)]))
+    executor.execute(_dispatch(db_path, agent_id="role:lead"))
+    interaction_id = _pending_interactions(db_path)[0]["id"]
+
+    resolve_interaction(db_path, interaction_id=interaction_id, action="accept", resolved_by_user_id="user")
+    # The approval commits on the NEXT wake (interaction_resolved), matching
+    # every other resolved-interaction side effect in this codebase.
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="interaction", reason="interaction_resolved",
+        payload={
+            "issue_id": "issue:intake", "wake_reason": "interaction_resolved",
+            "interaction_id": interaction_id, "action": "accept",
+        },
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    executor.execute(dispatch)
+
+    servers = list_mcp_servers(db_path.parent)
+    assert len(servers) == 1
+    assert servers[0]["name"] == "unity-mcp"
+    assert servers[0]["status"] == "approved"
+    assert servers[0]["source"] == "npx -y unity-mcp@1.2.0"
+    assert servers[0]["approved_by"] == "user"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        audit = conn.execute(
+            "SELECT payload_json FROM activity_log WHERE action = 'extension.approved'"
+        ).fetchone()
+    assert audit is not None
+    assert json.loads(audit["payload_json"])["name"] == "Unity MCP"
+
+
+def test_reject_writes_nothing_to_registry(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_VALID_PAYLOAD)]))
+    executor.execute(_dispatch(db_path, agent_id="role:lead"))
+    interaction_id = _pending_interactions(db_path)[0]["id"]
+
+    resolve_interaction(db_path, interaction_id=interaction_id, action="reject", resolved_by_user_id="user")
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="interaction", reason="interaction_resolved",
+        payload={
+            "issue_id": "issue:intake", "wake_reason": "interaction_resolved",
+            "interaction_id": interaction_id, "action": "reject",
+        },
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    executor.execute(dispatch)
+
+    assert list_mcp_servers(db_path.parent) == []
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        audit = conn.execute(
+            "SELECT action FROM activity_log WHERE action = 'extension.rejected'"
+        ).fetchone()
+    assert audit is not None

@@ -54,6 +54,7 @@ _TERMINAL_EXEC_STATUSES = {"completed", "failed", "skipped"}
 # Role/flow policies (tiers, ops matrix, breakers, ventanas) viven en
 # aiteam.policies (fase 5) — alias locales para los call sites existentes.
 from aiteam.policies import (  # noqa: E402
+    EXTENSION_PROPOSAL_REASON,
     LEAD_TIER_ROLES as _LEAD_TIER_ROLES_P,
     LLM_ADAPTER_TYPES as _LLM_ADAPTER_TYPES,
     NON_EDITING_ROLES as _NON_EDITING_ROLES,
@@ -308,6 +309,45 @@ class RunExecutor:
                                     "user_note": (_r_result or {}).get("resolution_data", {}).get("user_note"),
                                     "resolution_data": (_r_result or {}).get("resolution_data"),
                                 }
+                                # ── Extension proposal resolution (self-extension PR2) ──
+                                # The owner's accept/reject IS the decision — committed
+                                # here deterministically, not left to the Lead's LLM to
+                                # re-confirm via some other op (that class of bug already
+                                # bit us once with a misrouted delegation). Idempotent
+                                # (upsert by name), safe if this wake is ever retried.
+                                if isinstance(_r_payload, dict) and _r_payload.get("reason") == EXTENSION_PROPOSAL_REASON:
+                                    try:
+                                        from aiteam.extensions import approve_mcp_server, reject_mcp_server  # noqa: PLC0415
+                                        _ext_action = str(ctx.get("action") or "")
+                                        if _ext_action == "accept":
+                                            approve_mcp_server(
+                                                self.db_path.parent,
+                                                name=str(_r_payload.get("name") or ""),
+                                                source=str(_r_payload.get("source") or ""),
+                                                args=_r_payload.get("args") or [],
+                                                env_required=_r_payload.get("env_required") or [],
+                                                applies_to_roles=_r_payload.get("applies_to_roles") or [],
+                                                justification=str(_r_payload.get("justification") or ""),
+                                                approved_by="user",
+                                            )
+                                            log_activity(
+                                                self.db_path, action="extension.approved", target_type="issue",
+                                                target_id=issue_id_str, run_id=run_id,
+                                                payload={"name": _r_payload.get("name"), "source": _r_payload.get("source")},
+                                            )
+                                        else:
+                                            reject_mcp_server(
+                                                self.db_path.parent,
+                                                name=str(_r_payload.get("name") or ""),
+                                                justification=str(_r_payload.get("justification") or ""),
+                                            )
+                                            log_activity(
+                                                self.db_path, action="extension.rejected", target_type="issue",
+                                                target_id=issue_id_str, run_id=run_id,
+                                                payload={"name": _r_payload.get("name")},
+                                            )
+                                    except Exception:
+                                        logger.warning("Failed to commit extension proposal resolution (int_id=%r)", _r_int_id, exc_info=True)
                         except Exception:
                             logger.warning("Failed to inject resolved_interaction into payload (int_id=%r)", _r_int_id, exc_info=True)
                 # ── Workspace listing for engineer continuation runs ──
@@ -1929,6 +1969,55 @@ class RunExecutor:
                 )
                 continue
             _summary = interaction.get("summary")
+            _payload_reason_early = str(((interaction.get("payload") or {}) or {}).get("reason") or "")
+            # ── Extension proposals (self-extension PR2) — Tier 1 only ────────
+            # propose_extension is documented as a create_interaction with this
+            # reason, not a new op type (mirrors lead_wants_file_read etc.). Only
+            # the Lead formalizes a proposal — Tier 2 can only SIGNAL a need in
+            # its report (needs_capability:); enforced here, not just by prompt,
+            # since installing an MCP server runs third-party code on approval.
+            if _payload_reason_early == EXTENSION_PROPOSAL_REASON:
+                if agent_role.lower() not in _LEAD_TIER_ROLES_P:
+                    logger.warning(
+                        "role.op_denied (extension_proposal): role=%r issue=%s — only Lead-tier may propose",
+                        agent_role, issue_id,
+                    )
+                    try:
+                        log_activity(
+                            self.db_path,
+                            action="role.op_denied",
+                            target_type="issue",
+                            target_id=issue_id,
+                            actor_agent_id=agent_id,
+                            run_id=str(run.get("id")),
+                            payload={"role": agent_role, "action_group": "extension_proposal", "reason": EXTENSION_PROPOSAL_REASON},
+                        )
+                    except Exception:
+                        pass
+                    continue
+                _ext_payload = interaction.get("payload") or {}
+                _missing = [
+                    field for field in ("name", "source", "justification")
+                    if not str(_ext_payload.get(field) or "").strip()
+                ]
+                if _missing:
+                    logger.warning(
+                        "extension_proposal rejected for issue %s — missing fields: %s", issue_id, _missing,
+                    )
+                    try:
+                        create_comment(
+                            self.db_path,
+                            issue_id=issue_id,
+                            body=(
+                                f"⚙ Sistema: propuesta de extensión rechazada — faltan campos obligatorios: "
+                                f"{', '.join(_missing)}. payload.reason={EXTENSION_PROPOSAL_REASON} requiere "
+                                "name, source y justification."
+                            ),
+                            author_user_id="system",
+                        )
+                    except Exception:
+                        logger.warning("failed to post extension-proposal rejection comment on %s", issue_id)
+                    continue
             # ── Cycle-close verification (non-negotiable) ─────────────────────
             # When a Lead proposes closing the cycle, append the machine-computed
             # verification (structured reviewer verdict + workspace stub scan) so

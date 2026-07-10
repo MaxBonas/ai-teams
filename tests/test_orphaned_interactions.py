@@ -96,3 +96,23 @@ def test_keeps_live_escalations_pending(tmp_path: Path) -> None:
     assert reconcile_orphaned_interactions(db_path) == []
     assert get_interaction(db_path, interaction_id=still_stalled["id"])["status"] == "pending"
     assert get_interaction(db_path, interaction_id=live_question["id"])["status"] == "pending"
+
+
+def test_extension_proposal_survives_terminal_originating_issue(tmp_path: Path) -> None:
+    """Live bug: a Lead's MCP proposal, attached to whatever issue it was
+    processing at the time, got auto-cancelled the moment that issue reached
+    'done' — even though the proposal itself (a standing capability request)
+    has nothing to do with that issue's fate. The owner never saw the card."""
+    db_path = _init_db(tmp_path)
+    proposal = create_interaction(
+        db_path,
+        issue_id="issue:done",  # the originating issue is already terminal
+        kind="request_confirmation",
+        payload={
+            "reason": "extension_install_requested",
+            "name": "unity", "source": "npx -y unity-mcp@1.2.0", "justification": "test",
+        },
+    )
+
+    assert reconcile_orphaned_interactions(db_path) == []
+    assert get_interaction(db_path, interaction_id=proposal["id"])["status"] == "pending"

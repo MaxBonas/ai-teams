@@ -10,10 +10,19 @@ from aiteam.db.activity_log import log_activity
 from aiteam.db.agents import create_agent
 from aiteam.db.interactions import ConflictError, create_interaction, resolve_interaction
 from aiteam.db.wakeups import enqueue_wakeup
+from aiteam.policies import EXTENSION_PROPOSAL_REASON
 from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
 from aiteam.tools.catalog import default_capabilities_for_role
 
 _TERMINAL = {"done", "cancelled"}
+
+# Reasons whose interaction is deliberately attached to an issue_id that may
+# be (or become) terminal — a terminal issue_status there is NOT staleness,
+# so the generic "issue closed → cancel as orphan" rule below must skip them.
+_TERMINAL_ISSUE_EXEMPT_REASONS = frozenset({
+    "parent_closed_child_open",  # attached to the closed parent on purpose
+    EXTENSION_PROPOSAL_REASON,   # a capability request outlives the issue that prompted it
+})
 
 
 def diagnose_issue(db_path: Path, *, issue_id: str) -> dict[str, Any]:
@@ -582,11 +591,7 @@ def reconcile_orphaned_interactions(db_path: Path) -> list[str]:
         payload = _decode_json(row["payload_json"])
         reason = str(payload.get("reason") or payload.get("escalation_reason") or "")
         orphan_why = ""
-        # parent_closed_child_open is DELIBERATELY attached to a terminal
-        # issue_id (the closed parent, so wake-on-resolve targets the right
-        # supervisor) — a terminal issue_status is the whole premise here,
-        # not staleness. Every other reason keys off a still-open issue.
-        if issue_status in _TERMINAL and reason != "parent_closed_child_open":
+        if issue_status in _TERMINAL and reason not in _TERMINAL_ISSUE_EXEMPT_REASONS:
             orphan_why = f"issue_{issue_status}"
         elif reason == "subtree_stalled":
             child_ids = [str(c) for c in (payload.get("blocked_child_ids") or [])]

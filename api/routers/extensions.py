@@ -1,7 +1,11 @@
-"""Project-scoped extensions API (self-extension PR 1 — skills only).
+"""Project-scoped extensions API.
 
-CRUD over ``.aiteam/extensions.json`` skills so the owner can attach local
-knowledge to a project from the Config tab. MCP endpoints land in a later PR.
+PR 1 — CRUD over ``.aiteam/extensions.json`` skills so the owner can attach
+local knowledge to a project from the Config tab.
+PR 2 — read-only listing of MCP server proposals (approve/reject happens via
+the existing pending-interactions popup, not a form here: the Lead proposes,
+the owner answers the card — see DESIGN_SELF_EXTENSION.md §4). Install/health
+check lands in PR 3.
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from api.utils import (
 from aiteam.db.activity_log import log_activity
 from aiteam.extensions import (
     delete_project_skill,
+    list_mcp_servers,
     list_project_skills,
     set_project_skill_status,
     upsert_project_skill,
@@ -104,3 +109,11 @@ async def delete_project_skill_endpoint(name: str, request: Request):
         raise HTTPException(status_code=404, detail="Skill not found")
     _audit(runtime_dir, "skill.deleted", {"name": name})
     return {"success": True}
+
+
+@router.get("/api/project/extensions/mcp")
+async def get_mcp_servers(request: Request):
+    """Read-only. Proposals are pending interactions (see the Pendientes
+    popup); this lists what the owner has already approved/rejected."""
+    _require_api_auth_request(request)
+    return {"success": True, "mcp_servers": list_mcp_servers(_runtime_dir(request))}
