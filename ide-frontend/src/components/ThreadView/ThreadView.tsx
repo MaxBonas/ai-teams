@@ -59,7 +59,12 @@ export interface ThreadViewProps {
 function formatTime(ts?: string | null): string {
   if (!ts) return '';
   try {
-    return new Date(ts.endsWith('Z') ? ts : ts + 'Z').toLocaleTimeString([], {
+    // DB timestamps are UTC; naive strings must be tagged as such or they are
+    // parsed as local time. Offset-suffixed ("+00:00") strings stay untouched
+    // (the old endsWith('Z') check produced the invalid "...+00:00Z").
+    let iso = ts.includes('T') ? ts : ts.replace(' ', 'T');
+    if (!/(?:Z|[+-]\d{2}:?\d{2})$/.test(iso)) iso += 'Z';
+    return new Date(iso).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     });

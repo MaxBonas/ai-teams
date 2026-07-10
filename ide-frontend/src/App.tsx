@@ -512,7 +512,14 @@ function shortPath(path: string): string {
 
 function parseTime(value?: string | null): number {
   if (!value) return 0;
-  const parsed = Date.parse(value.includes('T') ? value : value.replace(' ', 'T'));
+  let iso = value.includes('T') ? value : value.replace(' ', 'T');
+  // DB timestamps are UTC in two shapes: naive ("2026-07-09 14:35:58", from
+  // SQLite CURRENT_TIMESTAMP) and offset-suffixed ("...+00:00", from Python).
+  // A naive string parsed by Date.parse is treated as LOCAL time, which ran
+  // every clock in the app behind by the user's UTC offset. Tag naive strings
+  // as UTC; toLocaleString then renders in the system timezone.
+  if (iso.includes('T') && !/(?:Z|[+-]\d{2}:?\d{2})$/.test(iso)) iso += 'Z';
+  const parsed = Date.parse(iso);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
