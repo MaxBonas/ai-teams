@@ -54,6 +54,16 @@ interface LoopHealth {
   summary: { total_loops: number; total_at_risk: number; requires_attention: boolean };
 }
 
+interface ProjectSkill {
+  name: string;
+  body?: string;
+  applies_to_roles?: string[];
+  origin?: string;
+  status?: string;
+  approved_by?: string;
+  updated_at?: string;
+}
+
 interface WorkspacePayload {
   workspace?: string;
   configured?: boolean;
@@ -617,6 +627,10 @@ export default function App() {
   // Autonomy policy (P5): supervised (default) | autonomous
   const [autonomyMode, setAutonomyMode] = useState<string>('supervised');
   const [autonomySaving, setAutonomySaving] = useState(false);
+  // Project skills (self-extension PR1)
+  const [projectSkills, setProjectSkills] = useState<ProjectSkill[]>([]);
+  const [skillDraft, setSkillDraft] = useState<{ name: string; roles: string; body: string }>({ name: '', roles: '', body: '' });
+  const [skillSaving, setSkillSaving] = useState(false);
   // In-flight guard: the 20 s baseline and 2 s active-run intervals overlap;
   // skip a poll tick while the previous /api/project/state is still pending.
   const projectStatePollBusy = useRef(false);
@@ -856,6 +870,65 @@ export default function App() {
     }
   };
 
+  const loadProjectSkills = async () => {
+    try {
+      const res = await apiFetch('/api/project/skills');
+      if (!res.ok) return;
+      const json = (await res.json()) as { skills?: ProjectSkill[] };
+      setProjectSkills(json.skills || []);
+    } catch { /* ignore */ }
+  };
+
+  const saveProjectSkill = async () => {
+    const name = skillDraft.name.trim();
+    const body = skillDraft.body.trim();
+    if (!name || !body || skillSaving) return;
+    setSkillSaving(true);
+    try {
+      const roles = skillDraft.roles.split(',').map((r) => r.trim()).filter(Boolean);
+      const res = await apiFetch('/api/project/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, body, applies_to_roles: roles }),
+      });
+      const json = (await res.json()) as { success?: boolean; detail?: string };
+      if (!res.ok || !json.success) throw new Error(json.detail || `skill:${res.status}`);
+      setSkillDraft({ name: '', roles: '', body: '' });
+      await loadProjectSkills();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'skill_save_failed');
+    } finally {
+      setSkillSaving(false);
+    }
+  };
+
+  const editProjectSkill = (skill: ProjectSkill) => {
+    setSkillDraft({
+      name: skill.name,
+      roles: (skill.applies_to_roles || []).join(', '),
+      body: skill.body || '',
+    });
+  };
+
+  const toggleProjectSkill = async (skill: ProjectSkill) => {
+    const next = skill.status === 'active' ? 'retired' : 'active';
+    try {
+      await apiFetch(`/api/project/skills/${encodeURIComponent(skill.name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next }),
+      });
+      await loadProjectSkills();
+    } catch { /* ignore */ }
+  };
+
+  const deleteProjectSkill = async (skill: ProjectSkill) => {
+    try {
+      await apiFetch(`/api/project/skills/${encodeURIComponent(skill.name)}`, { method: 'DELETE' });
+      await loadProjectSkills();
+    } catch { /* ignore */ }
+  };
+
   /**
    * Poll issue:intake every 2 s until the Lead has started running (status ≠ 'todo').
    * Shows the projectInitializing overlay during the wait.
@@ -1001,6 +1074,12 @@ export default function App() {
     if (viewMode === 'chat') chatStickToBottomRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
+
+  // Lazy-load project skills only when the Config tab is open.
+  useEffect(() => {
+    if (viewMode === 'config' && workspaceConfigured) void loadProjectSkills();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, workspaceConfigured]);
 
   const loadWsFiles = async () => {
     try {
@@ -3026,6 +3105,66 @@ export default function App() {
                       ? ' — las interacciones operativas se resuelven solas (una vez por issue y motivo).'
                       : ' — el equipo se detiene en cada escalación hasta que respondas.'}
                   </p>
+                </div>
+
+                {/* Extensiones — skills de proyecto (self-extension PR1) */}
+                <div className="config-subsection">
+                  <div className="config-subsection-label">
+                    Skills del proyecto
+                    <InfoTip
+                      tip="Conocimiento local que se inyecta a los roles indicados en cada run, ADEMÁS de su skill base. Refina el rol (p.ej. 'las escenas Unity se regeneran con Tools > Create Test Scene'); nunca contradice tus directivas. Deja los roles vacíos para aplicar a todos."
+                      wide
+                    />
+                  </div>
+                  {projectSkills.length > 0 && (
+                    <div className="skill-list">
+                      {projectSkills.map((skill) => (
+                        <div key={skill.name} className={`skill-item${skill.status === 'active' ? '' : ' retired'}`}>
+                          <div className="skill-item-head">
+                            <strong>{skill.name}</strong>
+                            <span className="skill-roles">
+                              {(skill.applies_to_roles && skill.applies_to_roles.length > 0)
+                                ? skill.applies_to_roles.join(', ')
+                                : 'todos los roles'}
+                            </span>
+                            {skill.status !== 'active' && <span className="skill-badge">retirada</span>}
+                          </div>
+                          <div className="skill-item-actions">
+                            <button className="config-inline-btn" onClick={() => editProjectSkill(skill)}>Editar</button>
+                            <button className="secondary-button" onClick={() => void toggleProjectSkill(skill)}>
+                              {skill.status === 'active' ? 'Retirar' : 'Activar'}
+                            </button>
+                            <button className="danger-button" onClick={() => void deleteProjectSkill(skill)}>Borrar</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="skill-form">
+                    <input
+                      placeholder="Nombre (p.ej. unity-scene-regen)"
+                      value={skillDraft.name}
+                      onChange={(e) => setSkillDraft((d) => ({ ...d, name: e.target.value }))}
+                    />
+                    <input
+                      placeholder="Roles separados por coma (vacío = todos)"
+                      value={skillDraft.roles}
+                      onChange={(e) => setSkillDraft((d) => ({ ...d, roles: e.target.value }))}
+                    />
+                    <textarea
+                      placeholder="Conocimiento en markdown que verán los agentes…"
+                      value={skillDraft.body}
+                      onChange={(e) => setSkillDraft((d) => ({ ...d, body: e.target.value }))}
+                      rows={4}
+                    />
+                    <button
+                      className="config-inline-btn"
+                      onClick={() => void saveProjectSkill()}
+                      disabled={skillSaving || !workspaceConfigured || !skillDraft.name.trim() || !skillDraft.body.trim()}
+                    >
+                      {skillSaving ? 'Guardando…' : 'Guardar skill'}
+                    </button>
+                  </div>
                 </div>
               </div>
 

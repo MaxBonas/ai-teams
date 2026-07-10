@@ -42,7 +42,7 @@ from aiteam.run_liveness import (
     collect_run_evidence,
 )
 from aiteam.run_profiles import FULL_TEAM, normalize_run_profile
-from aiteam.skills import load_skill
+from aiteam.skills import compose_skill
 from aiteam.tools.catalog import check_capability, default_capabilities_for_role, get_agent_capabilities
 from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntime
 from aiteam.user_config import inject_adapter_secrets, profile_is_connected, resolve_adapter_config
@@ -212,7 +212,7 @@ class RunExecutor:
         ctx: dict[str, Any] = json.loads(run.get("context_snapshot_json") or "{}")
         issue_id_str = str(run.get("issue_id") or "")
         comment_id_str = str(ctx.get("wake_comment_id") or "")
-        skill_content = load_skill(agent_role) if agent_role else None
+        skill_content = compose_skill(agent_role, self.db_path.parent) if agent_role else None
 
         # Compute workspace_root early so reviewer/QA can get file context
         workspace_root = workspace_root_for_db(self.db_path)

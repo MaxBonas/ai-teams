@@ -1836,6 +1836,26 @@ dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 0.8rem; color:
   border-top: 1px solid var(--border);
 }
 .config-subsection:first-of-type { border-top: none; padding-top: 0; }
+
+/* Project skills (self-extension PR1) */
+.skill-list { display: flex; flex-direction: column; gap: 6px; }
+.skill-item {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 10px; background: var(--surface-2);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.skill-item.retired { opacity: 0.55; }
+.skill-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.skill-item-head strong { font-size: 0.82rem; }
+.skill-roles { font-size: 0.7rem; color: var(--text-dim); }
+.skill-badge {
+  font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: 999px; background: var(--border); color: var(--text-dim);
+}
+.skill-item-actions { display: flex; gap: 6px; }
+.skill-item-actions button { font-size: 0.72rem; padding: 3px 8px; }
+.skill-form { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.skill-form textarea { font-family: var(--mono, monospace); font-size: 0.76rem; resize: vertical; }
 .config-subsection-label {
   display: flex; align-items: center; gap: 5px;
   font-size: 0.72rem; font-weight: 700; color: var(--text-muted);

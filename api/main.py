@@ -27,6 +27,7 @@ from api.routers import comments as comments_router
 from api.routers import control_plane as control_plane_router
 from api.routers import dependencies as dependencies_router
 from api.routers import documents as documents_router
+from api.routers import extensions as extensions_router
 from api.routers import goals as goals_router
 from api.routers import interactions as interactions_router
 from api.routers import issues as issues_router
@@ -156,6 +157,7 @@ app.include_router(runs_router.router)
 app.include_router(comments_router.router)
 app.include_router(dependencies_router.router)
 app.include_router(documents_router.router)
+app.include_router(extensions_router.router)
 app.include_router(timeline_router.router)
 app.include_router(settings_router.router)
 app.include_router(tool_access_router.router)
