@@ -182,7 +182,10 @@ def test_accept_writes_approved_registry_entry(tmp_path: Path) -> None:
     assert json.loads(audit["payload_json"])["name"] == "Unity MCP"
 
 
-def test_reject_writes_nothing_to_registry(tmp_path: Path) -> None:
+def test_reject_persists_rejection_without_granting(tmp_path: Path) -> None:
+    """A rejection grants nothing and runs nothing — but it IS recorded, so
+    the Lead has ground truth to avoid re-proposing what the owner declined
+    (design §7: idempotency per extension)."""
     db_path = tmp_path / "aiteam.db"
     _init_db(db_path)
     executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_VALID_PAYLOAD)]))
@@ -200,10 +203,30 @@ def test_reject_writes_nothing_to_registry(tmp_path: Path) -> None:
     dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
     executor.execute(dispatch)
 
-    assert list_mcp_servers(db_path.parent) == []
+    servers = list_mcp_servers(db_path.parent)
+    assert len(servers) == 1
+    assert servers[0]["status"] == "rejected"
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         audit = conn.execute(
             "SELECT action FROM activity_log WHERE action = 'extension.rejected'"
         ).fetchone()
     assert audit is not None
+
+
+def test_approve_after_reject_overwrites(tmp_path: Path) -> None:
+    """The owner can change their mind: approving the same name later wins."""
+    from aiteam.extensions import approve_mcp_server, reject_mcp_server
+
+    runtime_dir = tmp_path / ".aiteam"
+    runtime_dir.mkdir()
+    reject_mcp_server(runtime_dir, name="unity", justification="not yet")
+    approve_mcp_server(
+        runtime_dir, name="unity", source="npx -y unity-mcp@1.2.0",
+        applies_to_roles=["engineer"], justification="now yes", approved_by="user",
+    )
+
+    servers = list_mcp_servers(runtime_dir)
+    assert len(servers) == 1
+    assert servers[0]["status"] == "approved"
+    assert servers[0]["source"] == "npx -y unity-mcp@1.2.0"

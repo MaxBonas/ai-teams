@@ -327,6 +327,7 @@ interface Interaction {
   resolved_by_user_id?: string | null;
   created_at?: string;
   resolved_at?: string | null;
+  payload?: Record<string, unknown>;
 }
 
 interface Run {
@@ -2193,6 +2194,8 @@ export default function App() {
                 const issue = issues.find((item) => item.id === interaction.issue_id);
                 const isHiring = interaction.kind === 'suggest_tasks';
                 const isQuestion = interaction.kind === 'ask_user_questions';
+                const payload = interaction.payload || {};
+                const isExtension = String(payload.reason || '') === 'extension_install_requested';
                 return (
                   <div key={interaction.id} className="pending-modal-card">
                     <div className="chat-card-header">
@@ -2202,6 +2205,26 @@ export default function App() {
                     </div>
                     {issue && <div className="pending-modal-issue">Issue: {issue.title}</div>}
                     {interaction.summary && <p className="chat-card-body">{interaction.summary}</p>}
+                    {isExtension && (
+                      // Aceptar instala código de terceros: el owner debe ver el
+                      // comando EXACTO que se ejecutará, no solo el resumen del Lead.
+                      <div className="extension-proposal-detail">
+                        <div><span className="ext-label">Servidor:</span> <strong>{String(payload.name || '?')}</strong></div>
+                        <div><span className="ext-label">Comando:</span> <code>{String(payload.source || '(sin comando — propuesta inválida)')}</code></div>
+                        <div>
+                          <span className="ext-label">Roles:</span>{' '}
+                          {Array.isArray(payload.applies_to_roles) && payload.applies_to_roles.length > 0
+                            ? (payload.applies_to_roles as string[]).join(', ')
+                            : 'sin roles asignados'}
+                        </div>
+                        {typeof payload.justification === 'string' && payload.justification && (
+                          <div><span className="ext-label">Evidencia:</span> {payload.justification}</div>
+                        )}
+                        <p className="ext-warning">
+                          Aceptar autoriza ejecutar este software de terceros en tu máquina (tras verificación de salud). Revisa el comando antes de aceptar.
+                        </p>
+                      </div>
+                    )}
                     {isHiring ? (
                       <p className="muted pending-modal-hiring-note">
                         Propuesta de equipo — ábrela en el chat para ajustar adapters y modelos antes de contratar.

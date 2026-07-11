@@ -277,10 +277,24 @@ def approve_mcp_server(
 
 
 def reject_mcp_server(runtime_dir: Path, *, name: str, justification: str = "") -> dict[str, Any]:
-    """Record that a proposal was rejected — for audit/history only; nothing
-    is granted, nothing runs."""
+    """Persist that the owner declined this proposal. Nothing is granted and
+    nothing runs — but the rejection IS recorded, so the Lead (and future
+    need-detection reconcilers) have ground truth to avoid re-proposing a
+    capability the owner already turned down. A later approve of the same
+    name overwrites the entry (the owner changed their mind)."""
     slug = slugify_skill_name(name)
-    return {"name": slug, "status": "rejected", "justification": str(justification or "").strip()}
+    registry = read_extensions(runtime_dir)
+    existing = registry["mcp_servers"].get(slug) if isinstance(registry["mcp_servers"].get(slug), dict) else {}
+    entry = {
+        **existing,
+        "justification": str(justification or "").strip() or existing.get("justification", ""),
+        "status": "rejected",
+        "created_at": existing.get("created_at") or _now(),
+        "updated_at": _now(),
+    }
+    registry["mcp_servers"][slug] = entry
+    _write_extensions(runtime_dir, registry)
+    return {"name": slug, **entry}
 
 
 def set_mcp_server_status(runtime_dir: Path, *, name: str, status: str) -> dict[str, Any] | None:
