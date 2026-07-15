@@ -165,10 +165,14 @@ def sync_default_child_dependencies(db_path: Path, *, parent_issue_id: str) -> l
             (parent_issue_id,),
         ).fetchall()
     children = [dict(row) for row in rows]
+    # El test_designer escribe la suite desde la spec EN PARALELO al engineer
+    # (sin dependencia entre ellos — no debe ver la implementación); ambos son
+    # prerrequisito de reviewer/qa/test_runner: el runner ejecuta las dos
+    # suites y el reviewer juzga con todo el material delante.
     engineering = [
         row["id"]
         for row in children
-        if str(row.get("role") or "").strip().lower() in {"engineer", "software_engineer"}
+        if str(row.get("role") or "").strip().lower() in {"engineer", "software_engineer", "test_designer"}
     ]
     dependents = [
         row["id"]

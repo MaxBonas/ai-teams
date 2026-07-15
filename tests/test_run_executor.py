@@ -1574,8 +1574,10 @@ def test_llm_lead_created_issues_get_agents_and_wakeups(tmp_path: Path) -> None:
     assert agents["role:engineer"]["supervisor_agent_id"] == "role:lead"
     assert "repo_read" in json.loads(agents["role:engineer"]["capabilities_json"])
     assert "role:reviewer" in agents
-    assert {row["assignee_agent_id"] for row in issues} == {"role:engineer", "role:reviewer"}
-    assert {row["agent_id"] for row in wakeups} == {"role:engineer", "role:reviewer"}
+    # test_designer: guardrail de suite independiente (P1, 2026-07-15) — se
+    # materializa siempre que el Lead delega engineering.
+    assert {row["assignee_agent_id"] for row in issues} == {"role:engineer", "role:reviewer", "role:test_designer"}
+    assert {row["agent_id"] for row in wakeups} == {"role:engineer", "role:reviewer", "role:test_designer"}
 
 
 def test_llm_lead_created_issue_agents_use_project_adapter_policy(tmp_path: Path) -> None:

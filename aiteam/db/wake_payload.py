@@ -273,6 +273,47 @@ def build_wake_payload(
         "children": children_summary,
     }
 
+    # Review sobre diffs: al reviewer/QA se le entregan los commits (recibos
+    # git) de las issues hermanas para que el veredicto ancle en hunks
+    # concretos en vez de releer el workspace entero — más profundo y más
+    # barato a la vez. Presupuesto acotado; los patches ya llegan truncados.
+    _role_key = str(issue.get("role") or "").strip().lower()
+    if _role_key in {"reviewer", "code_reviewer", "qa", "qa_engineer"} and issue.get("parent_id"):
+        with contextlib.closing(_connect(db_path)) as conn2:
+            diff_rows = conn2.execute(
+                """
+                SELECT r.agent_id, r.issue_id, e.payload_json
+                FROM run_events e
+                JOIN runs r ON r.id = e.run_id
+                JOIN issues i ON i.id = r.issue_id
+                WHERE e.event_type = 'git_commit'
+                  AND i.parent_id = ?
+                ORDER BY e.created_at DESC
+                LIMIT 5
+                """,
+                (issue["parent_id"],),
+            ).fetchall()
+        diffs: list[dict[str, Any]] = []
+        budget = 24000
+        for row in diff_rows:
+            try:
+                receipt = json.loads(str(row["payload_json"] or "{}"))
+            except (TypeError, ValueError):
+                continue
+            patch = str(receipt.get("patch") or "")[: max(0, budget)]
+            budget -= len(patch)
+            diffs.append({
+                "agent_id": row["agent_id"],
+                "issue_id": row["issue_id"],
+                "commit": receipt.get("commit"),
+                "diffstat": receipt.get("diffstat"),
+                "patch": patch,
+            })
+            if budget <= 0:
+                break
+        if diffs:
+            payload["implementation_diffs"] = diffs
+
     # Lecciones de proyectos anteriores — solo en issues RAÍZ (el Lead
     # planifica ahí) y solo si el almacén global tiene algo: hechos operativos
     # destilados al cierre de proyectos pasados (learning.py), p.ej. "el

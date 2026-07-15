@@ -18,14 +18,14 @@ import os
 
 LEAD_TIER_ROLES = frozenset({"lead", "team_lead", "lead_executor"})
 
-TIER2_ROLES = frozenset({"engineer", "software_engineer", "reviewer", "code_reviewer", "qa", "worker"})
+TIER2_ROLES = frozenset({"engineer", "software_engineer", "reviewer", "code_reviewer", "qa", "worker", "test_designer"})
 
 TIER3_ROLES = frozenset({"file_scout", "web_scout", "context_curator", "test_runner"})
 
 # Hiring policy tiers (model selection): strong models for seniors,
 # cheap/local for juniors.
 SENIOR_ROLES = frozenset({"lead", "team_lead", "reviewer", "quorum_senior", "quorum_auditor", "architect"})
-JUNIOR_ROLES = frozenset({"engineer", "test_runner", "worker", "file_scout", "web_scout", "context_curator"})
+JUNIOR_ROLES = frozenset({"engineer", "test_runner", "worker", "file_scout", "web_scout", "context_curator", "test_designer"})
 
 # Roles that must never edit workspace files: they delegate (Lead) or report
 # (scouts/curator). Enforced via CLI read-only sandbox, the preventive
@@ -75,8 +75,22 @@ def cross_provider_review_enforced() -> bool:
 # roles de lectura tolerante (lead-tier, scouts) pueden acompañarlo.
 WORK_SLOT_ROLES = frozenset({
     "engineer", "software_engineer", "worker", "qa", "qa_engineer",
-    "reviewer", "code_reviewer", "test_runner",
+    "reviewer", "code_reviewer", "test_runner", "test_designer",
 })
+
+
+def independent_tests_enabled() -> bool:
+    """Tests de aceptación escritos por un agente DISTINTO del implementador.
+
+    La ventaja estructural del equipo sobre un agente único: el engineer que
+    escribe sus propios tests produce una suite que confirma lo que el código
+    hace, no lo que la spec pide (mismo sesgo que un soloista). Con esto, al
+    delegar trabajo de engineering se materializa un `test_designer` hermano
+    que escribe la suite SOLO desde la especificación, en paralelo, y el
+    test_runner ejecuta ambas. Apagar con ``AITEAM_INDEPENDENT_TESTS=0``.
+    """
+    import os
+    return os.environ.get("AITEAM_INDEPENDENT_TESTS", "").strip().lower() not in {"0", "false", "no"}
 
 
 def parallel_channels_enabled() -> bool:

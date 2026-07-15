@@ -17,12 +17,22 @@ nunca un requisito para que el heartbeat avance.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _patch_budget_bytes() -> int:
+    raw = os.environ.get("AITEAM_DIFF_RECEIPT_MAX_BYTES", "").strip()
+    try:
+        value = int(raw) if raw else 12000
+    except ValueError:
+        return 12000
+    return max(1000, value)
 
 _MARKER = "git_managed"
 _GITIGNORE = """# AI Teams — control plane y artefactos locales
@@ -123,7 +133,14 @@ def commit_run_snapshot(
         return None
     sha = _git(workspace, "rev-parse", "--short", "HEAD")
     diffstat = staged.stdout.strip()[-1500:]
+    # El patch completo (truncado) viaja en el recibo: el reviewer juzga
+    # hunks concretos en su wake en vez de releer el workspace entero.
+    patch = ""
+    show = _git(workspace, "show", "--format=", "--patch", "HEAD")
+    if show is not None and show.returncode == 0:
+        patch = show.stdout[: _patch_budget_bytes()]
     return {
         "commit": sha.stdout.strip() if sha and sha.returncode == 0 else "?",
         "diffstat": diffstat,
+        "patch": patch,
     }

@@ -2682,6 +2682,12 @@ class RunExecutor:
             run=run,
             created_child_roles=created_child_roles,
         )
+        self._maybe_add_independent_test_designer(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            run=run,
+            created_child_roles=created_child_roles,
+        )
         try:
             sync_default_child_dependencies(self.db_path, parent_issue_id=issue_id)
         except Exception:
@@ -2968,6 +2974,71 @@ class RunExecutor:
             },
             metadata_source="full_team_review_guardrail",
             activity_source="guardrail:full_team_reviewer",
+        )
+
+    def _maybe_add_independent_test_designer(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        run: dict[str, Any],
+        created_child_roles: list[str],
+    ) -> None:
+        """Materializa el test_designer hermano al delegar engineering.
+
+        La suite de aceptación la escribe un agente que NO implementa: desde
+        la especificación del padre, en paralelo al engineer (las dependencias
+        por defecto hacen que test_runner y reviewer esperen a AMBOS). Una vez
+        por padre; determinista — no depende de que el Lead se acuerde.
+        """
+        from aiteam.policies import independent_tests_enabled
+
+        if not independent_tests_enabled():
+            return
+        if "test_designer" in created_child_roles:
+            return
+        if not {"engineer", "software_engineer", "lead_executor"} & set(created_child_roles):
+            return
+        agent = self._agent_info(agent_id) or {}
+        if str(agent.get("role") or "").strip().lower() not in {"lead", "team_lead"}:
+            return
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            existing = conn.execute(
+                "SELECT id FROM issues WHERE parent_id = ? AND lower(role) = 'test_designer' LIMIT 1",
+                (issue_id,),
+            ).fetchone()
+        if existing is not None:
+            return
+        parent_issue = get_issue(self.db_path, issue_id=issue_id) or {}
+        parent_meta = _decode_json(parent_issue.get("metadata_json") or "{}")
+        criteria = [
+            str(item) for item in (parent_meta.get("acceptance_criteria") or []) if str(item).strip()
+        ]
+        criteria_block = (
+            "\n\nCriterios de aceptación del padre:\n" + "\n".join(f"- {c}" for c in criteria[:10])
+            if criteria else ""
+        )
+        spec_source = str(parent_issue.get("description") or parent_issue.get("title") or "")[:1500]
+        self._create_delegated_issue(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            run=run,
+            spec={
+                "title": "Suite de aceptación independiente (desde la spec)",
+                "description": (
+                    "Escribe tests de aceptación en tests/ SOLO a partir de la especificación "
+                    "de abajo. NO leas la implementación ni sus tests: tu suite debe fallar si "
+                    "la spec no se cumple, no confirmar lo que el código ya hace. Cubre el "
+                    "camino feliz de cada requisito y al menos un caso borde por comando/función "
+                    "(entradas vacías, datos inválidos, unicode). Los archivos deben poder "
+                    "coexistir con otros tests: usa nombres tests/test_acceptance_*.py.\n\n"
+                    f"Especificación:\n{spec_source}{criteria_block}"
+                ),
+                "role": "test_designer",
+                "complexity": "medium",
+            },
+            metadata_source="independent_test_designer_guardrail",
+            activity_source="guardrail:independent_test_designer",
         )
 
     # Tier 3 cheap specialists — always prefer budget/local adapters.
@@ -4706,6 +4777,29 @@ class RunExecutor:
                     f"({_RUNTIME_VERIFICATION_WAIVER_REASON} aceptada) — el gate no bloquea el cierre."
                 )
             lines.append(test_gate_line)
+        # Suite independiente: señala si la aceptación la escribió un agente
+        # distinto del implementador (la del engineer confirma lo que el código
+        # hace; la del test_designer, lo que la spec pide).
+        _has_engineering = any(
+            str(r.get("role") or "").strip().lower() in {"engineer", "software_engineer"} for r in rows
+        )
+        if _has_engineering:
+            _designer_rows = [
+                r for r in rows if str(r.get("role") or "").strip().lower() == "test_designer"
+            ]
+            if _designer_rows:
+                _designer_report = _designer_rows[0].get("last_agent_report") or {}
+                _d_status = str(_designer_rows[0].get("status") or "")
+                lines.append(
+                    "Tests independientes (test_designer): "
+                    + (f"report {_designer_report.get('result')}" if _designer_report else "sin report")
+                    + f", issue {_d_status}"
+                )
+            else:
+                lines.append(
+                    "Tests independientes: NO hay suite del test_designer — la aceptación "
+                    "solo la verificó quien implementó."
+                )
         lines.extend(self._workspace_verification_lines())
         cost_line = self._cycle_cost_line(issue_id)
         if cost_line:
