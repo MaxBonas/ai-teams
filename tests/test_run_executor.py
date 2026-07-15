@@ -3697,3 +3697,99 @@ def test_model_escalation_noop_without_profile_id(tmp_path: Path) -> None:
         issue_id="issue-1", agent_id="agent-1", run_id="run:x",
         agent_role="engineer", liveness_reason="plan_only_exhausted_at_attempt_2",
     ) is False
+
+
+# ── Review cross-provider vinculante en criticidad alta ───────────────────────
+
+def _cross_review_db(tmp_path: Path, *, criticality: str = "high") -> Path:
+    """Root con engineer y reviewer AMBOS en openai — el juez comparte familia
+    con el generador. gemini_api conectado como alternativa."""
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, adapter_type, adapter_config_json) VALUES "
+            "('role:engineer', 'engineer', 'E', 'openai_api', '{}'),"
+            "('role:reviewer', 'reviewer', 'R', 'openai_api', '{}')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES "
+            "('root', 'g1', 'Root', 'in_progress', 'lead', NULL)"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES "
+            "('issue-eng', 'g1', 'root', 'Impl', 'done', 'engineer', 'role:engineer')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id, criticality) VALUES "
+            f"('issue-rev', 'g1', 'root', 'Review', 'in_progress', 'reviewer', 'role:reviewer', '{criticality}')"
+        )
+        conn.commit()
+    return db_path
+
+
+def test_cross_provider_review_repoints_reviewer_on_high_criticality(tmp_path: Path, monkeypatch) -> None:
+    from aiteam.project_adapters import write_project_adapter_policy
+    from aiteam.user_config import store_secret
+
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    store_secret(provider="google", name="default", secret="gemini-key")
+    db_path = _cross_review_db(tmp_path, criticality="high")
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    moved = executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    )
+
+    assert moved is True
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        reviewer = conn.execute("SELECT adapter_type FROM agents WHERE id='role:reviewer'").fetchone()
+        audit = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action='review.cross_provider_enforced' AND target_id='issue-rev'"
+        ).fetchone()[0]
+    assert reviewer["adapter_type"] == "gemini_api", "el juez debe salir de la familia del engineer"
+    assert audit == 1
+
+    # Segunda pasada: ya es cross-provider → no-op.
+    assert executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    ) is False
+
+
+def test_cross_provider_review_ignores_normal_criticality(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    db_path = _cross_review_db(tmp_path, criticality="medium")
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    assert executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    ) is False
+
+
+def test_cross_provider_review_noop_without_alternative_provider(tmp_path: Path, monkeypatch) -> None:
+    """Sin proveedor alternativo conectado: queda la señal informativa, el
+    review NUNCA se bloquea por esto."""
+    from aiteam.project_adapters import write_project_adapter_policy
+
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    db_path = _cross_review_db(tmp_path, criticality="critical")
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api"])  # solo la familia del engineer
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    assert executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    ) is False
+
+
+def test_cross_provider_review_can_be_disabled(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_CROSS_PROVIDER_REVIEW", "0")
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    db_path = _cross_review_db(tmp_path, criticality="critical")
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    assert executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    ) is False

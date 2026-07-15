@@ -148,6 +148,20 @@ class RunExecutor:
         agent_info = self._agent_info(agent_id)
         adapter_type = (agent_info.get("adapter_type") if agent_info else None) or "manual"
         agent_role = (agent_info.get("role") if agent_info else None) or ""
+        # ── Review cross-provider vinculante (criticidad alta) ───────────────
+        # Antes de resolver el runtime: si este run es de un reviewer sobre una
+        # issue high/critical y su proveedor coincide con el del engineer del
+        # subtree, re-apuntarlo a otro proveedor conectado — el sesgo de
+        # auto-preferencia del juez no se mitiga con una nota, se mitiga con
+        # otra familia de modelo.
+        try:
+            if self._enforce_cross_provider_review(
+                issue_id=str(run.get("issue_id") or ""), agent_id=agent_id, agent_role=agent_role
+            ):
+                agent_info = self._agent_info(agent_id)
+                adapter_type = (agent_info.get("adapter_type") if agent_info else None) or "manual"
+        except Exception:
+            logger.warning("cross-provider review enforcement failed for run %s", run_id, exc_info=True)
         runtime = self.registry.get(adapter_type)
         # Per-agent model override via adapter_config_json
         adapter_cfg: dict[str, Any] = {}
@@ -3547,6 +3561,119 @@ class RunExecutor:
         )
 
         return "\n".join(parts)
+
+    def _enforce_cross_provider_review(
+        self, *, issue_id: str, agent_id: str, agent_role: str
+    ) -> bool:
+        """Fuerza juez de otra familia en issues high/critical (una vez por issue).
+
+        Devuelve True si re-apuntó el adapter del reviewer (el caller debe
+        recargar agent_info). Sin alternativa conectada, queda la señal
+        informativa de `_separation_of_duties_line` — no se bloquea el review.
+        """
+        from aiteam.policies import cross_provider_review_enforced
+
+        role_key = str(agent_role or "").strip().lower()
+        if role_key not in {"reviewer", "code_reviewer"} or not issue_id:
+            return False
+        if not cross_provider_review_enforced():
+            return False
+        issue = self._issue_info(issue_id)
+        criticality = str((issue or {}).get("criticality") or "").strip().lower()
+        if criticality not in {"high", "critical"}:
+            return False
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            if conn.execute(
+                "SELECT COUNT(*) FROM activity_log WHERE action = 'review.cross_provider_enforced' AND target_id = ?",
+                (issue_id,),
+            ).fetchone()[0]:
+                return False
+
+        from aiteam.hiring_economics import provider_and_model_for  # noqa: PLC0415
+
+        root_id = self._root_issue_id(issue_id)
+        engineer_provider = ""
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT a.adapter_type, a.adapter_config_json
+                FROM issues i JOIN agents a ON a.id = i.assignee_agent_id
+                WHERE i.parent_id = ? AND lower(i.role) IN ('engineer', 'software_engineer')
+                ORDER BY i.created_at DESC LIMIT 1
+                """,
+                (root_id,),
+            ).fetchone()
+            if row:
+                engineer_provider, _ = provider_and_model_for(
+                    str(row["adapter_type"] or ""), _decode_json(str(row["adapter_config_json"] or "{}"))
+                )
+            me = conn.execute(
+                "SELECT adapter_type, adapter_config_json FROM agents WHERE id = ?", (agent_id,)
+            ).fetchone()
+        if not engineer_provider or me is None:
+            return False
+        my_provider, _ = provider_and_model_for(
+            str(me["adapter_type"] or ""), _decode_json(str(me["adapter_config_json"] or "{}"))
+        )
+        if my_provider != engineer_provider:
+            return False  # ya es cross-provider
+
+        profiles = project_profiles(Path(self.db_path).parent)
+        candidates = []
+        for profile in profiles:
+            if not profile_is_connected(profile):
+                continue
+            prov, _ = provider_and_model_for(
+                str(profile.get("adapter_type") or ""), {"profile_id": profile.get("id")}
+            )
+            if prov and prov != engineer_provider:
+                candidates.append(profile)
+        if not candidates:
+            return False
+        selection = choose_adapter_for_role(agent_role, None, candidates)
+        if not selection:
+            return False
+
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            conn.execute(
+                "UPDATE agents SET adapter_type = ?, adapter_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (
+                    str(selection["adapter_type"]),
+                    json.dumps(selection.get("adapter_config") or {}, ensure_ascii=False, sort_keys=True),
+                    agent_id,
+                ),
+            )
+        log_activity(
+            self.db_path,
+            action="review.cross_provider_enforced",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            payload={
+                "criticality": criticality,
+                "engineer_provider": engineer_provider,
+                "new_adapter_type": str(selection["adapter_type"]),
+                "new_adapter_profile_id": selection.get("adapter_profile_id"),
+            },
+        )
+        with contextlib.suppress(Exception):
+            create_comment(
+                self.db_path,
+                issue_id=issue_id,
+                author_agent_id=None,
+                body=(
+                    f"⚙ Sistema: issue de criticidad {criticality} — el reviewer compartía proveedor "
+                    f"con el engineer ({engineer_provider}) y el sesgo de auto-preferencia del juez "
+                    f"debilitaría el veredicto. Reviewer re-apuntado a `{selection['adapter_type']}` "
+                    f"({selection.get('adapter_profile_id')})."
+                ),
+                metadata={"source": "cross_provider_review"},
+            )
+        logger.info(
+            "cross_provider_review: issue %s reviewer moved off %s to %s",
+            issue_id, engineer_provider, selection.get("adapter_profile_id"),
+        )
+        return True
 
     def _attempt_model_escalation(
         self,

@@ -52,6 +52,19 @@ INFRA_ERROR_CODES = frozenset({
 })
 
 
+def cross_provider_review_enforced() -> bool:
+    """Review cross-provider VINCULANTE en issues high/critical (default ON).
+
+    Un juez de la misma familia que el generador favorece sus salidas (~10% de
+    win rate extra medido) — la mitigación primaria es juez de otra familia.
+    `_separation_of_duties_line` ya lo señala; en criticidad alta además se
+    fuerza, re-apuntando el reviewer a otro proveedor conectado si existe.
+    Apagar con ``AITEAM_CROSS_PROVIDER_REVIEW=0``.
+    """
+    import os
+    return os.environ.get("AITEAM_CROSS_PROVIDER_REVIEW", "").strip().lower() not in {"0", "false", "no"}
+
+
 # ── Paralelismo por canal (opt-in) ─────────────────────────────────────────────
 # El heartbeat es secuencial por diseño; con el flag activo puede ejecutar en
 # paralelo runs de PROVEEDORES distintos bajo restricciones estrictas. La
