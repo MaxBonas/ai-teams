@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,6 +102,7 @@ class ClaudeSubscriptionCliRuntime:
         else:
             ws = env.get("AITEAM_WORKSPACE_ROOT", "").strip()
             effective_cwd = ws or None
+        merged_env = _inject_python_toolchain(merged_env, effective_cwd)
 
         try:
             with _command_context(self, env, run, effective_cwd=effective_cwd) as spec:
@@ -424,6 +426,37 @@ def _extract_usage(raw_output: str) -> dict[str, Any] | None:
     if isinstance(result, dict) and isinstance(result.get("usage"), dict):
         return result["usage"]
     return None
+
+
+def _inject_python_toolchain(env: dict[str, str], workspace: str | None) -> dict[str, str]:
+    """Garantiza que el agente CLI pueda ejecutar ``python``/``pytest``.
+
+    Visto en vivo (CLI Notas, 2026-07-15): el engineer no pudo auto-verificar
+    porque el proceso hijo de codex no tenía ningún Python resoluble en PATH,
+    y el ciclo terminó escalando al usuario. Prepende el venv del workspace si
+    existe (Scripts/ en Windows, bin/ en POSIX) y, en su defecto, el
+    directorio del intérprete del orquestador (que siempre existe y trae
+    pytest). Expone además ``AITEAM_PYTHON`` con la ruta exacta.
+    """
+    candidates: list[Path] = []
+    if workspace:
+        for venv_name in ("venv", ".venv"):
+            for bin_name in ("Scripts", "bin"):
+                bin_dir = Path(workspace) / venv_name / bin_name
+                if (bin_dir / "python.exe").exists() or (bin_dir / "python").exists():
+                    candidates.append(bin_dir)
+    orchestrator_bin = Path(sys.executable).parent
+    candidates.append(orchestrator_bin)
+
+    env = dict(env)
+    prefix = os.pathsep.join(str(c) for c in candidates)
+    current_path = env.get("PATH", "")
+    if prefix and prefix not in current_path:
+        env["PATH"] = prefix + (os.pathsep + current_path if current_path else "")
+    first = candidates[0]
+    python_exe = first / ("python.exe" if (first / "python.exe").exists() else "python")
+    env.setdefault("AITEAM_PYTHON", str(python_exe if python_exe.exists() else sys.executable))
+    return env
 
 
 def _extract_codex_usage(stdout: str, stderr: str) -> dict[str, Any] | None:

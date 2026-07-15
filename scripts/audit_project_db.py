@@ -17,6 +17,11 @@ from pathlib import Path
 
 EXCERPT_LEN = 400
 
+# La consola de Windows por defecto es cp1252: los caracteres del informe
+# (·, →) salían como '?' — forzar UTF-8 en stdout.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _connect(project_dir: Path) -> sqlite3.Connection:
     db = project_dir / ".aiteam" / "aiteam.db"
@@ -75,6 +80,15 @@ def report(project_dir: Path, *, excerpts: bool) -> None:
         "COALESCE(SUM(output_tokens),0) o FROM cost_events"
     ).fetchone()
     print(f"  total: {r['c'] / 100:.2f} USD  ({r['i']:,} in / {r['o']:,} out tokens)")
+    for r in q(
+        "SELECT channel, agent_id, COUNT(*) n, COALESCE(SUM(cost_cents),0) c, "
+        "COALESCE(SUM(input_tokens),0) i, COALESCE(SUM(output_tokens),0) o "
+        "FROM cost_events GROUP BY channel, agent_id ORDER BY i DESC"
+    ):
+        print(
+            f"  {r['channel'] or '?'} · {r['agent_id']}: {r['n']} runs, "
+            f"{r['c'] / 100:.2f} USD, {r['i']:,} in / {r['o']:,} out"
+        )
 
     section("INTERACCIONES (escalaciones)")
     for r in q("SELECT status, COUNT(*) n FROM issue_thread_interactions GROUP BY status"):

@@ -13,6 +13,7 @@ from api.utils import (
     PROJECT_ROOT,
     _require_api_auth_request,
     _workspace_from_request,
+    require_configured_workspace,
     get_current_workspace,
     resolve_runtime_dir,
 )
@@ -155,6 +156,7 @@ async def list_wakeup_requests(
 @router.post("/api/wakeup-requests")
 async def post_wakeup_request(payload: EnqueueWakeupRequest, request: Request):
     _require_api_auth_request(request)
+    require_configured_workspace(request)
     db_path = _db_path_from_request(request)
     try:
         row = enqueue_wakeup(

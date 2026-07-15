@@ -1874,21 +1874,21 @@ class RunExecutor:
         if role == "engineer":
             output = (
                 f"Engineer intake para: {title}\n\n"
-                "He recibido la delegación. Antes de implementar necesito concretar el primer vertical jugable: "
-                "loop principal, tecnología objetivo, assets mínimos y criterio de aceptación. "
+                "He recibido la delegación. Antes de implementar necesito concretar el primer entregable "
+                "verificable: alcance mínimo, tecnología objetivo y criterio de aceptación. "
                 "Puedo absorber la lectura y tareas mecánicas para reservar el contexto del Lead."
             )
         elif role == "reviewer":
             output = (
                 f"Reviewer intake para: {title}\n\n"
-                "Riesgos principales a vigilar: plan demasiado amplio, dependencias no ordenadas, falta de una demo "
-                "ejecutable, y revisiones que bloqueen sin evidencia. Revisaré decisiones y qué puede romper la "
-                "siguiente run."
+                "Riesgos principales a vigilar: plan demasiado amplio, dependencias no ordenadas, falta de un "
+                "entregable ejecutable, y revisiones que bloqueen sin evidencia. Revisaré decisiones y qué puede "
+                "romper la siguiente run."
             )
         elif role == "qa":
             output = (
                 f"QA intake para: {title}\n\n"
-                "Propongo una verificación ligera: arrancar la app/juego, validar flujo principal, capturar errores "
+                "Propongo una verificación ligera: ejercitar el flujo principal del entregable, capturar errores "
                 "visibles y registrar evidencia mínima. Sin gates fuertes salvo riesgo alto."
             )
         else:

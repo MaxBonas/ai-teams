@@ -413,3 +413,22 @@ def test_run_once_can_opt_into_legacy_full_drain(tmp_path: Path) -> None:
 
     assert run_once.status_code == 200
     assert run_once.json()["dispatched_count"] == 2
+
+
+def test_post_wakeup_without_configured_workspace_is_409(tmp_path: Path) -> None:
+    """Visto en vivo (2026-07-15): tras un reinicio que olvidó el workspace,
+    el POST iba contra la DB legacy del repo y moría con un críptico
+    'FOREIGN KEY constraint failed'. Debe ser un 409 accionable."""
+    from api.utils import PROJECT_ROOT
+
+    client, previous = _client_for_workspace(PROJECT_ROOT)
+    try:
+        response = client.post(
+            "/api/wakeup-requests",
+            json={"agent_id": "role:lead", "source": "manual", "reason": "manual"},
+        )
+    finally:
+        _restore_workspace(previous)
+
+    assert response.status_code == 409
+    assert "workspace" in response.json()["detail"].lower()

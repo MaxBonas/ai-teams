@@ -26,6 +26,7 @@ from api.utils import (
     PROJECT_ROOT,
     _require_api_auth_request,
     _workspace_from_request,
+    require_configured_workspace,
     get_current_workspace,
     resolve_runtime_dir,
 )
@@ -65,6 +66,7 @@ async def post_chat_message(body: ChatMessageRequest, request: Request):
     context to work with.
     """
     _require_api_auth_request(request)
+    require_configured_workspace(request)
     if not body.body.strip():
         raise HTTPException(status_code=400, detail="Message body is required")
     db = _db(request)

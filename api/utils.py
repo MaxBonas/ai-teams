@@ -121,6 +121,26 @@ def _workspace_persistence_disabled() -> bool:
     )
 
 
+def require_configured_workspace(request: Request) -> Path:
+    """Rechaza con 409 las mutaciones cuando no hay proyecto activo.
+
+    Sin este guard, un POST (wakeup, chat) tras un reinicio que olvidó el
+    workspace iba contra la DB legacy del repo (runtime/aiteam.db) y moría con
+    un críptico "FOREIGN KEY constraint failed" — o peor, escribía en una DB
+    que ningún heartbeat procesa. Visto en vivo el 2026-07-15.
+    """
+    workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
+    if workspace.resolve() == PROJECT_ROOT.resolve():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No hay proyecto activo: selecciona un workspace con POST /api/workspace "
+                "o pasa la cabecera x-aiteam-workspace."
+            ),
+        )
+    return workspace
+
+
 def resolve_runtime_dir(workspace: Path, project_root: Path = PROJECT_ROOT) -> Path:
     workspace = Path(workspace).resolve()
     project_root = Path(project_root).resolve()

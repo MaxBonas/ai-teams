@@ -643,3 +643,42 @@ class TestCodexUsageExtraction:
             output_path=str(tmp_path / "o.json"), effective_cwd=str(tmp_path),
         )
         assert "--json" in command
+
+
+class TestPythonToolchainInjection:
+    """El engineer de CLI Notas no pudo ejecutar pytest: el hijo de codex no
+    tenia ningun Python resoluble en PATH y el cierre acabo escalando."""
+
+    def test_prefers_workspace_venv(self, tmp_path):
+        import os as _os
+        from aiteam.adapters.subscription_cli_adapter import _inject_python_toolchain
+
+        bin_dir = tmp_path / "venv" / "Scripts"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "python.exe").write_bytes(b"")
+
+        env = _inject_python_toolchain({"PATH": "C:/algo"}, str(tmp_path))
+
+        assert env["PATH"].startswith(str(bin_dir))
+        assert env["AITEAM_PYTHON"] == str(bin_dir / "python.exe")
+        assert "C:/algo" in env["PATH"]
+
+    def test_falls_back_to_orchestrator_interpreter(self, tmp_path):
+        import sys as _sys
+        from pathlib import Path as _Path
+        from aiteam.adapters.subscription_cli_adapter import _inject_python_toolchain
+
+        env = _inject_python_toolchain({}, str(tmp_path))
+
+        orch_bin = str(_Path(_sys.executable).parent)
+        assert env["PATH"].startswith(orch_bin)
+        assert env["AITEAM_PYTHON"]
+        assert _Path(env["AITEAM_PYTHON"]).exists()
+
+    def test_does_not_duplicate_path_prefix(self, tmp_path):
+        from aiteam.adapters.subscription_cli_adapter import _inject_python_toolchain
+
+        once = _inject_python_toolchain({}, str(tmp_path))
+        twice = _inject_python_toolchain(dict(once), str(tmp_path))
+
+        assert twice["PATH"] == once["PATH"]
