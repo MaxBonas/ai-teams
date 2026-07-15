@@ -1054,17 +1054,32 @@ class RunExecutor:
             and agent_role not in {"lead", "team_lead"}
             and issue_id_str
         ):
+            # Cascada de calidad en dos peldaños: (1) modelo senior del mismo
+            # perfil — más barato de intentar y suele bastar; (2) solo si no
+            # hay peldaño 1 disponible, cambio de canal (adapter recovery).
+            _escalated = False
             try:
-                self._attempt_adapter_recovery(
+                _escalated = self._attempt_model_escalation(
                     issue_id=issue_id_str,
                     agent_id=agent_id,
                     run_id=run_id,
-                    failed_adapter_type=adapter_type,
                     agent_role=agent_role,
                     liveness_reason=str(liveness_result.reason or ""),
                 )
             except Exception:
-                logger.warning("adapter recovery failed for issue %s", issue_id_str, exc_info=True)
+                logger.warning("model escalation failed for issue %s", issue_id_str, exc_info=True)
+            if not _escalated:
+                try:
+                    self._attempt_adapter_recovery(
+                        issue_id=issue_id_str,
+                        agent_id=agent_id,
+                        run_id=run_id,
+                        failed_adapter_type=adapter_type,
+                        agent_role=agent_role,
+                        liveness_reason=str(liveness_result.reason or ""),
+                    )
+                except Exception:
+                    logger.warning("adapter recovery failed for issue %s", issue_id_str, exc_info=True)
 
         # ── Step 6: Record workspace evidence event (for blocked + advanced) ──
         is_engineering = str(agent_role or "").strip().lower() in {"engineer", "software_engineer"}
@@ -3507,6 +3522,97 @@ class RunExecutor:
         )
 
         return "\n".join(parts)
+
+    def _attempt_model_escalation(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        run_id: str,
+        agent_role: str,
+        liveness_reason: str,
+    ) -> bool:
+        """Peldaño 1 de la cascada de calidad: escalar al modelo senior del
+        MISMO perfil antes de cambiar de canal.
+
+        Patrón FrugalGPT (skill multi-model-orchestration): el barato intenta,
+        y solo se escala capacidad cuando falla — aquí "falla" = agotó sus
+        continuaciones sin evidencia de workspace. Una vez por issue; si el
+        agente ya corre el modelo tope del perfil (o no hay perfil), devuelve
+        False y el caller pasa al peldaño 2 (_attempt_adapter_recovery, cambio
+        de canal).
+        """
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM activity_log WHERE action = 'issue.model_escalation' AND target_id = ?",
+                (issue_id,),
+            ).fetchone()
+            if row and int(row[0]) > 0:
+                return False
+            agent_row = conn.execute(
+                "SELECT adapter_type, adapter_config_json FROM agents WHERE id = ?",
+                (agent_id,),
+            ).fetchone()
+        if agent_row is None:
+            return False
+        config = _decode_json(str(agent_row["adapter_config_json"] or "{}"))
+        profile_id = str(config.get("profile_id") or "").strip()
+        current_model = str(config.get("model") or "").strip()
+        if not profile_id:
+            return False
+        from aiteam.project_adapters import senior_model_for_profile  # noqa: PLC0415
+        senior = str(senior_model_for_profile(profile_id) or "").strip()
+        if not senior or senior == current_model:
+            return False
+
+        new_config = {**config, "model": senior}
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            conn.execute(
+                "UPDATE agents SET adapter_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (json.dumps(new_config, ensure_ascii=False, sort_keys=True), agent_id),
+            )
+        update_issue(self.db_path, issue_id=issue_id, status="todo")
+        log_activity(
+            self.db_path,
+            action="issue.model_escalation",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=run_id,
+            payload={
+                "profile_id": profile_id,
+                "from_model": current_model or None,
+                "to_model": senior,
+                "liveness_reason": liveness_reason,
+            },
+        )
+        with contextlib.suppress(Exception):
+            create_comment(
+                self.db_path,
+                issue_id=issue_id,
+                author_agent_id=None,
+                body=(
+                    f"⚙ Sistema: `{current_model or 'el modelo asignado'}` agotó sus intentos sin "
+                    f"producir cambios verificables ({liveness_reason}). Escalado al modelo senior "
+                    f"del mismo perfil (`{senior}`) y la issue vuelve a `todo` — si también falla, "
+                    "el siguiente paso será cambiar de canal."
+                ),
+                metadata={"source": "model_escalation"},
+            )
+        enqueue_wakeup(
+            self.db_path,
+            agent_id=agent_id,
+            source="model_escalation",
+            reason="assignment",
+            trigger_detail=f"model_escalation:{current_model or '?'}->{senior}",
+            payload={"issue_id": issue_id, "wake_reason": "assignment"},
+            idempotency_key=f"model_escalation:{issue_id}",
+        )
+        logger.info(
+            "model_escalation: issue %s escalated %s -> %s after %s",
+            issue_id, current_model or "?", senior, liveness_reason,
+        )
+        return True
 
     def _attempt_adapter_recovery(
         self,

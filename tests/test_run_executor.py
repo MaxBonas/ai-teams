@@ -3610,3 +3610,90 @@ def test_daily_cost_cap_disabled_by_default(tmp_path: Path, monkeypatch) -> None
     executor.execute(dispatch)
 
     assert runtime.calls == 1, "sin cap configurado, el gasto no bloquea nada"
+
+
+# ── Cascada de calidad: escalado de modelo antes de cambio de canal ───────────
+
+def _escalation_db(tmp_path: Path, *, model: str = "gpt-5.4-mini") -> Path:
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, adapter_config_json) VALUES (?, ?, ?, ?, ?, ?)",
+            ("agent-1", "engineer", "E", "standard", "subscription_cli",
+             json.dumps({"profile_id": "codex_subscription", "model": model, "cli_kind": "codex"})),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, assignee_agent_id, role) VALUES (?, ?, ?, ?, ?, ?)",
+            ("issue-1", "g1", "Implement", "blocked", "agent-1", "engineer"),
+        )
+        conn.execute(
+            "INSERT INTO runs (id, agent_id, issue_id, status) VALUES ('run:x', 'agent-1', 'issue-1', 'failed')"
+        )
+        conn.commit()
+    return db_path
+
+
+def test_model_escalation_upgrades_to_profile_senior_once(tmp_path: Path) -> None:
+    """Peldaño 1 de la cascada FrugalGPT: el mini agotado escala al modelo
+    senior del MISMO perfil, reabre la issue y despierta al agente — una vez."""
+    db_path = _escalation_db(tmp_path, model="gpt-5.4-mini")
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+
+    escalated = executor._attempt_model_escalation(
+        issue_id="issue-1", agent_id="agent-1", run_id="run:x",
+        agent_role="engineer", liveness_reason="plan_only_exhausted_at_attempt_2",
+    )
+
+    assert escalated is True
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        agent = conn.execute("SELECT adapter_type, adapter_config_json FROM agents WHERE id='agent-1'").fetchone()
+        issue = conn.execute("SELECT status FROM issues WHERE id='issue-1'").fetchone()
+        wake = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='agent-1' AND source='model_escalation' AND status='queued'"
+        ).fetchone()[0]
+    config = json.loads(agent["adapter_config_json"])
+    assert agent["adapter_type"] == "subscription_cli", "mismo canal: solo cambia el modelo"
+    assert config["model"] == "gpt-5.5"
+    assert issue["status"] == "todo"
+    assert wake == 1
+
+    # Segunda vez: no re-escala (cap por issue).
+    assert executor._attempt_model_escalation(
+        issue_id="issue-1", agent_id="agent-1", run_id="run:y",
+        agent_role="engineer", liveness_reason="plan_only_exhausted_at_attempt_2",
+    ) is False
+
+
+def test_model_escalation_noop_when_already_on_senior_model(tmp_path: Path) -> None:
+    db_path = _escalation_db(tmp_path, model="gpt-5.5")
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+
+    assert executor._attempt_model_escalation(
+        issue_id="issue-1", agent_id="agent-1", run_id="run:x",
+        agent_role="engineer", liveness_reason="plan_only_exhausted_at_attempt_2",
+    ) is False, "ya corre el tope del perfil: toca el peldaño 2 (cambio de canal)"
+
+
+def test_model_escalation_noop_without_profile_id(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, adapter_type, adapter_config_json) VALUES (?, ?, ?, ?, ?)",
+            ("agent-1", "engineer", "E", "subscription_cli", "{}"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, assignee_agent_id) VALUES (?, ?, ?, ?, ?)",
+            ("issue-1", "g1", "T", "blocked", "agent-1"),
+        )
+        conn.commit()
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+
+    assert executor._attempt_model_escalation(
+        issue_id="issue-1", agent_id="agent-1", run_id="run:x",
+        agent_role="engineer", liveness_reason="plan_only_exhausted_at_attempt_2",
+    ) is False

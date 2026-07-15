@@ -348,6 +348,16 @@ def _choose_model(profile_id: str, *, role: str = "", needs_senior: bool) -> str
     return str(options[-1]["value"])
 
 
+def senior_model_for_profile(profile_id: str) -> str | None:
+    """Modelo de máxima capacidad del perfil — objetivo de la cascada de escalado.
+
+    Deliberadamente SIN role: las opciones por rol devuelven el modelo que el
+    scoring consideró suficiente para ese rol (el barato que acaba de fallar);
+    la cascada necesita el tope del perfil, no otra vez el mismo peldaño.
+    """
+    return _choose_model(profile_id, role="", needs_senior=True)
+
+
 def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> list[str]:
     """Create quorum auditor agents if they do not already exist.
 
