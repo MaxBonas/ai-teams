@@ -9,6 +9,7 @@ from typing import Callable
 from aiteam.adapters.registry import AdapterRegistry
 from aiteam.autonomy import auto_resolve_operational_interactions
 from aiteam.db.liveness import (
+    reconcile_idle_parents,
     reconcile_orphaned_children_of_closed_parents,
     reconcile_orphaned_interactions,
     reconcile_stalled_subtrees,
@@ -106,6 +107,9 @@ class HeartbeatLoop:
             recovered = await loop.run_in_executor(None, reconcile_unqueued_assigned_issues, self.db_path)
             stalled = await loop.run_in_executor(None, reconcile_stalled_subtrees, self.db_path)
             reopened_gap = await loop.run_in_executor(None, reconcile_orphaned_children_of_closed_parents, self.db_path)
+            idle_parents = await loop.run_in_executor(None, reconcile_idle_parents, self.db_path)
+            if idle_parents:
+                logger.warning("reconciled %d idle parent(s) with all children terminal: %s", len(idle_parents), idle_parents)
             recovered = [*materialized, *recovered]
             if recovered:
                 logger.info("liveness: re-enqueued %d orphaned issue(s): %s", len(recovered), recovered)

@@ -451,6 +451,68 @@ def reconcile_stalled_subtrees(db_path: Path) -> list[str]:
     return enqueued
 
 
+def reconcile_idle_parents(db_path: Path) -> list[str]:
+    """Despierta a padres cuyo trabajo terminó pero a los que nadie avisó.
+
+    Patrón visto en vivo (CLI Tareas, 2026-07-15): todos los hijos terminales,
+    padre in_progress con asignado, y CERO wakeups — el último hijo cerró sin
+    notify_supervisor y `reconcile_unqueued_assigned_issues` excluye a
+    propósito las issues con hijos, así que ningún mecanismo volvería a
+    despertar al Lead jamás. Red de seguridad determinista:
+
+    - todos los hijos en done/cancelled
+    - sin wakeup vivo del asignado para esa issue, sin run activa
+    - sin interacción pendiente (una decisión humana en curso ES el motivo
+      legítimo para esperar)
+    - margen de 60s desde el último cambio, para no pisar el auto-report
+      normal del flujo.
+    """
+    with contextlib.closing(_connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT p.id, p.assignee_agent_id, p.updated_at
+            FROM issues p
+            WHERE p.status IN ('todo', 'in_progress', 'in_review', 'blocked')
+              AND p.assignee_agent_id IS NOT NULL
+              AND EXISTS (SELECT 1 FROM issues c WHERE c.parent_id = p.id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM issues c
+                  WHERE c.parent_id = p.id AND c.status NOT IN ('done', 'cancelled')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM wakeup_requests w
+                  WHERE w.agent_id = p.assignee_agent_id
+                    AND w.status IN ('queued', 'claimed', 'running')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM runs r
+                  WHERE r.issue_id = p.id AND r.status = 'running'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM issue_thread_interactions x
+                  WHERE x.issue_id = p.id AND x.status = 'pending'
+              )
+              AND p.updated_at < datetime('now', '-60 seconds')
+            ORDER BY p.updated_at ASC
+            """
+        ).fetchall()
+
+    woken: list[str] = []
+    for row in rows:
+        issue_id = str(row["id"])
+        enqueue_wakeup(
+            db_path,
+            agent_id=str(row["assignee_agent_id"]),
+            source="reconciler",
+            reason="children_terminal",
+            trigger_detail="idle_parent_all_children_terminal",
+            payload={"issue_id": issue_id, "wake_reason": "children_terminal"},
+            idempotency_key=f"idle_parent:{issue_id}:{row['updated_at']}",
+        )
+        woken.append(issue_id)
+    return woken
+
+
 def reconcile_orphaned_children_of_closed_parents(db_path: Path) -> list[str]:
     """Escalate open children left behind when their parent already closed.
 

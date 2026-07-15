@@ -3807,3 +3807,58 @@ def test_file_ops_accepts_content_as_body_alias(tmp_path: Path) -> None:
 
     assert touched == ["x.py"]
     assert (tmp_path / "x.py").read_text(encoding="utf-8") == "print('hola')\n"
+
+
+# ── El cierre de un hijo SIEMPRE reporta al padre (visto en CLI Tareas) ───────
+
+def test_scout_closing_done_auto_reports_to_supervisor(tmp_path: Path) -> None:
+    """El file_scout de verificación final cerró done sin notify_supervisor y
+    el Lead nunca despertó: el auto-report debe cubrir TODOS los roles no-lead,
+    no solo engineer/reviewer/qa."""
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, adapter_type, supervisor_agent_id) VALUES "
+            "('role:lead', 'lead', 'L', 'subscription_cli', NULL),"
+            "('role:scout', 'file_scout', 'S', 'subscription_cli', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES "
+            "('root', 'g1', 'Root', 'in_progress', 'lead', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES "
+            "('scout-issue', 'g1', 'root', 'Verificar', 'in_progress', 'file_scout', 'role:scout')"
+        )
+        conn.commit()
+
+    class _ScoutRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            # Cierra done SIN notify_supervisor — como el LLM real.
+            return ExecutionResult(
+                status="completed",
+                output="Verificado: archivos presentes y con contenido.",
+                actions={"issue_status": "done"},
+            )
+
+    executor = RunExecutor(db_path, AdapterRegistry([_ScoutRuntime()]))
+    enqueue_wakeup(
+        db_path, agent_id="role:scout", source="assignment", reason="new_issue",
+        payload={"issue_id": "scout-issue", "wake_reason": "new_issue"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:scout")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        lead_wake = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
+        ).fetchone()[0]
+    assert lead_wake == 1, "el cierre de un hijo debe despertar al padre SIEMPRE, sin depender del LLM"

@@ -2444,21 +2444,19 @@ class RunExecutor:
             )
         # ── Auto-supervisor report for terminal statuses ───────────────────────
         # LLM agents don't always emit notify_supervisor when they complete.
-        # Reviewers in particular are API-only (no workspace changes) so the
-        # liveness system never fires the workspace-based notify_supervisor.
         # Auto-report on any terminal issue_status so the Lead is always woken
-        # without requiring a manual wakeup between the reviewer and the Lead.
+        # without requiring the LLM to remember the op. Applies to EVERY
+        # non-lead role: la lista blanca original (engineer/reviewer/qa) dejó
+        # fuera a los scouts Tier-3, y un file_scout de verificación final que
+        # cerró done sin notify_supervisor dejó al Lead sin despertar para
+        # siempre — padre in_progress, todos los hijos done, cero wakeups
+        # (visto en vivo en CLI Tareas, 2026-07-15).
         # Idempotency in _enqueue_supervisor_report prevents double-wakeups when
         # notify_supervisor was already emitted above.
-        _AUTO_REPORT_ROLES = {
-            "reviewer", "code_reviewer",
-            "engineer", "software_engineer",
-            "qa", "lead_executor",
-        }
         if (
             isinstance(issue_status, str)
             and issue_status in {"done", "blocked", "cancelled"}
-            and agent_role.lower() in _AUTO_REPORT_ROLES
+            and agent_role.lower() not in _LEAD_TIER_ROLES_P
             and not actions.get("notify_supervisor")
         ):
             try:
