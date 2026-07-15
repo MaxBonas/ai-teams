@@ -97,6 +97,38 @@ def test_reconcile_stale_runs_marks_old_running_as_failed(tmp_path: Path) -> Non
     assert run["error_code"] == "liveness_timeout"
 
 
+def test_reconcile_stale_runs_also_closes_out_its_wakeup_request(tmp_path: Path) -> None:
+    """A crashed process leaves its run 'running' forever without ever calling
+    finish_wakeup — the wakeup_request it came from must not be left dangling
+    at status='running' once the run itself has been reconciled to 'failed'."""
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+
+    wakeup = enqueue_wakeup(db_path, agent_id="agent-1", source="manual", reason="test")
+    create_run(db_path, run_id="run-stale-2", agent_id="agent-1", wakeup_request_id=wakeup["id"])
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE runs SET status = 'running', started_at = '2020-01-01T00:00:00+00:00' WHERE id = ?",
+            ("run-stale-2",),
+        )
+        conn.execute(
+            "UPDATE wakeup_requests SET status = 'running', run_id = ? WHERE id = ?",
+            ("run-stale-2", wakeup["id"]),
+        )
+
+    recovered = reconcile_stale_runs(db_path, max_age_sec=60)
+
+    assert recovered == ["run-stale-2"]
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT status, error FROM wakeup_requests WHERE id = ?", (wakeup["id"],)
+        ).fetchone()
+
+    assert row["status"] == "failed"
+    assert row["error"] == "reconciled: liveness window exceeded"
+
+
 def test_reconcile_stale_runs_skips_recent_running(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init_db(db_path)

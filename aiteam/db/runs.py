@@ -205,6 +205,12 @@ def reconcile_stale_runs(
 ) -> list[str]:
     """Mark runs stuck in 'running' longer than max_age_sec as failed.
 
+    Also closes out the originating ``wakeup_requests`` row (if any) — left
+    open otherwise, since the normal finish path (RunExecutor calling
+    finish_wakeup) never runs for a crashed/killed process. An orphaned
+    'running' wakeup_request would sit forever, mismatching a run that has
+    already been reconciled to 'failed'.
+
     Returns the IDs of reconciled runs. Safe to call on startup.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_sec)).isoformat()
@@ -220,11 +226,26 @@ def reconcile_stale_runs(
                 updated_at = CURRENT_TIMESTAMP
             WHERE status = 'running'
               AND started_at < ?
-            RETURNING id
+            RETURNING id, wakeup_request_id
             """,
             (cutoff,),
         ).fetchall()
-        return [row[0] for row in rows]
+        wakeup_ids = [row["wakeup_request_id"] for row in rows if row["wakeup_request_id"]]
+        if wakeup_ids:
+            placeholders = ",".join("?" for _ in wakeup_ids)
+            conn.execute(
+                f"""
+                UPDATE wakeup_requests
+                SET status = 'failed',
+                    error = 'reconciled: liveness window exceeded',
+                    finished_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders})
+                  AND status IN ('claimed', 'running', 'queued')
+                """,
+                wakeup_ids,
+            )
+        return [row["id"] for row in rows]
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
