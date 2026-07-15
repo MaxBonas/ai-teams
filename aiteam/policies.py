@@ -52,6 +52,26 @@ INFRA_ERROR_CODES = frozenset({
 })
 
 
+def daily_cost_cap_cents() -> int:
+    """Techo duro de gasto real (céntimos) por día natural UTC para TODO el
+    proyecto. A diferencia del cost_breaker de gasto-sin-progreso (por subárbol,
+    se resetea al progresar), este es un límite global independiente del
+    progreso: es la mitigación del *cascade pile-up* (un runaway que sigue
+    haciendo micro-cambios evade el breaker de progreso pero debe topar aquí).
+
+    El canal de suscripción registra 0 céntimos, así que este cap solo muerde
+    el gasto real por-token (API) — que es exactamente lo que protege dinero.
+    Env ``AITEAM_DAILY_COST_CAP_CENTS`` (default 0 = desactivado, opt-in).
+    """
+    import os
+    raw = os.environ.get("AITEAM_DAILY_COST_CAP_CENTS", "").strip()
+    try:
+        value = int(raw) if raw else 0
+    except ValueError:
+        return 0
+    return value if value > 0 else 0
+
+
 def provider_escalation_threshold() -> float:
     """Fracción de runs de infra por encima de la cual un proveedor se marca
     'unhealthy' en el router. A diferencia de una cascada de calidad (banda sana

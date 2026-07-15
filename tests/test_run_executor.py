@@ -3523,3 +3523,90 @@ def test_zero_cost_run_with_tokens_records_cost_event(tmp_path: Path) -> None:
     assert cost["cost_cents"] == 0
     assert cost["input_tokens"] == 14874
     assert cost["output_tokens"] == 17
+
+
+# ── Hard daily cost cap (project-wide cascade pile-up mitigation) ─────────────
+
+def test_daily_cost_cap_blocks_and_escalates_when_reached(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_DAILY_COST_CAP_CENTS", "100")
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO cost_events (id, agent_id, issue_id, cost_cents, period) VALUES (?, ?, ?, ?, ?)",
+            ("cost-day-1", "agent-1", "issue-1", 120, current_period()),  # 120 >= 100 cap
+        )
+        conn.commit()
+
+    runtime = _CountingRuntime()
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    dispatch = _dispatch_one(db_path)
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        wakeup = conn.execute(
+            "SELECT status, error FROM wakeup_requests WHERE id = ?",
+            (dispatch.wakeup_request["id"],),
+        ).fetchone()
+        interaction = conn.execute(
+            "SELECT status, payload_json FROM issue_thread_interactions WHERE title = 'Cap de coste diario alcanzado'"
+        ).fetchone()
+
+    assert runtime.calls == 0, "no debe gastar una run más con el cap alcanzado"
+    assert wakeup["status"] == "skipped"
+    assert wakeup["error"] == "daily_cost_cap_reached"
+    assert interaction is not None and interaction["status"] == "pending"
+    assert json.loads(interaction["payload_json"])["cap_cents"] == 100
+
+
+def test_daily_cost_cap_allows_after_user_accepts(tmp_path: Path, monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    monkeypatch.setenv("AITEAM_DAILY_COST_CAP_CENTS", "100")
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO cost_events (id, agent_id, issue_id, cost_cents, period) VALUES (?, ?, ?, ?, ?)",
+            ("cost-day-1", "agent-1", "issue-1", 120, current_period()),
+        )
+        conn.commit()
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    interaction = create_interaction(
+        db_path,
+        issue_id="issue-1",
+        kind="request_confirmation",
+        payload={"reason": "daily_cost_cap_reached"},
+        idempotency_key=f"daily_cost_cap:{day}:issue-1",
+    )
+    resolve_interaction(db_path, interaction_id=interaction["id"], action="accept")
+
+    runtime = _CountingRuntime()
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    dispatch = _dispatch_one(db_path)
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        run = conn.execute("SELECT status FROM runs WHERE id = ?", (dispatch.run["id"],)).fetchone()
+    assert runtime.calls == 1, "tras aceptar el override, la run debe ejecutarse"
+    assert run[0] == "completed"
+
+
+def test_daily_cost_cap_disabled_by_default(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AITEAM_DAILY_COST_CAP_CENTS", raising=False)
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO cost_events (id, agent_id, issue_id, cost_cents, period) VALUES (?, ?, ?, ?, ?)",
+            ("cost-day-1", "agent-1", "issue-1", 999999, current_period()),
+        )
+        conn.commit()
+
+    runtime = _CountingRuntime()
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    dispatch = _dispatch_one(db_path)
+    executor.execute(dispatch)
+
+    assert runtime.calls == 1, "sin cap configurado, el gasto no bloquea nada"

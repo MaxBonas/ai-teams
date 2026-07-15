@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -393,11 +394,37 @@ async def get_loop_health(request: Request):
         except Exception:
             router_health = []
         providers_unhealthy = sorted(r["provider"] for r in router_health if r["unhealthy"])
+
+        # Estado del cap de coste diario (real, por-token) para el dashboard.
+        cost_cap: dict[str, Any] = {"enabled": False}
+        try:
+            from aiteam.policies import daily_cost_cap_cents
+            _cap = daily_cost_cap_cents()
+            if _cap > 0:
+                _day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                with contextlib.closing(sqlite3.connect(str(db), timeout=20.0)) as conn:
+                    _spent = int(
+                        conn.execute(
+                            "SELECT COALESCE(SUM(cost_cents), 0) FROM cost_events WHERE substr(created_at,1,10) = ?",
+                            (_day,),
+                        ).fetchone()[0]
+                        or 0
+                    )
+                cost_cap = {
+                    "enabled": True,
+                    "day": _day,
+                    "cap_cents": _cap,
+                    "spent_cents": _spent,
+                    "reached": _spent >= _cap,
+                }
+        except Exception:
+            cost_cap = {"enabled": False}
         requires_attention = (
             bool(detected_loops)
             or any(r["skip_count"] >= 2 for r in at_risk)
             or bool(providers_degraded)
             or bool(providers_unhealthy)
+            or bool(cost_cap.get("reached"))
         )
         return {
             "success": True,
@@ -408,6 +435,7 @@ async def get_loop_health(request: Request):
             "providers_degraded": providers_degraded,
             "router_health": router_health,
             "providers_unhealthy": providers_unhealthy,
+            "cost_cap": cost_cap,
             "policy_deviations": policy_deviations,
             "summary": {
                 "total_loops": len(detected_loops),

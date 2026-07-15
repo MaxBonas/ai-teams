@@ -64,6 +64,7 @@ from aiteam.policies import (  # noqa: E402
     TERMINAL_ISSUE_STATUSES as _TERMINAL_ISSUE_STATUSES_P,
     WORKSPACE_NOISE_DIRS as _SKIP_DIRS,
     cost_breaker_threshold_cents as _cost_breaker_threshold_cents,
+    daily_cost_cap_cents as _daily_cost_cap_cents,
     delegation_churn_limit as _delegation_churn_limit,
     operational_interaction_default as _operational_interaction_default,
     rereview_limit as _rereview_limit,
@@ -541,6 +542,36 @@ class RunExecutor:
                 status="failed",
                 run_id=run_id,
                 error="budget_rejected",
+            )
+            return
+
+        # ── Hard daily cost cap (project-wide) ─────────────────────────────
+        # Independiente del progreso: topa el gasto real por día natural aunque
+        # el subtree siga "avanzando". Mitigación del cascade pile-up.
+        cap_gate = self._daily_cost_cap_gate(run_id=run_id, issue_id=str(run.get("issue_id") or ""), agent_id=agent_id)
+        if cap_gate == "blocked":
+            finish_wakeup(
+                self.db_path,
+                wakeup_id=wakeup_id,
+                status="skipped",
+                run_id=run_id,
+                error="daily_cost_cap_reached",
+            )
+            return
+        if cap_gate == "rejected":
+            finish_run(
+                self.db_path,
+                run_id=run_id,
+                status="failed",
+                error="daily_cost_cap_rejected",
+                error_code="daily_cost_cap_rejected",
+            )
+            finish_wakeup(
+                self.db_path,
+                wakeup_id=wakeup_id,
+                status="failed",
+                run_id=run_id,
+                error="daily_cost_cap_rejected",
             )
             return
 
@@ -5280,6 +5311,75 @@ class RunExecutor:
         if status == "rejected":
             return "rejected"
         return "blocked"
+
+    def _daily_cost_cap_gate(self, *, run_id: str, issue_id: str, agent_id: str) -> str:
+        """Techo duro de gasto real por día natural para todo el proyecto.
+
+        Suma cost_events del día UTC actual; si alcanza el cap, escala UNA vez
+        (request_confirmation con idempotency por día) y bloquea. Accept =
+        override para ese día; reject = pausa; pending = bloqueado. El canal
+        flat-rate registra 0 céntimos, así que solo topa gasto por-token real.
+        """
+        if not issue_id:
+            return "allowed"
+        cap = _daily_cost_cap_cents()
+        if cap <= 0:
+            return "allowed"
+        from datetime import datetime, timezone
+
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            spent_row = conn.execute(
+                "SELECT COALESCE(SUM(cost_cents), 0) FROM cost_events WHERE substr(created_at, 1, 10) = ?",
+                (day,),
+            ).fetchone()
+        spent = int(spent_row[0] or 0) if spent_row else 0
+        if spent < cap:
+            return "allowed"
+
+        root_id = self._root_issue_id(issue_id)
+        idem = f"daily_cost_cap:{day}:{root_id}"
+        interaction = self._interaction_by_idempotency(issue_id=root_id, idempotency_key=idem)
+        if interaction is None:
+            create_interaction(
+                self.db_path,
+                issue_id=root_id,
+                kind="request_confirmation",
+                continuation_policy="wake_assignee",
+                payload={
+                    "version": 1,
+                    "reason": "daily_cost_cap_reached",
+                    "day": day,
+                    "spent_cents": spent,
+                    "cap_cents": cap,
+                    "run_id": run_id,
+                },
+                source_run_id=run_id,
+                created_by_agent_id=agent_id,
+                title="Cap de coste diario alcanzado",
+                summary=(
+                    f"El proyecto lleva {spent} céntimos de gasto real hoy ({day}), "
+                    f"al o por encima del cap de {cap}. ¿Autorizas seguir gastando hoy "
+                    "(accept) o pausas hasta mañana / subir el cap (reject)?"
+                ),
+                idempotency_key=idem,
+            )
+            return "blocked"
+        status = str(interaction.get("status") or "").strip().lower()
+        if status == "accepted":
+            return "allowed"
+        if status == "rejected":
+            return "rejected"
+        return "blocked"
+
+    def _interaction_by_idempotency(self, *, issue_id: str, idempotency_key: str) -> dict[str, Any] | None:
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                "SELECT * FROM issue_thread_interactions WHERE issue_id = ? AND idempotency_key = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (issue_id, idempotency_key),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def _budget_gate(self, *, run_id: str, issue_id: str, agent_id: str) -> str:
         if not issue_id:
