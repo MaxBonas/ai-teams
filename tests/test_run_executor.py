@@ -3483,3 +3483,43 @@ def test_builtin_test_runner_failing_suite_blocks_issue(tmp_path: Path) -> None:
     assert report[0] == "failed"
     assert "exit 0" not in report[1]
     assert run_row[0] == "completed", "una suite roja no es un fallo del runner: la run completó su trabajo"
+
+
+class _SubscriptionUsageRuntime:
+    """Run de canal suscripción: coste 0 pero tokens reales consumidos."""
+
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="completed",
+            output="done",
+            actual_cost_cents=0,
+            usage={"input_tokens": 14874, "output_tokens": 17, "cached_input_tokens": 3456},
+        )
+
+
+def test_zero_cost_run_with_tokens_records_cost_event(tmp_path: Path) -> None:
+    """El canal de suscripción (tarifa plana) consumía millones de tokens sin
+    dejar rastro: cost_events solo se escribía con cost > 0, así que la
+    auditoría y la economía de hiring solo veían el canal API."""
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    registry = AdapterRegistry([_SubscriptionUsageRuntime()])
+    executor = RunExecutor(db_path, registry)
+    dispatch = _dispatch_one(db_path)
+
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        cost = conn.execute(
+            "SELECT * FROM cost_events WHERE run_id = ?", (dispatch.run["id"],)
+        ).fetchone()
+    assert cost is not None, "una run con tokens debe dejar cost_event aunque cueste 0"
+    assert cost["cost_cents"] == 0
+    assert cost["input_tokens"] == 14874
+    assert cost["output_tokens"] == 17

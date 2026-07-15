@@ -1108,13 +1108,22 @@ class RunExecutor:
                 liveness_reason=liveness_result.reason,
                 continuation_attempt=liveness_result.continuation_attempt,
             )
-        if int(result.actual_cost_cents or 0) > 0:
+        # Registrar el evento también con coste 0 cuando hubo tokens: el canal
+        # de suscripción (tarifa plana) consumía cientos de miles de tokens sin
+        # dejar rastro en cost_events, así que el resumen de costes y la
+        # economía de hiring solo veían el canal API (infraestimación masiva).
+        _usage_dict = result.usage if isinstance(result.usage, dict) else {}
+        _has_token_usage = any(
+            int(_usage_dict.get(key) or 0) > 0
+            for key in ("input_tokens", "output_tokens", "total_tokens", "prompt_tokens", "completion_tokens")
+        )
+        if int(result.actual_cost_cents or 0) > 0 or _has_token_usage:
             record_cost(
                 self.db_path,
                 run_id=run_id,
                 agent_id=agent_id,
                 amount_cents=result.actual_cost_cents,
-                metadata={"source": "run_executor"},
+                metadata={"source": "run_executor", "usage": _usage_dict} if _has_token_usage else {"source": "run_executor"},
             )
         # ── Cost circuit breaker ──────────────────────────────────────────────
         # Spend without workspace progress is the economic twin of a loop:

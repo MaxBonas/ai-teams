@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -178,6 +179,14 @@ class ClaudeSubscriptionCliRuntime:
         status = str(work.get("status") or "completed")
         summary = str(work.get("summary") or "").strip()
         usage = _extract_usage(raw_output)
+        if usage is None and self.cli_kind == "codex":
+            # El last_message de codex nunca trae usage: vive en el event
+            # stream de stdout (--json) o, como último recurso, en la línea
+            # "tokens used" del log humano de stderr.
+            usage = _extract_codex_usage(
+                proc.stdout if isinstance(proc.stdout, str) else "",
+                proc.stderr if isinstance(proc.stderr, str) else "",
+            )
 
         return ExecutionResult(
             status=status if status in {"completed", "failed", "skipped"} else "completed",
@@ -237,6 +246,12 @@ class ClaudeSubscriptionCliRuntime:
         # must not trigger ~/.codex/config.toml's `notify` hook, which spawns a
         # computer-use helper that kills the run's process tree mid-flight.
         command.extend(["-c", "notify=[]"])
+        # --json emite eventos JSONL por stdout (turn.completed trae el usage
+        # con desglose input/output/cached/reasoning). Sin esto el canal de
+        # suscripción no registraba NI UN token: usage_json quedaba {} y
+        # cost_events vacío, dejando ciega la economía de hiring en el canal
+        # mayoritario (627/935 runs del proyecto Unity, todo CLI Notas/Gastos).
+        command.append("--json")
         command.extend(["--output-schema", schema_path, "--output-last-message", output_path])
         if self.model:
             if self.oss or self.local_provider:
@@ -408,6 +423,50 @@ def _extract_usage(raw_output: str) -> dict[str, Any] | None:
     result = parsed.get("result")
     if isinstance(result, dict) and isinstance(result.get("usage"), dict):
         return result["usage"]
+    return None
+
+
+def _extract_codex_usage(stdout: str, stderr: str) -> dict[str, Any] | None:
+    """Token usage de una run de codex exec.
+
+    Preferente: eventos JSONL de ``--json`` en stdout — cada turno emite
+    ``{"type": "turn.completed", "usage": {input_tokens, cached_input_tokens,
+    output_tokens, reasoning_output_tokens}}``; se suman todos los turnos.
+    Fallback: el log humano de stderr termina con "tokens used" y la cifra
+    total en la línea siguiente (con separador de miles según locale).
+    """
+    totals: dict[str, int] = {}
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(event, dict):
+            continue
+        usage = event.get("usage")
+        if not (isinstance(usage, dict) and str(event.get("type") or "").endswith("completed")):
+            continue
+        for key, value in usage.items():
+            try:
+                totals[str(key)] = totals.get(str(key), 0) + int(value)
+            except (TypeError, ValueError):
+                continue
+    if totals:
+        return {
+            "input_tokens": totals.get("input_tokens", 0),
+            "output_tokens": totals.get("output_tokens", 0),
+            "cached_input_tokens": totals.get("cached_input_tokens", 0),
+            "reasoning_output_tokens": totals.get("reasoning_output_tokens", 0),
+        }
+
+    match = re.search(r"tokens used[^\d]*([\d.,  ]+)", stderr, re.IGNORECASE)
+    if match:
+        digits = re.sub(r"\D", "", match.group(1))
+        if digits:
+            return {"total_tokens": int(digits)}
     return None
 
 

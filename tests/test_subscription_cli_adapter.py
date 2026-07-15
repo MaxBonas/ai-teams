@@ -594,3 +594,52 @@ class TestReconcileUpgradesApiOnlyJunior:
 
         assert row["adapter_type"] == "subscription_cli"
         assert json.loads(row["adapter_config_json"])["profile_id"] == "codex_subscription"
+
+
+class TestCodexUsageExtraction:
+    """El canal de suscripcion no registraba ni un token (usage_json={}):
+    el last_message de codex nunca trae usage, vive en el stream --json."""
+
+    def test_sums_usage_across_turn_completed_events(self):
+        from aiteam.adapters.subscription_cli_adapter import _extract_codex_usage
+
+        stdout = "\n".join([
+            'CORRECTO: ruido del notify hook',
+            '{"type":"item.completed","item":{"type":"agent_message"}}',
+            '{"type":"turn.completed","usage":{"input_tokens":14874,"cached_input_tokens":3456,"output_tokens":17,"reasoning_output_tokens":10}}',
+            '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":3,"reasoning_output_tokens":0}}',
+            'linea no-json',
+        ])
+        usage = _extract_codex_usage(stdout, "")
+
+        assert usage == {
+            "input_tokens": 14974,
+            "output_tokens": 20,
+            "cached_input_tokens": 3456,
+            "reasoning_output_tokens": 10,
+        }
+
+    def test_falls_back_to_stderr_tokens_used_line(self):
+        from aiteam.adapters.subscription_cli_adapter import _extract_codex_usage
+
+        stderr = "codex\nhola\ntokens used\n12.466\n"
+        usage = _extract_codex_usage("", stderr)
+
+        assert usage == {"total_tokens": 12466}
+
+    def test_returns_none_without_signals(self):
+        from aiteam.adapters.subscription_cli_adapter import _extract_codex_usage
+
+        assert _extract_codex_usage("solo texto", "sin cifras") is None
+
+    def test_codex_command_includes_json_flag(self, tmp_path):
+        runtime = ClaudeSubscriptionCliRuntime(
+            descriptor=AdapterDescriptor(adapter_type="subscription_cli", channel="subscription"),
+            command=["codex"],
+            cli_kind="codex",
+        )
+        command = runtime._build_codex_command(
+            "prompt", schema_path=str(tmp_path / "s.json"),
+            output_path=str(tmp_path / "o.json"), effective_cwd=str(tmp_path),
+        )
+        assert "--json" in command

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -9,6 +10,7 @@ from typing import Mapping
 
 from fastapi import HTTPException, Request
 
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _CURRENT_WORKSPACE: Path = PROJECT_ROOT
@@ -52,6 +54,13 @@ def set_current_workspace(path: Path, *, persist: bool = False) -> None:
 
 
 def clear_persisted_workspace() -> None:
+    # Mismo guard que persist/load: sin él, cualquier pytest que pase por el
+    # branch de workspace-missing (test_workspace_api) o el borrado de
+    # proyectos borraba el current_workspace.json REAL del desarrollador, y el
+    # siguiente reinicio del backend olvidaba el proyecto activo (visto en
+    # vivo dos veces el 2026-07-15).
+    if _workspace_persistence_disabled():
+        return
     path = _workspace_state_path()
     try:
         path.unlink()
@@ -73,7 +82,10 @@ def _persist_current_workspace(path: Path) -> None:
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps({"workspace": str(path.resolve())}, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
-        pass
+        # Sin persistencia, un reinicio del backend olvida el proyecto activo y
+        # el heartbeat deja de procesarlo hasta que alguien re-selecciona en la
+        # UI — el fallo tiene que ser visible en el log, no tragado.
+        logger.warning("failed to persist current workspace to %s", state_path, exc_info=True)
 
 
 def _load_persisted_workspace() -> Path | None:
@@ -94,6 +106,10 @@ def _load_persisted_workspace() -> Path | None:
         return None
     if candidate.exists() and db_path.exists():
         return candidate
+    logger.warning(
+        "persisted workspace %s is stale (dir exists=%s, db exists=%s) — clearing",
+        candidate, candidate.exists(), db_path.exists(),
+    )
     clear_persisted_workspace()
     return None
 

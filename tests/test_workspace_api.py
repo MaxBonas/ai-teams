@@ -315,3 +315,20 @@ def test_delete_current_project_moves_locked_folder_to_tombstone(tmp_path: Path,
     assert payload["reason"] == "moved_to_tombstone"
     assert not project.exists()
     assert Path(payload["cleanup_path"]).exists()
+
+
+def test_pytest_run_never_deletes_real_persisted_workspace(tmp_path):
+    """Regresión del 2026-07-15: correr la suite borraba el
+    runtime/current_workspace.json REAL — clear_persisted_workspace no tenía
+    el guard de persistencia-deshabilitada que sí tienen persist y load."""
+    from api.utils import _workspace_state_path, clear_persisted_workspace
+
+    state_path = _workspace_state_path()
+    existed_before = state_path.exists()
+    payload_before = state_path.read_text(encoding="utf-8") if existed_before else None
+
+    clear_persisted_workspace()  # bajo pytest debe ser un no-op
+
+    assert state_path.exists() == existed_before
+    if payload_before is not None:
+        assert state_path.read_text(encoding="utf-8") == payload_before
