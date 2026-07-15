@@ -72,6 +72,19 @@ def create_interaction(
                     idempotency_key, created_by_agent_id, title, summary,
                 ),
             ).fetchone()
+            # Una decisión que espera al humano no debe esperar en silencio:
+            # avisar por el canal configurado (AITEAM_NOTIFY_COMMAND). Nunca
+            # bloquea ni falla la creación de la interacción.
+            if kind == "request_confirmation":
+                with contextlib.suppress(Exception):
+                    from aiteam.notifications import notify_escalation  # noqa: PLC0415
+                    notify_escalation({
+                        "kind": kind,
+                        "title": title or "",
+                        "summary": summary or "",
+                        "issue_id": issue_id,
+                        "project": str(Path(db_path).resolve().parent.parent.name),
+                    })
             return dict(row)
     except sqlite3.IntegrityError as exc:
         # Race on unique idempotency index
@@ -189,6 +202,41 @@ class ConflictError(Exception):
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+def decision_latency_stats(db_path: Path) -> dict[str, Any]:
+    """Latencia de decisión humana sobre las escalaciones (request_confirmation).
+
+    En modo supervisado este número ES el cuello de botella del lead time del
+    proyecto — sin medirlo, nadie sabía cuánto esperaban los equipos. Segundos:
+    - resueltas: media y máximo de (resolved_at - created_at)
+    - pendientes: cuántas hay y la edad de la más vieja
+    """
+    with contextlib.closing(_connect(db_path)) as conn:
+        resolved = conn.execute(
+            """
+            SELECT COUNT(*) AS n,
+                   AVG((julianday(resolved_at) - julianday(created_at)) * 86400.0) AS avg_s,
+                   MAX((julianday(resolved_at) - julianday(created_at)) * 86400.0) AS max_s
+            FROM issue_thread_interactions
+            WHERE kind = 'request_confirmation' AND resolved_at IS NOT NULL
+            """
+        ).fetchone()
+        pending = conn.execute(
+            """
+            SELECT COUNT(*) AS n,
+                   MAX((julianday('now') - julianday(created_at)) * 86400.0) AS oldest_s
+            FROM issue_thread_interactions
+            WHERE kind = 'request_confirmation' AND status = 'pending'
+            """
+        ).fetchone()
+    return {
+        "resolved_count": int(resolved["n"] or 0),
+        "avg_resolution_seconds": round(float(resolved["avg_s"]), 1) if resolved["avg_s"] else None,
+        "max_resolution_seconds": round(float(resolved["max_s"]), 1) if resolved["max_s"] else None,
+        "pending_count": int(pending["n"] or 0),
+        "oldest_pending_seconds": round(float(pending["oldest_s"]), 1) if pending["oldest_s"] else None,
+    }
+
 
 def _maybe_enqueue_wakeup(
     db_path: Path,

@@ -117,6 +117,13 @@ def report(project_dir: Path, *, excerpts: bool) -> None:
     section("INTERACCIONES (escalaciones)")
     for r in q("SELECT status, COUNT(*) n FROM issue_thread_interactions GROUP BY status"):
         print(f"  {r['status']}: {r['n']}")
+    lat = q(
+        "SELECT COUNT(*) n, AVG((julianday(resolved_at)-julianday(created_at))*86400.0) avg_s, "
+        "MAX((julianday(resolved_at)-julianday(created_at))*86400.0) max_s "
+        "FROM issue_thread_interactions WHERE kind='request_confirmation' AND resolved_at IS NOT NULL"
+    ).fetchone()
+    if lat and lat["n"]:
+        print(f"  latencia de decisión: media {lat['avg_s']/60:.1f} min, máx {lat['max_s']/60:.1f} min ({lat['n']} resueltas)")
 
     section("ULTIMA ACTIVIDAD")
     r = q("SELECT MAX(updated_at) t FROM runs").fetchone()

@@ -403,6 +403,12 @@ async def get_loop_health(request: Request):
             r["provider"] for r in (router_health_24h or router_health) if r["unhealthy"]
         )
 
+        try:
+            from aiteam.db.interactions import decision_latency_stats
+            decision_latency = decision_latency_stats(db)
+        except Exception:
+            decision_latency = {}
+
         # Estado del cap de coste diario (real, por-token) para el dashboard.
         cost_cap: dict[str, Any] = {"enabled": False}
         try:
@@ -444,6 +450,7 @@ async def get_loop_health(request: Request):
             "router_health": router_health,
             "router_health_24h": router_health_24h,
             "providers_unhealthy": providers_unhealthy,
+            "decision_latency": decision_latency,
             "cost_cap": cost_cap,
             "policy_deviations": policy_deviations,
             "summary": {
