@@ -242,7 +242,7 @@ def build_wake_payload(
     with contextlib.closing(_connect(db_path)) as conn:
         user_directives = _user_directives(conn)
 
-    return {
+    payload: dict[str, Any] = {
         "issue_id": issue_id,
         "run_id": run_id,
         "user_directives": user_directives,
@@ -272,6 +272,21 @@ def build_wake_payload(
         "trigger_comment_id": comment_id,
         "children": children_summary,
     }
+
+    # Lecciones de proyectos anteriores — solo en issues RAÍZ (el Lead
+    # planifica ahí) y solo si el almacén global tiene algo: hechos operativos
+    # destilados al cierre de proyectos pasados (learning.py), p.ej. "el
+    # entorno no puede ejecutar pytest: delega un test_runner desde el inicio".
+    if issue.get("parent_id") is None:
+        try:
+            from aiteam.learning import global_learning_facts  # noqa: PLC0415
+            lessons = global_learning_facts(limit=5)
+            if lessons:
+                payload["lessons_from_previous_projects"] = lessons
+        except Exception:
+            pass
+
+    return payload
 
 
 _PROJECT_OPEN_ISSUES_LIMIT = 40

@@ -2416,6 +2416,24 @@ class RunExecutor:
                 resolve_blocker_wakeups(self.db_path, resolved_issue_id=issue_id, source_run_id=str(run.get("id") or ""))
             except Exception:
                 logger.warning("resolve_blocker_wakeups failed for issue %s", issue_id, exc_info=True)
+            # Cierre de una issue RAÍZ = fin de ciclo del proyecto: destilar
+            # los hechos operativos a learning_facts (+ espejo global) para
+            # que el próximo proyecto no re-descubra las mismas fricciones.
+            if issue_status == "done":
+                try:
+                    with contextlib.closing(_connect(self.db_path)) as conn:
+                        _parent = conn.execute(
+                            "SELECT parent_id FROM issues WHERE id = ?", (issue_id,)
+                        ).fetchone()
+                    if _parent is not None and _parent["parent_id"] is None:
+                        from aiteam.learning import distill_learning_facts  # noqa: PLC0415
+                        distilled = distill_learning_facts(self.db_path)
+                        if distilled:
+                            logger.info(
+                                "learning: %d fact(s) distilled at close of %s", len(distilled), issue_id
+                            )
+                except Exception:
+                    logger.warning("learning distillation failed at close of %s", issue_id, exc_info=True)
         if actions.get("notify_supervisor"):
             self._enqueue_supervisor_report(
                 issue_id=issue_id,
