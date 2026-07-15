@@ -210,6 +210,110 @@ class HeartbeatScheduler:
             )
 
 
+def batch_candidates(db_path: Path, *, limit: int = 25) -> list[dict[str, Any]]:
+    """Wakeups en cola enriquecidos para la selección del batch paralelo.
+
+    Cada candidato lleva el rol y adapter de su agente, la issue objetivo y la
+    raíz de su subtree (CTE recursivo sobre parent_id) — todo lo que
+    ``select_parallel_batch`` necesita para aplicar restricciones sin reclamar
+    nada todavía (reclamar y devolver a la cola no es atómico; filtrar antes sí).
+    """
+    with contextlib.closing(_connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT w.id AS wakeup_id, w.agent_id, w.payload_json,
+                   a.role, a.adapter_type, a.adapter_config_json
+            FROM wakeup_requests w
+            LEFT JOIN agents a ON a.id = w.agent_id
+            WHERE w.status = 'queued'
+            ORDER BY w.requested_at ASC, w.id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _decode_json(row["payload_json"])
+            issue_id = str(payload.get("issue_id") or payload.get("task_id") or "").strip()
+            root_id = issue_id
+            if issue_id:
+                root_row = conn.execute(
+                    """
+                    WITH RECURSIVE chain(id, parent_id) AS (
+                        SELECT id, parent_id FROM issues WHERE id = ?
+                        UNION ALL
+                        SELECT i.id, i.parent_id FROM issues i JOIN chain c ON i.id = c.parent_id
+                    )
+                    SELECT id FROM chain WHERE parent_id IS NULL LIMIT 1
+                    """,
+                    (issue_id,),
+                ).fetchone()
+                if root_row:
+                    root_id = str(root_row["id"])
+            out.append({
+                "wakeup_id": str(row["wakeup_id"]),
+                "agent_id": str(row["agent_id"] or ""),
+                "role": str(row["role"] or "").strip().lower(),
+                "adapter_type": str(row["adapter_type"] or ""),
+                "adapter_config_json": str(row["adapter_config_json"] or "{}"),
+                "issue_id": issue_id,
+                "root_issue_id": root_id or f"agent:{row['agent_id']}",
+            })
+        return out
+
+
+def select_parallel_batch(candidates: list[dict[str, Any]], *, max_runs: int) -> list[str]:
+    """Selección pura del batch paralelo (testeable sin DB).
+
+    Restricciones, en orden de llegada de la cola:
+      1. Proveedores DISTINTOS (el pacing TPM del governor es por proveedor;
+         dos runs del mismo proveedor en paralelo se pisan el presupuesto).
+      2. Agentes distintos y subtrees (raíz) distintos — dos runs del mismo
+         subtree comparten estado de issue y se generan comentarios mutuamente.
+      3. Como máximo UN rol de slot de trabajo (WORK_SLOT_ROLES): el workspace
+         es compartido y la atribución de deltas/evidencia no sobrevive a dos
+         editores o verificadores concurrentes.
+    """
+    from aiteam.hiring_economics import provider_and_model_for
+    from aiteam.policies import WORK_SLOT_ROLES
+    import json as _json
+
+    selected: list[str] = []
+    providers: set[str] = set()
+    agents: set[str] = set()
+    roots: set[str] = set()
+    work_slot_taken = False
+    for cand in candidates:
+        if len(selected) >= max_runs:
+            break
+        role = cand["role"]
+        try:
+            provider, _ = provider_and_model_for(
+                cand["adapter_type"], _json.loads(cand["adapter_config_json"] or "{}")
+            )
+        except Exception:
+            provider = cand["adapter_type"] or "?"
+        # test_runner se ejecuta como builtin determinista: no consume proveedor.
+        provider_key = "builtin" if role == "test_runner" else (provider or cand["adapter_type"] or "?")
+        is_work = role in WORK_SLOT_ROLES
+        if cand["agent_id"] in agents:
+            continue
+        if cand["root_issue_id"] in roots:
+            continue
+        if provider_key != "builtin" and provider_key in providers:
+            continue
+        if is_work and work_slot_taken:
+            continue
+        selected.append(cand["wakeup_id"])
+        agents.add(cand["agent_id"])
+        roots.add(cand["root_issue_id"])
+        if provider_key != "builtin":
+            providers.add(provider_key)
+        if is_work:
+            work_slot_taken = True
+    return selected
+
+
 def _connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=20.0, isolation_level=None)
     conn.row_factory = sqlite3.Row

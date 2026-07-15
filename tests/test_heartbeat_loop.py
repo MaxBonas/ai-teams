@@ -145,3 +145,117 @@ def test_reconcile_stale_runs_skips_recent_running(tmp_path: Path) -> None:
         run = conn.execute("SELECT status FROM runs WHERE id = ?", ("run-fresh",)).fetchone()
 
     assert run["status"] == "running"
+
+
+# ── Paralelismo por canal (opt-in) ─────────────────────────────────────────────
+
+def _cand(wid, agent, role, adapter, root):
+    return {
+        "wakeup_id": wid, "agent_id": agent, "role": role,
+        "adapter_type": adapter, "adapter_config_json": "{}",
+        "issue_id": root, "root_issue_id": root,
+    }
+
+
+def test_select_parallel_batch_distinct_providers_single_work_slot() -> None:
+    from aiteam.heartbeat.scheduler import select_parallel_batch
+
+    candidates = [
+        _cand("w1", "role:engineer", "engineer", "subscription_cli", "root-a"),
+        _cand("w2", "role:reviewer", "reviewer", "openai_api", "root-b"),   # 2º slot de trabajo → fuera
+        _cand("w3", "role:lead", "lead", "openai_api", "root-c"),           # lead openai → entra
+        _cand("w4", "role:lead2", "lead", "gemini_api", "root-c"),          # mismo root que w3 → fuera
+        _cand("w5", "role:scout", "file_scout", "gemini_api", "root-d"),    # lector gemini → entra
+    ]
+
+    chosen = select_parallel_batch(candidates, max_runs=4)
+
+    assert chosen == ["w1", "w3", "w5"]
+
+
+def test_select_parallel_batch_same_provider_never_concurrent() -> None:
+    from aiteam.heartbeat.scheduler import select_parallel_batch
+
+    candidates = [
+        _cand("w1", "a1", "lead", "openai_api", "r1"),
+        _cand("w2", "a2", "lead", "openai_api", "r2"),  # mismo proveedor → fuera
+    ]
+
+    assert select_parallel_batch(candidates, max_runs=3) == ["w1"]
+
+
+def test_select_parallel_batch_builtin_test_runner_skips_provider_constraint() -> None:
+    from aiteam.heartbeat.scheduler import select_parallel_batch
+
+    candidates = [
+        _cand("w1", "a1", "lead", "subscription_cli", "r1"),
+        _cand("w2", "a2", "test_runner", "subscription_cli", "r2"),  # builtin: no consume proveedor
+    ]
+
+    assert select_parallel_batch(candidates, max_runs=3) == ["w1", "w2"]
+
+
+def test_parallel_drain_executes_batch_concurrently(tmp_path: Path, monkeypatch) -> None:
+    """Dos runs de proveedores distintos y roots distintos deben solaparse
+    de verdad (no solo despacharse): cada runtime espera a que el otro haya
+    ARRANCADO antes de terminar — con dispatch secuencial esto deadlockearía."""
+    import threading
+
+    monkeypatch.setenv("AITEAM_PARALLEL_CHANNELS", "1")
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, adapter_type, status) VALUES "
+            "('role:lead', 'lead', 'L', 'subscription_cli', 'active'),"
+            "('role:scout', 'web_scout', 'S', 'openai_api', 'active')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES "
+            "('root-a', 'g1', 'A', 'in_progress', 'lead', 'role:lead'),"
+            "('root-b', 'g1', 'B', 'in_progress', 'web_scout', 'role:scout')"
+        )
+        conn.commit()
+
+    both_started = threading.Barrier(2, timeout=30)
+
+    class _BarrierRuntime:
+        def __init__(self, adapter_type: str, channel: str) -> None:
+            self.descriptor = AdapterDescriptor(adapter_type=adapter_type, channel=channel)
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            both_started.wait()  # solo pasa si el otro run también está corriendo
+            return ExecutionResult(status="completed", output="ok")
+
+    enqueue_wakeup(db_path, agent_id="role:lead", source="manual", reason="t", payload={"issue_id": "root-a"})
+    enqueue_wakeup(db_path, agent_id="role:scout", source="manual", reason="t", payload={"issue_id": "root-b"})
+
+    registry = AdapterRegistry([
+        _BarrierRuntime("subscription_cli", "subscription"),
+        _BarrierRuntime("openai_api", "api"),
+    ])
+    executor = RunExecutor(db_path, registry)
+    loop = HeartbeatLoop(db_path, executor)
+
+    dispatched = asyncio.run(loop.run_once())
+
+    assert dispatched == 2
+    with sqlite3.connect(str(db_path)) as conn:
+        statuses = [r[0] for r in conn.execute("SELECT status FROM runs")]
+    assert statuses == ["completed", "completed"]
+
+
+def test_parallel_flag_off_keeps_sequential_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AITEAM_PARALLEL_CHANNELS", raising=False)
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    enqueue_wakeup(db_path, agent_id="agent-1", source="manual", reason="t1")
+
+    registry = AdapterRegistry([_OkRuntime()])
+    loop = HeartbeatLoop(db_path, RunExecutor(db_path, registry))
+
+    assert asyncio.run(loop.run_once()) == 1

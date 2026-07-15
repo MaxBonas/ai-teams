@@ -52,6 +52,37 @@ INFRA_ERROR_CODES = frozenset({
 })
 
 
+# ── Paralelismo por canal (opt-in) ─────────────────────────────────────────────
+# El heartbeat es secuencial por diseño; con el flag activo puede ejecutar en
+# paralelo runs de PROVEEDORES distintos bajo restricciones estrictas. La
+# restricción crítica es el workspace compartido: dos runs que editan o
+# verifican archivos a la vez corrompen la atribución de deltas (snapshot
+# before/after) y la evidencia de review/tests. Por eso el batch admite COMO
+# MÁXIMO UN rol de "slot de trabajo" (edita o verifica el workspace); los
+# roles de lectura tolerante (lead-tier, scouts) pueden acompañarlo.
+WORK_SLOT_ROLES = frozenset({
+    "engineer", "software_engineer", "worker", "qa", "qa_engineer",
+    "reviewer", "code_reviewer", "test_runner",
+})
+
+
+def parallel_channels_enabled() -> bool:
+    """Flag opt-in del dispatch paralelo por canal (default OFF)."""
+    import os
+    return os.environ.get("AITEAM_PARALLEL_CHANNELS", "").strip().lower() in {"1", "true", "yes"}
+
+
+def parallel_batch_max() -> int:
+    """Tamaño máximo del batch paralelo (default 3, mín 2)."""
+    import os
+    raw = os.environ.get("AITEAM_PARALLEL_MAX", "").strip()
+    try:
+        value = int(raw) if raw else 3
+    except ValueError:
+        return 3
+    return max(2, value)
+
+
 def daily_cost_cap_cents() -> int:
     """Techo duro de gasto real (céntimos) por día natural UTC para TODO el
     proyecto. A diferencia del cost_breaker de gasto-sin-progreso (por subárbol,

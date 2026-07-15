@@ -139,6 +139,12 @@ class HeartbeatLoop:
             logger.exception("autonomy reconciler failed")
 
         dispatched = 0
+        from aiteam.policies import parallel_channels_enabled
+
+        if parallel_channels_enabled():
+            dispatched += await self._drain_parallel(loop)
+            return dispatched
+
         while True:
             try:
                 result = await loop.run_in_executor(None, self._scheduler.dispatch_next)
@@ -154,6 +160,71 @@ class HeartbeatLoop:
             dispatched += 1
 
         return dispatched
+
+    async def _drain_parallel(self, loop: asyncio.AbstractEventLoop) -> int:
+        """Drena la cola en batches concurrentes por proveedor (opt-in).
+
+        Cada batch respeta las restricciones de ``select_parallel_batch``
+        (proveedores/agentes/subtrees distintos, un solo slot de trabajo). Los
+        batches se ejecutan con gather y se espera el batch COMPLETO antes de
+        formar el siguiente — sin solapamiento entre batches, la invariante de
+        "un editor a la vez" se mantiene globalmente.
+        """
+        from aiteam.heartbeat.scheduler import batch_candidates, select_parallel_batch
+        from aiteam.policies import parallel_batch_max
+
+        dispatched = 0
+        while True:
+            try:
+                candidates = await loop.run_in_executor(
+                    None, lambda: batch_candidates(self.db_path)
+                )
+                chosen = select_parallel_batch(candidates, max_runs=parallel_batch_max())
+            except Exception:
+                logger.exception("parallel batch selection failed — falling back to single dispatch")
+                chosen = []
+            if not chosen:
+                # Cola vacía o sin candidatos válidos: un último dispatch_next
+                # secuencial drena wakeups sin agente/issue que la selección
+                # no supo clasificar, garantizando progreso.
+                result = await loop.run_in_executor(None, self._scheduler.dispatch_next)
+                if result is None:
+                    return dispatched
+                try:
+                    await loop.run_in_executor(None, self.executor.execute, result)
+                except Exception:
+                    logger.exception("executor.execute failed for run %s", result.run.get("id"))
+                dispatched += 1
+                continue
+
+            claims: list[Any] = []
+            for wakeup_id in chosen:
+                try:
+                    result = await loop.run_in_executor(
+                        None, lambda wid=wakeup_id: self._scheduler.dispatch_next(wakeup_ids={wid})
+                    )
+                except Exception:
+                    logger.exception("dispatch_next failed for wakeup %s", wakeup_id)
+                    continue
+                if result is not None:
+                    claims.append(result)
+            if not claims:
+                continue
+            if len(claims) > 1:
+                logger.info(
+                    "parallel dispatch: executing %d runs concurrently (%s)",
+                    len(claims),
+                    ", ".join(str(c.run.get("agent_id")) for c in claims),
+                )
+
+            async def _run_one(dispatch: Any) -> None:
+                try:
+                    await loop.run_in_executor(None, self.executor.execute, dispatch)
+                except Exception:
+                    logger.exception("executor.execute failed for run %s", dispatch.run.get("id"))
+
+            await asyncio.gather(*(_run_one(c) for c in claims))
+            dispatched += len(claims)
 
     async def run_forever(self) -> None:
         """Loop forever: run_once then sleep tick_interval_sec."""
