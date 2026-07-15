@@ -6045,7 +6045,10 @@ def _execute_file_ops(
             continue
 
         try:
-            body = str(op.get("body") or "")
+            # 'body' es el contrato; 'content' es el alias que los LLM emiten
+            # con frecuencia — sin esta tolerancia el op escribía un archivo
+            # VACÍO en silencio (lo cazó el canario e2e con su propio stub).
+            body = str(op.get("body") if op.get("body") is not None else (op.get("content") or ""))
             if op_type == "write_file":
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(body, encoding="utf-8")

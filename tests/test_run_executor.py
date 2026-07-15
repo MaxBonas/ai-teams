@@ -3793,3 +3793,17 @@ def test_cross_provider_review_can_be_disabled(tmp_path: Path, monkeypatch) -> N
     assert executor._enforce_cross_provider_review(
         issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
     ) is False
+
+
+def test_file_ops_accepts_content_as_body_alias(tmp_path: Path) -> None:
+    """Cazado por el canario e2e: un op con 'content' en vez de 'body'
+    escribía un archivo VACIO en silencio."""
+    from aiteam.heartbeat.executor import _execute_file_ops
+
+    touched = _execute_file_ops(
+        [{"op": "write_file", "path": "x.py", "content": "print('hola')\n"}],
+        tmp_path,
+    )
+
+    assert touched == ["x.py"]
+    assert (tmp_path / "x.py").read_text(encoding="utf-8") == "print('hola')\n"
