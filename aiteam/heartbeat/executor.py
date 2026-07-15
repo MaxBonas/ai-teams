@@ -3648,7 +3648,11 @@ class RunExecutor:
                 candidates.append(profile)
         if not candidates:
             return False
-        selection = choose_adapter_for_role(agent_role, None, candidates)
+        from aiteam.hiring_economics import demoted_profile_ids as _demoted  # noqa: PLC0415
+        selection = choose_adapter_for_role(
+            agent_role, None, candidates,
+            demoted_profile_ids=_demoted(self.db_path, candidates),
+        )
         if not selection:
             return False
 
@@ -3817,7 +3821,11 @@ class RunExecutor:
         ]
         if not candidates:
             return False
-        selection = choose_adapter_for_role(agent_role, None, candidates)
+        from aiteam.hiring_economics import demoted_profile_ids  # noqa: PLC0415
+        selection = choose_adapter_for_role(
+            agent_role, None, candidates,
+            demoted_profile_ids=demoted_profile_ids(self.db_path, candidates),
+        )
         if not selection or str(selection.get("adapter_type") or "") == failed_adapter_type:
             return False
 

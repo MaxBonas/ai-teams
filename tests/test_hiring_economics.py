@@ -323,3 +323,80 @@ def test_provider_escalation_threshold_env_tunable(monkeypatch: pytest.MonkeyPat
     assert provider_escalation_threshold() == 0.1
     monkeypatch.setenv("AITEAM_PROVIDER_ESCALATION_THRESHOLD", "bogus")
     assert provider_escalation_threshold() == 0.25
+
+
+def test_router_health_window_excludes_old_failures(tmp_path: Path) -> None:
+    """La ventana temporal: fallos de hace días no cuentan en la vista 24h."""
+    db = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    _seed_runs(db, [("openai", "completed", None)] * 5)
+    with sqlite3.connect(str(db)) as conn:
+        # 5 fallos de infra ANTIGUOS (hace 3 días)
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO runs (id, agent_id, provider, status, error_code, created_at) "
+                "VALUES (?, 'agent-1', 'openai', 'failed', 'api_error', datetime('now', '-3 days'))",
+                (f"old-{i}",),
+            )
+        conn.commit()
+
+    historic = hiring_economics.provider_router_health(db)
+    recent = hiring_economics.provider_router_health(db, window_hours=24)
+
+    assert historic[0]["infra_failures"] == 5
+    assert historic[0]["unhealthy"] is True
+    assert recent[0]["infra_failures"] == 0, "los fallos viejos no deben gritar en la ventana reciente"
+    assert recent[0]["unhealthy"] is False
+
+
+def test_demoted_profile_ids_maps_unhealthy_adapter_types(tmp_path: Path) -> None:
+    db = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute("INSERT INTO agents (id, role, name, adapter_type) VALUES ('agent-1','engineer','E','subscription_cli')")
+        for i in range(6):
+            conn.execute(
+                "INSERT INTO runs (id, agent_id, provider, adapter_type, status, error_code) "
+                "VALUES (?, 'agent-1', 'claude-code', 'subscription_cli', 'failed', 'subscription_cli_not_found')",
+                (f"r-{i}",),
+            )
+        conn.commit()
+
+    profiles = [
+        {"id": "codex_subscription", "adapter_type": "subscription_cli"},
+        {"id": "openai_api", "adapter_type": "openai_api"},
+    ]
+    demoted = hiring_economics.demoted_profile_ids(db, profiles)
+
+    assert demoted == {"codex_subscription"}
+
+
+def test_choose_adapter_demotes_but_never_excludes() -> None:
+    from aiteam.project_adapters import choose_adapter_for_role
+
+    profiles = [
+        {"id": "codex_subscription", "adapter_type": "subscription_cli", "channel": "subscription", "status": "connected"},
+        {"id": "openai_api", "adapter_type": "openai_api", "channel": "api", "status": "connected"},
+    ]
+
+    # Sin demote: el scoring normal decide (subscription suele ganar para engineer).
+    baseline = choose_adapter_for_role("engineer", None, list(profiles))
+    assert baseline is not None
+
+    # Con el ganador demotado: el otro pasa delante.
+    demoted = choose_adapter_for_role(
+        "engineer", None, list(profiles),
+        demoted_profile_ids={str(baseline.get("adapter_profile_id") or baseline["adapter_config"].get("profile_id"))},
+    )
+    assert demoted is not None
+    assert demoted["adapter_type"] != baseline["adapter_type"]
+
+    # Si TODOS están demotados, se sigue eligiendo uno (nunca excluir).
+    all_demoted = choose_adapter_for_role(
+        "engineer", None, list(profiles),
+        demoted_profile_ids={"codex_subscription", "openai_api"},
+    )
+    assert all_demoted is not None

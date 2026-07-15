@@ -207,7 +207,9 @@ def detect_policy_deviations(db_path: Path) -> list[dict[str, Any]]:
     return deviations
 
 
-def provider_router_health(db_path: Path, *, min_runs: int = 5) -> list[dict[str, Any]]:
+def provider_router_health(
+    db_path: Path, *, min_runs: int = 5, window_hours: int | None = None
+) -> list[dict[str, Any]]:
     """Tasa de escalación (fallos de infra) por proveedor, como señal de salud
     del router.
 
@@ -225,6 +227,11 @@ def provider_router_health(db_path: Path, *, min_runs: int = 5) -> list[dict[str
     from aiteam.policies import INFRA_ERROR_CODES, provider_escalation_threshold
 
     placeholders = ",".join("?" for _ in INFRA_ERROR_CODES)
+    window_filter = ""
+    params: tuple[Any, ...] = tuple(INFRA_ERROR_CODES)
+    if window_hours and window_hours > 0:
+        window_filter = "AND created_at >= datetime('now', ?)"
+        params = (*params, f"-{int(window_hours)} hours")
     try:
         with contextlib.closing(_connect(db_path)) as conn:
             rows = conn.execute(
@@ -234,12 +241,14 @@ def provider_router_health(db_path: Path, *, min_runs: int = 5) -> list[dict[str
                     COUNT(*) AS total_runs,
                     SUM(CASE WHEN status = 'failed'
                               AND error_code IN ({placeholders})
-                             THEN 1 ELSE 0 END) AS infra_failures
+                             THEN 1 ELSE 0 END) AS infra_failures,
+                    GROUP_CONCAT(DISTINCT adapter_type) AS adapter_types
                 FROM runs
                 WHERE provider IS NOT NULL
+                  {window_filter}
                 GROUP BY COALESCE(provider, '?')
                 """,
-                tuple(INFRA_ERROR_CODES),
+                params,
             ).fetchall()
     except sqlite3.Error:
         return []
@@ -259,9 +268,38 @@ def provider_router_health(db_path: Path, *, min_runs: int = 5) -> list[dict[str
             "escalation_rate": round(rate, 4),
             "threshold": threshold,
             "unhealthy": rate > threshold,
+            "adapter_types": sorted(str(row["adapter_types"] or "").split(",")) if row["adapter_types"] else [],
+            "window_hours": window_hours,
         })
     out.sort(key=lambda item: item["escalation_rate"], reverse=True)
     return out
+
+
+def demoted_profile_ids(
+    db_path: Path, profiles: list[dict[str, Any]], *, window_hours: int = 24
+) -> set[str]:
+    """Perfiles a DEMOTAR en el routing porque su adapter corre sobre un
+    proveedor unhealthy en la ventana reciente.
+
+    Cierra el lazo salud→routing: la métrica ya diagnosticaba (proyecto Unity,
+    claude-code al 24% de infra-fallos) pero el router seguía eligiendo el
+    mismo canal roto. Demote = reordenar al final, NUNCA excluir: si es el
+    único canal conectado, se sigue usando.
+    """
+    try:
+        unhealthy_adapter_types: set[str] = set()
+        for row in provider_router_health(db_path, window_hours=window_hours):
+            if row["unhealthy"]:
+                unhealthy_adapter_types.update(t for t in row["adapter_types"] if t)
+        if not unhealthy_adapter_types:
+            return set()
+        return {
+            str(p.get("id") or "")
+            for p in profiles
+            if str(p.get("adapter_type") or "") in unhealthy_adapter_types
+        }
+    except Exception:
+        return set()
 
 
 def _zero_cost_channel_connected(db_path: Path) -> bool:

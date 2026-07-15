@@ -108,7 +108,13 @@ def project_profiles(runtime_dir: Path) -> list[dict[str, Any]]:
     return available_project_profiles(ids)
 
 
-def choose_adapter_for_role(role: str, seniority: str | None, profiles: list[dict[str, Any]]) -> dict[str, Any] | None:
+def choose_adapter_for_role(
+    role: str,
+    seniority: str | None,
+    profiles: list[dict[str, Any]],
+    *,
+    demoted_profile_ids: set[str] | None = None,
+) -> dict[str, Any] | None:
     if not profiles:
         return None
     role_key = str(role or "").strip().lower()
@@ -120,6 +126,12 @@ def choose_adapter_for_role(role: str, seniority: str | None, profiles: list[dic
         reverse=True,
     )
     ranked = _apply_cost_policy(role_key, ranked)
+    # Feedback salud→routing: los perfiles de proveedores unhealthy (ventana
+    # reciente, hiring_economics.demoted_profile_ids) van al final — sort
+    # estable, así que el orden interno de cada grupo se conserva. Nunca se
+    # excluye: un canal roto sigue siendo mejor que ningún canal.
+    if demoted_profile_ids:
+        ranked = sorted(ranked, key=lambda p: str(p.get("id") or "") in demoted_profile_ids)
     profile = ranked[0]
     model = _choose_model(str(profile.get("id") or ""), role=role_key, needs_senior=needs_senior)
     config = {"profile_id": profile.get("id")}

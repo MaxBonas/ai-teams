@@ -393,7 +393,15 @@ async def get_loop_health(request: Request):
             router_health = provider_router_health(db)
         except Exception:
             router_health = []
-        providers_unhealthy = sorted(r["provider"] for r in router_health if r["unhealthy"])
+        try:
+            router_health_24h = provider_router_health(db, window_hours=24)
+        except Exception:
+            router_health_24h = []
+        # La atención se decide con la ventana RECIENTE: un proveedor que falló
+        # hace una semana y ya se arregló no debe seguir gritando en el panel.
+        providers_unhealthy = sorted(
+            r["provider"] for r in (router_health_24h or router_health) if r["unhealthy"]
+        )
 
         # Estado del cap de coste diario (real, por-token) para el dashboard.
         cost_cap: dict[str, Any] = {"enabled": False}
@@ -434,6 +442,7 @@ async def get_loop_health(request: Request):
             "providers": providers,
             "providers_degraded": providers_degraded,
             "router_health": router_health,
+            "router_health_24h": router_health_24h,
             "providers_unhealthy": providers_unhealthy,
             "cost_cap": cost_cap,
             "policy_deviations": policy_deviations,
