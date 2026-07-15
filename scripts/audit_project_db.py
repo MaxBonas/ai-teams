@@ -90,6 +90,30 @@ def report(project_dir: Path, *, excerpts: bool) -> None:
             f"{r['c'] / 100:.2f} USD, {r['i']:,} in / {r['o']:,} out"
         )
 
+    section("SALUD DEL ROUTER (tasa de infra-fallos por proveedor)")
+    infra_codes = (
+        "api_error", "subscription_cli_not_found", "subscription_cli_nonzero_exit",
+        "subscription_cli_timeout", "subscription_cli_error", "subscription_cli_parse_error",
+        "liveness_timeout",
+    )
+    ph = ",".join("?" for _ in infra_codes)
+    router_rows = q(
+        f"SELECT provider, COUNT(*) n, "
+        f"SUM(CASE WHEN status='failed' AND error_code IN ({ph}) THEN 1 ELSE 0 END) infra "
+        f"FROM runs WHERE provider IS NOT NULL GROUP BY provider ORDER BY n DESC",
+        infra_codes,
+    ).fetchall()
+    any_router = False
+    for r in router_rows:
+        if r["n"] < 5:
+            continue
+        any_router = True
+        rate = (r["infra"] or 0) / r["n"]
+        flag = "!! " if rate > 0.25 else "OK "
+        print(f"  {flag}{r['provider']}: {rate:.0%} infra-fallos ({r['infra']}/{r['n']} runs)")
+    if not any_router:
+        print("  (sin proveedor con >=5 runs)")
+
     section("INTERACCIONES (escalaciones)")
     for r in q("SELECT status, COUNT(*) n FROM issue_thread_interactions GROUP BY status"):
         print(f"  {r['status']}: {r['n']}")

@@ -250,3 +250,76 @@ def test_cost_policy_warning_comment_is_idempotent(tmp_path: Path, isolated_user
         ).fetchone()
     assert comments[0] == 1
     assert events[0] == 1
+
+
+def _seed_runs(db_path: Path, rows: list[tuple[str, str, str | None]]) -> None:
+    """rows: (provider, status, error_code) — inserta runs mínimos."""
+    import uuid
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("INSERT OR IGNORE INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT OR IGNORE INTO agents (id, role, name, adapter_type) VALUES ('agent-1','engineer','E','subscription_cli')"
+        )
+        for provider, status, error_code in rows:
+            conn.execute(
+                "INSERT INTO runs (id, agent_id, provider, status, error_code) VALUES (?,?,?,?,?)",
+                (f"run-{uuid.uuid4()}", "agent-1", provider, status, error_code),
+            )
+        conn.commit()
+
+
+def test_provider_router_health_flags_high_infra_failure_rate(tmp_path: Path) -> None:
+    """Patrón del proyecto Unity: claude-code con muchos
+    subscription_cli_not_found debe marcarse unhealthy."""
+    db = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    rows = [("claude-code", "completed", None)] * 6 + [
+        ("claude-code", "failed", "subscription_cli_not_found")
+    ] * 4  # 4/10 = 40% infra
+    _seed_runs(db, rows)
+
+    health = hiring_economics.provider_router_health(db)
+
+    assert len(health) == 1
+    entry = health[0]
+    assert entry["provider"] == "claude-code"
+    assert entry["total_runs"] == 10
+    assert entry["infra_failures"] == 4
+    assert entry["escalation_rate"] == 0.4
+    assert entry["unhealthy"] is True
+
+
+def test_provider_router_health_ignores_product_failures(tmp_path: Path) -> None:
+    """Un fallo que NO es de infra (p.ej. sin error_code) no cuenta como
+    escalación — no penaliza al proveedor por malas decisiones del agente."""
+    db = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    rows = [("openai", "completed", None)] * 8 + [("openai", "failed", None)] * 2
+    _seed_runs(db, rows)
+
+    health = hiring_economics.provider_router_health(db)
+
+    assert health[0]["infra_failures"] == 0
+    assert health[0]["escalation_rate"] == 0.0
+    assert health[0]["unhealthy"] is False
+
+
+def test_provider_router_health_skips_low_sample_providers(tmp_path: Path) -> None:
+    """Menos de min_runs runs = ruido estadístico, no se reporta."""
+    db = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    _seed_runs(db, [("gemini", "failed", "api_error")] * 3)  # solo 3 runs
+
+    assert hiring_economics.provider_router_health(db) == []
+
+
+def test_provider_escalation_threshold_env_tunable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aiteam.policies import provider_escalation_threshold
+
+    monkeypatch.setenv("AITEAM_PROVIDER_ESCALATION_THRESHOLD", "0.1")
+    assert provider_escalation_threshold() == 0.1
+    monkeypatch.setenv("AITEAM_PROVIDER_ESCALATION_THRESHOLD", "bogus")
+    assert provider_escalation_threshold() == 0.25

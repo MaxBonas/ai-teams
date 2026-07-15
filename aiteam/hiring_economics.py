@@ -207,6 +207,63 @@ def detect_policy_deviations(db_path: Path) -> list[dict[str, Any]]:
     return deviations
 
 
+def provider_router_health(db_path: Path, *, min_runs: int = 5) -> list[dict[str, Any]]:
+    """Tasa de escalación (fallos de infra) por proveedor, como señal de salud
+    del router.
+
+    Patrón 2026 (skill multi-model-orchestration): el router es infraestructura
+    de producción y su salud se mide. Aquí un run que falla en el transporte del
+    proveedor o el entorno del CLI (INFRA_ERROR_CODES) es una "escalación"
+    involuntaria — el trabajo tuvo que recuperarse en vez de completarse. Una
+    tasa alta significa que ESE proveedor está fallando (credenciales, rate
+    limits, binario ausente), no que el equipo sea malo: fue exactamente el
+    patrón del proyecto Unity (claude-code al 24%, subscription_cli_not_found).
+
+    Devuelve una fila por proveedor con >= ``min_runs`` runs, ordenada por tasa
+    descendente, marcando ``unhealthy`` cuando supera el umbral env-tunable.
+    """
+    from aiteam.policies import INFRA_ERROR_CODES, provider_escalation_threshold
+
+    placeholders = ",".join("?" for _ in INFRA_ERROR_CODES)
+    try:
+        with contextlib.closing(_connect(db_path)) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    COALESCE(provider, '?') AS provider,
+                    COUNT(*) AS total_runs,
+                    SUM(CASE WHEN status = 'failed'
+                              AND error_code IN ({placeholders})
+                             THEN 1 ELSE 0 END) AS infra_failures
+                FROM runs
+                WHERE provider IS NOT NULL
+                GROUP BY COALESCE(provider, '?')
+                """,
+                tuple(INFRA_ERROR_CODES),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+
+    threshold = provider_escalation_threshold()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        total = int(row["total_runs"] or 0)
+        if total < min_runs:
+            continue
+        infra = int(row["infra_failures"] or 0)
+        rate = infra / total if total else 0.0
+        out.append({
+            "provider": str(row["provider"]),
+            "total_runs": total,
+            "infra_failures": infra,
+            "escalation_rate": round(rate, 4),
+            "threshold": threshold,
+            "unhealthy": rate > threshold,
+        })
+    out.sort(key=lambda item: item["escalation_rate"], reverse=True)
+    return out
+
+
 def _zero_cost_channel_connected(db_path: Path) -> bool:
     try:
         profiles = project_profiles(Path(db_path).parent)

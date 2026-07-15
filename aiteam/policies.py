@@ -35,6 +35,37 @@ NON_EDITING_ROLES = frozenset({"lead", "team_lead", "file_scout", "web_scout", "
 # Adapter types that call a remote LLM in-process (as opposed to CLI/builtin).
 LLM_ADAPTER_TYPES = frozenset({"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"})
 
+# ── Fallos de infraestructura (no de producto) ─────────────────────────────────
+# Un run con uno de estos error_code falló en el transporte del proveedor o en
+# el entorno del CLI, NO por una mala decisión del agente. Fuente única para:
+# el backoff de reintento (liveness), el que no cuenten como lead.unblock_skipped,
+# y la métrica de salud del router (provider_router_health) — una tasa alta de
+# estos por proveedor significa "el proveedor está fallando", no "el equipo es malo".
+INFRA_ERROR_CODES = frozenset({
+    "api_error",                     # 429 / timeout / 5xx del proveedor (http_retry agotado)
+    "subscription_cli_not_found",    # binario del CLI ausente / config rota
+    "subscription_cli_nonzero_exit", # el CLI salió !=0 (auth, modelo rechazado…)
+    "subscription_cli_timeout",      # el CLI no terminó en su ventana
+    "subscription_cli_error",        # excepción lanzando el CLI
+    "subscription_cli_parse_error",  # salida del CLI ilegible
+    "liveness_timeout",              # el proceso se colgó y el liveness lo mató
+})
+
+
+def provider_escalation_threshold() -> float:
+    """Fracción de runs de infra por encima de la cual un proveedor se marca
+    'unhealthy' en el router. A diferencia de una cascada de calidad (banda sana
+    5-50%), aquí escalar = recuperarse de un fallo: 0% es lo ideal y alto es malo.
+    Env-tunable: ``AITEAM_PROVIDER_ESCALATION_THRESHOLD`` (default 0.25).
+    """
+    import os
+    raw = os.environ.get("AITEAM_PROVIDER_ESCALATION_THRESHOLD", "").strip()
+    try:
+        value = float(raw) if raw else 0.25
+    except ValueError:
+        return 0.25
+    return value if 0.0 < value <= 1.0 else 0.25
+
 # ── Waiver de verificación runtime ─────────────────────────────────────────────
 # Contrato entre el quality gate de tests y las escalaciones al usuario: cuando
 # el entorno no puede ejecutar la suite, el Lead (o el propio sistema, tras

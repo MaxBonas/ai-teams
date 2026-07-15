@@ -15,7 +15,7 @@ from aiteam.db.documents import get_context_summary, get_document
 from aiteam.db.interactions import list_interactions
 from aiteam.db.issues import create_issue, get_issue, list_issues, update_issue
 from aiteam.db.liveness import diagnose_issue
-from aiteam.hiring_economics import detect_policy_deviations
+from aiteam.hiring_economics import detect_policy_deviations, provider_router_health
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
 from aiteam.provider_governor import GOVERNOR
 from aiteam.run_profiles import normalize_run_profile, LEAD_QUORUM
@@ -388,7 +388,17 @@ async def get_loop_health(request: Request):
             policy_deviations = detect_policy_deviations(db)
         except Exception:
             policy_deviations = []
-        requires_attention = bool(detected_loops) or any(r["skip_count"] >= 2 for r in at_risk) or bool(providers_degraded)
+        try:
+            router_health = provider_router_health(db)
+        except Exception:
+            router_health = []
+        providers_unhealthy = sorted(r["provider"] for r in router_health if r["unhealthy"])
+        requires_attention = (
+            bool(detected_loops)
+            or any(r["skip_count"] >= 2 for r in at_risk)
+            or bool(providers_degraded)
+            or bool(providers_unhealthy)
+        )
         return {
             "success": True,
             "detected_loops": detected_loops,
@@ -396,6 +406,8 @@ async def get_loop_health(request: Request):
             "thin_delegations_last_24h": thin_count,
             "providers": providers,
             "providers_degraded": providers_degraded,
+            "router_health": router_health,
+            "providers_unhealthy": providers_unhealthy,
             "policy_deviations": policy_deviations,
             "summary": {
                 "total_loops": len(detected_loops),
