@@ -35,6 +35,16 @@ NON_EDITING_ROLES = frozenset({"lead", "team_lead", "file_scout", "web_scout", "
 # Adapter types that call a remote LLM in-process (as opposed to CLI/builtin).
 LLM_ADAPTER_TYPES = frozenset({"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"})
 
+# ── Waiver de verificación runtime ─────────────────────────────────────────────
+# Contrato entre el quality gate de tests y las escalaciones al usuario: cuando
+# el entorno no puede ejecutar la suite, el Lead (o el propio sistema, tras
+# denegaciones repetidas) escala una request_confirmation cuyo payload lleva
+# este reason. Si el usuario la ACEPTA, el gate test_runner_exit_zero_required
+# queda dispensado para esa issue — sin esto, la decisión explícita del usuario
+# ("cierra sin pytest") era ignorada en silencio y el proyecto quedaba en
+# deadlock (visto en vivo en el proyecto CLI Notas, 2026-07-15).
+RUNTIME_VERIFICATION_WAIVER_REASON = "runtime_verification_unavailable"
+
 # ── Directorios de ruido a excluir en cualquier escaneo del workspace ──────────
 # Auto-generados por herramientas/VCS — nunca código del proyecto. Antes vivía
 # triplicado (workspace_evidence.py, executor.py, api/routers/workspace.py) sin

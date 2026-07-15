@@ -7,6 +7,8 @@ import logging
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -58,6 +60,7 @@ from aiteam.policies import (  # noqa: E402
     LEAD_TIER_ROLES as _LEAD_TIER_ROLES_P,
     LLM_ADAPTER_TYPES as _LLM_ADAPTER_TYPES,
     NON_EDITING_ROLES as _NON_EDITING_ROLES,
+    RUNTIME_VERIFICATION_WAIVER_REASON as _RUNTIME_VERIFICATION_WAIVER_REASON,
     TERMINAL_ISSUE_STATUSES as _TERMINAL_ISSUE_STATUSES_P,
     WORKSPACE_NOISE_DIRS as _SKIP_DIRS,
     cost_breaker_threshold_cents as _cost_breaker_threshold_cents,
@@ -690,7 +693,7 @@ class RunExecutor:
         # ── Provider pacing gate ─────────────────────────────────────────────
         # Runs execute sequentially and share each provider's TPM budget; wait
         # out any active cooldown (learned from 429s) before spending tokens.
-        if adapter_type in _LLM_ADAPTER_TYPES:
+        if adapter_type in _LLM_ADAPTER_TYPES and str(agent_role or "").strip().lower() != "test_runner":
             _paced_seconds = GOVERNOR.acquire(runtime.descriptor.provider)
             if _paced_seconds > 0.5:
                 log_activity(
@@ -709,7 +712,13 @@ class RunExecutor:
         result: ExecutionResult
         try:
             _llm_adapters = {"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"}
-            if adapter_type in _llm_adapters:
+            if str(agent_role or "").strip().lower() == "test_runner":
+                # Ejecutar una suite es determinista (subprocess + exit code):
+                # un LLM aquí solo añade coste y la posibilidad de alucinar la
+                # evidencia que el quality gate exige. El builtin corre SIEMPRE,
+                # sea cual sea el adapter contratado para el rol.
+                result = self._execute_builtin_test_runner(run=run, agent_id=agent_id)
+            elif adapter_type in _llm_adapters:
                 # Real LLM adapter — skip builtin path entirely
                 result = runtime.execute(run, env)
             elif adapter_type == "lead_builtin" or (adapter_type == "manual" and agent_role in {"lead", "team_lead"}):
@@ -1881,6 +1890,170 @@ class RunExecutor:
             actions={"issue_status": "done", "notify_supervisor": True},
         )
 
+    def _execute_builtin_test_runner(self, *, run: dict[str, Any], agent_id: str) -> ExecutionResult:
+        """Ejecuta la suite de tests del workspace de forma determinista.
+
+        Produce el ---AGENT-REPORT--- que ``_test_runner_gate_line`` exige
+        (result aprobatorio + "exit 0" en evidence) sin pasar por un LLM: la
+        evidencia del gate sale de un exit code real, no de la narración de un
+        modelo — y cuesta cero tokens. El fallo de la suite NO es un fallo de
+        la run: el runner cumplió informando, la issue queda blocked para que
+        el Lead re-delegue el arreglo.
+        """
+        issue_id = str(run.get("issue_id") or "")
+        root = workspace_root_for_db(self.db_path)
+        cmd, suite_kind = self._resolve_test_command(root)
+        if cmd is None:
+            output = (
+                "Test runner: no se encontró una suite ejecutable en el workspace "
+                "(ni señales pytest con un Python disponible, ni package.json con script test).\n\n"
+                "---AGENT-REPORT---\n"
+                "role: test_runner\n"
+                "result: blocked\n"
+                "issue_status: blocked\n"
+                "blocker: no hay comando de tests ejecutable en este entorno\n"
+                "evidence: escaneo del workspace sin suite ejecutable\n"
+            )
+            return ExecutionResult(
+                status="completed",
+                output=output,
+                actions={"issue_status": "blocked", "notify_supervisor": True},
+            )
+
+        timeout_sec = int(os.environ.get("AITEAM_TEST_RUNNER_TIMEOUT_SEC", "600") or "600")
+        cmd_display = " ".join(cmd)
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_sec,
+            )
+            exit_code = int(proc.returncode)
+            tail = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+            tail = tail.strip()[-2000:]
+        except subprocess.TimeoutExpired:
+            output = (
+                f"Test runner: `{cmd_display}` superó el timeout de {timeout_sec}s.\n\n"
+                "---AGENT-REPORT---\n"
+                "role: test_runner\n"
+                "result: blocked\n"
+                "issue_status: blocked\n"
+                f"blocker: la suite no terminó en {timeout_sec}s (timeout)\n"
+                f"evidence: {cmd_display} -> timeout tras {timeout_sec}s\n"
+            )
+            return ExecutionResult(
+                status="completed",
+                output=output,
+                actions={"issue_status": "blocked", "notify_supervisor": True},
+            )
+        except Exception as exc:
+            return ExecutionResult(status="failed", error=f"test runner exec failed: {exc}", exit_code=1)
+
+        passed = exit_code == 0
+        # "exit 0" literal en evidence: es lo que _test_runner_gate_line busca
+        # cuando el report llega por la tabla agent_reports (que no conserva
+        # el campo exit_code, solo los REPORT_FIELDS).
+        evidence = f"{cmd_display} -> exit {exit_code} ({suite_kind})"
+        summary_line = tail.splitlines()[-1].strip() if tail else ""
+        if summary_line:
+            evidence += f"; {summary_line[:160]}"
+        report = (
+            "---AGENT-REPORT---\n"
+            "role: test_runner\n"
+            f"result: {'done' if passed else 'failed'}\n"
+            f"issue_status: {'done' if passed else 'blocked'}\n"
+            + ("" if passed else f"blocker: la suite falló con exit {exit_code}\n")
+            + f"evidence: {evidence}\n"
+        )
+        output = (
+            f"Test runner (builtin determinista): `{cmd_display}` en {root}\n"
+            f"Exit code: {exit_code}\n\n"
+            f"--- salida (tail) ---\n{tail}\n\n{report}"
+        )
+        return ExecutionResult(
+            status="completed",
+            output=output,
+            exit_code=exit_code,
+            actions={"issue_status": "done" if passed else "blocked", "notify_supervisor": True},
+        )
+
+    def _resolve_test_command(self, root: Path) -> tuple[list[str] | None, str]:
+        """Detecta la suite del workspace y devuelve (comando, tipo).
+
+        Python primero (pytest con el venv del workspace o, en su defecto, el
+        intérprete del orquestador — que siempre existe y trae pytest), luego
+        npm test si package.json declara un script test real. Devuelve
+        (None, "") si no hay nada ejecutable.
+        """
+        has_pytest_signals = False
+        node_pkg: Path | None = None
+        try:
+            for rel_path in snapshot_workspace(root):
+                path_key = str(rel_path).replace("\\", "/")
+                name = path_key.rsplit("/", 1)[-1]
+                if name in {"pytest.ini", "tox.ini", "noxfile.py"}:
+                    has_pytest_signals = True
+                elif path_key.startswith(("tests/", "test/")) and name.startswith("test_") and name.endswith(".py"):
+                    has_pytest_signals = True
+                elif name.startswith("test_") and name.endswith(".py"):
+                    has_pytest_signals = True
+                elif name == "pyproject.toml":
+                    with contextlib.suppress(Exception):
+                        if "pytest" in (root / rel_path).read_text(encoding="utf-8", errors="ignore").lower():
+                            has_pytest_signals = True
+                elif name == "package.json" and node_pkg is None:
+                    node_pkg = root / rel_path
+        except Exception:
+            logger.warning("test command scan failed for %s", root, exc_info=True)
+            return None, ""
+
+        if has_pytest_signals:
+            python = self._resolve_workspace_python(root)
+            if python:
+                return [python, "-m", "pytest", "-q"], "pytest"
+
+        if node_pkg is not None:
+            with contextlib.suppress(Exception):
+                pkg = json.loads(node_pkg.read_text(encoding="utf-8", errors="ignore"))
+                test_script = str((pkg.get("scripts") or {}).get("test") or "")
+                if test_script and "no test specified" not in test_script:
+                    import shutil as _shutil  # noqa: PLC0415
+                    npm = _shutil.which("npm.cmd") or _shutil.which("npm")
+                    if npm:
+                        return [npm, "test", "--silent"], "npm test"
+        return None, ""
+
+    def _resolve_workspace_python(self, root: Path) -> str | None:
+        """Python con pytest importable: venv del workspace > intérprete propio."""
+        candidates = [
+            root / "venv" / "Scripts" / "python.exe",
+            root / ".venv" / "Scripts" / "python.exe",
+            root / "venv" / "bin" / "python",
+            root / ".venv" / "bin" / "python",
+        ]
+        for candidate in candidates:
+            if not candidate.exists():
+                continue
+            with contextlib.suppress(Exception):
+                probe = subprocess.run(
+                    [str(candidate), "-c", "import pytest"],
+                    capture_output=True, timeout=30,
+                )
+                if probe.returncode == 0:
+                    return str(candidate)
+        with contextlib.suppress(Exception):
+            probe = subprocess.run(
+                [sys.executable, "-c", "import pytest"],
+                capture_output=True, timeout=30,
+            )
+            if probe.returncode == 0:
+                return sys.executable
+        return None
+
     def _apply_result_actions(
         self,
         *,
@@ -2117,6 +2290,17 @@ class RunExecutor:
                         )
                     except Exception:
                         pass
+                    # La denegación NUNCA puede ser silenciosa: sin esto el Lead
+                    # cree que cerró ("marco como completada"), la issue queda
+                    # blocked/in_progress sin wakeups pendientes y el proyecto
+                    # se estanca hasta que un humano mira la activity_log
+                    # (deadlock visto en vivo en CLI Notas, 2026-07-15).
+                    self._notify_quality_gate_denial(
+                        issue_id=issue_id,
+                        agent_id=agent_id,
+                        run_id=str(run.get("id")),
+                        reason=_quality_denied_reason,
+                    )
                     issue_status = None
         if isinstance(issue_status, str) and issue_status:
             update_issue(self.db_path, issue_id=issue_id, status=issue_status)
@@ -4006,8 +4190,136 @@ class RunExecutor:
             return None
         test_gate = self._test_runner_gate_line(rows)
         if test_gate and test_gate.startswith("BLOQUEANTE:"):
+            if self._runtime_verification_waived(issue_id):
+                return None
             return "test_runner_exit_zero_required"
         return None
+
+    # Avisos correctivos por (issue, reason) antes de escalar al usuario. Dos
+    # es deliberado: el primer aviso corrige un descuido del Lead; si el
+    # segundo tampoco produce evidencia, es que el equipo NO PUEDE (entorno
+    # sin runtime, rol inexistente) y seguir despertándolo solo quema tokens.
+    _GATE_NOTIFY_CAP = 2
+
+    def _notify_quality_gate_denial(
+        self, *, issue_id: str, agent_id: str, run_id: str, reason: str
+    ) -> None:
+        """Hace audible una denegación del quality gate y garantiza continuación.
+
+        1..N<cap: comentario correctivo de sistema (con marker dedupeable) +
+        re-wake del asignado para que delegue un test_runner o escale.
+        >=cap: el bucle de corrección no converge — auto-escala una
+        request_confirmation al usuario cuya aceptación dispensa el gate
+        (contrato RUNTIME_VERIFICATION_WAIVER_REASON). Sin más wakes: el
+        proyecto queda esperando una decisión humana, no en deadlock mudo.
+        """
+        marker = f"[gate:{reason}]"
+        try:
+            with contextlib.closing(_connect(self.db_path)) as conn:
+                prior_notices = conn.execute(
+                    "SELECT COUNT(*) FROM issue_comments"
+                    " WHERE issue_id = ? AND author_user_id = 'system' AND body LIKE ?",
+                    (issue_id, f"%{marker}%"),
+                ).fetchone()[0]
+                last_body = conn.execute(
+                    "SELECT body FROM issue_comments WHERE issue_id = ?"
+                    " ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                    (issue_id,),
+                ).fetchone()
+        except Exception:
+            logger.warning("gate denial notify: comment scan failed for %s", issue_id, exc_info=True)
+            return
+
+        if prior_notices >= self._GATE_NOTIFY_CAP:
+            with contextlib.suppress(Exception):
+                create_interaction(
+                    self.db_path,
+                    issue_id=issue_id,
+                    kind="request_confirmation",
+                    payload={
+                        "parent_issue_id": issue_id,
+                        "reason": _RUNTIME_VERIFICATION_WAIVER_REASON,
+                        "gate_reason": reason,
+                        "version": 1,
+                    },
+                    continuation_policy="wake_assignee",
+                    idempotency_key=f"gate-escalation:{reason}:{issue_id}",
+                    source_run_id=run_id,
+                    title="Gate de tests bloquea el cierre y el equipo no produce evidencia",
+                    summary=(
+                        "El quality gate exige una suite de tests ejecutada con exit 0, pero tras "
+                        f"{prior_notices} avisos correctivos ningún test_runner ha registrado esa "
+                        "evidencia (entorno posiblemente incapaz de ejecutar los tests). "
+                        "¿Aceptas cerrar dispensando la verificación runtime, o rechazas y "
+                        "esperas a que el entorno pueda ejecutar la suite?"
+                    ),
+                )
+            return
+
+        if not (last_body and marker in str(last_body[0] or "")):
+            with contextlib.suppress(Exception):
+                create_comment(
+                    self.db_path,
+                    issue_id=issue_id,
+                    body=(
+                        f"⚙ Sistema {marker}: cierre DENEGADO por el quality gate — hay tests en el "
+                        "workspace pero ningún test_runner reporta exit 0, así que la issue NO quedó "
+                        "cerrada aunque lo hayas intentado. Para desbloquear: (a) delega una sub-issue "
+                        "con role=test_runner (ejecuta la suite de forma determinista y registra la "
+                        "evidencia), o (b) si el entorno no puede ejecutar los tests, escala una "
+                        f"request_confirmation con reason='{_RUNTIME_VERIFICATION_WAIVER_REASON}' en el "
+                        "payload: si el usuario la acepta, este gate queda dispensado."
+                    ),
+                    author_user_id="system",
+                )
+        with contextlib.suppress(Exception):
+            enqueue_wakeup(
+                self.db_path,
+                agent_id=agent_id,
+                source="quality_gate",
+                reason="quality_gate_denied",
+                payload={
+                    "issue_id": issue_id,
+                    "wake_reason": "quality_gate_denied",
+                    "gate_reason": reason,
+                },
+                idempotency_key=f"gate-denied:{reason}:{issue_id}:{prior_notices}",
+            )
+
+    def _runtime_verification_waived(self, issue_id: str) -> bool:
+        """True cuando el usuario aceptó explícitamente cerrar sin verificación
+        runtime de tests para esta issue.
+
+        La aceptación llega como ``request_confirmation`` con
+        ``payload.reason == RUNTIME_VERIFICATION_WAIVER_REASON`` — el contrato
+        definido en policies. Sin este check, el gate contradecía en silencio
+        una decisión vinculante del usuario y la issue quedaba en deadlock.
+        """
+        try:
+            rows = list_interactions(self.db_path, issue_id=issue_id)
+        except Exception:
+            return False
+        for row in rows:
+            if str(row.get("kind") or "") != "request_confirmation":
+                continue
+            if str(row.get("status") or "") != "accepted":
+                continue
+            payload = _decode_json(str(row.get("payload_json") or "{}"))
+            reason = str(payload.get("reason") or "").strip()
+            if reason == _RUNTIME_VERIFICATION_WAIVER_REASON:
+                with contextlib.suppress(Exception):
+                    log_activity(
+                        self.db_path,
+                        action="quality_gate.waived",
+                        target_type="issue",
+                        target_id=issue_id,
+                        payload={
+                            "reason": "test_runner_exit_zero_required",
+                            "waived_by_interaction": str(row.get("id") or ""),
+                        },
+                    )
+                return True
+        return False
 
     def _acceptance_criteria_lines(self, rows: list[dict[str, Any]]) -> list[str]:
         lines: list[str] = []
@@ -4062,6 +4374,11 @@ class RunExecutor:
             lines.append(sod_line)
         test_gate_line = self._test_runner_gate_line(rows)
         if test_gate_line:
+            if test_gate_line.startswith("BLOQUEANTE:") and self._runtime_verification_waived(issue_id):
+                test_gate_line = (
+                    "Test runner: verificación runtime dispensada por el usuario "
+                    f"({_RUNTIME_VERIFICATION_WAIVER_REASON} aceptada) — el gate no bloquea el cierre."
+                )
             lines.append(test_gate_line)
         lines.extend(self._workspace_verification_lines())
         cost_line = self._cycle_cost_line(issue_id)

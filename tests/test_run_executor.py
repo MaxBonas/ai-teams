@@ -3283,3 +3283,203 @@ def test_file_ops_do_not_delete_provider_convention_files(tmp_path: Path) -> Non
 
     assert touched == []
     assert existing.read_text(encoding="utf-8") == "user-owned"
+
+
+# ── Quality gate: waiver del usuario, denegación audible y test_runner builtin ─
+# Deadlock visto en vivo (proyecto CLI Notas, 2026-07-15): el gate denegaba el
+# cierre en silencio DESPUÉS de que el usuario aceptara cerrar sin pytest, el
+# Lead creía haber cerrado y el proyecto quedaba blocked sin wakeups pendientes.
+
+from aiteam.policies import RUNTIME_VERIFICATION_WAIVER_REASON
+
+
+def _write_pytest_suite(tmp_path: Path, *, passing: bool = True) -> None:
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    body = "def test_ok():\n    assert True\n" if passing else "def test_ko():\n    assert False\n"
+    (tests_dir / "test_suite.py").write_text(body, encoding="utf-8")
+
+
+def _add_test_runner_child(db_path: Path) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, supervisor_agent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("role:test_runner", "test_runner", "Test Runner", "cheap", "subscription_cli", "role:lead"),
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "issue:testrun", "goal-1", "issue:intake", "Ejecutar suite de tests",
+                "in_progress", "test_runner", "role:test_runner",
+            ),
+        )
+        conn.commit()
+
+
+class _MustNotExecuteRuntime:
+    """Registro válido para el dispatch, pero si el executor llega a llamarlo
+    es que el builtin de test_runner NO interceptó la run."""
+
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        raise AssertionError("role=test_runner debe ejecutarse por el builtin, nunca por el adapter")
+
+
+def _gate_dispatch_one(tmp_path: Path, *, agent_id: str, issue_id: str, runtime=None) -> None:
+    registry = AdapterRegistry([runtime or _make_status_runtime("done")])
+    executor = RunExecutor(tmp_path / "aiteam.db", registry)
+    enqueue_wakeup(
+        tmp_path / "aiteam.db", agent_id=agent_id, source="manual", reason="manual",
+        payload={"issue_id": issue_id, "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(tmp_path / "aiteam.db").dispatch_next(agent_id=agent_id)
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+
+def test_gate_denial_posts_corrective_comment_and_rewakes_lead(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _write_pytest_suite(tmp_path)
+
+    _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="done")
+
+    assert _issue_status(db_path, "issue:intake") == "in_progress"  # denegado
+    with sqlite3.connect(str(db_path)) as conn:
+        comment = conn.execute(
+            "SELECT body FROM issue_comments WHERE issue_id = 'issue:intake'"
+            " AND author_user_id = 'system' AND body LIKE '%[gate:test_runner_exit_zero_required]%'"
+        ).fetchone()
+        wake = conn.execute(
+            "SELECT status FROM wakeup_requests WHERE agent_id = 'role:lead'"
+            " AND reason = 'quality_gate_denied' AND status = 'queued'"
+        ).fetchone()
+    assert comment is not None, "la denegación debe dejar un comentario correctivo visible"
+    assert "test_runner" in comment[0]
+    assert RUNTIME_VERIFICATION_WAIVER_REASON in comment[0]
+    assert wake is not None, "la denegación debe re-despertar al Lead, no dejar el proyecto mudo"
+
+
+def test_gate_denial_escalates_to_user_after_notify_cap(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _write_pytest_suite(tmp_path)
+
+    for _ in range(3):
+        _gate_dispatch_one(tmp_path, agent_id="role:lead", issue_id="issue:intake")
+
+    assert _issue_status(db_path, "issue:intake") == "in_progress"
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT payload_json, status FROM issue_thread_interactions"
+            " WHERE issue_id = 'issue:intake' AND kind = 'request_confirmation'"
+        ).fetchone()
+        notices = conn.execute(
+            "SELECT COUNT(*) FROM issue_comments WHERE issue_id = 'issue:intake'"
+            " AND author_user_id = 'system' AND body LIKE '%[gate:%'"
+        ).fetchone()[0]
+    assert row is not None, "tras el cap de avisos el sistema debe escalar al usuario"
+    assert row[1] == "pending"
+    assert json.loads(row[0])["reason"] == RUNTIME_VERIFICATION_WAIVER_REASON
+    assert notices <= 2, "el cap debe frenar el spam de comentarios correctivos"
+
+
+def test_accepted_runtime_waiver_lets_lead_close(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _write_pytest_suite(tmp_path)
+    interaction = create_interaction(
+        db_path,
+        issue_id="issue:intake",
+        kind="request_confirmation",
+        payload={"parent_issue_id": "issue:intake", "reason": RUNTIME_VERIFICATION_WAIVER_REASON},
+        title="Confirmar cierre sin pytest ejecutado",
+    )
+    resolve_interaction(db_path, interaction_id=interaction["id"], action="accept", resolved_by_user_id="user")
+
+    _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="done")
+
+    assert _issue_status(db_path, "issue:intake") == "done", (
+        "una confirmación aceptada por el usuario debe dispensar el gate, no ser ignorada"
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        waived = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'quality_gate.waived'"
+        ).fetchone()[0]
+    assert waived >= 1
+
+
+def test_rejected_runtime_waiver_keeps_gate_blocking(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _write_pytest_suite(tmp_path)
+    interaction = create_interaction(
+        db_path,
+        issue_id="issue:intake",
+        kind="request_confirmation",
+        payload={"parent_issue_id": "issue:intake", "reason": RUNTIME_VERIFICATION_WAIVER_REASON},
+    )
+    resolve_interaction(db_path, interaction_id=interaction["id"], action="reject", resolved_by_user_id="user")
+
+    _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="done")
+
+    assert _issue_status(db_path, "issue:intake") == "in_progress"
+
+
+def test_builtin_test_runner_green_suite_reports_exit_zero_and_unlocks_close(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _add_test_runner_child(db_path)
+    _write_pytest_suite(tmp_path, passing=True)
+
+    _gate_dispatch_one(
+        tmp_path, agent_id="role:test_runner", issue_id="issue:testrun",
+        runtime=_MustNotExecuteRuntime(),
+    )
+
+    assert _issue_status(db_path, "issue:testrun") == "done"
+    with sqlite3.connect(str(db_path)) as conn:
+        report = conn.execute(
+            "SELECT result, evidence, valid, is_assignee FROM agent_reports"
+            " WHERE issue_id = 'issue:testrun' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+    assert report is not None
+    assert report[0] == "done"
+    assert "exit 0" in report[1]
+    assert report[2] == 1 and report[3] == 1
+
+    # Con la evidencia registrada, el gate deja cerrar al Lead.
+    _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="done")
+    assert _issue_status(db_path, "issue:intake") == "done"
+
+
+def test_builtin_test_runner_failing_suite_blocks_issue(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _add_test_runner_child(db_path)
+    _write_pytest_suite(tmp_path, passing=False)
+
+    _gate_dispatch_one(
+        tmp_path, agent_id="role:test_runner", issue_id="issue:testrun",
+        runtime=_MustNotExecuteRuntime(),
+    )
+
+    assert _issue_status(db_path, "issue:testrun") == "blocked"
+    with sqlite3.connect(str(db_path)) as conn:
+        report = conn.execute(
+            "SELECT result, evidence FROM agent_reports"
+            " WHERE issue_id = 'issue:testrun' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        run_row = conn.execute(
+            "SELECT status FROM runs ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+    assert report is not None
+    assert report[0] == "failed"
+    assert "exit 0" not in report[1]
+    assert run_row[0] == "completed", "una suite roja no es un fallo del runner: la run completó su trabajo"
