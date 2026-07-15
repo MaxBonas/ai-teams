@@ -145,3 +145,42 @@ def test_reconciler_skips_blocked_issues(tmp_path):
     recovered = reconcile_unqueued_assigned_issues(db)
     assert "A" not in recovered  # A should not be re-enqueued while B is todo
     assert "B" in recovered      # B itself has no blockers and should be enqueued
+
+
+def test_default_child_dependencies_order_test_runner_after_engineer(tmp_path):
+    """Visto en vivo (CLI Gastos, 2026-07-15): el test_runner despertaba al
+    asignarse y ejecutaba la suite contra un workspace vacio porque el sync de
+    dependencias por defecto solo ordenaba reviewer/qa tras engineer."""
+    from aiteam.db.dependencies import sync_default_child_dependencies
+
+    db = tmp_path / "test.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, seniority) VALUES ('a1', 'lead', 'L', 'lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, assignee_agent_id)"
+            " VALUES ('parent', 'g1', 'Parent', 'in_progress', 'a1')"
+        )
+        for iid, role in [("eng", "engineer"), ("rev", "reviewer"), ("runner", "test_runner")]:
+            conn.execute(
+                "INSERT INTO issues (id, goal_id, parent_id, title, status, role)"
+                " VALUES (?, 'g1', 'parent', ?, 'todo', ?)",
+                (iid, f"Issue {iid}", role),
+            )
+
+    created = sync_default_child_dependencies(db, parent_issue_id="parent")
+
+    pairs = {(row["issue_id"], row["depends_on_issue_id"]) for row in created}
+    assert ("rev", "eng") in pairs
+    assert ("runner", "eng") in pairs, "test_runner debe esperar al artefacto del engineer"
+    assert ("eng", "rev") not in pairs and ("eng", "runner") not in pairs
+
+
+def test_builtin_test_runner_strips_ansi_from_evidence():
+    from aiteam.heartbeat.executor import RunExecutor
+
+    colored = "\x1b[32m\x1b[1m16 passed\x1b[0m\x1b[32m in 0.18s\x1b[0m"
+    assert RunExecutor._ANSI_RE.sub("", colored) == "16 passed in 0.18s"

@@ -1890,6 +1890,10 @@ class RunExecutor:
             actions={"issue_status": "done", "notify_supervisor": True},
         )
 
+    # pytest/npm colorean su salida aunque no haya TTY (FORCE_COLOR, colorama);
+    # los escapes acababan dentro de evidence en agent_reports y en la UI.
+    _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
     def _execute_builtin_test_runner(self, *, run: dict[str, Any], agent_id: str) -> ExecutionResult:
         """Ejecuta la suite de tests del workspace de forma determinista.
 
@@ -1934,7 +1938,7 @@ class RunExecutor:
             )
             exit_code = int(proc.returncode)
             tail = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
-            tail = tail.strip()[-2000:]
+            tail = self._ANSI_RE.sub("", tail).strip()[-2000:]
         except subprocess.TimeoutExpired:
             output = (
                 f"Test runner: `{cmd_display}` superó el timeout de {timeout_sec}s.\n\n"

@@ -146,9 +146,12 @@ def unresolved_blockers(db_path: Path, *, issue_id: str) -> list[dict[str, Any]]
 def sync_default_child_dependencies(db_path: Path, *, parent_issue_id: str) -> list[dict[str, str]]:
     """Apply the default programming workflow dependencies for a parent issue.
 
-    Engineer issues produce the implementation artifact. Reviewer and QA issues
-    should not run before that artifact exists, so they depend on every open
-    engineering child under the same parent.
+    Engineer issues produce the implementation artifact. Reviewer, QA and
+    test_runner issues should not run before that artifact exists, so they
+    depend on every open engineering child under the same parent. Sin
+    test_runner aquí, el builtin despertaba al asignarse y ejecutaba la suite
+    contra un workspace todavía vacío (visto en vivo en CLI Gastos,
+    2026-07-15: run 'blocked' 41s antes de que el engineer entregara).
     """
     with contextlib.closing(_connect(db_path)) as conn:
         rows = conn.execute(
@@ -170,7 +173,7 @@ def sync_default_child_dependencies(db_path: Path, *, parent_issue_id: str) -> l
     dependents = [
         row["id"]
         for row in children
-        if str(row.get("role") or "").strip().lower() in {"reviewer", "code_reviewer", "qa", "qa_engineer"}
+        if str(row.get("role") or "").strip().lower() in {"reviewer", "code_reviewer", "qa", "qa_engineer", "test_runner"}
     ]
     created: list[dict[str, str]] = []
     for dependent_id in dependents:
