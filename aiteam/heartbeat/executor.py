@@ -816,6 +816,31 @@ class RunExecutor:
 
         workspace_delta = diff_snapshots(before_workspace, snapshot_workspace(workspace_root))
 
+        # ── Recibo VCS: commit automático de los cambios de la run ──────────
+        # Solo en repos gestionados por AI Teams (init en el bootstrap del
+        # proyecto). El diffstat queda como run_event 'git_commit': evidencia
+        # estructurada de QUÉ cambió esta run, y rollback determinista si hizo
+        # falta revertirla. Nunca bloquea la run si git falla.
+        if workspace_delta.changed:
+            try:
+                from aiteam.workspace_git import commit_run_snapshot  # noqa: PLC0415
+                receipt = commit_run_snapshot(
+                    workspace_root,
+                    run_id=run_id,
+                    agent_id=agent_id,
+                    issue_id=str(run.get("issue_id") or "") or None,
+                )
+                if receipt:
+                    append_run_event(
+                        self.db_path,
+                        run_id=run_id,
+                        event_type="git_commit",
+                        stream="system",
+                        payload=receipt,
+                    )
+            except Exception:
+                logger.warning("git receipt failed for run %s", run_id, exc_info=True)
+
         # ── Step 1: Write output comment to DB (before evidence collection) ─
         # A failed run's `output` is raw stdout (for CLI adapters, the echoed
         # prompt) — keep it as a run event for debugging in the Runs tab, but

@@ -1,9 +1,12 @@
 import json
+import logging
 import mimetypes
 import os
 import shutil
 import sqlite3
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -158,6 +161,14 @@ async def create_project(payload: NewProjectRequest, request: Request):
         shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _initialize_project_runtime(target, initial_task=payload.initial_task)
+    # VCS del workspace: solo en proyectos RECIÉN creados por la app (un
+    # workspace externo seleccionado a posteriori nunca se toca — sin marker
+    # git_managed tampoco habrá commits automáticos).
+    try:
+        from aiteam.workspace_git import init_managed_repo
+        init_managed_repo(target)
+    except Exception:
+        logger.warning("workspace git init failed for %s", target, exc_info=True)
     set_current_workspace(target, persist=True)
 
     # Enqueue the Lead's first wakeup so the HeartbeatLoop can start immediately
