@@ -223,6 +223,13 @@ def _subscription_auth_probe(profile: dict[str, Any], config: dict[str, Any]) ->
     if ref and read_secret(ref):
         return {"status": "ok", "reason": "api_key_present", "detail": f"{ref} guardada en vault local"}
 
+    # Perfiles LOCALES (codex --oss contra Ollama/LM Studio): no necesitan
+    # auth de ChatGPT — la verificación honesta es que el runtime local
+    # responda y tenga el modelo descargado. Antes quedaban eternamente en
+    # "auth sin verificar" pidiendo un login que no aplica.
+    if config.get("oss") or str(config.get("local_provider") or "").strip():
+        return _local_runtime_probe(config)
+
     if cli_kind == "codex" or "codex" in provider:
         auth = _codex_auth_info()
         if auth:
@@ -245,6 +252,39 @@ def _subscription_auth_probe(profile: dict[str, Any], config: dict[str, Any]) ->
         }
 
     return {"status": "installed", "reason": "cli_installed_auth_not_verified"}
+
+
+def _local_runtime_probe(config: dict[str, Any]) -> dict[str, Any]:
+    """Salud real de un perfil local: ¿responde el runtime y tiene el modelo?"""
+    import urllib.request
+
+    local_provider = str(config.get("local_provider") or "ollama").strip().lower()
+    model = str(config.get("model") or "").strip()
+    if local_provider == "ollama":
+        url, models_key, name_key = "http://localhost:11434/api/tags", "models", "name"
+    else:  # lmstudio y compatibles OpenAI
+        url, models_key, name_key = "http://localhost:1234/v1/models", "data", "id"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        names = [str(m.get(name_key) or "") for m in (payload.get(models_key) or [])]
+    except Exception as exc:
+        return {
+            "status": "installed",
+            "reason": f"{local_provider}_not_running",
+            "hint": f"Arranca {local_provider} y vuelve a probar ({exc.__class__.__name__}).",
+        }
+    if model and not any(n == model or n.startswith(model.split(":")[0]) for n in names):
+        return {
+            "status": "installed",
+            "reason": "local_model_missing",
+            "hint": f"El runtime responde pero no tiene {model!r}: descárgalo (p.ej. `ollama pull {model}`).",
+        }
+    return {
+        "status": "ok",
+        "reason": "local_runtime_ready",
+        "detail": f"{local_provider} responde{f' con {model}' if model else ''} ({len(names)} modelo(s))",
+    }
 
 
 def _codex_auth_info() -> dict[str, Any] | None:
