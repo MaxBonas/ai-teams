@@ -52,6 +52,20 @@ INFRA_ERROR_CODES = frozenset({
 })
 
 
+def adversarial_qa_mode() -> str:
+    """Pase adversarial post-implementación: 'high' (default) | 'always' | 'off'.
+
+    Un agente único nunca se ataca a sí mismo con otra distribución de sesgos;
+    el equipo sí puede. En criticidad alta (o siempre, con 'always') se
+    materializa un QA cuyo contrato es aportar SOLO tests que fallen — si tras
+    intentarlo no encuentra fallo, aprueba con evidencia de qué intentó.
+    Env: ``AITEAM_ADVERSARIAL_QA``.
+    """
+    import os
+    raw = os.environ.get("AITEAM_ADVERSARIAL_QA", "").strip().lower()
+    return raw if raw in {"high", "always", "off"} else "high"
+
+
 def cross_provider_review_enforced() -> bool:
     """Review cross-provider VINCULANTE en issues high/critical (default ON).
 

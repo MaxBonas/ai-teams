@@ -23,6 +23,11 @@ dependencies = [
 dev = [
     "httpx",
     "pytest",
+    # quality_runner builtin: cobertura y lint como evidencia determinista de
+    # los proyectos capa-2 (degrada con gracia si faltan, pero con ellas el
+    # gate de calidad sube el listón mecánicamente).
+    "coverage",
+    "ruff",
 ]
 
 [project.scripts]

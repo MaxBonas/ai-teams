@@ -2019,6 +2019,16 @@ class RunExecutor:
             )
 
         timeout_sec = int(os.environ.get("AITEAM_TEST_RUNNER_TIMEOUT_SEC", "600") or "600")
+        # P3 — pytest corre BAJO coverage cuando la herramienta existe en ese
+        # intérprete: una sola ejecución produce exit code Y métrica de
+        # cobertura. El data file va a .aiteam/ (gitignorado) para no
+        # contaminar el workspace del equipo.
+        runner_env = {**os.environ}
+        measuring_coverage = False
+        if suite_kind == "pytest" and self._python_has_module(cmd[0], "coverage"):
+            runner_env["COVERAGE_FILE"] = str(Path(root) / ".aiteam" / ".coverage")
+            cmd = [cmd[0], "-m", "coverage", "run", "-m", "pytest", "-q"]
+            measuring_coverage = True
         cmd_display = " ".join(cmd)
         try:
             proc = subprocess.run(
@@ -2029,6 +2039,7 @@ class RunExecutor:
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout_sec,
+                env=runner_env,
             )
             exit_code = int(proc.returncode)
             tail = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
@@ -2052,6 +2063,41 @@ class RunExecutor:
             return ExecutionResult(status="failed", error=f"test runner exec failed: {exc}", exit_code=1)
 
         passed = exit_code == 0
+        # ── P3: métricas de calidad deterministas (cobertura + lint) ────────
+        # Subprocess + números, no narración: es el listón mecánico que un
+        # agente no puede alucinar. Umbrales opcionales bloqueantes por env.
+        coverage_pct: float | None = None
+        if measuring_coverage and passed:
+            cov = self._run_quiet(
+                [cmd[0], "-m", "coverage", "report", "--format=total"],
+                cwd=root, env=runner_env,
+            )
+            if cov is not None and cov.returncode == 0:
+                with contextlib.suppress(ValueError):
+                    coverage_pct = float(cov.stdout.strip())
+        lint_issues: int | None = None
+        if suite_kind == "pytest" and self._python_has_module(cmd[0], "ruff"):
+            ruff = self._run_quiet(
+                [cmd[0], "-m", "ruff", "check", "--output-format=concise", "."],
+                cwd=root, env=runner_env,
+            )
+            if ruff is not None and ruff.returncode in (0, 1):
+                lint_issues = len([l for l in (ruff.stdout or "").splitlines() if l.strip()])
+
+        blocker: str | None = None if passed else f"la suite falló con exit {exit_code}"
+        if passed and coverage_pct is not None:
+            _min_cov = os.environ.get("AITEAM_MIN_COVERAGE_PERCENT", "").strip()
+            with contextlib.suppress(ValueError):
+                if _min_cov and coverage_pct < float(_min_cov):
+                    passed = False
+                    blocker = f"cobertura {coverage_pct:.0f}% por debajo del mínimo exigido ({_min_cov}%)"
+        if passed and lint_issues is not None:
+            _max_lint = os.environ.get("AITEAM_MAX_LINT_ISSUES", "").strip()
+            with contextlib.suppress(ValueError):
+                if _max_lint and lint_issues > int(_max_lint):
+                    passed = False
+                    blocker = f"{lint_issues} avisos de lint por encima del máximo permitido ({_max_lint})"
+
         # "exit 0" literal en evidence: es lo que _test_runner_gate_line busca
         # cuando el report llega por la tabla agent_reports (que no conserva
         # el campo exit_code, solo los REPORT_FIELDS).
@@ -2059,12 +2105,22 @@ class RunExecutor:
         summary_line = tail.splitlines()[-1].strip() if tail else ""
         if summary_line:
             evidence += f"; {summary_line[:160]}"
+        if coverage_pct is not None:
+            evidence += f"; coverage {coverage_pct:.0f}%"
+        if lint_issues is not None:
+            evidence += f"; ruff {lint_issues} issue(s)"
+        metrics_lines = ""
+        if coverage_pct is not None:
+            metrics_lines += f"coverage_percent: {coverage_pct:.0f}\n"
+        if lint_issues is not None:
+            metrics_lines += f"lint_issues: {lint_issues}\n"
         report = (
             "---AGENT-REPORT---\n"
             "role: test_runner\n"
             f"result: {'done' if passed else 'failed'}\n"
             f"issue_status: {'done' if passed else 'blocked'}\n"
-            + ("" if passed else f"blocker: la suite falló con exit {exit_code}\n")
+            + (f"blocker: {blocker}\n" if blocker else "")
+            + metrics_lines
             + f"evidence: {evidence}\n"
         )
         output = (
@@ -2124,6 +2180,38 @@ class RunExecutor:
                     if npm:
                         return [npm, "test", "--silent"], "npm test"
         return None, ""
+
+    # Cache de sondas (python, module) — el intérprete no cambia entre runs y
+    # cada sonda cuesta un arranque de Python (~1s en Windows).
+    _MODULE_PROBE_CACHE: dict[tuple[str, str], bool] = {}
+
+    def _python_has_module(self, python: str, module: str) -> bool:
+        key = (python, module)
+        cached = self._MODULE_PROBE_CACHE.get(key)
+        if cached is not None:
+            return cached
+        probe = self._run_quiet([python, "-c", f"import {module}"], cwd=None, env=None, timeout=30)
+        result = probe is not None and probe.returncode == 0
+        self._MODULE_PROBE_CACHE[key] = result
+        return result
+
+    @staticmethod
+    def _run_quiet(
+        cmd: list[str], *, cwd: Path | None, env: dict[str, str] | None, timeout: int = 120
+    ) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(
+                cmd,
+                cwd=str(cwd) if cwd else None,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+            )
+        except Exception:
+            return None
 
     def _resolve_workspace_python(self, root: Path) -> str | None:
         """Python con pytest importable: venv del workspace > intérprete propio."""
@@ -2688,6 +2776,12 @@ class RunExecutor:
             run=run,
             created_child_roles=created_child_roles,
         )
+        self._maybe_add_adversarial_qa(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            run=run,
+            created_child_roles=created_child_roles,
+        )
         try:
             sync_default_child_dependencies(self.db_path, parent_issue_id=issue_id)
         except Exception:
@@ -2892,6 +2986,10 @@ class RunExecutor:
                 goal_id=str((parent_issue or {}).get("goal_id") or "") or None,
                 role=role_for_issue,
                 complexity=str(spec.get("complexity") or "medium") or None,
+                # Antes la criticality del spec se PERDÍA (solo viajaba en el
+                # metadata del routing): el gate de compliance high/critical y
+                # el pase adversarial nunca veían issues delegadas críticas.
+                criticality=str(spec.get("criticality") or "").strip().lower() or None,
                 assignee_agent_id=assignee_agent_id,
                 metadata=_issue_metadata,
             )
@@ -3039,6 +3137,78 @@ class RunExecutor:
             },
             metadata_source="independent_test_designer_guardrail",
             activity_source="guardrail:independent_test_designer",
+        )
+
+    def _maybe_add_adversarial_qa(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        run: dict[str, Any],
+        created_child_roles: list[str],
+    ) -> None:
+        """Materializa el pase adversarial post-implementación (P4).
+
+        Contrato inverso al del reviewer: no juzgar si está bien, sino
+        intentar demostrarlo roto — solo puede aportar tests que FALLEN. Se
+        activa en criticidad high/critical (o siempre con
+        AITEAM_ADVERSARIAL_QA=always); una vez por padre; el rol qa ya es
+        dependiente por defecto (espera a engineer y test_designer) y el
+        enforcement cross-provider lo saca de la familia del engineer.
+        """
+        from aiteam.policies import adversarial_qa_mode
+
+        mode = adversarial_qa_mode()
+        if mode == "off":
+            return
+        if not {"engineer", "software_engineer", "lead_executor"} & set(created_child_roles):
+            return
+        if {"qa", "qa_engineer"} & set(created_child_roles):
+            return
+        agent = self._agent_info(agent_id) or {}
+        if str(agent.get("role") or "").strip().lower() not in {"lead", "team_lead"}:
+            return
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            existing = conn.execute(
+                "SELECT id FROM issues WHERE parent_id = ? AND lower(role) IN ('qa', 'qa_engineer') LIMIT 1",
+                (issue_id,),
+            ).fetchone()
+            if existing is not None:
+                return
+            if mode == "high":
+                parent_row = conn.execute(
+                    "SELECT criticality FROM issues WHERE id = ?", (issue_id,)
+                ).fetchone()
+                parent_crit = str((parent_row or {"criticality": ""})["criticality"] or "").strip().lower()
+                child_crit = conn.execute(
+                    "SELECT COUNT(*) FROM issues WHERE parent_id = ? "
+                    "AND lower(COALESCE(criticality, '')) IN ('high', 'critical')",
+                    (issue_id,),
+                ).fetchone()[0]
+                if parent_crit not in {"high", "critical"} and not child_crit:
+                    return
+        self._create_delegated_issue(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            run=run,
+            spec={
+                "title": "Pase adversarial: intenta romper la entrega",
+                "description": (
+                    "Tu trabajo NO es confirmar que la entrega está bien: es intentar demostrarla "
+                    "rota. Lee la implementación buscando huecos frente a la especificación y "
+                    "aporta ÚNICAMENTE tests que fallen (tests/test_adversarial_*.py): casos borde "
+                    "(entradas vacías, datos inválidos, unicode, archivos corruptos, límites), "
+                    "condiciones de error y contratos implícitos de la spec que nadie probó. "
+                    "Si un test que escribes pasa, bórralo — no aporta. Si tras un intento serio "
+                    "no encuentras nada, reporta result: approved con evidencia de QUÉ intentaste "
+                    "y por qué no rompió. Si encuentras fallos, deja los tests fallando, reporta "
+                    "result: changes_requested y describe cada fallo en el blocker."
+                ),
+                "role": "qa",
+                "complexity": "medium",
+            },
+            metadata_source="adversarial_qa_guardrail",
+            activity_source="guardrail:adversarial_qa",
         )
 
     # Tier 3 cheap specialists — always prefer budget/local adapters.
@@ -3661,7 +3831,9 @@ class RunExecutor:
         from aiteam.policies import cross_provider_review_enforced
 
         role_key = str(agent_role or "").strip().lower()
-        if role_key not in {"reviewer", "code_reviewer"} or not issue_id:
+        # qa incluido: el pase adversarial (P4) pierde su gracia si el atacante
+        # comparte los sesgos del implementador.
+        if role_key not in {"reviewer", "code_reviewer", "qa", "qa_engineer"} or not issue_id:
             return False
         if not cross_provider_review_enforced():
             return False

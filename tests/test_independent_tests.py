@@ -186,3 +186,134 @@ def test_reviewer_wake_payload_carries_sibling_diffs(tmp_path: Path) -> None:
     # Y el engineer NO recibe diffs (solo roles de juicio).
     eng_payload = build_wake_payload(db_path, issue_id="eng")
     assert "implementation_diffs" not in eng_payload
+
+
+# ── P4: pase adversarial post-verde ───────────────────────────────────────────
+
+class _HighCritLeadRuntime:
+    """Lead que delega engineering con criticidad alta."""
+
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        return ExecutionResult(
+            status="completed",
+            output="Delego implementación crítica.",
+            actions={
+                "create_issues": [
+                    {
+                        "title": "Implementar módulo de pagos",
+                        "description": "Implementa el flujo de pagos con validación estricta. Files to modify: pagos.py",
+                        "role": "engineer",
+                        "complexity": "high",
+                        "criticality": "high",
+                    }
+                ]
+            },
+        )
+
+
+def _run_highcrit_delegation(db_path: Path) -> None:
+    executor = RunExecutor(db_path, AdapterRegistry([_HighCritLeadRuntime()]))
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "root", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+
+def test_high_criticality_delegation_materializes_adversarial_qa(tmp_path: Path) -> None:
+    db_path = _lead_db(tmp_path)
+
+    _run_highcrit_delegation(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        qa = conn.execute(
+            "SELECT description FROM issues WHERE parent_id='root' AND role='qa'"
+        ).fetchone()
+        crit = conn.execute(
+            "SELECT criticality FROM issues WHERE parent_id='root' AND role='engineer'"
+        ).fetchone()
+    assert crit["criticality"] == "high", "la criticality del spec debe PERSISTIR en la columna"
+    assert qa is not None, "criticidad alta debe materializar el pase adversarial"
+    assert "tests que FALLEN" in qa["description"] or "tests que fallen" in qa["description"]
+    assert "test_adversarial_" in qa["description"]
+
+
+def test_normal_criticality_skips_adversarial_by_default(tmp_path: Path) -> None:
+    db_path = _lead_db(tmp_path)
+
+    _run_lead_delegation(db_path)  # delegación sin criticality
+
+    with sqlite3.connect(str(db_path)) as conn:
+        n = conn.execute("SELECT COUNT(*) FROM issues WHERE parent_id='root' AND role='qa'").fetchone()[0]
+    assert n == 0, "modo 'high' por defecto: sin criticidad alta no hay pase adversarial"
+
+
+def test_adversarial_mode_always_forces_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AITEAM_ADVERSARIAL_QA", "always")
+    db_path = _lead_db(tmp_path)
+
+    _run_lead_delegation(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        n = conn.execute("SELECT COUNT(*) FROM issues WHERE parent_id='root' AND role='qa'").fetchone()[0]
+    assert n == 1
+
+
+def test_adversarial_mode_off_disables_even_on_high(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AITEAM_ADVERSARIAL_QA", "off")
+    db_path = _lead_db(tmp_path)
+
+    _run_highcrit_delegation(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        n = conn.execute("SELECT COUNT(*) FROM issues WHERE parent_id='root' AND role='qa'").fetchone()[0]
+    assert n == 0
+
+
+def test_cross_provider_enforcement_covers_adversarial_qa(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """El atacante no debe compartir familia con el implementador."""
+    from aiteam.project_adapters import write_project_adapter_policy
+    from aiteam.user_config import store_secret
+
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    store_secret(provider="google", name="default", secret="gemini-key")
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, adapter_type, adapter_config_json) VALUES "
+            "('role:engineer', 'engineer', 'E', 'openai_api', '{}'),"
+            "('role:qa', 'qa', 'Q', 'openai_api', '{}')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role) VALUES ('root', 'g1', 'R', 'in_progress', 'lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES "
+            "('i-eng', 'g1', 'root', 'Impl', 'done', 'engineer', 'role:engineer')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id, criticality) VALUES "
+            "('i-qa', 'g1', 'root', 'Adversarial', 'in_progress', 'qa', 'role:qa', 'high')"
+        )
+        conn.commit()
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    moved = executor._enforce_cross_provider_review(
+        issue_id="i-qa", agent_id="role:qa", agent_role="qa"
+    )
+
+    assert moved is True
+    with sqlite3.connect(str(db_path)) as conn:
+        adapter = conn.execute("SELECT adapter_type FROM agents WHERE id='role:qa'").fetchone()[0]
+    assert adapter == "gemini_api"

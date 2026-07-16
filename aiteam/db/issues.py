@@ -19,6 +19,7 @@ def create_issue(
     description: str | None = None,
     role: str | None = None,
     complexity: str | None = None,
+    criticality: str | None = None,
     priority: int = 0,
     assignee_agent_id: str | None = None,
     issue_id: str | None = None,
@@ -29,9 +30,9 @@ def create_issue(
             """
             INSERT INTO issues (
                 id, parent_id, goal_id, title, description, status,
-                priority, role, complexity, assignee_agent_id, metadata_json
+                priority, role, complexity, criticality, assignee_agent_id, metadata_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING *
             """,
             (
@@ -44,6 +45,7 @@ def create_issue(
                 int(priority),
                 role,
                 complexity,
+                criticality,
                 assignee_agent_id,
                 json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
             ),

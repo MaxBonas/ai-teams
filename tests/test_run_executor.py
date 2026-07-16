@@ -3864,3 +3864,55 @@ def test_scout_closing_done_auto_reports_to_supervisor(tmp_path: Path) -> None:
             "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
         ).fetchone()[0]
     assert lead_wake == 1, "el cierre de un hijo debe despertar al padre SIEMPRE, sin depender del LLM"
+
+
+# ── P3: métricas de calidad deterministas en el runner builtin ────────────────
+
+def test_builtin_runner_records_coverage_and_lint_metrics(tmp_path: Path) -> None:
+    """La evidencia gana cobertura y lint medidos por subprocess — números que
+    ningún agente puede alucinar, persistidos en el raw_json del report."""
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _add_test_runner_child(db_path)
+    _write_pytest_suite(tmp_path, passing=True)
+    (tmp_path / "modulo.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+
+    _gate_dispatch_one(
+        tmp_path, agent_id="role:test_runner", issue_id="issue:testrun",
+        runtime=_MustNotExecuteRuntime(),
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        report = conn.execute(
+            "SELECT evidence, raw_json FROM agent_reports WHERE issue_id='issue:testrun' "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+    assert report is not None
+    raw = json.loads(report["raw_json"])
+    assert "coverage 100%" in report["evidence"] or "coverage" in report["evidence"]
+    assert "coverage_percent" in raw, "la métrica debe persistir estructurada, no solo como texto"
+    assert "lint_issues" in raw
+    assert "exit 0" in report["evidence"]
+
+
+def test_builtin_runner_blocks_below_coverage_threshold(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_MIN_COVERAGE_PERCENT", "101")  # inalcanzable
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    _add_test_runner_child(db_path)
+    _write_pytest_suite(tmp_path, passing=True)
+
+    _gate_dispatch_one(
+        tmp_path, agent_id="role:test_runner", issue_id="issue:testrun",
+        runtime=_MustNotExecuteRuntime(),
+    )
+
+    assert _issue_status(db_path, "issue:testrun") == "blocked"
+    with sqlite3.connect(str(db_path)) as conn:
+        report = conn.execute(
+            "SELECT result, blocker FROM agent_reports WHERE issue_id='issue:testrun' "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+    assert report[0] == "failed"
+    assert "cobertura" in report[1]
