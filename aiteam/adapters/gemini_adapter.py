@@ -10,6 +10,26 @@ from aiteam.pricing import estimate_cost_from_usage
 from aiteam.adapters.work_contract import SUBMIT_WORK_SCHEMA, build_execution_contract, ops_to_actions, parse_submit_work
 
 
+def _to_gemini_schema(node: Any) -> Any:
+    """Sanitiza un JSON Schema estándar para el ``responseSchema`` de Gemini.
+
+    Gemini acepta un subconjunto de OpenAPI 3.0, no JSON Schema completo:
+    rechaza ``additionalProperties`` (error real en vivo: "Unknown name
+    'additionalProperties'... Cannot find field"). SUBMIT_WORK_SCHEMA se
+    comparte con el adapter OpenAI (que sí soporta esa keyword), así que se
+    sanea aquí en vez de tener dos schemas paralelos que pueden divergir.
+    """
+    if isinstance(node, dict):
+        return {
+            key: _to_gemini_schema(value)
+            for key, value in node.items()
+            if key != "additionalProperties"
+        }
+    if isinstance(node, list):
+        return [_to_gemini_schema(item) for item in node]
+    return node
+
+
 class GeminiApiRuntime:
     """Google Gemini API runtime using JSON response mode."""
 
@@ -32,7 +52,7 @@ class GeminiApiRuntime:
             "contents": [{"role": "user", "parts": [{"text": _user_prompt(env, run)}]}],
             "generationConfig": {
                 "responseMimeType": "application/json",
-                "responseSchema": SUBMIT_WORK_SCHEMA,
+                "responseSchema": _to_gemini_schema(SUBMIT_WORK_SCHEMA),
             },
         }
         try:
