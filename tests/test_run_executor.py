@@ -3916,3 +3916,50 @@ def test_builtin_runner_blocks_below_coverage_threshold(tmp_path: Path, monkeypa
         ).fetchone()
     assert report[0] == "failed"
     assert "cobertura" in report[1]
+
+
+def test_fix_titled_delegation_to_readonly_role_rejected(tmp_path: Path) -> None:
+    """CLI Textos en vivo: 'Fix: corregir stats...' delegado a file_scout pasó
+    el guard (la señal iba en el TITULO y sin 'Files to modify'), el scout
+    cerró done sin tocar nada y el review quemó 4 rondas contra un fix
+    inexistente."""
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+
+    class _FixToScoutLead:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="delego",
+                actions={
+                    "create_issues": [{
+                        "title": "Fix: corregir stats y aportar evidencia pytest real",
+                        "description": "Confirmar que el comando stats cumple la especificacion y aportar evidencia.",
+                        "role": "file_scout",
+                        "complexity": "low",
+                    }]
+                },
+            )
+
+    executor = RunExecutor(db_path, AdapterRegistry([_FixToScoutLead()]))
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        created = conn.execute(
+            "SELECT COUNT(*) FROM issues WHERE parent_id='issue:intake' AND role='file_scout'"
+        ).fetchone()[0]
+        rejection = conn.execute(
+            "SELECT COUNT(*) FROM issue_comments WHERE author_user_id='system' AND body LIKE '%solo lectura%'"
+        ).fetchone()[0]
+    assert created == 0, "un titulo con 'Fix:' es intencion de edicion — rol read-only rechazado"
+    assert rejection == 1, "el rechazo debe dejar comentario correctivo para el Lead"

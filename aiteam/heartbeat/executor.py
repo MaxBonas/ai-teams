@@ -2901,10 +2901,14 @@ class RunExecutor:
             # "fix delegated" and moved on, leaving the review permanently
             # blocked on a fix that was never materialized. "Files to modify:"
             # is unambiguous editing intent — no read-only role can satisfy it.
-            if role_for_issue in _NON_EDITING_ROLES and _FILE_EDIT_SIGNAL_RE.search(_desc_val):
+            # El título cuenta como señal: "Fix: corregir stats" (CLI Textos)
+            # llevaba toda la intención en el título y una descripción neutra.
+            if role_for_issue in _NON_EDITING_ROLES and _FILE_EDIT_SIGNAL_RE.search(
+                f"{title_val}\n{_desc_val}"
+            ):
                 logger.warning(
                     "delegation_role_mismatch: issue %r delegated to read-only role=%r "
-                    "but description requests file edits — rejecting.",
+                    "but title/description requests file edits — rejecting.",
                     title_val, role_for_issue,
                 )
                 log_activity(
@@ -6168,7 +6172,14 @@ _FOCUS_PATH_RE = re.compile(r"[A-Za-z0-9_\-./\\]*[A-Za-z0-9_\-]\.[A-Za-z0-9.]{1,
 # Unambiguous editing intent in a delegation description — no read-only
 # (Tier 3 / NON_EDITING_ROLES) role can satisfy this, see _create_delegated_issue.
 _FILE_EDIT_SIGNAL_RE = re.compile(
-    r"files? to modify|archivos? a modificar|file to change|archivo a cambiar",
+    # Señal explícita ("Files to modify: ...") o intención de arreglo: la run
+    # CLI Textos delegó "Fix: corregir stats..." a un file_scout (solo
+    # lectura), que cerró done sin tocar un archivo, y el sistema quemó 4
+    # rondas de review contra un fix inexistente hasta el freno. Un verbo de
+    # arreglo/implementación es intención de edición aunque no liste archivos.
+    r"files? to modify|archivos? a modificar|file to change|archivo a cambiar"
+    r"|\bfix\b|\bfixe?ar\b|\barregla[r]?\b|\bcorr?ige\b|\bcorregir\b"
+    r"|\bimplementa[r]?\b|\bimplement\b|\brefactor\w*\b|\breescrib\w*\b|\brewrite\b",
     re.IGNORECASE,
 )
 

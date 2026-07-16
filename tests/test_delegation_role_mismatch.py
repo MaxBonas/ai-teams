@@ -58,12 +58,15 @@ def _dispatch_lead(db_path: Path) -> Any:
     return HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
 
 
-def _run_delegation(tmp_path: Path, *, role: str, description: str) -> Path:
+def _run_delegation(
+    tmp_path: Path, *, role: str, description: str,
+    title: str = "Fix imports in CreateTestSceneEditor.cs",
+) -> Path:
     db_path = tmp_path / "aiteam.db"
     _init_db(db_path)
     actions = {
         "create_issues": [{
-            "title": "Fix imports in CreateTestSceneEditor.cs",
+            "title": title,
             "description": description,
             "role": role,
             "complexity": "low",
@@ -125,9 +128,16 @@ def test_engineer_editing_delegation_allowed(tmp_path: Path) -> None:
 
 
 def test_file_scout_pure_read_task_still_allowed(tmp_path: Path) -> None:
-    """A legitimate read-only scout task (no editing signal) must not be blocked."""
+    """A legitimate read-only scout task (no editing signal) must not be blocked.
+
+    Policy update (CLI Textos, 2026-07-16): a "Fix ..." TITLE now counts as
+    editing intent even with a read-only description — the Lead reads the
+    scout's done as "fix landed" and reviews burn rounds against a fix that
+    never existed. Pure-read tasks must be titled honestly.
+    """
     db_path = _run_delegation(
         tmp_path, role="file_scout",
+        title="Inventariar imports en CreateTestSceneEditor.cs",
         description="Inspect Assets/Editor/CreateTestSceneEditor.cs and report which "
                      "using statements are missing so the Lead can decide next steps.",
     )
@@ -135,7 +145,7 @@ def test_file_scout_pure_read_task_still_allowed(tmp_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         created = conn.execute(
-            "SELECT id, role FROM issues WHERE title = 'Fix imports in CreateTestSceneEditor.cs'"
+            "SELECT id, role FROM issues WHERE title = 'Inventariar imports en CreateTestSceneEditor.cs'"
         ).fetchone()
 
     assert created is not None
