@@ -52,6 +52,20 @@ INFRA_ERROR_CODES = frozenset({
 })
 
 
+def payload_delta_enabled() -> bool:
+    """Dieta de contexto: si el workspace NO cambió desde la última run
+    completada del mismo agente sobre la misma issue, los cuerpos de archivo
+    no se re-inyectan en el wake (solo la lista de paths + nota).
+
+    El overhead de coordinación sin retorno es lo que hace a un equipo más
+    caro que un agente único: el engineer de CLI Tareas consumió 487K tokens
+    de entrada en 2 runs re-recibiendo un workspace que no había cambiado.
+    Apagar con ``AITEAM_PAYLOAD_DELTA=0``.
+    """
+    import os
+    return os.environ.get("AITEAM_PAYLOAD_DELTA", "").strip().lower() not in {"0", "false", "no"}
+
+
 def adversarial_qa_mode() -> str:
     """Pase adversarial post-implementación: 'high' (default) | 'always' | 'off'.
 

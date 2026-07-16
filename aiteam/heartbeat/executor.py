@@ -269,7 +269,34 @@ class RunExecutor:
                 if agent_role in _WORKSPACE_READER_ROLES:
                     ws_files = _read_workspace_files(workspace_root, focus_paths=_focus_paths)
                     if ws_files:
-                        payload["workspace_files"] = ws_files
+                        # Dieta de contexto (P5): workspace idéntico al de la
+                        # última run completada de ESTE agente sobre ESTA issue
+                        # → solo lista de paths, sin cuerpos.
+                        from aiteam.policies import payload_delta_enabled  # noqa: PLC0415
+                        _unchanged = False
+                        if payload_delta_enabled():
+                            try:
+                                _unchanged = self._workspace_digest_unchanged(
+                                    issue_id=issue_id_str,
+                                    agent_id=agent_id,
+                                    run_id=run_id,
+                                    workspace_root=workspace_root,
+                                )
+                            except Exception:
+                                logger.warning("payload delta check failed", exc_info=True)
+                        if _unchanged:
+                            payload["workspace_files"] = [
+                                {k: v for k, v in item.items() if k != "content"}
+                                for item in ws_files
+                            ]
+                            payload["workspace_files_note"] = (
+                                "El workspace NO ha cambiado desde tu última run completada: "
+                                "los cuerpos de archivo se omiten para ahorrar contexto (ya los "
+                                "viste). La lista de paths sigue completa; si necesitas releer "
+                                "un archivo concreto, dilo en tu comentario."
+                            )
+                        else:
+                            payload["workspace_files"] = ws_files
                 # ── Global open-issues view for the Lead ──────────────────────
                 # The payload is scoped to ONE issue's subtree; with several
                 # root issues (each user task can start a new root), a Lead
@@ -4357,6 +4384,52 @@ class RunExecutor:
             if _operational_interaction_default(reason) is None:
                 return True
         return False
+
+    def _workspace_digest_unchanged(
+        self, *, issue_id: str, agent_id: str, run_id: str, workspace_root: Path
+    ) -> bool:
+        """True si el workspace es idéntico al de la última run COMPLETADA de
+        este agente sobre esta issue (P5, dieta de contexto).
+
+        Registra siempre el digest de ESTA run (activity
+        ``workspace.context_digest``) para que la siguiente pueda comparar.
+        Una run previa fallida re-envía cuerpos completos: el agente pudo no
+        haber llegado a leerlos.
+        """
+        snapshot = snapshot_workspace(workspace_root)
+        digest = hashlib.sha256(
+            json.dumps(sorted(snapshot.items()), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        unchanged = False
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            prev = conn.execute(
+                """
+                SELECT a.payload_json, r.status AS run_status
+                FROM activity_log a
+                LEFT JOIN runs r ON r.id = a.run_id
+                WHERE a.action = 'workspace.context_digest'
+                  AND a.target_id = ?
+                  AND a.actor_agent_id = ?
+                  AND a.run_id != ?
+                ORDER BY a.created_at DESC, a.rowid DESC
+                LIMIT 1
+                """,
+                (issue_id, agent_id, run_id),
+            ).fetchone()
+        if prev is not None and str(prev["run_status"] or "") == "completed":
+            prev_digest = str(_decode_json(str(prev["payload_json"] or "{}")).get("digest") or "")
+            unchanged = bool(prev_digest) and prev_digest == digest
+        with contextlib.suppress(Exception):
+            log_activity(
+                self.db_path,
+                action="workspace.context_digest",
+                target_type="issue",
+                target_id=issue_id,
+                actor_agent_id=agent_id,
+                run_id=run_id,
+                payload={"digest": digest},
+            )
+        return unchanged
 
     def _review_evidence_unchanged(self, *, issue_id: str, workspace_root: Path, current_run_id: str) -> bool:
         """True when the workspace fingerprint matches the one recorded at the
