@@ -304,4 +304,11 @@ def _codex_auth_info() -> dict[str, Any] | None:
             return {"email": email or None}
     if parsed.get("access_token") or parsed.get("accessToken"):
         return {"email": parsed.get("email")}
+    # Codex Desktop/CLI actuales persisten la sesión de ChatGPT bajo `tokens`.
+    # Solo comprobamos presencia; nunca devolvemos ni registramos credenciales.
+    tokens = parsed.get("tokens")
+    if isinstance(tokens, dict) and (
+        tokens.get("access_token") or tokens.get("accessToken")
+    ):
+        return {"email": tokens.get("email") or parsed.get("email")}
     return None

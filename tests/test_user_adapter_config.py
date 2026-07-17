@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from api.main import app
+from api.routers.user_adapters import _codex_auth_info
 from aiteam.user_config import (
     _cmd_command,
     _write_windows_login_launcher,
@@ -160,3 +162,18 @@ def test_user_adapter_test_reports_missing_secret(tmp_path: Path, monkeypatch) -
     assert payload["health"]["status"] == "failed"
     assert payload["health"]["reason"] == "missing_secret"
     monkeypatch.delenv("AITEAM_API_KEY", raising=False)
+
+
+def test_codex_auth_probe_supports_current_tokens_layout(tmp_path: Path, monkeypatch) -> None:
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(
+        json.dumps({
+            "auth_mode": "chatgpt",
+            "tokens": {"access_token": "secret-never-returned", "account_id": "acct"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    assert _codex_auth_info() == {"email": None}

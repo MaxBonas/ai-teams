@@ -1,0 +1,27 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "provider_failover_v1",
+  "completed": false,
+  "failure": "no quorum session found",
+  "diagnostics": {
+    "session": null,
+    "base": null,
+    "contributions": [],
+    "auditor_runs": []
+  },
+  "provenance": {
+    "runtime": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 76.8,
+      "ticks": 1,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": true,
+      "limit_reached": false,
+      "runs": 1,
+      "tokens_in": 12567,
+      "tokens_out": 4096,
+      "cost_cents": 9
+    }
+  }
+}

@@ -166,6 +166,37 @@ def test_quorum_report_in_add_comment_records_contribution(tmp_path: Path) -> No
         ).fetchone()
     assert row == ("openai", 1)
 
+    # El segundo aporte llega también tarde, dentro de add_comment: debe
+    # reevaluar el gate y despertar al Lead sin depender del orden de ops.
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO runs (id,agent_id,issue_id,status,provider,model,channel) "
+            "VALUES ('run:add2','role:q2','issue:q2','running','anthropic','m2','api')"
+        )
+        conn.commit()
+    executor._apply_result_actions(
+        run={"id": "run:add2", "issue_id": "issue:q2", "provider": "anthropic", "model": "m2", "channel": "api"},
+        agent_id="role:q2",
+        agent_role="reviewer",
+        result=ExecutionResult(
+            status="completed",
+            actions={"add_comments": [
+                "---AGENT-REPORT---\nrole: reviewer\nresult: approved\n"
+                "issue_status: done\nnext_owner: lead\ntech_match: n/a\n"
+                "blocker: none\nevidence: independent finding"
+            ]},
+        ),
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        wake = conn.execute(
+            "SELECT status FROM wakeup_requests WHERE reason='quorum_ready'"
+        ).fetchone()
+        status = conn.execute(
+            "SELECT status FROM quorum_sessions WHERE id=?", (session["id"],)
+        ).fetchone()[0]
+    assert wake == ("queued",)
+    assert status == "ready"
+
 
 def test_missing_quorum_report_retries_once_then_degrades_with_lead_wakeup(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"

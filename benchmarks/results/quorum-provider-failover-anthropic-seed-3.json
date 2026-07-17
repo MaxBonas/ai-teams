@@ -1,0 +1,355 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "provider_failover_v1",
+  "base": {
+    "score": 20.0,
+    "max_score": 23.0,
+    "score_pct": 86.96,
+    "hard_failures": [],
+    "passes_hard_gate": true,
+    "word_count": 1924,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "done|completad"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "siguiente run|continuaci|wakeup|heartbeat|reanud"
+        ],
+        "required": false
+      },
+      {
+        "id": "failure_taxonomy",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "429|rate.limit|timeout|auth|invalid.request"
+        ],
+        "required": true
+      },
+      {
+        "id": "idempotency",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "idempoten|deduplic"
+        ],
+        "required": true
+      },
+      {
+        "id": "circuit_breaker",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "circuit.breaker|cortacircuit"
+        ],
+        "required": true
+      },
+      {
+        "id": "bounded_retries",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+        ],
+        "required": false
+      },
+      {
+        "id": "cost_cap",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+        ],
+        "required": true
+      },
+      {
+        "id": "quality_guard",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "quality|calidad|capacidad.{0,20}modelo|equivalencia"
+        ],
+        "required": false
+      },
+      {
+        "id": "observability",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "telemetr|m[eé]trica|cost_events|run_events"
+        ],
+        "required": false
+      },
+      {
+        "id": "recovery_test",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "unbounded_fallback",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "final": {
+    "score": 18.0,
+    "max_score": 23.0,
+    "score_pct": 78.26,
+    "hard_failures": [],
+    "passes_hard_gate": true,
+    "word_count": 1811,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "done|completad"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      },
+      {
+        "id": "failure_taxonomy",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "429|rate.limit|timeout|auth|invalid.request"
+        ],
+        "required": true
+      },
+      {
+        "id": "idempotency",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "idempoten|deduplic"
+        ],
+        "required": true
+      },
+      {
+        "id": "circuit_breaker",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "circuit.breaker|cortacircuit"
+        ],
+        "required": true
+      },
+      {
+        "id": "bounded_retries",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+        ],
+        "required": false
+      },
+      {
+        "id": "cost_cap",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+        ],
+        "required": true
+      },
+      {
+        "id": "quality_guard",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "quality|calidad|capacidad.{0,20}modelo|equivalencia"
+        ],
+        "required": false
+      },
+      {
+        "id": "observability",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "telemetr|m[eé]trica|cost_events|run_events"
+        ],
+        "required": false
+      },
+      {
+        "id": "recovery_test",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "unbounded_fallback",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "delta_score_pct": -8.7,
+  "improved": false,
+  "regressed": true,
+  "hard_gate_improved": false,
+  "provenance": {
+    "session": {
+      "id": "e51746ad-f333-478b-b163-d74ee6bd130c",
+      "issue_id": "issue:intake",
+      "status": "accepted",
+      "base_plan_revision_id": "c8dce247-40af-468c-8ccb-a9523de17d39",
+      "final_plan_revision_id": "8465db05-aa1e-4389-a1d9-f2c4a3eab786",
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": null
+    },
+    "contributions": [
+      {
+        "ordinal": 1,
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:d9be838d-fde6-451f-8796-365314a2053d",
+        "input_tokens": 24545,
+        "output_tokens": 2164,
+        "cost_cents": 0
+      },
+      {
+        "ordinal": 2,
+        "provider": "anthropic",
+        "model": "claude-opus-4-5",
+        "channel": "api",
+        "valid": 1,
+        "run_id": "run:53de6040-265a-4753-8fec-3758c8c994a2",
+        "input_tokens": 6699,
+        "output_tokens": 637,
+        "cost_cents": 14
+      }
+    ],
+    "runtime": null
+  }
+}

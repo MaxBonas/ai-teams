@@ -4148,6 +4148,14 @@ class RunExecutor:
                 "provider": contribution.get("provider"),
             },
         )
+        # El reporte puede llegar en result.output o dentro de un add_comment.
+        # En el segundo caso, el auto-supervisor genérico ya se ejecutó antes;
+        # evaluar aquí garantiza que el último aporte siempre continúe el gate.
+        self._enqueue_supervisor_report(
+            issue_id=issue_id,
+            reporting_agent_id=agent_id,
+            source_run_id=str(run.get("id") or ""),
+        )
         return contribution
 
     def _enqueue_supervisor_report(
