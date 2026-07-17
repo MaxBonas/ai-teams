@@ -177,6 +177,53 @@ def test_resolve_ask_user_questions_with_answer(tmp_path: Path) -> None:
     assert updated["status"] == "answered"
 
 
+def test_suggest_tasks_changes_requested_is_neutral_terminal_and_wakes_lead(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path, with_assignee=True)
+    interaction = create_interaction(
+        db_path,
+        issue_id="issue-1",
+        kind="suggest_tasks",
+        payload={"proposed_team": []},
+    )
+
+    updated = resolve_interaction(
+        db_path,
+        interaction_id=interaction["id"],
+        action="changes_requested",
+        resolution_data={"user_note": "  Reduce el equipo a Engineer y Reviewer.  "},
+        resolved_by_user_id="user",
+    )
+
+    result = json.loads(updated["result_json"])
+    assert updated["status"] == "answered"
+    assert result["outcome"] == "changes_requested"
+    assert result["resolution_data"]["user_note"] == "Reduce el equipo a Engineer y Reviewer."
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        wake = conn.execute(
+            "SELECT payload_json FROM wakeup_requests WHERE agent_id='agent-1' AND status='queued'"
+        ).fetchone()
+    payload = json.loads(wake["payload_json"])
+    assert payload["action"] == "changes_requested"
+    assert payload["resolution_data"]["user_note"].startswith("Reduce el equipo")
+
+
+@pytest.mark.parametrize("feedback", [None, "   ", "x" * 4001])
+def test_suggest_tasks_changes_requested_validates_feedback(tmp_path: Path, feedback: str | None) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    interaction = create_interaction(db_path, issue_id="issue-1", kind="suggest_tasks", payload={})
+
+    with pytest.raises(ValueError, match="changes_requested"):
+        resolve_interaction(
+            db_path,
+            interaction_id=interaction["id"],
+            action="changes_requested",
+            resolution_data={"user_note": feedback} if feedback is not None else None,
+        )
+
+
 def test_resolve_any_kind_with_cancel(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init_db(db_path)

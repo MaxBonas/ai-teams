@@ -1,0 +1,228 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "provider_failover_v1",
+  "completed": false,
+  "failure": "quorum session 103cdcdd-be8a-4993-9bd7-dab1962423cf has no accepted final plan",
+  "diagnostics": {
+    "session": {
+      "id": "103cdcdd-be8a-4993-9bd7-dab1962423cf",
+      "issue_id": "issue:intake",
+      "status": "degraded",
+      "base_plan_revision_id": "54ce18a4-97dc-4d18-82b9-4b78b9b342ca",
+      "final_plan_revision_id": null,
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": "auditor_report_format_exhausted"
+    },
+    "base": {
+      "score": 18.0,
+      "max_score": 23.0,
+      "score_pct": 78.26,
+      "hard_failures": [],
+      "passes_hard_gate": true,
+      "word_count": 2035,
+      "criteria": [
+        {
+          "id": "objective",
+          "weight": 1.0,
+          "passed": false,
+          "matched": [],
+          "required": false
+        },
+        {
+          "id": "closure",
+          "weight": 1.0,
+          "passed": false,
+          "matched": [],
+          "required": false
+        },
+        {
+          "id": "decomposition",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "sub-?issue|tarea|fase|paso"
+          ],
+          "required": false
+        },
+        {
+          "id": "ownership",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "owner|responsable|reporta|asignad"
+          ],
+          "required": false
+        },
+        {
+          "id": "evidence",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "evidencia|recibo|artefacto|diff|test"
+          ],
+          "required": false
+        },
+        {
+          "id": "risk",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "riesgo|fallo|rotura|rollback"
+          ],
+          "required": false
+        },
+        {
+          "id": "escalation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "escal|bloque|intervenci.{0,10}human|usuario"
+          ],
+          "required": false
+        },
+        {
+          "id": "continuation",
+          "weight": 1.0,
+          "passed": false,
+          "matched": [],
+          "required": false
+        },
+        {
+          "id": "failure_taxonomy",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "429|rate.limit|timeout|auth|invalid.request"
+          ],
+          "required": true
+        },
+        {
+          "id": "idempotency",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "idempoten|deduplic"
+          ],
+          "required": true
+        },
+        {
+          "id": "circuit_breaker",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "circuit.breaker|cortacircuit"
+          ],
+          "required": true
+        },
+        {
+          "id": "bounded_retries",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+          ],
+          "required": false
+        },
+        {
+          "id": "cost_cap",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+          ],
+          "required": true
+        },
+        {
+          "id": "quality_guard",
+          "weight": 2.0,
+          "passed": false,
+          "matched": [],
+          "required": false
+        },
+        {
+          "id": "observability",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "telemetr|m[eé]trica|cost_events|run_events"
+          ],
+          "required": false
+        },
+        {
+          "id": "recovery_test",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "chaos|fault.injection|simular.{0,20}(429|timeout)|test.{0,20}failover"
+          ],
+          "required": false
+        }
+      ],
+      "penalties": [
+        {
+          "id": "unbounded_fallback",
+          "applied": 0.0,
+          "matched": []
+        }
+      ]
+    },
+    "contributions": [
+      {
+        "ordinal": 1,
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:5b0bfb01-55df-4008-a49b-7cc3b5bfe4ff"
+      }
+    ],
+    "auditor_runs": [
+      {
+        "id": "run:5b0bfb01-55df-4008-a49b-7cc3b5bfe4ff",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 24672, \"output_tokens\": 1639, \"reasoning_output_tokens\": 31}"
+      },
+      {
+        "id": "run:d78f9292-d1b2-4d0a-adb3-4510d8bc75b2",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "completed",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:32b",
+        "channel": "local",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 2050, \"output_tokens\": 62, \"reasoning_output_tokens\": 0}"
+      },
+      {
+        "id": "run:aab17102-e2b5-4ee5-9f0d-91d2b6947b43",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "skipped",
+        "provider": null,
+        "model": null,
+        "channel": null,
+        "error_code": "review_evidence_unchanged",
+        "error": "review_evidence_unchanged",
+        "usage_json": "{}"
+      },
+      {
+        "id": "run:3a1f04da-7d6a-4146-a2d0-b04bf151d74e",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "completed",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:32b",
+        "channel": "local",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 2050, \"output_tokens\": 102, \"reasoning_output_tokens\": 0}"
+      }
+    ]
+  },
+  "provenance": {}
+}

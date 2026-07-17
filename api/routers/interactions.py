@@ -39,7 +39,7 @@ class CreateInteractionRequest(BaseModel):
 
 
 class ResolveInteractionRequest(BaseModel):
-    action: str  # accept | reject | answer | cancel
+    action: str  # accept | changes_requested | reject | answer | cancel
     result: dict[str, Any] | None = None
     resolution_data: dict[str, Any] | None = None  # optional payload override (e.g. modified team proposal)
     resolved_by_user_id: str | None = None

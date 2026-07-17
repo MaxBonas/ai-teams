@@ -17,13 +17,17 @@ TERMINAL_STATUSES = {"accepted", "rejected", "answered", "cancelled", "expired"}
 _KIND_ACTIONS: dict[str, set[str]] = {
     "request_confirmation": {"accept", "reject", "cancel"},
     "ask_user_questions": {"answer", "cancel"},
-    "suggest_tasks": {"accept", "reject", "cancel"},
+    "suggest_tasks": {"accept", "changes_requested", "reject", "cancel"},
 }
 
 _ACTION_STATUS: dict[str, str] = {
     "accept": "accepted",
     "reject": "rejected",
     "answer": "answered",
+    # The schema already models a neutral answered terminal state. Keep the
+    # product outcome in result_json without conflating requested revisions
+    # with a rejected proposal or rebuilding the SQLite CHECK constraint.
+    "changes_requested": "answered",
     "cancel": "cancelled",
 }
 
@@ -152,6 +156,14 @@ def resolve_interaction(
     if action not in allowed:
         raise ValueError(f"action {action!r} is not valid for kind {kind!r}; allowed: {sorted(allowed)}")
 
+    if action == "changes_requested":
+        feedback = str((resolution_data or {}).get("user_note") or "").strip()
+        if not feedback:
+            raise ValueError("changes_requested requires non-empty resolution_data.user_note")
+        if len(feedback) > 4000:
+            raise ValueError("changes_requested feedback exceeds 4000 characters")
+        resolution_data = {**(resolution_data or {}), "user_note": feedback}
+
     new_status = _ACTION_STATUS[action]
     now = _now()
     base_result = result or _default_result(action)
@@ -268,6 +280,7 @@ def _maybe_enqueue_wakeup(
             "issue_id": issue_id,
             "kind": interaction["kind"],
             "action": action,
+            "resolution_data": _decode_result(interaction).get("resolution_data") or {},
             "wake_reason": "interaction_resolved",
         },
         idempotency_key=f"interaction:{interaction['id']}:resolved",
@@ -293,6 +306,14 @@ def _get_by_idempotency(
 
 def _default_result(action: str) -> dict[str, Any]:
     return {"version": 1, "outcome": action}
+
+
+def _decode_result(interaction: dict[str, Any]) -> dict[str, Any]:
+    try:
+        value = json.loads(str(interaction.get("result_json") or "{}"))
+        return value if isinstance(value, dict) else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
 
 
 def _is_idempotency_conflict(exc: sqlite3.IntegrityError) -> bool:

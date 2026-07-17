@@ -2267,6 +2267,8 @@ dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 0.8rem; color:
 .hiring-table-name { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.74rem; }
 .hiring-table-why { color: var(--text-dim); font-size: 0.72rem; max-width: 220px; }
 .inbox-actions { align-self: flex-end; }
+.request-changes-button { color: var(--pending-text); border-color: var(--pending); }
+.request-changes-button:hover:not(:disabled) { background: var(--pending-bg); }
 
 /* ── Configuración: dos ámbitos con navegación lateral ────────────────────── */
 .config-panel { padding: 0; overflow: hidden; }

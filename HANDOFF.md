@@ -59,7 +59,7 @@ Completado en este bloque: fotografía y limpieza documental, canario deny → c
 Siguiente orden:
 
 1. Ejecutar nuevas semillas reales del selector en casos medios reversibles y tareas complejas de otra naturaleza. Las 28 fronteras deterministas protegen la política, pero no sustituyen varianza de LLM.
-2. Instalar/conectar un segundo proveedor permitido y ejecutar tres semillas de cada rúbrica `lead_quorum`; no sustituir diversidad real por dos runs de Codex.
+2. Ejecutar tres semillas aceptadas de cada rúbrica `lead_quorum` con proveedores que respeten el contrato estructurado; Codex + Ollama ya validó diversidad, coste, degradación y UI, pero Qwen 32B no produjo un aporte válido.
 3. Verificar `usage` real de Gemini subscription durante esas runs. La identidad provider/channel ya se resuelve desde el perfil durable en vez del descriptor CLI compartido.
 4. Activar y evaluar resumen causal cuando el contexto exceda presupuesto.
 5. Integrar el resumen de evals SQL en `loop-health` cuando se toque esa superficie.
@@ -73,6 +73,8 @@ Siguiente orden:
 - Gemini CLI 0.51.0 quedó instalado, pero el OAuth existente es rechazado por Google con `UNSUPPORTED_CLIENT`/`IneligibleTierError` y exige migración a Antigravity; por tanto continúa sin ser un segundo proveedor utilizable para benchmarks.
 - Nuevas anclas reales: `config_redactor` empata 3/3 pero `solo_lead` cuesta 4,68× tokens de entrada y 5,17× tiempo; `tenant_authorizer` favorece a Codex directo 4/5 frente a `full_team` 2/5. El default conservador no debe relajarse ni presentarse como calibrado con estas semillas.
 - `benchmarks/results/quorum-sqlite-seed-1.json` es evidencia de una run incompleta, no un resultado A/B: Plan A obtuvo 91,3 % y el segundo auditor falló con `subscription_cli_not_found`.
+- `benchmarks/results/quorum-provider-failover-local-seed-1.json` es una segunda evidencia incompleta pero útil: Plan A obtuvo 78,26 %, Codex aportó una auditoría válida y Qwen 32B consumió 4.100 tokens de entrada/164 de salida en dos intentos sin cumplir `AGENT-REPORT`; la sesión terminó `degraded` con escalado durable. El runtime reintenta una sola vez, excluye ese reintento del guard de evidencia idéntica y cancela wakeups sobrantes al degradar.
+- El QuorumStepper fue comprobado contra esa SQLite real: distingue ahora `degraded` de “No requerido”, expone `1/2` aportes, gate pendiente, causa y provenance del aporte válido. Evidencia visual local en `output/playwright/quorum-stepper-degraded.png` (no versionada).
 - El benchmark ya tiene resultados versionados y juez oculto aislado (harness v3); faltan más semillas y familias de tarea antes de extraer conclusiones estadísticas.
 - Los documentos históricos de migración pueden contener estados de fase ya superados; el banner del documento indica cómo leerlos.
 - Prompts externos o antiguos que mencionen `AITEAM_AUTO_QUORUM` están obsoletos: el único disparador vivo es el perfil explícito `lead_quorum`.
@@ -84,7 +86,7 @@ Suite completa verificada el `2026-07-17`:
 
 ```powershell
 .\scripts\pytest_local.bat tests -q --tb=short
-# 888 passed in 226.10s
+# 910 passed in 313.44s
 ```
 
 Canario e2e:

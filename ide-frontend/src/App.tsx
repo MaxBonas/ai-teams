@@ -432,7 +432,8 @@ function QuorumStepper({ quorum, loading }: { quorum: QuorumPayload | null; load
   if (!quorum) return null;
 
   const { session, contributions, gate } = quorum;
-  const skipped = Boolean(session.skipped_reason) || session.status === 'skipped';
+  const skipped = session.status === 'skipped';
+  const degraded = session.status === 'degraded';
   const synthesized = Boolean(session.final_plan_revision_id);
   const requestComplete = skipped || contributions.length > 0 || gate.ready;
   const auditComplete = skipped || gate.valid_contributions >= session.min_valid_contributions;
@@ -444,7 +445,7 @@ function QuorumStepper({ quorum, loading }: { quorum: QuorumPayload | null; load
   ];
 
   return (
-    <section className={`quorum-stepper${skipped ? ' skipped' : ''}`} aria-label="Estado del quorum de planificación">
+    <section className={`quorum-stepper${skipped ? ' skipped' : ''}${degraded ? ' degraded' : ''}`} aria-label="Estado del quorum de planificación">
       <div className="quorum-stepper-header">
         <div>
           <span className="quorum-eyebrow">Quorum de planificación</span>
@@ -460,7 +461,7 @@ function QuorumStepper({ quorum, loading }: { quorum: QuorumPayload | null; load
           </div>
         ))}
       </div>
-      {skipped && <p className="quorum-skip-reason">{session.skipped_reason || 'El perfil de esta issue no requiere quorum.'}</p>}
+      {(skipped || degraded) && <p className="quorum-skip-reason">{session.skipped_reason || 'El perfil de esta issue no requiere quorum.'}</p>}
       {!skipped && contributions.length > 0 && (
         <div className="quorum-contributions">
           {contributions.map((contribution) => (
@@ -501,6 +502,7 @@ interface Interaction {
   created_at?: string;
   resolved_at?: string | null;
   payload?: Record<string, unknown>;
+  result?: Record<string, unknown>;
 }
 
 interface Run {
@@ -696,6 +698,7 @@ function statusLabel(status: string): string {
     blocked: 'bloqueado',
     cancelled: 'cancelado',
     completed: 'completado',
+    degraded: 'degradado',
     done: 'done',
     failed: 'fallido',
     in_progress: 'en progreso',
@@ -2060,7 +2063,11 @@ export default function App() {
     }
   }
 
-  const resolveInteraction = async (interaction: Interaction, intent: 'accept' | 'reject', note?: string) => {
+  const resolveInteraction = async (
+    interaction: Interaction,
+    intent: 'accept' | 'changes_requested' | 'reject',
+    note?: string,
+  ) => {
     setLoading(true);
     setError('');
     try {
@@ -2071,7 +2078,9 @@ export default function App() {
         ? (intent === 'accept' ? 'answer' : 'cancel')
         : intent;
       const body: Record<string, unknown> = { action, resolved_by_user_id: 'user' };
-      if (intent === 'accept' && hiringTeam && interaction.kind === 'suggest_tasks') {
+      if (intent === 'changes_requested' && interaction.kind === 'suggest_tasks') {
+        body.resolution_data = { user_note: note?.trim() || '' };
+      } else if (intent === 'accept' && hiringTeam && interaction.kind === 'suggest_tasks') {
         body.resolution_data = { proposed_team: hiringTeam };
       } else if (intent === 'accept' && note && note.trim() && interaction.kind !== 'suggest_tasks') {
         // Carry the user's free-text answer so the Lead can read it from result.resolution_data.user_note
@@ -3057,6 +3066,7 @@ export default function App() {
                 const isPending = current?.status === 'pending';
                 const isHiring = current?.kind === 'suggest_tasks';
                 const isQuestion = current?.kind === 'ask_user_questions';
+                const currentOutcome = String(current?.result?.outcome || '');
                 const payload = (current?.payload || {}) as Record<string, unknown>;
                 const isExtension = String(payload.reason || '') === 'extension_install_requested';
                 const proposedTeam: ProposedTeamMember[] = (payload.proposed_team as ProposedTeamMember[]) || [];
@@ -3099,7 +3109,11 @@ export default function App() {
                           <div className="inbox-detail-header">
                             {isPending ? <AlertCircle size={15} /> : <CheckCircle2 size={15} />}
                             <h3>{current.title || current.kind}</h3>
-                            {!isPending && <span className="chat-resolved-badge">{statusLabel(current.status)}</span>}
+                            {!isPending && (
+                              <span className="chat-resolved-badge">
+                                {currentOutcome === 'changes_requested' ? 'Cambios solicitados' : statusLabel(current.status)}
+                              </span>
+                            )}
                             {isHiring && <ProfileBadge profile={hiringProfile in PROFILE_BADGES ? hiringProfile : null} compact />}
                           </div>
                           {currentIssue && (
@@ -3205,10 +3219,12 @@ export default function App() {
                             </div>
                           )}
 
-                          {isPending && !isHiring && (
+                          {isPending && (
                             <div className="interaction-note-area">
                               <textarea
-                                placeholder="Escribe tu respuesta... (opcional — si no escribes nada, se enviará solo Aceptar)"
+                                placeholder={isHiring
+                                  ? 'Describe los cambios que debe hacer el Lead antes de presentar otra propuesta…'
+                                  : 'Escribe tu respuesta... (opcional — si no escribes nada, se enviará solo Aceptar)'}
                                 value={interactionNotes[current.id] || ''}
                                 onChange={(event) => setInteractionNotes((prev) => ({ ...prev, [current.id]: event.target.value }))}
                                 rows={3}
@@ -3226,6 +3242,16 @@ export default function App() {
                               >
                                 {isQuestion ? 'Descartar' : 'Rechazar'}
                               </button>
+                              {isHiring && (
+                                <button
+                                  className="secondary-button request-changes-button"
+                                  onClick={() => void resolveInteraction(current, 'changes_requested', interactionNotes[current.id])}
+                                  disabled={loading || !(interactionNotes[current.id] || '').trim()}
+                                  title="Devuelve la propuesta al Lead con este feedback"
+                                >
+                                  Pedir cambios…
+                                </button>
+                              )}
                               <button
                                 onClick={() => void resolveInteraction(current, 'accept', isHiring ? undefined : interactionNotes[current.id])}
                                 disabled={loading}

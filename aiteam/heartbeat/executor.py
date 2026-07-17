@@ -328,6 +328,17 @@ class RunExecutor:
                                 "No exijas workspace_files ni implementación."
                             ),
                         }
+                    if str(ctx.get("wake_reason") or "") == "quorum_report_retry":
+                        correction = (
+                            "CORRECCIÓN OBLIGATORIA: tu run anterior terminó sin un AGENT-REPORT "
+                            "estructurado y por tanto no cuenta para el quorum. Debes usar `add_comment` "
+                            "e incluir al final exactamente un bloque `---AGENT-REPORT---` con role, "
+                            "result, issue_status, next_owner, blocker y evidence. No termines solo con summary."
+                        )
+                        existing_instruction = str(payload.get("mandatory_instruction") or "").strip()
+                        payload["mandatory_instruction"] = correction + (
+                            f"\n\n{existing_instruction}" if existing_instruction else ""
+                        )
                 _quorum_session_id = str(ctx.get("quorum_session_id") or "").strip()
                 if _quorum_session_id and str(ctx.get("wake_reason") or "") in {
                     "quorum_ready", "quorum_degraded"
@@ -1104,6 +1115,12 @@ class RunExecutor:
 
         # ── Step 2: Apply the adapter's own result actions ───────────────────
         self._apply_result_actions(run=run, agent_id=agent_id, agent_role=agent_role, result=result)
+        self._ensure_quorum_auditor_continuation(
+            issue_id=issue_id_str,
+            agent_id=agent_id,
+            run_id=run_id,
+            run_status=result.status,
+        )
 
         # ── Step 2.5: Lead unblock audit + circuit breaker ───────────────────
         # When a non-builtin LLM Lead wakes because a child reported blocked,
@@ -3970,6 +3987,116 @@ class RunExecutor:
         )
         return session
 
+    def _ensure_quorum_auditor_continuation(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        run_id: str,
+        run_status: str,
+    ) -> None:
+        """Retry or degrade when an auditor completes without a valid report.
+
+        A successful process exit is not quorum evidence. Local/small models can
+        satisfy the CLI output schema with only a summary, leaving the session
+        reviewing with no wakeups. One corrective retry is allowed; a second
+        format failure degrades the session and wakes the Lead durably.
+        """
+        if run_status != "completed" or not issue_id:
+            return
+        issue = get_issue(self.db_path, issue_id=issue_id) or {}
+        metadata = _decode_json(issue.get("metadata_json") or "{}")
+        session_id = str(metadata.get("quorum_session_id") or "").strip()
+        if not session_id:
+            return
+        session = get_quorum_session(self.db_path, session_id=session_id)
+        if session is None or str(session.get("status") or "") in {"accepted", "degraded", "failed"}:
+            return
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            contribution = conn.execute(
+                "SELECT 1 FROM quorum_contributions WHERE session_id=? AND run_id=? AND valid=1",
+                (session_id, run_id),
+            ).fetchone()
+            already_recorded = conn.execute(
+                "SELECT 1 FROM activity_log WHERE action='quorum.auditor_report_missing' "
+                "AND target_id=? AND run_id=?",
+                (issue_id, run_id),
+            ).fetchone()
+            prior = int(conn.execute(
+                "SELECT COUNT(*) FROM activity_log "
+                "WHERE action='quorum.auditor_report_missing' AND target_id=?",
+                (issue_id,),
+            ).fetchone()[0])
+        if contribution or already_recorded:
+            return
+
+        log_activity(
+            self.db_path,
+            action="quorum.auditor_report_missing",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=run_id,
+            payload={"session_id": session_id, "attempt": prior + 1},
+        )
+        if prior < 1:
+            update_issue(self.db_path, issue_id=issue_id, status="todo")
+            create_comment(
+                self.db_path,
+                issue_id=issue_id,
+                author_user_id="system",
+                body=(
+                    "⚙ Sistema: la auditoría terminó sin AGENT-REPORT estructurado y no cuenta "
+                    "para el quorum. Se permite un único reintento correctivo de formato."
+                ),
+                metadata={"source": "quorum_report_validation"},
+            )
+            enqueue_wakeup(
+                self.db_path,
+                agent_id=agent_id,
+                source="quorum",
+                reason="quorum_report_retry",
+                payload={
+                    "issue_id": issue_id,
+                    "quorum_session_id": session_id,
+                    "wake_reason": "quorum_report_retry",
+                },
+                idempotency_key=f"quorum_report_retry:{session_id}:{agent_id}",
+            )
+            return
+
+        degraded = degrade_quorum_session(
+            self.db_path,
+            session_id=session_id,
+            skipped_reason="auditor_report_format_exhausted",
+        )
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            conn.execute(
+                "UPDATE wakeup_requests SET status='cancelled', finished_at=CURRENT_TIMESTAMP, "
+                "updated_at=CURRENT_TIMESTAMP, error='quorum_session_degraded' "
+                "WHERE agent_id=? AND reason='quorum_report_retry' AND status='queued' "
+                "AND json_extract(payload_json, '$.quorum_session_id')=?",
+                (agent_id, session_id),
+            )
+            conn.commit()
+        parent_issue_id = str(issue.get("parent_id") or degraded.get("issue_id") or "").strip()
+        parent = get_issue(self.db_path, issue_id=parent_issue_id) or {}
+        lead_id = str(parent.get("assignee_agent_id") or "role:lead").strip()
+        enqueue_wakeup(
+            self.db_path,
+            agent_id=lead_id,
+            source="quorum",
+            reason="quorum_degraded",
+            payload={
+                "issue_id": parent_issue_id,
+                "child_issue_id": issue_id,
+                "quorum_session_id": session_id,
+                "wake_reason": "quorum_degraded",
+                "skipped_reason": "auditor_report_format_exhausted",
+            },
+            idempotency_key=f"quorum_degraded:{session_id}",
+        )
+
     def _maybe_record_quorum_contribution(
         self,
         *,
@@ -5015,7 +5142,7 @@ class RunExecutor:
         if (
             issue_id
             and role_key in self._REREVIEW_ROLES
-            and wake_reason not in {"interaction_resolved", "liveness_continuation"}
+            and wake_reason not in {"interaction_resolved", "liveness_continuation", "quorum_report_retry"}
             and self._review_evidence_unchanged(issue_id=issue_id, workspace_root=workspace_root, current_run_id=run_id)
         ):
             logger.info(

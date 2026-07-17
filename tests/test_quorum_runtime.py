@@ -167,6 +167,83 @@ def test_quorum_report_in_add_comment_records_contribution(tmp_path: Path) -> No
     assert row == ("openai", 1)
 
 
+def test_missing_quorum_report_retries_once_then_degrades_with_lead_wakeup(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    session = executor._initialize_quorum_session(
+        parent_issue_id="issue:root", proposal=_proposal(), created_issue_ids=["issue:q1", "issue:q2"]
+    )
+    assert session is not None
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO runs (id,agent_id,issue_id,status) VALUES "
+            "('run:missing-1','role:q2','issue:q2','completed'),"
+            "('run:missing-2','role:q2','issue:q2','completed')"
+        )
+        conn.commit()
+
+    executor._ensure_quorum_auditor_continuation(
+        issue_id="issue:q2", agent_id="role:q2", run_id="run:missing-1", run_status="completed"
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        retry = conn.execute(
+            "SELECT payload_json FROM wakeup_requests WHERE reason='quorum_report_retry'"
+        ).fetchone()
+        status = conn.execute("SELECT status FROM issues WHERE id='issue:q2'").fetchone()[0]
+    assert retry is not None
+    assert json.loads(retry[0])["quorum_session_id"] == session["id"]
+    assert status == "todo"
+
+    executor._ensure_quorum_auditor_continuation(
+        issue_id="issue:q2", agent_id="role:q2", run_id="run:missing-1", run_status="completed"
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        unchanged = conn.execute(
+            "SELECT status FROM quorum_sessions WHERE id=?", (session["id"],)
+        ).fetchone()[0]
+        missing_events = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action='quorum.auditor_report_missing'"
+        ).fetchone()[0]
+    assert unchanged == "reviewing"
+    assert missing_events == 1
+
+    executor._ensure_quorum_auditor_continuation(
+        issue_id="issue:q2", agent_id="role:q2", run_id="run:missing-2", run_status="completed"
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        degraded = conn.execute(
+            "SELECT status,skipped_reason FROM quorum_sessions WHERE id=?", (session["id"],)
+        ).fetchone()
+        lead_wake = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND reason='quorum_degraded'"
+        ).fetchone()[0]
+        pending_retry = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE reason='quorum_report_retry' AND status='queued'"
+        ).fetchone()[0]
+    assert degraded == ("degraded", "auditor_report_format_exhausted")
+    assert lead_wake == 1
+    assert pending_retry == 0
+
+
+def test_quorum_report_retry_bypasses_unchanged_review_evidence(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    monkeypatch.setattr(executor, "_review_evidence_unchanged", lambda **_kwargs: True)
+
+    skip_reason = executor._preflight_skip_reason(
+        issue_id="issue:q2",
+        agent_role="reviewer",
+        ctx={"wake_reason": "quorum_report_retry"},
+        run_id="run:retry",
+        agent_id="role:q2",
+        workspace_root=tmp_path,
+    )
+
+    assert skip_reason is None
+
+
 def test_explicit_quorum_cannot_close_before_accepted_plan(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init(db_path)
