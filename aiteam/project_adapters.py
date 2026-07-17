@@ -183,7 +183,7 @@ def apply_adapter_policy_to_member(member: dict[str, Any], profiles: list[dict[s
     }
 
 
-def reconcile_project_agent_policy(db_path: Path) -> list[str]:
+def reconcile_project_agent_policy(db_path: Path, *, include_tier3: bool = True) -> list[str]:
     """Repair default/simulated agents so a project uses its selected adapters.
 
     Two upgrade paths:
@@ -290,10 +290,11 @@ def reconcile_project_agent_policy(db_path: Path) -> list[str]:
             conn.execute(f"UPDATE agents SET {', '.join(sets)} WHERE id = ?", params)
             repaired.append(str(row["id"]))
         conn.commit()
-    # After repairing existing agents, ensure Tier 3 defaults exist.
-    # This is idempotent — skips agents that already exist.
-    tier3_created = ensure_tier3_agents(db_path, profiles=profiles)
-    repaired.extend(tier3_created)
+    if include_tier3:
+        # Team modes keep cheap specialists ready. A true `solo_lead`
+        # project must not materialize dormant pseudo-team members.
+        tier3_created = ensure_tier3_agents(db_path, profiles=profiles)
+        repaired.extend(tier3_created)
     return repaired
 
 

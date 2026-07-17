@@ -310,6 +310,42 @@ CREATE TABLE IF NOT EXISTS agent_reports (
 
 CREATE INDEX IF NOT EXISTS idx_agent_reports_issue ON agent_reports(issue_id, created_at);
 
+CREATE TABLE IF NOT EXISTS quorum_sessions (
+    id TEXT PRIMARY KEY,
+    issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    base_plan_revision_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'reviewing'
+        CHECK (status IN ('reviewing', 'ready', 'synthesizing', 'accepted', 'degraded', 'failed')),
+    requested_contributions INTEGER NOT NULL DEFAULT 2,
+    min_valid_contributions INTEGER NOT NULL DEFAULT 2,
+    next_profile TEXT NOT NULL DEFAULT 'planning_complete',
+    skipped_reason TEXT,
+    synthesis_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    final_plan_revision_id TEXT,
+    dispositions_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(issue_id, base_plan_revision_id)
+);
+
+CREATE TABLE IF NOT EXISTS quorum_contributions (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES quorum_sessions(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    ordinal INTEGER NOT NULL,
+    provider TEXT,
+    model TEXT,
+    channel TEXT CHECK (channel IS NULL OR channel IN ('subscription', 'api', 'local')),
+    result TEXT NOT NULL,
+    evidence TEXT NOT NULL DEFAULT '',
+    findings_json TEXT NOT NULL DEFAULT '[]',
+    valid INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(session_id, agent_id),
+    UNIQUE(session_id, ordinal)
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency
     ON wakeup_requests(agent_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
@@ -328,3 +364,5 @@ CREATE INDEX IF NOT EXISTS idx_issue_documents_issue_key ON issue_documents(issu
 CREATE INDEX IF NOT EXISTS idx_issue_document_revisions_doc ON issue_document_revisions(document_id, revision_number);
 CREATE INDEX IF NOT EXISTS idx_cost_events_run ON cost_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_cost_events_agent_period ON cost_events(agent_id, period);
+CREATE INDEX IF NOT EXISTS idx_quorum_sessions_issue ON quorum_sessions(issue_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_quorum_contributions_session ON quorum_contributions(session_id, ordinal);

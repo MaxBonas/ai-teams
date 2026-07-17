@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 import uuid
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,12 @@ from aiteam.policies import WORKSPACE_NOISE_DIRS as _WS_SKIP_DIRS
 from aiteam.project_adapters import (
     available_project_profiles,
     choose_adapter_for_role,
+    ensure_quorum_agents,
     project_profiles,
     reconcile_project_agent_policy,
     write_project_adapter_policy,
 )
+from aiteam.run_profiles import FULL_TEAM, LEAD_QUORUM, normalize_run_profile
 from aiteam.user_config import profile_is_connected
 from aiteam.db.comments import create_comment
 from aiteam.db.wakeups import enqueue_wakeup
@@ -49,6 +52,7 @@ class NewProjectRequest(BaseModel):
     name: str
     initial_task: str | None = None
     adapter_profile_ids: list[str] = Field(default_factory=list)
+    run_profile: Literal["solo_lead", "lead_quorum", "full_team"] = FULL_TEAM
 
 class DeleteProjectRequest(BaseModel):
     confirmation: str
@@ -160,7 +164,12 @@ async def create_project(payload: NewProjectRequest, request: Request):
     except ValueError as exc:
         shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _initialize_project_runtime(target, initial_task=payload.initial_task)
+    run_profile = normalize_run_profile(payload.run_profile)
+    _initialize_project_runtime(
+        target,
+        initial_task=payload.initial_task,
+        run_profile=run_profile,
+    )
     # VCS del workspace: solo en proyectos RECIÉN creados por la app (un
     # workspace externo seleccionado a posteriori nunca se toca — sin marker
     # git_managed tampoco habrá commits automáticos).
@@ -180,7 +189,11 @@ async def create_project(payload: NewProjectRequest, request: Request):
             agent_id="role:lead",
             source="project_bootstrap",
             reason="new_project",
-            payload={"issue_id": "issue:intake", "wake_reason": "new_project"},
+            payload={
+                "issue_id": "issue:intake",
+                "wake_reason": "new_project",
+                "profile": run_profile,
+            },
             idempotency_key="bootstrap:issue:intake:role:lead",
         )
     except Exception:
@@ -203,6 +216,7 @@ async def create_project(payload: NewProjectRequest, request: Request):
         "workspace": str(target.as_posix()),
         "project_name": target.name,
         "configured": True,
+        "run_profile": run_profile,
         "adapter_warning": adapter_warning,
     }
 
@@ -368,7 +382,13 @@ async def read_workspace_file(file_path: str, request: Request):
     }
 
 
-def _initialize_project_runtime(project_path: Path, *, initial_task: str | None = None) -> None:
+def _initialize_project_runtime(
+    project_path: Path,
+    *,
+    initial_task: str | None = None,
+    run_profile: str = FULL_TEAM,
+) -> None:
+    run_profile = normalize_run_profile(run_profile)
     runtime_dir = resolve_runtime_dir(project_path, PROJECT_ROOT)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     instructions = runtime_dir / "instructions.md"
@@ -418,7 +438,13 @@ def _initialize_project_runtime(project_path: Path, *, initial_task: str | None 
             INSERT OR IGNORE INTO goals (id, title, description, source, metadata_json)
             VALUES (?, ?, ?, ?, ?)
             """,
-            ("goal:intake", intake_title, intake_desc, "project_bootstrap", '{"profile":"full_team"}'),
+            (
+                "goal:intake",
+                intake_title,
+                intake_desc,
+                "project_bootstrap",
+                json.dumps({"profile": run_profile}, ensure_ascii=False, sort_keys=True),
+            ),
         )
         conn.execute(
             """
@@ -438,7 +464,15 @@ def _initialize_project_runtime(project_path: Path, *, initial_task: str | None 
                 "medium",
                 "medium",
                 "role:lead",
-                '{"source":"project_bootstrap","wake_reason":"new_project"}',
+                json.dumps(
+                    {
+                        "profile": run_profile,
+                        "source": "project_bootstrap",
+                        "wake_reason": "new_project",
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
             ),
         )
         if task:
@@ -462,4 +496,6 @@ def _initialize_project_runtime(project_path: Path, *, initial_task: str | None 
 
     # Bootstrap minimum org chart: repair Lead adapter + create Tier 3 agents.
     # Idempotent — safe to call on rename/re-init as well.
-    reconcile_project_agent_policy(db_path)
+    reconcile_project_agent_policy(db_path, include_tier3=run_profile != "solo_lead")
+    if run_profile == LEAD_QUORUM:
+        ensure_quorum_agents(db_path, profiles=project_profiles(runtime_dir))

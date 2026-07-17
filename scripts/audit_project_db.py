@@ -90,6 +90,30 @@ def report(project_dir: Path, *, excerpts: bool) -> None:
             f"{r['c'] / 100:.2f} USD, {r['i']:,} in / {r['o']:,} out"
         )
 
+    has_quorum = q(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+        "AND name IN ('quorum_sessions','quorum_contributions')"
+    ).fetchone()[0] == 2
+    if has_quorum:
+        section("QUORUM")
+        rows = q(
+            "SELECT status, COUNT(*) n FROM quorum_sessions GROUP BY status ORDER BY n DESC"
+        ).fetchall()
+        if rows:
+            for row in rows:
+                print(f"  {row['status']}: {row['n']}")
+        else:
+            print("  (sin sesiones)")
+        linked = q(
+            "SELECT COUNT(*) total, "
+            "SUM(CASE WHEN ce.id IS NOT NULL THEN 1 ELSE 0 END) with_cost "
+            "FROM quorum_contributions qc LEFT JOIN cost_events ce ON ce.run_id=qc.run_id"
+        ).fetchone()
+        print(
+            f"  contribuciones con cost_event: {int(linked['with_cost'] or 0)}/"
+            f"{int(linked['total'] or 0)}"
+        )
+
     section("SALUD DEL ROUTER (tasa de infra-fallos por proveedor)")
     infra_codes = (
         "api_error", "subscription_cli_not_found", "subscription_cli_nonzero_exit",
@@ -159,6 +183,8 @@ def report(project_dir: Path, *, excerpts: bool) -> None:
             "WHERE status NOT IN ('resolved','cancelled','accepted','rejected')"
         ),
     }
+    if has_quorum:
+        checks.update(_quorum_invariant_checks())
     ok = True
     for label, sql in checks.items():
         n = q(sql).fetchone()[0]
@@ -179,6 +205,75 @@ def report(project_dir: Path, *, excerpts: bool) -> None:
             print(f"  -- {r['id']} ({r['agent_id']}, {r['error_code']}):")
             for line in tail.splitlines()[-6:]:
                 print(f"     {line}")
+
+
+def _quorum_invariant_checks() -> dict[str, str]:
+    """Invariantes de quorum basados en rutas durables, no solo en status."""
+    active_wakeup = "('queued','claimed','running')"
+    active_run = "('queued','running')"
+    open_interaction = "('accepted','rejected','answered','cancelled','expired')"
+    return {
+        "quorum reviewing sin auditor/run/wakeup vivo": f"""
+            SELECT COUNT(*) FROM quorum_sessions qs
+            WHERE qs.status='reviewing'
+              AND NOT EXISTS (
+                  SELECT 1 FROM issues child
+                  WHERE json_extract(child.metadata_json, '$.quorum_session_id')=qs.id
+                    AND child.status NOT IN ('done','cancelled','blocked')
+                    AND (
+                        EXISTS (SELECT 1 FROM runs r WHERE r.issue_id=child.id AND r.status IN {active_run})
+                        OR EXISTS (
+                            SELECT 1 FROM wakeup_requests w
+                            WHERE w.status IN {active_wakeup}
+                              AND COALESCE(json_extract(w.payload_json, '$.issue_id'), '')=child.id
+                        )
+                    )
+              )
+        """,
+        "quorum ready sin wakeup/run de sintesis": f"""
+            SELECT COUNT(*) FROM quorum_sessions qs
+            WHERE qs.status='ready'
+              AND NOT EXISTS (
+                  SELECT 1 FROM wakeup_requests w
+                  WHERE w.status IN {active_wakeup}
+                    AND json_extract(w.payload_json, '$.quorum_session_id')=qs.id
+                    AND w.reason='quorum_ready'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM runs r
+                  WHERE r.issue_id=qs.issue_id AND r.status IN {active_run}
+              )
+        """,
+        "quorum degraded sin escalado durable": f"""
+            SELECT COUNT(*) FROM quorum_sessions qs
+            WHERE qs.status='degraded'
+              AND NOT EXISTS (
+                  SELECT 1 FROM wakeup_requests w
+                  WHERE w.status IN {active_wakeup}
+                    AND json_extract(w.payload_json, '$.quorum_session_id')=qs.id
+                    AND w.reason IN ('quorum_degraded','quorum_ready')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM issue_thread_interactions i
+                  WHERE i.issue_id=qs.issue_id AND i.status NOT IN {open_interaction}
+              )
+        """,
+        "quorum accepted con issue no terminal": """
+            SELECT COUNT(*) FROM quorum_sessions qs
+            JOIN issues i ON i.id=qs.issue_id
+            WHERE qs.status='accepted' AND i.status NOT IN ('done','cancelled')
+        """,
+        "contribuciones quorum validas sin provenance completa": """
+            SELECT COUNT(*) FROM quorum_contributions qc
+            LEFT JOIN runs r ON r.id=qc.run_id
+            WHERE qc.valid=1 AND (
+                qc.run_id IS NULL OR r.id IS NULL
+                OR COALESCE(qc.provider,'')=''
+                OR COALESCE(qc.model,'')=''
+                OR COALESCE(qc.channel,'')=''
+            )
+        """,
+    }
 
 
 def main() -> None:

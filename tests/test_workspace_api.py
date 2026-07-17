@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -164,6 +165,103 @@ def test_create_project_bootstraps_lead_with_selected_adapter(tmp_path: Path, mo
         row = conn.execute("SELECT adapter_type, adapter_config_json FROM agents WHERE id = 'role:lead'").fetchone()
     assert row[0] == "openai_api"
     assert '"profile_id": "openai_api"' in row[1]
+
+
+def test_create_project_persists_lead_quorum_and_bootstraps_auditors(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={
+                "name": "Quorum",
+                "initial_task": "Diseña el plan crítico",
+                "adapter_profile_ids": ["openai_api"],
+                "run_profile": "lead_quorum",
+            },
+        )
+        payload = response.json()
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 200
+    assert payload["run_profile"] == "lead_quorum"
+    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        goal_metadata = json.loads(conn.execute(
+            "SELECT metadata_json FROM goals WHERE id = 'goal:intake'"
+        ).fetchone()[0])
+        issue_metadata = json.loads(conn.execute(
+            "SELECT metadata_json FROM issues WHERE id = 'issue:intake'"
+        ).fetchone()[0])
+        auditor_ids = {
+            row[0]
+            for row in conn.execute(
+                "SELECT id FROM agents WHERE role = 'quorum_auditor'"
+            ).fetchall()
+        }
+        wake_payload = json.loads(conn.execute(
+            "SELECT payload_json FROM wakeup_requests WHERE idempotency_key = ?",
+            ("bootstrap:issue:intake:role:lead",),
+        ).fetchone()[0])
+
+    assert goal_metadata["profile"] == "lead_quorum"
+    assert issue_metadata["profile"] == "lead_quorum"
+    assert wake_payload["profile"] == "lead_quorum"
+    assert auditor_ids == {"role:quorum_auditor_1", "role:quorum_auditor_2"}
+
+
+def test_create_solo_lead_project_bootstraps_only_the_lead(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={
+                "name": "Solo",
+                "adapter_profile_ids": ["openai_api"],
+                "run_profile": "solo_lead",
+            },
+        )
+        payload = response.json()
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 200
+    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        agents = conn.execute("SELECT id, role FROM agents ORDER BY id").fetchall()
+    assert agents == [("role:lead", "lead")]
+
+
+def test_create_project_rejects_unknown_run_profile(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={
+                "name": "Invalid",
+                "adapter_profile_ids": ["openai_api"],
+                "run_profile": "maximum_magic",
+            },
+        )
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 422
+    assert not (source_root / "Invalid").exists()
 
 
 def test_create_project_bootstraps_minimum_org_chart(tmp_path: Path, monkeypatch) -> None:

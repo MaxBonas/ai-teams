@@ -2200,6 +2200,213 @@ def test_update_child_issue_sets_status_and_posts_comment(tmp_path: Path) -> Non
     assert len(wakeups) >= 1, "Expected child to be re-queued after update_child_issue"
 
 
+def test_unchanged_failed_test_runner_is_not_requeued(tmp_path: Path) -> None:
+    """A failed deterministic runner must wait for a real workspace change."""
+    workspace = tmp_path / "workspace"
+    db_path = workspace / ".aiteam" / "aiteam.db"
+    db_path.parent.mkdir(parents=True)
+    (workspace / "app.py").write_text("print('broken')\n", encoding="utf-8")
+    _init_lead_child_db(db_path)
+
+    executor = RunExecutor(db_path, AdapterRegistry([_UpdateChildRuntime()]))
+    digest = executor._workspace_digest(workspace)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET role = 'test_runner' WHERE id = 'role:engineer'")
+        conn.execute("UPDATE issues SET role = 'test_runner' WHERE id = 'issue:child'")
+        conn.execute(
+            "INSERT INTO runs (id, agent_id, issue_id, status) VALUES (?, ?, ?, ?)",
+            ("run:test-failed", "role:engineer", "issue:child", "completed"),
+        )
+        conn.execute(
+            """
+            INSERT INTO agent_reports (
+                id, issue_id, agent_id, run_id, agent_role, result,
+                valid, is_assignee, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, '{}')
+            """,
+            (
+                "report:test-failed", "issue:child", "role:engineer",
+                "run:test-failed", "test_runner", "failed",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO activity_log (
+                id, run_id, actor_agent_id, action, target_type, target_id, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "activity:test-digest", "run:test-failed", "role:engineer",
+                "workspace.context_digest", "issue", "issue:child",
+                json.dumps({"digest": digest}),
+            ),
+        )
+        conn.commit()
+
+    enqueue_wakeup(
+        db_path,
+        agent_id="role:lead",
+        source="test",
+        reason="child_report",
+        payload={"issue_id": "issue:intake"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        child = conn.execute(
+            "SELECT status FROM issues WHERE id = 'issue:child'"
+        ).fetchone()
+        runner_wakeups = conn.execute(
+            """
+            SELECT COUNT(*) FROM wakeup_requests
+            WHERE agent_id = 'role:engineer' AND reason = 'lead_directive'
+            """
+        ).fetchone()[0]
+        correction_wakeups = conn.execute(
+            """
+            SELECT COUNT(*) FROM wakeup_requests
+            WHERE agent_id = 'role:lead' AND reason = 'unchanged_test_failure'
+            """
+        ).fetchone()[0]
+        suppressed = conn.execute(
+            """
+            SELECT COUNT(*) FROM activity_log
+            WHERE action = 'lead.requeue_suppressed_unchanged_workspace'
+            """
+        ).fetchone()[0]
+
+    assert child["status"] == "blocked"
+    assert runner_wakeups == 0
+    assert correction_wakeups == 1
+    assert suppressed == 1
+
+
+def test_failed_test_runner_can_be_requeued_after_workspace_change(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    db_path = workspace / ".aiteam" / "aiteam.db"
+    db_path.parent.mkdir(parents=True)
+    source = workspace / "app.py"
+    source.write_text("print('broken')\n", encoding="utf-8")
+    _init_lead_child_db(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([_UpdateChildRuntime()]))
+    failed_digest = executor._workspace_digest(workspace)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET role = 'test_runner' WHERE id = 'role:engineer'")
+        conn.execute("UPDATE issues SET role = 'test_runner' WHERE id = 'issue:child'")
+        conn.execute(
+            "INSERT INTO runs (id, agent_id, issue_id, status) VALUES ('run:failed', 'role:engineer', 'issue:child', 'completed')"
+        )
+        conn.execute(
+            """
+            INSERT INTO agent_reports (
+                id, issue_id, agent_id, run_id, agent_role, result,
+                valid, is_assignee, raw_json
+            ) VALUES ('report:failed', 'issue:child', 'role:engineer', 'run:failed',
+                      'test_runner', 'failed', 1, 1, '{}')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO activity_log (
+                id, run_id, actor_agent_id, action, target_type, target_id, payload_json
+            ) VALUES ('activity:digest', 'run:failed', 'role:engineer',
+                      'workspace.context_digest', 'issue', 'issue:child', ?)
+            """,
+            (json.dumps({"digest": failed_digest}),),
+        )
+        conn.commit()
+    source.write_text("print('fixed')\n", encoding="utf-8")
+
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="test", reason="child_report",
+        payload={"issue_id": "issue:intake"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        status = conn.execute(
+            "SELECT status FROM issues WHERE id = 'issue:child'"
+        ).fetchone()[0]
+        runner_wakeups = conn.execute(
+            """
+            SELECT COUNT(*) FROM wakeup_requests
+            WHERE agent_id = 'role:engineer' AND reason = 'lead_directive'
+            """
+        ).fetchone()[0]
+    assert status == "todo"
+    assert runner_wakeups == 1
+
+
+def test_solo_lead_rejects_every_delegation_and_keeps_one_agent(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_lead_child_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DELETE FROM issues WHERE id = 'issue:child'")
+        conn.execute(
+            "UPDATE issues SET metadata_json = ? WHERE id = 'issue:intake'",
+            (json.dumps({"profile": "solo_lead"}),),
+        )
+        conn.commit()
+
+    class _OverHiringLeadRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Formando equipo.",
+                actions={
+                    "create_issues": [
+                        {
+                            "title": "Implementar",
+                            "role": "engineer",
+                            "criticality": "low",
+                            "complexity": "low",
+                            "action_type": "implementation",
+                        },
+                        {"title": "Revisar", "role": "reviewer"},
+                        {"title": "Explorar", "role": "file_scout"},
+                    ]
+                },
+            )
+
+    executor = RunExecutor(db_path, AdapterRegistry([_OverHiringLeadRuntime()]))
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="test", reason="new_project",
+        payload={"issue_id": "issue:intake"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="test", reason="child_report",
+        payload={"issue_id": "issue:intake"}, idempotency_key="solo:second-lead-run",
+    )
+    second_dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert second_dispatch is not None
+    executor.execute(second_dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        roles = [
+            row[0] for row in conn.execute(
+                "SELECT role FROM issues WHERE parent_id = 'issue:intake' ORDER BY rowid"
+            )
+        ]
+        constrained = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'profile.delegation_constrained'"
+        ).fetchone()[0]
+    assert roles == []
+    assert constrained == 2
+
+
 def test_update_child_issue_ignores_non_child(tmp_path: Path) -> None:
     """update_child_issue on an issue that is NOT a child of the current issue must be silently dropped."""
     db_path = tmp_path / "aiteam.db"
@@ -2646,6 +2853,65 @@ def test_lead_file_ops_on_api_adapter_blocked_preventively(tmp_path: Path) -> No
             "SELECT COUNT(*) FROM activity_log WHERE action = 'role.op_denied'"
         ).fetchone()
     assert denied[0] >= 1
+
+
+def test_solo_lead_can_write_workspace_and_close_without_children(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DELETE FROM issues WHERE parent_id='issue:intake'")
+        conn.execute(
+            "UPDATE issues SET metadata_json=? WHERE id='issue:intake'",
+            (json.dumps({"profile": "solo_lead"}),),
+        )
+        conn.commit()
+
+    class _SoloWritingLeadRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id, "AITEAM_WORKSPACE_ROOT": str(tmp_path)}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Implementado y verificado por el único agente.",
+                actions={
+                    "file_ops": [
+                        {"op": "write_file", "path": "solution.py", "body": "VALUE = 42\n"},
+                        {
+                            "op": "write_file",
+                            "path": "tests/test_solution.py",
+                            "body": "from solution import VALUE\n\ndef test_value():\n    assert VALUE == 42\n",
+                        },
+                    ],
+                    "issue_status": "done",
+                    "create_issues": [{"title": "No debe existir", "role": "reviewer"}],
+                },
+            )
+
+    executor = RunExecutor(db_path, AdapterRegistry([_SoloWritingLeadRuntime()]))
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="manual", reason="manual",
+        payload={"issue_id": "issue:intake", "wake_reason": "manual", "profile": "solo_lead"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead")
+    assert dispatch is not None
+    executor.execute(dispatch)
+
+    assert (tmp_path / "solution.py").read_text(encoding="utf-8") == "VALUE = 42\n"
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT status FROM issues WHERE id='issue:intake'").fetchone()[0] == "done"
+        assert conn.execute("SELECT COUNT(*) FROM issues WHERE parent_id='issue:intake'").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action='role.violation'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action='solo_lead.verification_passed'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE status='queued'"
+        ).fetchone()[0] == 0
 
 
 def test_non_editing_role_writing_files_logs_role_violation(tmp_path: Path) -> None:

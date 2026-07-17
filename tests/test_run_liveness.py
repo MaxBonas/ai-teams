@@ -438,7 +438,9 @@ class TestNonEngineeringRoles:
         assert result.state == "advanced"
         assert result.needs_continuation is False
 
-    @pytest.mark.parametrize("role", ["file_scout", "web_scout", "test_runner"])
+    @pytest.mark.parametrize(
+        "role", ["file_scout", "web_scout", "test_runner", "test_designer"]
+    )
     def test_one_shot_scout_auto_closes_its_issue(self, role: str):
         result = classify_run_liveness(
             run_status="completed",

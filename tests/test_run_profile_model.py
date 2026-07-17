@@ -7,6 +7,12 @@ from aiteam.run_profiles import (
     build_default_team_blueprint,
     normalize_run_profile,
     profile_config,
+    select_execution_profile,
+)
+from aiteam.policies import (
+    QUORUM_MAX_CONTRIBUTIONS,
+    QUORUM_MAX_SYNTHESIS_ATTEMPTS,
+    QUORUM_MIN_VALID_CONTRIBUTIONS,
 )
 
 
@@ -44,6 +50,12 @@ def test_lead_quorum_blueprint_uses_senior_auditors_without_worker_hiring() -> N
     assert all(agent.seniority in {"lead", "senior"} for agent in blueprint.agents)
     assert blueprint.cost_policy["delegation_allowed"] is False
     assert profile_config(LEAD_QUORUM).uses_quorum is True
+    assert profile_config(LEAD_QUORUM).phase == "planning"
+    assert profile_config(LEAD_QUORUM).completion_artifact == "accepted_plan"
+    assert profile_config(LEAD_QUORUM).next_profile is None
+    assert QUORUM_MIN_VALID_CONTRIBUTIONS == 2
+    assert QUORUM_MAX_CONTRIBUTIONS >= QUORUM_MIN_VALID_CONTRIBUTIONS
+    assert QUORUM_MAX_SYNTHESIS_ATTEMPTS == 2
 
 
 def test_full_team_blueprint_models_programming_team_and_cost_delegation() -> None:
@@ -60,4 +72,59 @@ def test_full_team_blueprint_models_programming_team_and_cost_delegation() -> No
     assert blueprint.cost_policy["senior_control_roles"] == ["team_lead", "reviewer"]
     assert profile_config(FULL_TEAM).requires_review_gate is True
     assert profile_config(FULL_TEAM).requires_qa_gate is False
+    assert profile_config(FULL_TEAM).phase == "execution"
+    assert profile_config(FULL_TEAM).next_profile is None
     assert "programming team" in blueprint.rationale.lower()
+
+
+def test_execution_selector_uses_solo_for_bounded_reversible_work() -> None:
+    selected = select_execution_profile(
+        criticality="medium",
+        ambiguity="low",
+        independent_verification=False,
+        parallel_workstreams=1,
+        reversible=True,
+    )
+    assert selected.profile == SOLO_LEAD
+    assert selected.reason == "bounded_reversible_single_agent_work"
+
+
+def test_execution_selector_uses_team_for_each_material_team_signal() -> None:
+    base = {
+        "criticality": "medium",
+        "ambiguity": "low",
+        "independent_verification": False,
+        "parallel_workstreams": 1,
+        "reversible": True,
+    }
+    cases = (
+        ({"criticality": "high"}, "high_or_critical_risk_requires_team_controls"),
+        ({"ambiguity": "high"}, "high_ambiguity_requires_separate_planning_and_execution"),
+        ({"independent_verification": True}, "independent_verification_requested"),
+        ({"parallel_workstreams": 2}, "multiple_parallel_workstreams"),
+        ({"reversible": False}, "irreversible_change_uses_team_default"),
+    )
+    for override, reason in cases:
+        selected = select_execution_profile(**{**base, **override})
+        assert selected.profile == FULL_TEAM
+        assert selected.reason == reason
+
+
+def test_execution_selector_is_conservative_when_signals_are_missing() -> None:
+    selected = select_execution_profile(criticality="low")
+    assert selected.profile == FULL_TEAM
+    assert selected.reason == "incomplete_signals_use_safe_team_default"
+
+
+def test_execution_selector_never_auto_selects_quorum_but_honours_override() -> None:
+    automatic = select_execution_profile(
+        criticality="critical",
+        ambiguity="high",
+        independent_verification=True,
+        parallel_workstreams=3,
+        reversible=False,
+    )
+    explicit = select_execution_profile(explicit_profile="lead_quorum")
+    assert automatic.profile == FULL_TEAM
+    assert explicit.profile == LEAD_QUORUM
+    assert explicit.source == "explicit_override"

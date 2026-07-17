@@ -118,6 +118,13 @@ class _LeadRuntime:
 
 
 def _init_project(workdir: Path) -> Path:
+    # La suite existe antes del primer heartbeat del Lead. Así el primer intento
+    # de cierre puede demostrar de verdad que el gate exige un test_runner,
+    # aunque el Engineer todavía no haya materializado la implementación.
+    tests_dir = workdir / "tests"
+    tests_dir.mkdir(parents=True, exist_ok=True)
+    (tests_dir / "test_gastos.py").write_text(_ENGINEER_TESTS, encoding="utf-8")
+
     runtime_dir = workdir / ".aiteam"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     db_path = runtime_dir / "aiteam.db"
@@ -149,15 +156,44 @@ def _init_project(workdir: Path) -> Path:
         conn.commit()
     # Dependencias por defecto: reviewer y test_runner esperan al engineer.
     sync_default_child_dependencies(db_path, parent_issue_id="issue:intake")
-    for agent, issue in (
+    # El Lead intenta cerrar ANTES del runner: este wakeup se despacha de forma
+    # dirigida en run_canary y debe producir quality_gate.denied + continuación.
+    enqueue_wakeup(
+        db_path,
+        agent_id="role:lead",
+        source="canary_precheck",
+        reason="pre_runner_close_attempt",
+        payload={"issue_id": "issue:intake", "wake_reason": "pre_runner_close_attempt"},
+        idempotency_key="canary:lead-precheck",
+        wakeup_id="canary:000:lead-precheck",
+    )
+    for position, (agent, issue) in enumerate((
         ("role:engineer", "issue:eng"),
         ("role:reviewer", "issue:rev"),
         ("role:test_runner", "issue:runner"),
-    ):
+    ), start=1):
         enqueue_wakeup(
             db_path, agent_id=agent, source="assignment", reason="new_issue",
             payload={"issue_id": issue, "wake_reason": "new_issue"},
+            wakeup_id=f"canary:{position:03d}:{issue}",
         )
+    # claim_next_wakeup ordena por requested_at. Fechas distintas hacen que un
+    # único HeartbeatLoop.run_once ejecute el guion completo sin depender de
+    # UUIDs ni del reloj de resolución de SQLite. Los re-wakes generados por el
+    # gate y los child reports quedan después de estas asignaciones; el
+    # coalescing conserva la fecha del primer wakeup vivo del Lead.
+    with sqlite3.connect(str(db_path)) as conn:
+        for position, wakeup_id in enumerate((
+            "canary:000:lead-precheck",
+            "canary:001:issue:eng",
+            "canary:002:issue:rev",
+            "canary:003:issue:runner",
+        )):
+            conn.execute(
+                "UPDATE wakeup_requests SET requested_at = ? WHERE id = ?",
+                (f"2000-01-01T00:00:0{position}+00:00", wakeup_id),
+            )
+        conn.commit()
     return db_path
 
 
@@ -178,6 +214,7 @@ def run_canary(workdir: Path) -> dict[str, Any]:
             break
 
     checks: dict[str, Any] = {}
+    info: dict[str, Any] = {}
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         checks["intake_done"] = (
@@ -195,11 +232,35 @@ def run_canary(workdir: Path) -> dict[str, Any]:
         checks["test_runner_exit_zero_evidence"] = bool(
             runner_report and "exit 0" in str(runner_report["evidence"] or "")
         )
-        checks["gate_denied_then_recovered"] = (
-            conn.execute(
-                "SELECT COUNT(*) FROM activity_log WHERE action='quality_gate.denied'"
-            ).fetchone()[0] >= 0  # informativo: puede ser 0 si el runner llegó antes que el lead
+        denial = conn.execute(
+            """
+            SELECT denied_run.rowid AS denied_order,
+                   runner_run.rowid AS runner_order
+            FROM activity_log AS activity
+            JOIN runs AS denied_run ON denied_run.id = activity.run_id
+            JOIN agent_reports AS report
+              ON report.agent_role = 'test_runner'
+             AND report.valid = 1
+             AND report.is_assignee = 1
+            JOIN runs AS runner_run ON runner_run.id = report.run_id
+            WHERE activity.action = 'quality_gate.denied'
+              AND json_extract(activity.payload_json, '$.reason') = 'test_runner_exit_zero_required'
+            ORDER BY denied_run.rowid ASC, runner_run.rowid ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        checks["gate_denied_before_runner_then_recovered"] = bool(
+            denial
+            and int(denial["denied_order"]) < int(denial["runner_order"])
+            and checks["intake_done"]
+            and checks["test_runner_exit_zero_evidence"]
         )
+        corrective_comments = conn.execute(
+            "SELECT COUNT(*) FROM issue_comments WHERE issue_id='issue:intake'"
+            " AND author_user_id='system'"
+            " AND body LIKE '%[gate:test_runner_exit_zero_required]%'"
+        ).fetchone()[0]
+        checks["gate_left_corrective_comment"] = corrective_comments >= 1
         checks["no_failed_runs"] = (
             conn.execute("SELECT COUNT(*) FROM runs WHERE status='failed'").fetchone()[0] == 0
         )
@@ -217,9 +278,24 @@ def run_canary(workdir: Path) -> dict[str, Any]:
             ).fetchone()[0] == 0
         )
         total_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        info["run_order"] = [
+            str(row["agent_id"])
+            for row in conn.execute("SELECT agent_id FROM runs ORDER BY rowid ASC").fetchall()
+        ]
+        info["quality_gate_denials"] = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action='quality_gate.denied'"
+        ).fetchone()[0]
+        info["corrective_comments"] = corrective_comments
 
     ok = all(v for k, v in checks.items())
-    return {"ok": ok, "checks": checks, "ticks": ticks, "runs": total_runs, "db": str(db_path)}
+    return {
+        "ok": ok,
+        "checks": checks,
+        "info": info,
+        "ticks": ticks,
+        "runs": total_runs,
+        "db": str(db_path),
+    }
 
 
 def main() -> int:

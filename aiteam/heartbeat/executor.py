@@ -28,6 +28,15 @@ from aiteam.db.issues import get_issue, update_issue
 from aiteam.db.runs import append_run_event, finish_run, mark_run_running
 from aiteam.db.tool_access import record_tool_access
 from aiteam.db.agent_reports import latest_agent_report, record_agent_report
+from aiteam.db.quorum_sessions import (
+    accept_quorum_synthesis,
+    create_quorum_session,
+    degrade_quorum_session,
+    evaluate_quorum_session,
+    get_quorum_session,
+    quorum_synthesis_context,
+    record_quorum_contribution,
+)
 from aiteam.db.wake_payload import build_wake_payload, project_open_issues, _parse_agent_report
 from aiteam.db.wakeups import enqueue_wakeup, finish_wakeup
 from aiteam.heartbeat.scheduler import DispatchResult
@@ -43,7 +52,7 @@ from aiteam.run_liveness import (
     classify_run_liveness,
     collect_run_evidence,
 )
-from aiteam.run_profiles import FULL_TEAM, normalize_run_profile
+from aiteam.run_profiles import FULL_TEAM, SOLO_LEAD, normalize_run_profile
 from aiteam.skills import compose_skill
 from aiteam.tools.catalog import check_capability, default_capabilities_for_role, get_agent_capabilities
 from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntime
@@ -60,6 +69,7 @@ from aiteam.policies import (  # noqa: E402
     LEAD_TIER_ROLES as _LEAD_TIER_ROLES_P,
     LLM_ADAPTER_TYPES as _LLM_ADAPTER_TYPES,
     NON_EDITING_ROLES as _NON_EDITING_ROLES,
+    QUORUM_MAX_SYNTHESIS_ATTEMPTS as _QUORUM_MAX_SYNTHESIS_ATTEMPTS,
     RUNTIME_VERIFICATION_WAIVER_REASON as _RUNTIME_VERIFICATION_WAIVER_REASON,
     TERMINAL_ISSUE_STATUSES as _TERMINAL_ISSUE_STATUSES_P,
     WORKSPACE_NOISE_DIRS as _SKIP_DIRS,
@@ -141,13 +151,23 @@ class RunExecutor:
         agent_id: str = run["agent_id"]
         wakeup_id: str = wakeup["id"]
 
+        _run_issue = get_issue(self.db_path, issue_id=str(run.get("issue_id") or "")) or {}
+        _run_issue_metadata = _decode_json(_run_issue.get("metadata_json") or "{}")
+        _active_run_profile = normalize_run_profile(_run_issue_metadata.get("profile") or "")
         try:
-            reconcile_project_agent_policy(self.db_path)
+            reconcile_project_agent_policy(
+                self.db_path,
+                include_tier3=_active_run_profile != SOLO_LEAD,
+            )
         except Exception:
             logger.warning("reconcile_project_agent_policy failed for db %s", self.db_path, exc_info=True)
         agent_info = self._agent_info(agent_id)
         adapter_type = (agent_info.get("adapter_type") if agent_info else None) or "manual"
         agent_role = (agent_info.get("role") if agent_info else None) or ""
+        _solo_direct_lead = (
+            _active_run_profile == SOLO_LEAD
+            and str(agent_role or "").strip().lower() in {"lead", "team_lead"}
+        )
         # ── Review cross-provider vinculante (criticidad alta) ───────────────
         # Antes de resolver el runtime: si este run es de un reviewer sobre una
         # issue high/critical y su proveedor coincide con el del engineer del
@@ -184,7 +204,7 @@ class RunExecutor:
                 # Orchestration/scout roles run the coding CLI read-only so they
                 # cannot edit files — they must delegate (Lead) or report
                 # (scouts) via structured ops instead of implementing directly.
-                if agent_role.lower() in _NON_EDITING_ROLES:
+                if agent_role.lower() in _NON_EDITING_ROLES and not _solo_direct_lead:
                     adapter_cfg = {**adapter_cfg, "sandbox": "read-only"}
                 runtime = runtime.with_config(adapter_cfg)
         # ── Provider degradation fallback (opt-in) ───────────────────────────
@@ -251,6 +271,20 @@ class RunExecutor:
                     max_comments=_max_comments,
                 )
                 payload["wake_context"] = ctx
+                _quorum_session_id = str(ctx.get("quorum_session_id") or "").strip()
+                if _quorum_session_id and str(ctx.get("wake_reason") or "") in {
+                    "quorum_ready", "quorum_degraded"
+                }:
+                    try:
+                        payload["quorum"] = quorum_synthesis_context(
+                            self.db_path, session_id=_quorum_session_id
+                        )
+                    except Exception:
+                        logger.warning(
+                            "failed to build quorum synthesis context for %s",
+                            _quorum_session_id,
+                            exc_info=True,
+                        )
                 # ── Workspace files for reviewer/QA (prevents hallucinated reviews) ──
                 # API-only reviewers and QA agents cannot read files themselves; inject
                 # the actual workspace content into the wake payload so they work with
@@ -692,6 +726,16 @@ class RunExecutor:
             model=effective_model,
             channel=runtime.descriptor.channel,
         )
+        # Keep the in-memory run aligned with the durable row.  Downstream
+        # provenance writers (notably quorum contributions) run before the DB
+        # row is reloaded and must not persist the scheduler's stale NULLs.
+        run = {
+            **run,
+            "adapter_type": runtime.descriptor.adapter_type,
+            "provider": runtime.descriptor.provider,
+            "model": effective_model,
+            "channel": runtime.descriptor.channel,
+        }
         mark_run_running(self.db_path, run_id=run_id)
         # Auto-advance the issue todo → in_progress before the LLM runs.
         # This prevents the control-plane from re-dispatching the same issue
@@ -751,6 +795,15 @@ class RunExecutor:
         )
 
         env = runtime.build_env(run_id=run_id, wake_context=wake_context)
+        if _solo_direct_lead:
+            # Durable identity remains role:lead, but the invoked process must
+            # receive a pure single-agent contract. Reusing lead.md leaves the
+            # model under contradictory manager/delegation instructions.
+            env = {
+                **env,
+                "AITEAM_AGENT_ROLE": "solo_lead",
+                "AITEAM_AGENT_SKILL": compose_skill("solo_lead", self.db_path.parent) or "",
+            }
         if adapter_cfg.get("model"):
             env = {
                 **env,
@@ -790,6 +843,24 @@ class RunExecutor:
                 # evidencia que el quality gate exige. El builtin corre SIEMPRE,
                 # sea cual sea el adapter contratado para el rol.
                 result = self._execute_builtin_test_runner(run=run, agent_id=agent_id)
+            elif (
+                str(agent_role or "").strip().lower() in {"lead", "team_lead"}
+                and str(ctx.get("wake_reason") or "") == "interaction_resolved"
+                and str(ctx.get("kind") or "") == "suggest_tasks"
+                and str(ctx.get("action") or "") == "accept"
+            ):
+                # Accepting a persisted proposal is a deterministic control-
+                # plane transition.  It must not depend on whether the Lead's
+                # adapter is builtin, API or subscription CLI, nor spend a
+                # second LLM call merely to replay the user's acceptance.
+                result = self._execute_builtin_lead(run=run, agent_id=agent_id, context=ctx)
+            elif (
+                str(agent_role or "").strip().lower() in {"lead", "team_lead"}
+                and str(ctx.get("wake_reason") or "") == "quorum_degraded"
+            ):
+                # Degradation is a control-plane failure mode, not an open
+                # planning question. Escalate identically for every adapter.
+                result = self._execute_builtin_lead(run=run, agent_id=agent_id, context=ctx)
             elif adapter_type in _llm_adapters:
                 # Real LLM adapter — skip builtin path entirely
                 result = runtime.execute(run, env)
@@ -820,7 +891,11 @@ class RunExecutor:
         # runs; this covers API adapters, which have no sandbox. Detection via
         # role.violation stays as the backstop — this makes it preventive.
         _requested_file_ops = (result.actions or {}).get("file_ops") or []
-        if _requested_file_ops and str(agent_role or "").strip().lower() in _NON_EDITING_ROLES:
+        if (
+            _requested_file_ops
+            and str(agent_role or "").strip().lower() in _NON_EDITING_ROLES
+            and not _solo_direct_lead
+        ):
             logger.warning(
                 "role.op_denied: non-editing role %r (%s) emitted %d file op(s) — dropped",
                 agent_role, agent_id, len(_requested_file_ops),
@@ -927,13 +1002,19 @@ class RunExecutor:
                 _parsed_report = _parse_agent_report(result.output)
                 if _parsed_report:
                     try:
-                        record_agent_report(
+                        _stored_report = record_agent_report(
                             self.db_path,
                             issue_id=issue_id_str,
                             agent_id=agent_id,
                             run_id=run_id,
                             agent_role=agent_role,
                             parsed=_parsed_report,
+                        )
+                        self._maybe_record_quorum_contribution(
+                            issue_id=issue_id_str,
+                            agent_id=agent_id,
+                            run=run,
+                            report=_stored_report,
                         )
                     except Exception:
                         logger.warning("agent report persistence failed for run %s", run_id, exc_info=True)
@@ -1170,7 +1251,11 @@ class RunExecutor:
         # regression) could let them write. Record any workspace change by a
         # non-editing role as an auditable violation so role adherence is
         # observable, not just prompted.
-        if workspace_delta.changed and str(agent_role or "").strip().lower() in _NON_EDITING_ROLES:
+        if (
+            workspace_delta.changed
+            and str(agent_role or "").strip().lower() in _NON_EDITING_ROLES
+            and not _solo_direct_lead
+        ):
             logger.warning(
                 "role.violation: non-editing role %r (%s) produced workspace changes: %s",
                 agent_role, agent_id, workspace_delta.to_dict(),
@@ -1347,6 +1432,34 @@ class RunExecutor:
         if not issue_id:
             return ExecutionResult(status="skipped", output="Lead wake without issue context; no action taken.")
 
+        if context.get("wake_reason") == "quorum_degraded":
+            session_id = str(context.get("quorum_session_id") or "").strip()
+            session = get_quorum_session(self.db_path, session_id=session_id) or {}
+            skipped_reason = str(session.get("skipped_reason") or "quorum_gate_unsatisfied")
+            return ExecutionResult(
+                status="completed",
+                output=f"Quorum degradado: {skipped_reason}.",
+                actions={
+                    "interactions": [
+                        {
+                            "kind": "request_confirmation",
+                            "payload": {
+                                "version": 1,
+                                "reason": "quorum_degraded",
+                                "quorum_session_id": session_id,
+                                "skipped_reason": skipped_reason,
+                            },
+                            "title": "Quorum sin evidencia suficiente",
+                            "summary": (
+                                f"El quorum no pudo satisfacer el gate ({skipped_reason}). "
+                                "Revisa los adapters de auditoría o decide continuar sin quorum."
+                            ),
+                            "idempotency_key": f"quorum:degraded:{session_id}",
+                        }
+                    ]
+                },
+            )
+
         if (
             context.get("wake_reason") == "interaction_resolved"
             and context.get("kind") == "suggest_tasks"
@@ -1380,6 +1493,12 @@ class RunExecutor:
                 proposal=payload,
                 source_run_id=str(run.get("id")),
             )
+            if str(payload.get("profile") or "").strip().lower() == "lead_quorum":
+                self._initialize_quorum_session(
+                    parent_issue_id=issue_id,
+                    proposal=payload,
+                    created_issue_ids=outcome["created_issues"],
+                )
             created_agents = ", ".join(outcome["created_agents"]) or "sin agentes nuevos"
             created_issues = ", ".join(outcome["created_issues"]) or "sin issues nuevas"
             return ExecutionResult(
@@ -1832,7 +1951,7 @@ class RunExecutor:
         if profile == "lead_quorum":
             title_str = "Plan y equipo de quorum propuestos"
             summary_str = (
-                "El Lead propone un equorum de revisión antes de ejecutar. "
+                "El Lead propone un quorum de revisión antes de ejecutar. "
                 "Aceptar crea los auditores e issues de revisión; rechazar deja el proyecto esperando ajustes."
             )
         else:
@@ -2294,6 +2413,7 @@ class RunExecutor:
             "write_file": "file_ops",
             "append_file": "file_ops",
             "delete_file": "file_ops",
+            "accept_quorum_synthesis": "accept_quorum_synthesis",
         }
         from aiteam.adapters.work_contract import forbidden_ops_for_role
         _forbidden_action_keys = {
@@ -2528,6 +2648,24 @@ class RunExecutor:
             )
         if issue_status in ("done", "cancelled") and issue_id:
             try:
+                with contextlib.closing(_connect(self.db_path)) as conn:
+                    conn.execute(
+                        """
+                        UPDATE wakeup_requests
+                        SET status='cancelled', finished_at=CURRENT_TIMESTAMP,
+                            updated_at=CURRENT_TIMESTAMP,
+                            error='target_issue_terminal'
+                        WHERE status='queued'
+                          AND COALESCE(
+                              json_extract(payload_json, '$.issue_id'),
+                              json_extract(payload_json, '$.task_id')
+                          ) = ?
+                        """,
+                        (issue_id,),
+                    )
+            except Exception:
+                logger.warning("terminal wakeup cancellation failed for issue %s", issue_id, exc_info=True)
+            try:
                 resolve_blocker_wakeups(self.db_path, resolved_issue_id=issue_id, source_run_id=str(run.get("id") or ""))
             except Exception:
                 logger.warning("resolve_blocker_wakeups failed for issue %s", issue_id, exc_info=True)
@@ -2633,10 +2771,11 @@ class RunExecutor:
 
         # update_plan: LLM-written plan document
         plan_action = actions.get("update_plan")
+        _new_plan_revision_id = ""
         if isinstance(plan_action, dict) and plan_action.get("body"):
             try:
                 existing = get_document(self.db_path, issue_id=issue_id, key="plan")
-                put_document(
+                updated_plan = put_document(
                     self.db_path,
                     issue_id=issue_id,
                     key="plan",
@@ -2647,10 +2786,115 @@ class RunExecutor:
                     base_revision_id=str(existing.get("current_revision_id") or "") or None
                     if existing else None,
                 )
+                _new_plan_revision_id = str(updated_plan.get("current_revision_id") or "")
             except DocumentConflict:
                 pass
             except Exception:
                 logger.warning("update_plan action failed for issue %s", issue_id, exc_info=True)
+
+        quorum_action = actions.get("accept_quorum_synthesis")
+        if isinstance(quorum_action, dict):
+            session_id = str(quorum_action.get("session_id") or "").strip()
+            dispositions = quorum_action.get("dispositions")
+            try:
+                if str(agent_role or "").strip().lower() not in {"lead", "team_lead"}:
+                    raise ValueError("only the Lead may accept a quorum synthesis")
+                session = get_quorum_session(self.db_path, session_id=session_id)
+                if session is None or str(session.get("issue_id") or "") != issue_id:
+                    raise ValueError("quorum session does not belong to the current Lead issue")
+                if not _new_plan_revision_id:
+                    raise ValueError("quorum synthesis requires update_plan in the same run")
+                if not isinstance(dispositions, list):
+                    raise ValueError("quorum synthesis dispositions must be a list")
+                accept_quorum_synthesis(
+                    self.db_path,
+                    session_id=session_id,
+                    synthesis_run_id=str(run.get("id") or ""),
+                    final_plan_revision_id=_new_plan_revision_id,
+                    dispositions=dispositions,
+                )
+            except Exception as exc:
+                logger.warning("quorum synthesis rejected for %s: %s", session_id, exc)
+                with contextlib.suppress(Exception):
+                    create_comment(
+                        self.db_path,
+                        issue_id=issue_id,
+                        author_user_id="system",
+                        body=(
+                            f"⚙ Sistema: síntesis de quorum rechazada — {exc}. "
+                            "Actualiza el plan y dispone cada finding antes de reintentar."
+                        ),
+                        metadata={"source": "quorum_synthesis_validation"},
+                    )
+                with contextlib.suppress(Exception):
+                    log_activity(
+                        self.db_path,
+                        action="quorum.synthesis_rejected",
+                        target_type="quorum_session",
+                        target_id=session_id,
+                        actor_agent_id=agent_id,
+                        run_id=str(run.get("id") or "") or None,
+                        payload={"issue_id": issue_id, "reason": str(exc)},
+                    )
+                with contextlib.closing(_connect(self.db_path)) as conn:
+                    rejected_attempts = int(conn.execute(
+                        """
+                        SELECT COUNT(*) FROM activity_log
+                        WHERE action = 'quorum.synthesis_rejected' AND target_id = ?
+                        """,
+                        (session_id,),
+                    ).fetchone()[0])
+                if rejected_attempts >= _QUORUM_MAX_SYNTHESIS_ATTEMPTS:
+                    degrade_quorum_session(
+                        self.db_path,
+                        session_id=session_id,
+                        skipped_reason="synthesis_attempts_exhausted",
+                    )
+                    with contextlib.closing(_connect(self.db_path)) as conn:
+                        conn.execute(
+                            """
+                            UPDATE wakeup_requests
+                            SET status = 'cancelled', error = 'synthesis_attempts_exhausted',
+                                finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                            WHERE agent_id = ? AND status = 'queued'
+                              AND reason = 'quorum_ready'
+                              AND json_extract(payload_json, '$.quorum_session_id') = ?
+                            """,
+                            (agent_id, session_id),
+                        )
+                    create_interaction(
+                        self.db_path,
+                        issue_id=issue_id,
+                        kind="request_confirmation",
+                        payload={
+                            "version": 1,
+                            "reason": "quorum_synthesis_failed",
+                            "quorum_session_id": session_id,
+                            "last_error": str(exc),
+                        },
+                        idempotency_key=f"quorum:synthesis-failed:{session_id}",
+                        source_run_id=str(run.get("id") or "") or None,
+                        created_by_agent_id=agent_id,
+                        title="Síntesis de quorum bloqueada",
+                        summary=(
+                            f"El Lead no pudo producir una síntesis válida tras "
+                            f"{rejected_attempts} intentos. Revisa el plan o cancela el quorum."
+                        ),
+                    )
+                else:
+                    enqueue_wakeup(
+                        self.db_path,
+                        agent_id=agent_id,
+                        source="quorum",
+                        reason="quorum_ready",
+                        payload={
+                            "issue_id": issue_id,
+                            "quorum_session_id": session_id,
+                            "wake_reason": "quorum_ready",
+                            "correction": str(exc),
+                        },
+                        idempotency_key=f"quorum_synthesis_retry:{session_id}:{str(run.get('id') or '')}",
+                    )
 
         # update_child_issues: Lead posts a directive and/or requeues a child issue
         for child_update in actions.get("update_child_issues") or []:
@@ -2677,6 +2921,61 @@ class RunExecutor:
                 new_status = str(child_update.get("status") or "").strip()
                 directive_body = str(child_update.get("body") or "").strip()
                 _active_requeue_statuses = {"todo", "in_progress"}
+                # A deterministic test failure cannot improve by executing the
+                # same runner against the same files.  The Lead used to bypass
+                # wakeup idempotency because every directive was keyed by its
+                # own run id, producing test_runner -> Lead loops with identical
+                # evidence.  Keep this as a runtime invariant: code must change
+                # (normally through an engineer/fix issue) before the runner is
+                # eligible again.
+                if (
+                    new_status in _active_requeue_statuses
+                    and str(child_issue.get("role") or "").strip().lower() == "test_runner"
+                    and self._failed_test_runner_workspace_unchanged(
+                        issue_id=child_issue_id,
+                        workspace_root=workspace_root_for_db(self.db_path),
+                    )
+                ):
+                    digest = self._workspace_digest(workspace_root_for_db(self.db_path))
+                    correction = (
+                        f"⚙ Sistema: reejecución de `{child_issue_id}` rechazada. "
+                        "El último test_runner falló y el workspace no ha cambiado. "
+                        "Crea o reactiva un issue de engineer con la evidencia del fallo; "
+                        "el test_runner podrá ejecutarse de nuevo después de un cambio real."
+                    )
+                    with contextlib.suppress(Exception):
+                        create_comment(
+                            self.db_path,
+                            issue_id=issue_id,
+                            author_agent_id=agent_id,
+                            source_run_id=str(run.get("id")),
+                            body=correction,
+                            metadata={"source": "unchanged_test_failure_guard"},
+                        )
+                    with contextlib.suppress(Exception):
+                        log_activity(
+                            self.db_path,
+                            action="lead.requeue_suppressed_unchanged_workspace",
+                            target_type="issue",
+                            target_id=child_issue_id,
+                            actor_agent_id=agent_id,
+                            run_id=str(run.get("id")),
+                            payload={"parent_issue_id": issue_id, "workspace_digest": digest},
+                        )
+                    enqueue_wakeup(
+                        self.db_path,
+                        agent_id=agent_id,
+                        source="policy",
+                        reason="unchanged_test_failure",
+                        payload={
+                            "issue_id": issue_id,
+                            "child_issue_id": child_issue_id,
+                            "wake_reason": "unchanged_test_failure",
+                            "mandatory_instruction": correction,
+                        },
+                        idempotency_key=f"unchanged_test_failure:{child_issue_id}:{digest}",
+                    )
+                    continue
                 # Validate: requeuing without a directive is a no-op for the engineer.
                 # Drop the op and log a warning so the Lead is informed next run.
                 if new_status in _active_requeue_statuses and not directive_body:
@@ -2776,10 +3075,34 @@ class RunExecutor:
                 )
 
         # create_issues: sub-issues delegated by the LLM
+        _issue_metadata = _decode_json((get_issue(self.db_path, issue_id=issue_id) or {}).get("metadata_json") or "{}")
+        _run_profile = normalize_run_profile(_issue_metadata.get("profile") or "")
+        _issue_specs = [
+            spec for spec in (actions.get("create_issues") or []) if isinstance(spec, dict)
+        ]
+        if _run_profile == SOLO_LEAD and str(agent_role or "").strip().lower() in {"lead", "team_lead"}:
+            # ``solo_lead`` is a true single-agent mode: the Lead itself owns
+            # planning, implementation and verification. Any child creation
+            # would turn it back into manager/worker orchestration.
+            original_count = len(_issue_specs)
+            _issue_specs = []
+            if original_count:
+                log_activity(
+                    self.db_path,
+                    action="profile.delegation_constrained",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id")),
+                    payload={
+                        "profile": SOLO_LEAD,
+                        "requested_issues": original_count,
+                        "accepted_issues": len(_issue_specs),
+                        "accepted_role": "",
+                    },
+                )
         created_child_roles: list[str] = []
-        for spec in actions.get("create_issues") or []:
-            if not isinstance(spec, dict):
-                continue
+        for spec in _issue_specs:
             created = self._create_delegated_issue(
                 issue_id=issue_id,
                 agent_id=agent_id,
@@ -2944,7 +3267,7 @@ class RunExecutor:
             _criticality = str(spec.get("criticality") or "").strip().lower()
             _complexity = str(spec.get("complexity") or "").strip().lower()
             _action_type = str(spec.get("action_type") or "").strip().lower()
-            if _criticality and _action_type:
+            if _criticality and _action_type and not bool(spec.get("_profile_role_locked")):
                 from aiteam.action_routing import route_action, pick_role_for_routing  # noqa: PLC0415
                 _routing = route_action(
                     criticality=_criticality or "medium",
@@ -3124,6 +3447,10 @@ class RunExecutor:
 
         if not independent_tests_enabled():
             return
+        parent_issue = get_issue(self.db_path, issue_id=issue_id) or {}
+        parent_meta = _decode_json(parent_issue.get("metadata_json") or "{}")
+        if normalize_run_profile(parent_meta.get("profile") or "") != FULL_TEAM:
+            return
         if "test_designer" in created_child_roles:
             return
         if not {"engineer", "software_engineer", "lead_executor"} & set(created_child_roles):
@@ -3138,8 +3465,6 @@ class RunExecutor:
             ).fetchone()
         if existing is not None:
             return
-        parent_issue = get_issue(self.db_path, issue_id=issue_id) or {}
-        parent_meta = _decode_json(parent_issue.get("metadata_json") or "{}")
         criteria = [
             str(item) for item in (parent_meta.get("acceptance_criteria") or []) if str(item).strip()
         ]
@@ -3191,6 +3516,10 @@ class RunExecutor:
 
         mode = adversarial_qa_mode()
         if mode == "off":
+            return
+        parent_issue = get_issue(self.db_path, issue_id=issue_id) or {}
+        parent_meta = _decode_json(parent_issue.get("metadata_json") or "{}")
+        if normalize_run_profile(parent_meta.get("profile") or "") != FULL_TEAM:
             return
         if not {"engineer", "software_engineer", "lead_executor"} & set(created_child_roles):
             return
@@ -3404,6 +3733,116 @@ class RunExecutor:
             ).fetchone()
         return str(row["status"]) if row else None
 
+    def _initialize_quorum_session(
+        self,
+        *,
+        parent_issue_id: str,
+        proposal: dict[str, Any],
+        created_issue_ids: list[str],
+    ) -> dict[str, Any] | None:
+        base_revision_id = str(proposal.get("plan_revision_id") or "").strip()
+        if not base_revision_id:
+            logger.warning("lead_quorum proposal has no plan_revision_id for %s", parent_issue_id)
+            return None
+        auditor_specs = [
+            item
+            for item in (proposal.get("suggested_issues") or [])
+            if isinstance(item, dict) and str(item.get("delegation_type") or "") == "risk_review"
+        ]
+        if not auditor_specs:
+            return None
+        session = create_quorum_session(
+            self.db_path,
+            issue_id=parent_issue_id,
+            base_plan_revision_id=base_revision_id,
+            requested_contributions=len(auditor_specs),
+        )
+        created_set = {str(item) for item in created_issue_ids}
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            for ordinal, spec in enumerate(auditor_specs, start=1):
+                child_id = str(spec.get("id") or "").strip()
+                if not child_id or child_id not in created_set:
+                    continue
+                row = conn.execute(
+                    "SELECT metadata_json FROM issues WHERE id = ?", (child_id,)
+                ).fetchone()
+                metadata = _decode_json(row["metadata_json"] if row else "{}")
+                metadata.update(
+                    {
+                        "quorum_session_id": session["id"],
+                        "quorum_ordinal": ordinal,
+                        "quorum_base_plan_revision_id": base_revision_id,
+                    }
+                )
+                conn.execute(
+                    "UPDATE issues SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(metadata, ensure_ascii=False, sort_keys=True), child_id),
+                )
+        log_activity(
+            self.db_path,
+            action="quorum.session_created",
+            target_type="quorum_session",
+            target_id=str(session["id"]),
+            actor_agent_id="role:lead",
+            payload={
+                "issue_id": parent_issue_id,
+                "base_plan_revision_id": base_revision_id,
+                "requested_contributions": len(auditor_specs),
+            },
+        )
+        return session
+
+    def _maybe_record_quorum_contribution(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        run: dict[str, Any],
+        report: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        issue = get_issue(self.db_path, issue_id=issue_id) or {}
+        metadata = _decode_json(issue.get("metadata_json") or "{}")
+        session_id = str(metadata.get("quorum_session_id") or "").strip()
+        if not session_id or not int(report.get("valid") or 0) or not int(report.get("is_assignee") or 0):
+            return None
+        evidence = str(report.get("evidence") or report.get("blocker") or "").strip()
+        result = str(report.get("result") or "").strip().lower()
+        finding_summary = evidence or f"Auditor result: {result}"
+        contribution = record_quorum_contribution(
+            self.db_path,
+            session_id=session_id,
+            agent_id=agent_id,
+            run_id=str(run.get("id") or "") or None,
+            ordinal=int(metadata.get("quorum_ordinal") or 0),
+            provider=str(run.get("provider") or ""),
+            model=str(run.get("model") or ""),
+            channel=str(run.get("channel") or "") or None,
+            result=result,
+            evidence=evidence,
+            findings=[
+                {
+                    "id": f"{issue_id}:report",
+                    "severity": "high" if result == "blocked" else "medium",
+                    "summary": finding_summary,
+                }
+            ],
+        )
+        log_activity(
+            self.db_path,
+            action="quorum.contribution_recorded",
+            target_type="quorum_contribution",
+            target_id=str(contribution["id"]),
+            actor_agent_id=agent_id,
+            run_id=str(run.get("id") or "") or None,
+            payload={
+                "session_id": session_id,
+                "issue_id": issue_id,
+                "valid": bool(contribution["valid"]),
+                "provider": contribution.get("provider"),
+            },
+        )
+        return contribution
+
     def _enqueue_supervisor_report(
         self,
         *,
@@ -3435,6 +3874,52 @@ class RunExecutor:
         fresh_issue = get_issue(self.db_path, issue_id=issue_id)
         if fresh_issue:
             child_status = str(fresh_issue.get("status") or child_status)
+
+        # Quorum auditors report through their durable session gate, not via a
+        # generic child_report.  Partial opinions never wake the Lead.  Once
+        # all configured auditors finished, emit either quorum_ready or an
+        # explicit degraded continuation — never leave the root silent.
+        issue_metadata = _decode_json((fresh_issue or issue).get("metadata_json") or "{}")
+        quorum_session_id = str(issue_metadata.get("quorum_session_id") or "").strip()
+        if quorum_session_id:
+            session = get_quorum_session(self.db_path, session_id=quorum_session_id)
+            if session is None:
+                return
+            if str(session.get("status") or "") in {"accepted", "degraded", "failed"}:
+                return
+            gate = evaluate_quorum_session(self.db_path, session_id=quorum_session_id)
+            if gate["ready"]:
+                reason = "quorum_ready"
+            elif gate["total_contributions"] >= int(session["requested_contributions"]):
+                reason = "quorum_degraded"
+                skipped_reason = (
+                    "provider_diversity_unsatisfied"
+                    if not gate["diversity_satisfied"]
+                    else "insufficient_valid_contributions"
+                )
+                degrade_quorum_session(
+                    self.db_path,
+                    session_id=quorum_session_id,
+                    skipped_reason=skipped_reason,
+                )
+            else:
+                return
+            enqueue_wakeup(
+                self.db_path,
+                agent_id=supervisor_agent_id,
+                source="quorum",
+                reason=reason,
+                trigger_detail=f"quorum:{quorum_session_id}:{reason}",
+                payload={
+                    "issue_id": parent_issue_id,
+                    "child_issue_id": issue_id,
+                    "quorum_session_id": quorum_session_id,
+                    "wake_reason": reason,
+                    "quorum_gate": gate,
+                },
+                idempotency_key=f"{reason}:{quorum_session_id}",
+            )
+            return
 
         # ── Sibling-completion gate ───────────────────────────────────────────
         # If the child finished normally (done/in_review/in_progress) but there
@@ -4435,6 +4920,41 @@ class RunExecutor:
             )
         return unchanged
 
+    @staticmethod
+    def _workspace_digest(workspace_root: Path) -> str:
+        snapshot = snapshot_workspace(workspace_root)
+        return hashlib.sha256(
+            json.dumps(sorted(snapshot.items()), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+    def _failed_test_runner_workspace_unchanged(
+        self, *, issue_id: str, workspace_root: Path
+    ) -> bool:
+        """Whether the latest trusted test report failed on this exact tree."""
+        current_digest = self._workspace_digest(workspace_root)
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT ar.result, a.payload_json
+                FROM agent_reports ar
+                LEFT JOIN activity_log a
+                  ON a.run_id = ar.run_id
+                 AND a.action = 'workspace.context_digest'
+                 AND a.target_id = ar.issue_id
+                WHERE ar.issue_id = ?
+                  AND ar.valid = 1
+                  AND ar.is_assignee = 1
+                  AND ar.agent_role = 'test_runner'
+                ORDER BY ar.created_at DESC, ar.rowid DESC, a.rowid DESC
+                LIMIT 1
+                """,
+                (issue_id,),
+            ).fetchone()
+        if row is None or str(row["result"] or "").lower() not in {"failed", "blocked"}:
+            return False
+        prior_digest = str(_decode_json(str(row["payload_json"] or "{}")).get("digest") or "")
+        return bool(prior_digest) and prior_digest == current_digest
+
     def _review_evidence_unchanged(self, *, issue_id: str, workspace_root: Path, current_run_id: str) -> bool:
         """True when the workspace fingerprint matches the one recorded at the
         reviewer's last run on this issue AND that run completed — same files,
@@ -4836,10 +5356,72 @@ class RunExecutor:
             return None
         test_gate = self._test_runner_gate_line(rows)
         if test_gate and test_gate.startswith("BLOQUEANTE:"):
+            issue = get_issue(self.db_path, issue_id=issue_id) or {}
+            metadata = _decode_json(issue.get("metadata_json") or "{}")
+            if normalize_run_profile(metadata.get("profile") or "") == SOLO_LEAD:
+                if self._solo_lead_machine_verification_passed(issue_id=issue_id):
+                    return None
             if self._runtime_verification_waived(issue_id):
                 return None
             return "test_runner_exit_zero_required"
         return None
+
+    def _solo_lead_machine_verification_passed(self, *, issue_id: str) -> bool:
+        """Verify a solo agent's tests without inventing a second agent.
+
+        `solo_lead` owns implementation and verification, but the close gate
+        must still trust a subprocess receipt rather than model narration.
+        Successful receipts are cached in activity_log to avoid rerunning the
+        suite when the same close action is retried.
+        """
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            cached = conn.execute(
+                "SELECT 1 FROM activity_log WHERE action='solo_lead.verification_passed' "
+                "AND target_id=? LIMIT 1",
+                (issue_id,),
+            ).fetchone()
+        if cached:
+            return True
+        root = workspace_root_for_db(self.db_path)
+        cmd, suite_kind = self._resolve_test_command(root)
+        if cmd is None:
+            return False
+        timeout_sec = int(os.environ.get("AITEAM_TEST_RUNNER_TIMEOUT_SEC", "600") or "600")
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_sec,
+                env={**os.environ},
+            )
+        except Exception as exc:
+            log_activity(
+                self.db_path,
+                action="solo_lead.verification_failed",
+                target_type="issue",
+                target_id=issue_id,
+                payload={"suite_kind": suite_kind, "error": str(exc)},
+            )
+            return False
+        tail = ((proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")).strip()[-2000:]
+        action = "solo_lead.verification_passed" if proc.returncode == 0 else "solo_lead.verification_failed"
+        log_activity(
+            self.db_path,
+            action=action,
+            target_type="issue",
+            target_id=issue_id,
+            payload={
+                "suite_kind": suite_kind,
+                "command": cmd,
+                "exit_code": int(proc.returncode),
+                "output_tail": tail,
+            },
+        )
+        return proc.returncode == 0
 
     # Avisos correctivos por (issue, reason) antes de escalar al usuario. Dos
     # es deliberado: el primer aviso corrige un descuido del Lead; si el

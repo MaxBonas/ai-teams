@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -144,6 +145,45 @@ def test_issue_get_includes_pending_interactions(client):
     assert r.status_code == 200
     assert len(r.json()["pending_interactions"]) == 1
     assert r.json()["pending_interactions"][0]["kind"] == "request_confirmation"
+
+
+def test_issue_creation_auto_selects_and_persists_execution_profile(client):
+    goal_id = client.post("/api/goals", json={"title": "G"}).json()["goal"]["id"]
+    response = client.post(
+        "/api/issues",
+        json={
+            "title": "Cambio acotado",
+            "goal_id": goal_id,
+            "criticality": "medium",
+            "ambiguity": "low",
+            "independent_verification": False,
+            "parallel_workstreams": 1,
+            "reversible": True,
+            "run_profile": "auto",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["profile_selection"]["profile"] == "solo_lead"
+    metadata = json.loads(payload["issue"]["metadata_json"])
+    assert metadata["profile"] == "solo_lead"
+    assert metadata["profile_selection"]["reason"] == "bounded_reversible_single_agent_work"
+
+
+def test_issue_creation_defaults_to_team_and_honours_quorum_override(client):
+    goal_id = client.post("/api/goals", json={"title": "G"}).json()["goal"]["id"]
+    conservative = client.post(
+        "/api/issues",
+        json={"title": "Sin señales", "goal_id": goal_id},
+    )
+    planning = client.post(
+        "/api/issues",
+        json={"title": "Solo plan", "goal_id": goal_id, "run_profile": "lead_quorum"},
+    )
+    assert conservative.json()["profile_selection"]["profile"] == "full_team"
+    assert conservative.json()["profile_selection"]["reason"] == "incomplete_signals_use_safe_team_default"
+    assert planning.json()["profile_selection"]["profile"] == "lead_quorum"
+    assert planning.json()["profile_selection"]["source"] == "explicit_override"
 
 
 # ── Runs list ─────────────────────────────────────────────────────────────────

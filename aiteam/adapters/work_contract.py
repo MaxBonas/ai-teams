@@ -21,6 +21,7 @@ OP_SCHEMA: dict[str, Any] = {
                 "write_file",
                 "append_file",
                 "delete_file",
+                "accept_quorum_synthesis",
             ],
         },
         "body": {"type": "string"},
@@ -42,6 +43,19 @@ OP_SCHEMA: dict[str, Any] = {
         # Must include a 'reason' field so the executor can route the response correctly.
         # Example: {"reason": "lead_wants_file_read", "parent_issue_id": "..."}
         "payload": {"type": "object"},
+        "dispositions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "finding_id": {"type": "string"},
+                    "decision": {"type": "string", "enum": ["accept", "qualify", "discard"]},
+                    "rationale": {"type": "string"},
+                },
+                "required": ["finding_id", "decision", "rationale"],
+                "additionalProperties": False,
+            },
+        },
     },
     "required": ["type"],
     "additionalProperties": False,
@@ -103,6 +117,10 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                         "required": ["reason", "parent_issue_id"],
                         "additionalProperties": False,
                     },
+                    "dispositions": {
+                        "type": ["array", "null"],
+                        "items": OP_SCHEMA["properties"]["dispositions"]["items"],
+                    },
                 },
                 "required": [
                     "type",
@@ -119,6 +137,7 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "idempotency_key",
                     "status",
                     "payload",
+                    "dispositions",
                 ],
                 "additionalProperties": False,
             },
@@ -298,6 +317,7 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
     update_plan: dict[str, Any] | None = None
     add_comments: list[str] = []
     file_ops: list[dict[str, Any]] = []
+    quorum_synthesis: dict[str, Any] | None = None
 
     for op in ops:
         op_type = str(op.get("type") or "")
@@ -375,6 +395,11 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
                         "body": str(op.get("body") or "") if op_type != "delete_file" else "",
                     }
                 )
+        elif op_type == "accept_quorum_synthesis":
+            quorum_synthesis = {
+                "session_id": str(op.get("path") or "").strip(),
+                "dispositions": op.get("dispositions") if isinstance(op.get("dispositions"), list) else [],
+            }
 
     if interactions:
         actions["interactions"] = interactions
@@ -388,6 +413,8 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
         actions["add_comments"] = add_comments
     if file_ops:
         actions["file_ops"] = file_ops
+    if quorum_synthesis is not None:
+        actions["accept_quorum_synthesis"] = quorum_synthesis
     return actions
 
 

@@ -193,6 +193,47 @@ class TestReadOnlySandboxForOrchestrators:
         assert "--sandbox" in cmd
         assert cmd[cmd.index("--sandbox") + 1] == "read-only"
 
+    def test_solo_lead_codex_run_keeps_workspace_write_sandbox(self, tmp_path: Path) -> None:
+        from aiteam.adapters.registry import build_default_registry
+        from aiteam.db.wakeups import enqueue_wakeup
+        from aiteam.heartbeat.executor import RunExecutor
+        from aiteam.heartbeat.scheduler import HeartbeatScheduler
+
+        db = tmp_path / "aiteam.db"
+        with sqlite3.connect(str(db)) as conn:
+            conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            conn.execute("INSERT INTO goals (id, title) VALUES ('g1','G')")
+            conn.execute(
+                "INSERT INTO agents (id, role, name, adapter_type, adapter_config_json) "
+                "VALUES ('role:lead','lead','Lead','subscription_cli', ?)",
+                (json.dumps({"cli_kind": "codex", "command": ["codex"], "sandbox": "workspace-write"}),),
+            )
+            conn.execute(
+                "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id, metadata_json) "
+                "VALUES ('issue:intake','g1','T','in_progress','lead','role:lead','{\"profile\":\"solo_lead\"}')"
+            )
+            conn.commit()
+
+        captured: dict[str, Any] = {}
+
+        def fake_run(*args: Any, **kwargs: Any):
+            captured["command"] = args[0] if args else kwargs.get("args")
+            proc = MagicMock(returncode=0, stderr="")
+            proc.stdout = json.dumps({"status": "completed", "summary": "ok", "add_comment": "", "ops": []})
+            return proc
+
+        enqueue_wakeup(
+            db, agent_id="role:lead", source="manual", reason="manual",
+            payload={"issue_id": "issue:intake", "wake_reason": "manual", "profile": "solo_lead"},
+        )
+        dispatch = HeartbeatScheduler(db).dispatch_next(agent_id="role:lead")
+        assert dispatch is not None
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+            RunExecutor(db, build_default_registry()).execute(dispatch)
+
+        cmd = captured["command"]
+        assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
+
 
 class TestCodexOutputSchema:
     def test_schema_includes_ops_so_agents_can_delegate(self):

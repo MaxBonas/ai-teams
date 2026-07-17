@@ -32,6 +32,15 @@ JUNIOR_ROLES = frozenset({"engineer", "test_runner", "worker", "file_scout", "we
 # file_ops gate, and the role.violation audit.
 NON_EDITING_ROLES = frozenset({"lead", "team_lead", "file_scout", "web_scout", "context_curator"})
 
+# ── Quorum de planificación ──────────────────────────────────────────────────
+# El quorum reduce riesgo de decisiones críticas y ambiguas; no es un equipo
+# de ejecución ni un multiplicador universal de agentes. Dos revisiones
+# independientes son el contrato mínimo del perfil canónico. El máximo evita
+# fan-out/coste sin límite mientras se calibra valor con benchmarks propios.
+QUORUM_MIN_VALID_CONTRIBUTIONS = 2
+QUORUM_MAX_CONTRIBUTIONS = 4
+QUORUM_MAX_SYNTHESIS_ATTEMPTS = 2
+
 # Adapter types that call a remote LLM in-process (as opposed to CLI/builtin).
 LLM_ADAPTER_TYPES = frozenset({"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"})
 
@@ -219,12 +228,14 @@ OPS_FORBIDDEN_FOR_TIER3 = frozenset({
     "write_file",
     "append_file",
     "delete_file",
+    "accept_quorum_synthesis",
 })
 
 OPS_FORBIDDEN_FOR_TIER2 = frozenset({
     "create_issue",
     "update_plan",
     "update_child_issue",
+    "accept_quorum_synthesis",
 })
 
 

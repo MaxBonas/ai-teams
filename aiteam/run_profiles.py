@@ -23,6 +23,9 @@ class RunProfileConfig:
     default_agent_ids: tuple[str, ...]
     cheap_delegate_roles: tuple[str, ...]
     senior_control_roles: tuple[str, ...]
+    phase: str
+    completion_artifact: str
+    next_profile: str | None
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,22 @@ class TeamBlueprintSpec:
         }
 
 
+@dataclass(frozen=True)
+class ExecutionProfileSelection:
+    profile: str
+    source: str
+    reason: str
+    signals: dict[str, Any]
+
+    def to_metadata(self) -> dict[str, Any]:
+        return {
+            "profile": self.profile,
+            "source": self.source,
+            "reason": self.reason,
+            "signals": dict(self.signals),
+        }
+
+
 PROFILE_CONFIGS: dict[str, RunProfileConfig] = {
     SOLO_LEAD: RunProfileConfig(
         name=SOLO_LEAD,
@@ -83,6 +102,9 @@ PROFILE_CONFIGS: dict[str, RunProfileConfig] = {
         default_agent_ids=("role:team_lead",),
         cheap_delegate_roles=(),
         senior_control_roles=("role:team_lead",),
+        phase="execution",
+        completion_artifact="accepted_delivery",
+        next_profile=None,
     ),
     LEAD_QUORUM: RunProfileConfig(
         name=LEAD_QUORUM,
@@ -103,6 +125,9 @@ PROFILE_CONFIGS: dict[str, RunProfileConfig] = {
             "role:quorum_auditor_1",
             "role:quorum_auditor_2",
         ),
+        phase="planning",
+        completion_artifact="accepted_plan",
+        next_profile=None,
     ),
     FULL_TEAM: RunProfileConfig(
         name=FULL_TEAM,
@@ -122,6 +147,9 @@ PROFILE_CONFIGS: dict[str, RunProfileConfig] = {
         ),
         cheap_delegate_roles=("engineer",),
         senior_control_roles=("team_lead", "reviewer"),
+        phase="execution",
+        completion_artifact="accepted_delivery",
+        next_profile=None,
     ),
 }
 
@@ -138,6 +166,82 @@ def normalize_run_profile(raw_profile: Any, *, chat_mode: str = "") -> str:
     if value in {"team", "team_advanced", "ai_team_basic", "ai_teams_full", "advanced"}:
         return FULL_TEAM
     return FULL_TEAM
+
+
+def select_execution_profile(
+    *,
+    explicit_profile: str | None = None,
+    criticality: str | None = None,
+    ambiguity: str | None = None,
+    independent_verification: bool | None = None,
+    parallel_workstreams: int | None = None,
+    reversible: bool | None = None,
+) -> ExecutionProfileSelection:
+    """Choose an execution profile from explicit, auditable signals.
+
+    This deliberately is not a weighted router. Missing signals choose the
+    safer team baseline. `lead_quorum` can only arrive as an explicit planning
+    override and is never selected for execution.
+    """
+    raw_explicit = str(explicit_profile or "").strip().lower()
+    if raw_explicit and raw_explicit != "auto":
+        if raw_explicit not in CANONICAL_RUN_PROFILES:
+            raise ValueError(f"unknown run profile: {explicit_profile}")
+        return ExecutionProfileSelection(
+            profile=raw_explicit,
+            source="explicit_override",
+            reason="user_selected_profile",
+            signals={},
+        )
+
+    crit = str(criticality or "").strip().lower()
+    amb = str(ambiguity or "").strip().lower()
+    streams = int(parallel_workstreams) if parallel_workstreams is not None else None
+    signals = {
+        "criticality": crit or None,
+        "ambiguity": amb or None,
+        "independent_verification": independent_verification,
+        "parallel_workstreams": streams,
+        "reversible": reversible,
+    }
+    if (
+        crit not in {"low", "medium", "high", "critical"}
+        or amb not in {"low", "medium", "high"}
+        or independent_verification is None
+        or streams is None
+        or reversible is None
+    ):
+        return ExecutionProfileSelection(
+            profile=FULL_TEAM,
+            source="automatic_policy",
+            reason="incomplete_signals_use_safe_team_default",
+            signals=signals,
+        )
+    if streams < 1:
+        raise ValueError("parallel_workstreams must be >= 1")
+    if crit in {"high", "critical"}:
+        reason = "high_or_critical_risk_requires_team_controls"
+    elif amb == "high":
+        reason = "high_ambiguity_requires_separate_planning_and_execution"
+    elif independent_verification:
+        reason = "independent_verification_requested"
+    elif streams >= 2:
+        reason = "multiple_parallel_workstreams"
+    elif not reversible:
+        reason = "irreversible_change_uses_team_default"
+    else:
+        return ExecutionProfileSelection(
+            profile=SOLO_LEAD,
+            source="automatic_policy",
+            reason="bounded_reversible_single_agent_work",
+            signals=signals,
+        )
+    return ExecutionProfileSelection(
+        profile=FULL_TEAM,
+        source="automatic_policy",
+        reason=reason,
+        signals=signals,
+    )
 
 
 def profile_config(raw_profile: Any, *, chat_mode: str = "") -> RunProfileConfig:
@@ -168,6 +272,9 @@ def build_default_team_blueprint(
             "allows_worker_delegation": config.allows_worker_delegation,
             "requires_review_gate": config.requires_review_gate,
             "requires_qa_gate": config.requires_qa_gate,
+            "phase": config.phase,
+            "completion_artifact": config.completion_artifact,
+            "next_profile": config.next_profile,
         },
     )
 

@@ -103,6 +103,8 @@ class HeartbeatScheduler:
             "max_continuation_attempts",
             "prompt_budget_hint",
             "timeout_retry_attempt",
+            "quorum_session_id",
+            "correction",
         ):
             if _clean_optional(payload.get(key)):
                 context_snapshot[key] = _clean_optional(payload.get(key))

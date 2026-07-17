@@ -306,7 +306,15 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
     """
     role = env.get("AITEAM_AGENT_ROLE", "").strip() or "engineer"
     role_key = role.lower()
-    is_orchestrator = role_key in _ORCHESTRATION_ROLES
+    try:
+        payload_data = json.loads(env.get("AITEAM_WAKE_PAYLOAD_JSON", "") or "{}")
+    except (TypeError, ValueError):
+        payload_data = {}
+    is_solo_direct = (
+        role_key in _ORCHESTRATION_ROLES
+        and str(payload_data.get("profile") or "").strip().lower() == "solo_lead"
+    )
+    is_orchestrator = role_key in _ORCHESTRATION_ROLES and not is_solo_direct
     is_read_only = is_orchestrator or role_key in _READ_ONLY_ROLES
     skill = env.get("AITEAM_AGENT_SKILL", "").strip()
     workspace = env.get("AITEAM_WORKSPACE_ROOT", "").strip()
@@ -375,6 +383,9 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         ]
     else:
         parts += [
+            "Modo SOLO LEAD: eres el único agente y tienes autoridad completa sobre el workspace. "
+            "No delegues ni crees sub-issues; planifica, implementa, ejecuta las verificaciones y cierra la issue tú mismo."
+            if is_solo_direct else None,
             "1. Lee los archivos relevantes del workspace para entender el estado actual.",
             "2. Implementa los cambios necesarios usando tus herramientas nativas (escritura/edición de archivos).",
             "3. Si necesitas ejecutar comandos (instalar dependencias, tests, etc.), usa el shell.",

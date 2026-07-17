@@ -4,7 +4,7 @@ import contextlib
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -19,7 +19,7 @@ from aiteam.db.liveness import diagnose_issue
 from aiteam.hiring_economics import detect_policy_deviations, provider_router_health
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
 from aiteam.provider_governor import GOVERNOR
-from aiteam.run_profiles import normalize_run_profile, LEAD_QUORUM
+from aiteam.run_profiles import LEAD_QUORUM, select_execution_profile
 
 router = APIRouter()
 
@@ -32,6 +32,12 @@ class CreateIssueRequest(BaseModel):
     description: str | None = None
     role: str | None = None
     complexity: str | None = None
+    criticality: Literal["low", "medium", "high", "critical"] | None = None
+    ambiguity: Literal["low", "medium", "high"] | None = None
+    independent_verification: bool | None = None
+    parallel_workstreams: int | None = None
+    reversible: bool | None = None
+    run_profile: Literal["auto", "solo_lead", "lead_quorum", "full_team"] | None = None
     priority: int = 0
     assignee_agent_id: str | None = None
     metadata: dict[str, Any] = {}
@@ -52,12 +58,28 @@ class UpdateIssueRequest(BaseModel):
 async def post_issue(body: CreateIssueRequest, request: Request):
     _require_api_auth_request(request)
     db = _db(request)
+    metadata = dict(body.metadata or {})
+    metadata_profile = str(metadata.get("profile") or "").strip() or None
+    try:
+        selection = select_execution_profile(
+            explicit_profile=body.run_profile or metadata_profile or "auto",
+            criticality=body.criticality,
+            ambiguity=body.ambiguity,
+            independent_verification=body.independent_verification,
+            parallel_workstreams=body.parallel_workstreams,
+            reversible=body.reversible,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    metadata["profile"] = selection.profile
+    metadata["profile_selection"] = selection.to_metadata()
     try:
         row = create_issue(
             db, title=body.title, status=body.status, goal_id=body.goal_id,
             parent_id=body.parent_id, description=body.description, role=body.role,
-            complexity=body.complexity, priority=body.priority,
-            assignee_agent_id=body.assignee_agent_id, metadata=body.metadata,
+            complexity=body.complexity, criticality=body.criticality,
+            priority=body.priority, assignee_agent_id=body.assignee_agent_id,
+            metadata=metadata,
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -66,8 +88,7 @@ async def post_issue(body: CreateIssueRequest, request: Request):
 
     # If this is a lead_quorum task, ensure quorum agents exist so the Lead
     # can immediately assign sub-issues to them without FK failures.
-    raw_profile = (body.metadata or {}).get("profile") or ""
-    if normalize_run_profile(raw_profile) == LEAD_QUORUM:
+    if selection.profile == LEAD_QUORUM:
         try:
             workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
             runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
@@ -82,9 +103,14 @@ async def post_issue(body: CreateIssueRequest, request: Request):
         target_type="issue",
         target_id=row["id"],
         actor_user_id="user",
-        payload={"title": row.get("title"), "status": row.get("status"), "assignee_agent_id": row.get("assignee_agent_id")},
+        payload={
+            "title": row.get("title"),
+            "status": row.get("status"),
+            "assignee_agent_id": row.get("assignee_agent_id"),
+            "profile_selection": selection.to_metadata(),
+        },
     )
-    return {"success": True, "issue": row}
+    return {"success": True, "issue": row, "profile_selection": selection.to_metadata()}
 
 
 @router.get("/api/issues")

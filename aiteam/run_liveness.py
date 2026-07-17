@@ -50,7 +50,9 @@ _ENGINEERING_ROLES: frozenset[str] = frozenset({"engineer", "software_engineer"}
 # One-shot Tier 3 scouts: inspect and report in a single run. Once they produce
 # output their issue is done — without this the issue lingers 'in_progress' and
 # the reconciler re-wakes the scout forever (observed: 24 runs on one issue).
-_ONE_SHOT_SCOUT_ROLES: frozenset[str] = frozenset({"file_scout", "web_scout", "test_runner"})
+_ONE_SHOT_SCOUT_ROLES: frozenset[str] = frozenset(
+    {"file_scout", "web_scout", "test_runner", "test_designer"}
+)
 
 MAX_CONTINUATION_ATTEMPTS: int = 2
 
