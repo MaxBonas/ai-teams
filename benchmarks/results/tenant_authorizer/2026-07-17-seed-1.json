@@ -1,0 +1,72 @@
+{
+  "case": "tenant_authorizer",
+  "seed": 1,
+  "started_at": "2026-07-17T17:04:57+0200",
+  "workdir": "runtime/bench/20260717-170457",
+  "config": {
+    "harness_version": 3,
+    "solo_model": "gpt-5.4",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "team_run_profile": "full_team",
+    "max_ticks": 10,
+    "max_minutes": 15.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 356.5,
+      "ticks": 6,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": true,
+      "limit_reached": false,
+      "runs": 6,
+      "tokens_in": 448705,
+      "tokens_out": 12576,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 3,
+        "hidden_exit": 1,
+        "hidden_passed": 2,
+        "hidden_failed": 3,
+        "hidden_errors": 0,
+        "hidden_total": 5,
+        "deliverable_files": [
+          "README.md",
+          "tenant_auth/__init__.py",
+          "tenant_auth/core.py",
+          "tenant_auth/models.py",
+          "tests/test_acceptance_spec.py"
+        ]
+      }
+    },
+    "solo": {
+      "arm": "solo",
+      "final_status": "done",
+      "wall_seconds": 246.1,
+      "runs": 1,
+      "tokens_in": 591143,
+      "tokens_out": 9122,
+      "cost_cents": 0,
+      "model": "gpt-5.4",
+      "score": {
+        "ruff_issues": 3,
+        "hidden_exit": 1,
+        "hidden_passed": 4,
+        "hidden_failed": 1,
+        "hidden_errors": 0,
+        "hidden_total": 5,
+        "deliverable_files": [
+          "README.md",
+          "docs/SECURITY.md",
+          "pyproject.toml",
+          "tenant_auth/__init__.py",
+          "tenant_auth/core.py",
+          "tests/test_tenant_auth.py"
+        ]
+      }
+    }
+  }
+}

@@ -142,11 +142,17 @@ def test_review_evidence_unchanged_skips_duplicate_review(tmp_path: Path) -> Non
     executor.execute(second)
     assert runtime.calls == 1
     assert _run_status(db_path, second.run["id"]) == ("skipped", "review_evidence_unchanged")
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT status FROM issues WHERE id='issue:work'").fetchone()[0] == "done"
 
-    # Workspace changed → exactly one new round re-enabled
+    # A new Lead directive reopens the issue; changed workspace then enables
+    # exactly one new round.
     target = db_path.parent.parent / "src" / "main.cs"
     target.write_text("class Main { int hp; }", encoding="utf-8")
     os.utime(target, (target.stat().st_atime + 5, target.stat().st_mtime + 5))
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE issues SET status='todo' WHERE id='issue:work'")
+        conn.commit()
     third = _dispatch(db_path, role="reviewer")
     executor.execute(third)
     assert runtime.calls == 2

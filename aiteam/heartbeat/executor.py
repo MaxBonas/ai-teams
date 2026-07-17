@@ -728,6 +728,27 @@ class RunExecutor:
             workspace_root=workspace_root,
         )
         if skip_reason:
+            if skip_reason == "review_evidence_unchanged" and issue_id_str:
+                # A Lead may reopen a completed review to request another pass.
+                # If preflight proves the workspace is identical, the previous
+                # completed verdict still satisfies that issue; leaving it todo
+                # creates a stranded root with an empty wakeup queue.
+                with contextlib.suppress(Exception):
+                    update_issue(self.db_path, issue_id=issue_id_str, status="done")
+                    log_activity(
+                        self.db_path,
+                        action="review.redundant_wake_closed",
+                        target_type="issue",
+                        target_id=issue_id_str,
+                        actor_agent_id=agent_id,
+                        run_id=run_id,
+                        payload={"reason": skip_reason},
+                    )
+                    self._enqueue_supervisor_report(
+                        issue_id=issue_id_str,
+                        reporting_agent_id=agent_id,
+                        source_run_id=run_id,
+                    )
             finish_run(
                 self.db_path,
                 run_id=run_id,
@@ -2235,7 +2256,7 @@ class RunExecutor:
         measuring_coverage = False
         if suite_kind == "pytest" and self._python_has_module(cmd[0], "coverage"):
             runner_env["COVERAGE_FILE"] = str(Path(root) / ".aiteam" / ".coverage")
-            cmd = [cmd[0], "-m", "coverage", "run", "-m", "pytest", "-q"]
+            cmd = [cmd[0], "-m", "coverage", "run", "-m", "pytest", *cmd[3:]]
             measuring_coverage = True
         cmd_display = " ".join(cmd)
         try:
@@ -2352,6 +2373,7 @@ class RunExecutor:
         (None, "") si no hay nada ejecutable.
         """
         has_pytest_signals = False
+        pytest_targets: list[str] = []
         node_pkg: Path | None = None
         try:
             for rel_path in snapshot_workspace(root):
@@ -2361,8 +2383,10 @@ class RunExecutor:
                     has_pytest_signals = True
                 elif path_key.startswith(("tests/", "test/")) and name.startswith("test_") and name.endswith(".py"):
                     has_pytest_signals = True
+                    pytest_targets.append(path_key)
                 elif name.startswith("test_") and name.endswith(".py"):
                     has_pytest_signals = True
+                    pytest_targets.append(path_key)
                 elif name == "pyproject.toml":
                     with contextlib.suppress(Exception):
                         if "pytest" in (root / rel_path).read_text(encoding="utf-8", errors="ignore").lower():
@@ -2376,7 +2400,10 @@ class RunExecutor:
         if has_pytest_signals:
             python = self._resolve_workspace_python(root)
             if python:
-                return [python, "-m", "pytest", "-q"], "pytest"
+                # Pass discovered test files explicitly. Pytest's recursive
+                # collection can otherwise enter locked CLI scratch folders on
+                # Windows and fail an otherwise green solo run with WinError 5.
+                return [python, "-m", "pytest", "-q", *sorted(set(pytest_targets))], "pytest"
 
         if node_pkg is not None:
             with contextlib.suppress(Exception):

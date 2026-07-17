@@ -69,7 +69,9 @@ Siguiente orden:
 
 - `RunExecutor` concentra muchas políticas; el orden de preflights y gates requiere tests dirigidos.
 - El bloque principal quedó consolidado en `codex/orchestration-hardening`; `.claude/skills/aiteams-frontend/` permanece sin seguimiento y fuera de los commits por origen no atribuido.
-- La telemetría de usage de CLIs no Codex, especialmente `gemini_subscription`, debe verificarse antes de comparar costes entre proveedores. En esta máquina `gemini` no está instalado y no hay claves API en el vault.
+- La telemetría de usage de CLIs no Codex, especialmente `gemini_subscription`, debe verificarse antes de comparar costes entre proveedores. En esta máquina no hay claves API en el vault y el canal OAuth de Gemini no es elegible.
+- Gemini CLI 0.51.0 quedó instalado, pero el OAuth existente es rechazado por Google con `UNSUPPORTED_CLIENT`/`IneligibleTierError` y exige migración a Antigravity; por tanto continúa sin ser un segundo proveedor utilizable para benchmarks.
+- Nuevas anclas reales: `config_redactor` empata 3/3 pero `solo_lead` cuesta 4,68× tokens de entrada y 5,17× tiempo; `tenant_authorizer` favorece a Codex directo 4/5 frente a `full_team` 2/5. El default conservador no debe relajarse ni presentarse como calibrado con estas semillas.
 - `benchmarks/results/quorum-sqlite-seed-1.json` es evidencia de una run incompleta, no un resultado A/B: Plan A obtuvo 91,3 % y el segundo auditor falló con `subscription_cli_not_found`.
 - El benchmark ya tiene resultados versionados y juez oculto aislado (harness v3); faltan más semillas y familias de tarea antes de extraer conclusiones estadísticas.
 - Los documentos históricos de migración pueden contener estados de fase ya superados; el banner del documento indica cómo leerlos.

@@ -2796,6 +2796,73 @@ def test_lead_cannot_close_when_tests_lack_test_runner_exit_zero(tmp_path: Path)
     assert denied[0] == 1
 
 
+def test_solo_lead_machine_verification_targets_tests_not_locked_scratch_dirs(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE issues SET metadata_json=? WHERE id='issue:intake'",
+            (json.dumps({"profile": "solo_lead"}),),
+        )
+        conn.commit()
+    (tmp_path / "test_ok.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    # A directory matching pytest's default recursion surface must not be
+    # needed to validate the explicitly discovered public test file.
+    (tmp_path / "tmp_cli_scratch").mkdir()
+
+    _run_status_transition(tmp_path, agent_id="role:lead", issue_id="issue:intake", target="done")
+
+    assert _issue_status(db_path, "issue:intake") == "done"
+    with sqlite3.connect(str(db_path)) as conn:
+        receipt = conn.execute(
+            "SELECT payload_json FROM activity_log "
+            "WHERE action='solo_lead.verification_passed' AND target_id='issue:intake'"
+        ).fetchone()
+    assert "test_ok.py" in json.loads(receipt[0])["command"]
+
+
+def test_redundant_reviewer_wake_closes_reopened_issue(tmp_path: Path) -> None:
+    (tmp_path / ".aiteam").mkdir()
+    db_path = tmp_path / ".aiteam" / "aiteam.db"
+    _make_circuit_breaker_db(db_path)
+    executor = RunExecutor(db_path, build_default_registry())
+    fingerprint = executor._workspace_digest(tmp_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET role='reviewer' WHERE id='role:engineer'")
+        conn.execute("UPDATE issues SET role='reviewer', status='todo' WHERE id='issue:child'")
+        conn.execute(
+            "INSERT INTO runs (id,agent_id,issue_id,status) VALUES ('run:prior-review','role:engineer','issue:child','completed')"
+        )
+        conn.execute(
+            "INSERT INTO activity_log (id,run_id,actor_agent_id,action,target_type,target_id,payload_json) "
+            "VALUES ('activity:review','run:prior-review','role:engineer','review.evidence','issue','issue:child',?)",
+            (json.dumps({"fingerprint": fingerprint}),),
+        )
+        conn.commit()
+    enqueue_wakeup(
+        db_path,
+        agent_id="role:engineer",
+        source="unblock",
+        reason="lead_directive",
+        payload={"issue_id": "issue:child", "wake_reason": "lead_directive"},
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:engineer")
+    assert dispatch is not None
+
+    executor.execute(dispatch)
+
+    assert _issue_status(db_path, "issue:child") == "done"
+    with sqlite3.connect(str(db_path)) as conn:
+        skipped = conn.execute(
+            "SELECT error_code FROM runs WHERE id != 'run:prior-review' ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()[0]
+        lead_wakes = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
+        ).fetchone()[0]
+    assert skipped == "review_evidence_unchanged"
+    assert lead_wakes == 1
+
+
 def test_lead_can_close_despite_unity_library_package_json(tmp_path: Path) -> None:
     """Live capa-2 bug: Library/PackageCache/**/package.json (Unity's own
     dependency cache, hundreds of files) was mistaken for a JS test suite,

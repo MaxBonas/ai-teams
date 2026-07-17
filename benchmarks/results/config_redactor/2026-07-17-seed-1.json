@@ -1,0 +1,67 @@
+{
+  "case": "config_redactor",
+  "seed": 1,
+  "started_at": "2026-07-17T16:48:40+0200",
+  "workdir": "runtime/bench/20260717-164840",
+  "config": {
+    "harness_version": 3,
+    "solo_model": "gpt-5.4",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "team_run_profile": "solo_lead",
+    "max_ticks": 8,
+    "max_minutes": 12.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 678.9,
+      "ticks": 3,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": true,
+      "limit_reached": false,
+      "runs": 3,
+      "tokens_in": 1285628,
+      "tokens_out": 15272,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 3,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 3,
+        "deliverable_files": [
+          "README.md",
+          "config_redactor.py",
+          "test_config_redactor.py"
+        ]
+      }
+    },
+    "solo": {
+      "arm": "solo",
+      "final_status": "done",
+      "wall_seconds": 131.3,
+      "runs": 1,
+      "tokens_in": 274953,
+      "tokens_out": 4683,
+      "cost_cents": 0,
+      "model": "gpt-5.4",
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 3,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 3,
+        "deliverable_files": [
+          "README.md",
+          "config_redactor.py",
+          "tests/test_config_redactor.py"
+        ]
+      }
+    }
+  }
+}
