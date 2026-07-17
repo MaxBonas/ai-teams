@@ -11,11 +11,16 @@ from pydantic import BaseModel
 
 from api.utils import PROJECT_ROOT, _require_api_auth_request, _workspace_from_request, get_current_workspace, resolve_runtime_dir
 from aiteam.db.activity_log import log_activity
-from aiteam.db.dependencies import list_dependencies, resolve_blocker_wakeups
+from aiteam.db.dependencies import resolve_blocker_wakeups
 from aiteam.db.documents import get_context_summary, get_document
 from aiteam.db.interactions import list_interactions
 from aiteam.db.issues import create_issue, get_issue, list_issues, update_issue
 from aiteam.db.liveness import diagnose_issue
+from aiteam.db.quorum_sessions import (
+    evaluate_quorum_session,
+    get_quorum_session_for_issue,
+    list_quorum_contributions,
+)
 from aiteam.hiring_economics import detect_policy_deviations, provider_router_health
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
 from aiteam.provider_governor import GOVERNOR
@@ -153,6 +158,55 @@ async def get_issue_by_id(issue_id: str, request: Request):
     except Exception:
         plan_document = None
     return {"success": True, "issue": row, "pending_interactions": pending, "plan_document": plan_document}
+
+
+@router.get("/api/issues/{issue_id}/quorum")
+async def get_issue_quorum(issue_id: str, request: Request):
+    """Proyección read-only del contrato durable de quorum de una issue."""
+    _require_api_auth_request(request)
+    db = _db(request)
+    try:
+        session = get_quorum_session_for_issue(db, issue_id=issue_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Quorum session not found")
+        contributions = list_quorum_contributions(db, session_id=str(session["id"]))
+        gate = evaluate_quorum_session(
+            db, session_id=str(session["id"]), persist=False
+        )
+    except HTTPException:
+        raise
+    except sqlite3.OperationalError as exc:
+        raise _schema_err(exc)
+    session_view = {
+        key: session.get(key)
+        for key in (
+            "id",
+            "issue_id",
+            "status",
+            "requested_contributions",
+            "min_valid_contributions",
+            "skipped_reason",
+            "final_plan_revision_id",
+        )
+    }
+    contribution_views = [
+        {
+            "ordinal": row.get("ordinal"),
+            "provider": row.get("provider"),
+            "model": row.get("model"),
+            "channel": row.get("channel"),
+            "result": row.get("result"),
+            "valid": bool(row.get("valid")),
+        }
+        for row in contributions
+    ]
+    return {
+        "success": True,
+        "issue_id": issue_id,
+        "session": session_view,
+        "contributions": contribution_views,
+        "gate": gate,
+    }
 
 
 @router.get("/api/issues/{issue_id}/thread")

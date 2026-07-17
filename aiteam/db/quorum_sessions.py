@@ -118,8 +118,14 @@ def record_quorum_contribution(
     return dict(row)
 
 
-def evaluate_quorum_session(db_path: Path, *, session_id: str) -> dict[str, Any]:
-    """Evalúa recibos, no prosa: cantidad válida y diversidad de provider."""
+def evaluate_quorum_session(
+    db_path: Path, *, session_id: str, persist: bool = True
+) -> dict[str, Any]:
+    """Evalúa recibos, no prosa: cantidad válida y diversidad de provider.
+
+    ``persist=False`` ofrece una proyección estrictamente read-only para APIs
+    GET: calcula el mismo gate sin avanzar ``reviewing`` a ``ready``.
+    """
     with contextlib.closing(_connect(db_path)) as conn:
         session = conn.execute(
             "SELECT * FROM quorum_sessions WHERE id = ?", (session_id,)
@@ -152,10 +158,11 @@ def evaluate_quorum_session(db_path: Path, *, session_id: str) -> dict[str, Any]
         else:
             ready = gate_satisfied
             status = "ready" if ready else "reviewing"
-            conn.execute(
-                "UPDATE quorum_sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (status, session_id),
-            )
+            if persist:
+                conn.execute(
+                    "UPDATE quorum_sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (status, session_id),
+                )
     return {
         "ready": ready,
         "status": status,
@@ -171,6 +178,38 @@ def get_quorum_session(db_path: Path, *, session_id: str) -> dict[str, Any] | No
     with contextlib.closing(_connect(db_path)) as conn:
         row = conn.execute("SELECT * FROM quorum_sessions WHERE id = ?", (session_id,)).fetchone()
     return dict(row) if row is not None else None
+
+
+def get_quorum_session_for_issue(
+    db_path: Path, *, issue_id: str
+) -> dict[str, Any] | None:
+    """Última sesión creada para una issue, si existe."""
+    with contextlib.closing(_connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM quorum_sessions
+            WHERE issue_id = ?
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT 1
+            """,
+            (issue_id,),
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def list_quorum_contributions(
+    db_path: Path, *, session_id: str
+) -> list[dict[str, Any]]:
+    with contextlib.closing(_connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM quorum_contributions
+            WHERE session_id = ?
+            ORDER BY ordinal ASC, rowid ASC
+            """,
+            (session_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def quorum_synthesis_context(db_path: Path, *, session_id: str) -> dict[str, Any]:

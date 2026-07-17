@@ -57,6 +57,9 @@ async def get_project_state(
         )
         comments = _fetch_comments(db, issue_ids=[str(row["id"]) for row in issues])
         interactions = [_decode_json_fields(row) for row in _fetch_interactions(db, issue_ids=[str(row["id"]) for row in issues])]
+        issues = _enrich_issue_pipeline(
+            db, issues=issues, agents=agents, interactions=interactions
+        )
         selected_id = _select_issue_id(issues, selected_issue_id)
         plan_document = get_document(db, issue_id=selected_id, key="plan") if selected_id else None
         if plan_document is None and selected_id and selected_id != "issue:intake":
@@ -167,6 +170,156 @@ def _fetch_comments(db: Path, *, issue_ids: list[str]) -> list[dict[str, Any]]:
 
 def _fetch_interactions(db: Path, *, issue_ids: list[str]) -> list[dict[str, Any]]:
     return _fetch_capped_newest(db, table="issue_thread_interactions", issue_ids=issue_ids, cap=_INTERACTIONS_CAP)
+
+
+_PHASE_BY_ROLE = {
+    "lead": "planning",
+    "team_lead": "planning",
+    "quorum_auditor": "planning",
+    "product_manager": "planning",
+    "engineer": "engineer",
+    "software_engineer": "engineer",
+    "worker": "engineer",
+    "test_designer": "tests",
+    "test_runner": "tests",
+    "qa": "tests",
+    "reviewer": "review",
+    "code_reviewer": "review",
+}
+_TERMINAL_ISSUE_STATUSES = {"done", "cancelled"}
+_TERMINAL_INTERACTION_STATUSES = {"accepted", "rejected", "answered", "cancelled", "expired"}
+
+
+def _enrich_issue_pipeline(
+    db: Path,
+    *,
+    issues: list[dict[str, Any]],
+    agents: list[dict[str, Any]],
+    interactions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Añade fase y ownership activo sin alterar campos existentes."""
+    issue_ids = [str(row.get("id") or "") for row in issues if row.get("id")]
+    active_runs: dict[str, dict[str, Any]] = {}
+    quorum_by_issue: dict[str, str] = {}
+    if issue_ids:
+        placeholders = ", ".join("?" for _ in issue_ids)
+        with contextlib.closing(_connect(db)) as conn:
+            run_rows = conn.execute(
+                f"""
+                SELECT * FROM runs
+                WHERE issue_id IN ({placeholders}) AND status IN ('queued','running')
+                ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
+                         created_at DESC, rowid DESC
+                """,
+                issue_ids,
+            ).fetchall()
+            for row in run_rows:
+                item = dict(row)
+                active_runs.setdefault(str(item["issue_id"]), item)
+            try:
+                quorum_rows = conn.execute(
+                    f"""
+                    SELECT issue_id, status FROM quorum_sessions
+                    WHERE issue_id IN ({placeholders})
+                    ORDER BY created_at DESC, rowid DESC
+                    """,
+                    issue_ids,
+                ).fetchall()
+                for row in quorum_rows:
+                    quorum_by_issue.setdefault(str(row["issue_id"]), str(row["status"]))
+            except sqlite3.OperationalError as exc:
+                if "no such table" not in str(exc).lower():
+                    raise
+
+    agents_by_id = {str(row.get("id")): row for row in agents}
+    open_interaction_issues = {
+        str(row.get("issue_id"))
+        for row in interactions
+        if str(row.get("status") or "") not in _TERMINAL_INTERACTION_STATUSES
+    }
+    children: dict[str, list[dict[str, Any]]] = {}
+    for issue in issues:
+        parent_id = str(issue.get("parent_id") or "")
+        if parent_id:
+            children.setdefault(parent_id, []).append(issue)
+
+    enriched: list[dict[str, Any]] = []
+    for issue in issues:
+        item = dict(issue)
+        issue_id = str(item.get("id") or "")
+        active_run = active_runs.get(issue_id)
+        active_agent = agents_by_id.get(str((active_run or {}).get("agent_id") or ""))
+        item["phase"] = _derive_issue_phase(
+            item,
+            active_run=active_run,
+            active_agent=active_agent,
+            child_issues=children.get(issue_id, []),
+            has_open_interaction=issue_id in open_interaction_issues,
+            quorum_status=quorum_by_issue.get(issue_id),
+        )
+        item["active_run"] = _active_run_view(active_run)
+        item["active_agent"] = _active_agent_view(active_agent)
+        enriched.append(item)
+    return enriched
+
+
+def _derive_issue_phase(
+    issue: dict[str, Any],
+    *,
+    active_run: dict[str, Any] | None,
+    active_agent: dict[str, Any] | None,
+    child_issues: list[dict[str, Any]],
+    has_open_interaction: bool,
+    quorum_status: str | None,
+) -> str:
+    status = str(issue.get("status") or "").strip().lower()
+    if status in _TERMINAL_ISSUE_STATUSES:
+        return "done"
+    if has_open_interaction or status == "blocked":
+        return "gate"
+    if quorum_status in {"ready", "synthesizing", "degraded", "failed"}:
+        return "gate"
+    if quorum_status == "accepted":
+        return "done" if status in _TERMINAL_ISSUE_STATUSES else "gate"
+    if quorum_status == "reviewing":
+        return "planning"
+    active_role = str((active_agent or {}).get("role") or "").strip().lower()
+    if active_run and active_role:
+        return _PHASE_BY_ROLE.get(active_role, "planning")
+    if child_issues:
+        live_children = [
+            child for child in child_issues
+            if str(child.get("status") or "").lower() not in _TERMINAL_ISSUE_STATUSES
+        ]
+        child_phases = {
+            "gate" if str(child.get("status") or "").lower() == "blocked"
+            else _PHASE_BY_ROLE.get(str(child.get("role") or "").lower(), "planning")
+            for child in live_children
+        }
+        for phase in ("gate", "review", "tests", "engineer", "planning"):
+            if phase in child_phases:
+                return phase
+    if status == "in_review":
+        return "review"
+    return _PHASE_BY_ROLE.get(str(issue.get("role") or "").strip().lower(), "planning")
+
+
+def _active_run_view(run: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not run:
+        return None
+    return {
+        key: run.get(key)
+        for key in (
+            "id", "status", "agent_id", "adapter_type", "provider", "model",
+            "channel", "started_at",
+        )
+    }
+
+
+def _active_agent_view(agent: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not agent:
+        return None
+    return {key: agent.get(key) for key in ("id", "role", "name")}
 
 
 def _select_issue_id(issues: list[dict[str, Any]], selected_issue_id: str | None) -> str:

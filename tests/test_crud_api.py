@@ -162,7 +162,7 @@ def test_issue_creation_auto_selects_and_persists_execution_profile(client):
             "run_profile": "auto",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["profile_selection"]["profile"] == "solo_lead"
     metadata = json.loads(payload["issue"]["metadata_json"])
@@ -184,6 +184,58 @@ def test_issue_creation_defaults_to_team_and_honours_quorum_override(client):
     assert conservative.json()["profile_selection"]["reason"] == "incomplete_signals_use_safe_team_default"
     assert planning.json()["profile_selection"]["profile"] == "lead_quorum"
     assert planning.json()["profile_selection"]["source"] == "explicit_override"
+
+
+def test_issue_quorum_endpoint_is_read_only_and_returns_contract(client, tmp_path):
+    goal_id = client.post("/api/goals", json={"title": "G"}).json()["goal"]["id"]
+    issue_id = client.post(
+        "/api/issues",
+        json={"title": "Plan", "goal_id": goal_id, "run_profile": "lead_quorum"},
+    ).json()["issue"]["id"]
+    db_path = tmp_path / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO quorum_sessions "
+            "(id,issue_id,base_plan_revision_id,status,requested_contributions,min_valid_contributions) "
+            "VALUES ('qs',?,'rev-a','reviewing',2,2)",
+            (issue_id,),
+        )
+        for ordinal, (agent, provider) in enumerate(
+            (("role:quorum_auditor_1", "openai"), ("role:quorum_auditor_2", "google")),
+            start=1,
+        ):
+            conn.execute(
+                "INSERT INTO quorum_contributions "
+                "(id,session_id,agent_id,ordinal,provider,model,channel,result,evidence,findings_json,valid) "
+                "VALUES (?,?,?, ?,?,'senior','api','approved','e','[]',1)",
+                (f"qc{ordinal}", "qs", agent, ordinal, provider),
+            )
+        conn.commit()
+
+    response = client.get(f"/api/issues/{issue_id}/quorum")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["session"] == {
+        "id": "qs",
+        "issue_id": issue_id,
+        "status": "reviewing",
+        "requested_contributions": 2,
+        "min_valid_contributions": 2,
+        "skipped_reason": None,
+        "final_plan_revision_id": None,
+    }
+    assert [row["ordinal"] for row in payload["contributions"]] == [1, 2]
+    assert payload["gate"]["ready"] is True
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT status FROM quorum_sessions WHERE id='qs'").fetchone()[0] == "reviewing"
+
+    without_session = client.post(
+        "/api/issues", json={"title": "Normal", "goal_id": goal_id}
+    ).json()["issue"]["id"]
+    missing = client.get(f"/api/issues/{without_session}/quorum")
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "Quorum session not found"
 
 
 # ── Runs list ─────────────────────────────────────────────────────────────────

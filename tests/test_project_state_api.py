@@ -122,6 +122,49 @@ def test_project_state_returns_cockpit_snapshot(tmp_path: Path) -> None:
     assert payload["timeline"]
     assert payload["cursor"]
     assert payload["autonomy"] == "supervised"
+    issue = payload["issues"][0]
+    assert issue["phase"] == "gate"
+    assert issue["active_run"] is None
+    assert issue["active_agent"] is None
+
+
+def test_project_state_adds_phase_and_active_owner_per_issue(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _init_db(workspace)
+    db_path = workspace / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO agents (id,role,name,adapter_type) "
+            "VALUES ('role:engineer','engineer','Engineer','subscription_cli')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id,parent_id,goal_id,title,status,role,assignee_agent_id) "
+            "VALUES ('issue:build','issue:intake','goal-1','Build','in_progress','engineer','role:engineer')"
+        )
+        conn.execute(
+            "INSERT INTO runs "
+            "(id,agent_id,issue_id,status,adapter_type,provider,model,channel,started_at) "
+            "VALUES ('run:active','role:engineer','issue:build','running',"
+            "'subscription_cli','openai-codex','gpt','subscription','2027-01-01T00:00:00Z')"
+        )
+        conn.commit()
+
+    client, previous = _client_for_workspace(workspace)
+    try:
+        response = client.get("/api/project/state")
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 200
+    issues = {row["id"]: row for row in response.json()["issues"]}
+    build = issues["issue:build"]
+    assert build["phase"] == "engineer"
+    assert build["active_run"]["id"] == "run:active"
+    assert build["active_run"]["status"] == "running"
+    assert build["active_agent"] == {
+        "id": "role:engineer", "role": "engineer", "name": "Engineer"
+    }
 
 
 def test_project_autonomy_endpoint_roundtrip(tmp_path: Path) -> None:
