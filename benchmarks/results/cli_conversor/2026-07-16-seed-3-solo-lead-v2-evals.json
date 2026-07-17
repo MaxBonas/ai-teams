@@ -1,0 +1,52 @@
+{
+  "db": "runtime/bench/20260717-000418/team/.aiteam/aiteam.db",
+  "outcome": {
+    "issues_by_status": {
+      "blocked": 1,
+      "done": 2,
+      "in_progress": 1,
+      "todo": 1
+    },
+    "accepted_root_issues": 0
+  },
+  "economy": {
+    "input_tokens": 329926,
+    "output_tokens": 8136,
+    "total_tokens": 338062,
+    "cost_cents": 0,
+    "tokens_per_accepted_root": null
+  },
+  "coordination": {
+    "runs_by_status": {
+      "completed": 4
+    },
+    "wakeups_by_status": {
+      "finished": 4,
+      "queued": 2,
+      "skipped": 2
+    },
+    "wakeups_per_issue_avg": 1.6,
+    "wakeups_per_issue_max": 2,
+    "repeated_agent_issue_runs": [],
+    "fix_issues": 0,
+    "test_failure_reports": 1,
+    "reviewer_rejection_reports": 0,
+    "approvals_contradicted_by_later_test_failure": 0,
+    "terminal_issue_skips": 0,
+    "lead_unblock_attempts": 0
+  },
+  "context": {
+    "workspace_digest_events": 1,
+    "unchanged_digest_reuses": 0,
+    "context_curator_issues": 0
+  },
+  "reports": {
+    "done": 1,
+    "failed": 1
+  },
+  "liveness": {
+    "nonterminal_runs": 0,
+    "claimed_or_running_wakeups": 0,
+    "healthy": true
+  }
+}

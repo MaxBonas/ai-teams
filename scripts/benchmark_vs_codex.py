@@ -12,7 +12,6 @@ Uso (gasta tokens reales — NUNCA corre en la suite de tests):
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import re
 import shutil
@@ -30,6 +29,14 @@ if str(REPO_ROOT) not in sys.path:
 VENV_PYTHON = sys.executable
 
 
+def _portable_path(path: Path) -> str:
+    resolved = Path(path).resolve()
+    try:
+        return str(resolved.relative_to(REPO_ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(resolved)
+
+
 # ── Scoring (compartido por ambos brazos) ─────────────────────────────────────
 
 def score_workspace(workspace: Path, hidden_dir: Path, *, python: str = VENV_PYTHON) -> dict[str, Any]:
@@ -40,7 +47,7 @@ def score_workspace(workspace: Path, hidden_dir: Path, *, python: str = VENV_PYT
     # Lint ANTES de copiar la suite oculta (no debe puntuar contra el candidato).
     ruff = _run([python, "-m", "ruff", "check", "--output-format=concise", "."], cwd=workspace)
     result["ruff_issues"] = (
-        len([l for l in (ruff.stdout or "").splitlines() if l.strip()])
+        len([line for line in (ruff.stdout or "").splitlines() if line.strip()])
         if ruff is not None and ruff.returncode in (0, 1) else None
     )
 
@@ -48,9 +55,19 @@ def score_workspace(workspace: Path, hidden_dir: Path, *, python: str = VENV_PYT
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)
     shutil.copytree(hidden_dir, dest)
+    # Import pytest under isolated mode *before* exposing the candidate workspace
+    # on sys.path.  Otherwise a deliverable named ``pytest.py`` can shadow the
+    # real runner, ignore ``dest`` and turn its own tests into a false green.
+    pytest_args = [str(dest), "-q", "-p", "no:cacheprovider"]
+    isolated_runner = (
+        "import sys, pytest; "
+        f"sys.path.insert(0, {str(workspace)!r}); "
+        f"raise SystemExit(pytest.main({pytest_args!r}))"
+    )
     proc = _run(
-        [python, "-m", "pytest", str(dest), "-q", "-p", "no:cacheprovider"],
-        cwd=workspace, timeout=300,
+        [python, "-I", "-c", isolated_runner],
+        cwd=workspace,
+        timeout=300,
     )
     out = (proc.stdout if proc else "") or ""
     result["hidden_exit"] = proc.returncode if proc else None
@@ -88,12 +105,12 @@ def _run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 120,
 # ── Brazo A: el equipo ────────────────────────────────────────────────────────
 
 def run_team_arm(workspace: Path, goal: str, *, profile_ids: list[str],
-                 max_ticks: int, max_minutes: float) -> dict[str, Any]:
+                 run_profile: str, max_ticks: int, max_minutes: float) -> dict[str, Any]:
     from api.routers.workspace import _initialize_project_runtime
     from aiteam.adapters.registry import build_default_registry
     from aiteam.db.wakeups import enqueue_wakeup
     from aiteam.heartbeat.executor import RunExecutor
-    from aiteam.heartbeat.loop import HeartbeatLoop
+    from aiteam.heartbeat.scheduler import HeartbeatScheduler
     from aiteam.project_adapters import write_project_adapter_policy
     from aiteam.workspace_git import init_managed_repo
 
@@ -101,7 +118,11 @@ def run_team_arm(workspace: Path, goal: str, *, profile_ids: list[str],
     runtime_dir = workspace / ".aiteam"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     write_project_adapter_policy(runtime_dir, profile_ids=profile_ids)
-    _initialize_project_runtime(workspace, initial_task=goal)
+    _initialize_project_runtime(
+        workspace,
+        initial_task=goal,
+        run_profile=run_profile,
+    )
     init_managed_repo(workspace)
     db = runtime_dir / "aiteam.db"
     with sqlite3.connect(str(db)) as conn:
@@ -110,22 +131,35 @@ def run_team_arm(workspace: Path, goal: str, *, profile_ids: list[str],
         raise RuntimeError("bootstrap sin issue:intake — revisa _initialize_project_runtime")
     enqueue_wakeup(
         db, agent_id="role:lead", source="project_bootstrap", reason="new_project",
-        payload={"issue_id": "issue:intake", "wake_reason": "new_project"},
+        payload={
+            "issue_id": "issue:intake",
+            "wake_reason": "new_project",
+            "profile": run_profile,
+        },
         idempotency_key="bench:bootstrap",
     )
 
-    loop = HeartbeatLoop(db, RunExecutor(db, build_default_registry()))
+    executor = RunExecutor(db, build_default_registry())
+    scheduler = HeartbeatScheduler(db)
     started = time.time()
     ticks = 0
     status = "in_progress"
+    queue_exhausted = False
     while ticks < max_ticks and (time.time() - started) < max_minutes * 60:
+        # Despacho acotado: HeartbeatLoop.run_once drena TODA la cola, por lo
+        # que max_ticks/max_minutes no podían limitar un benchmark (seed 1 hizo
+        # 24 runs en un solo tick). El camino durable scheduler→executor es el
+        # mismo, pero aquí una iteración equivale exactamente a una run.
+        dispatch = scheduler.dispatch_next()
+        if dispatch is None:
+            queue_exhausted = True
+            break
         ticks += 1
-        asyncio.run(loop.run_once())
+        executor.execute(dispatch)
         with sqlite3.connect(str(db)) as conn:
             status = conn.execute("SELECT status FROM issues WHERE id='issue:intake'").fetchone()[0]
         if status in ("done", "cancelled"):
             break
-        time.sleep(2)
 
     with sqlite3.connect(str(db)) as conn:
         tokens = conn.execute(
@@ -138,6 +172,9 @@ def run_team_arm(workspace: Path, goal: str, *, profile_ids: list[str],
         "final_status": status,
         "wall_seconds": round(time.time() - started, 1),
         "ticks": ticks,
+        "dispatch_mode": "bounded_scheduler_executor",
+        "queue_exhausted": queue_exhausted,
+        "limit_reached": ticks >= max_ticks or (time.time() - started) >= max_minutes * 60,
         "runs": runs,
         "tokens_in": int(tokens[0]),
         "tokens_out": int(tokens[1]),
@@ -189,8 +226,16 @@ def main() -> int:
     parser.add_argument("--workdir", type=Path, default=None)
     parser.add_argument("--model", default="gpt-5.4", help="modelo del brazo solo")
     parser.add_argument("--profiles", default="codex_subscription,openai_api")
+    parser.add_argument(
+        "--run-profile",
+        choices=("solo_lead", "lead_quorum", "full_team"),
+        default="full_team",
+        help="perfil canónico de orquestación del brazo AI Teams",
+    )
     parser.add_argument("--max-ticks", type=int, default=30)
     parser.add_argument("--max-minutes", type=float, default=25.0)
+    parser.add_argument("--seed", type=int, default=None, help="etiqueta de repetición (no controla el muestreo del proveedor)")
+    parser.add_argument("--output", type=Path, default=None, help="guarda el informe JSON además de imprimirlo")
     args = parser.parse_args()
 
     case_dir = args.case.resolve()
@@ -199,11 +244,26 @@ def main() -> int:
     workdir = (args.workdir or (REPO_ROOT / "runtime" / "bench" / time.strftime("%Y%m%d-%H%M%S"))).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
 
-    report: dict[str, Any] = {"case": case_dir.name, "workdir": str(workdir), "arms": {}}
+    report: dict[str, Any] = {
+        "case": case_dir.name,
+        "seed": args.seed,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "workdir": _portable_path(workdir),
+        "config": {
+            "harness_version": 3,
+            "solo_model": args.model,
+            "team_profiles": [p.strip() for p in args.profiles.split(",") if p.strip()],
+            "team_run_profile": args.run_profile,
+            "max_ticks": args.max_ticks,
+            "max_minutes": args.max_minutes,
+        },
+        "arms": {},
+    }
     if args.arm in ("both", "team"):
         ws = workdir / "team"
         metrics = run_team_arm(
             ws, goal, profile_ids=[p.strip() for p in args.profiles.split(",") if p.strip()],
+            run_profile=args.run_profile,
             max_ticks=args.max_ticks, max_minutes=args.max_minutes,
         )
         metrics["score"] = score_workspace(ws, hidden)
@@ -214,7 +274,13 @@ def main() -> int:
         metrics["score"] = score_workspace(ws, hidden)
         report["arms"]["solo"] = metrics
 
-    print(json.dumps(report, indent=2, ensure_ascii=False))
+    serialized = json.dumps(report, indent=2, ensure_ascii=False)
+    print(serialized)
+    if args.output is not None:
+        output = args.output.resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(serialized + "\n", encoding="utf-8")
+        print(f"\nInforme guardado en {output}")
     if len(report["arms"]) == 2:
         team, solo = report["arms"]["team"]["score"], report["arms"]["solo"]["score"]
         print(

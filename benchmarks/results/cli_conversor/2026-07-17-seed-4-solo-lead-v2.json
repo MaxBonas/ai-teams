@@ -1,0 +1,45 @@
+{
+  "case": "cli_conversor",
+  "seed": 4,
+  "started_at": "2026-07-17T00:11:25+0200",
+  "workdir": "runtime/bench/20260717-001125",
+  "config": {
+    "harness_version": 2,
+    "solo_model": "gpt-5.4",
+    "team_profiles": [
+      "codex_subscription",
+      "openai_api"
+    ],
+    "team_run_profile": "solo_lead",
+    "max_ticks": 3,
+    "max_minutes": 8.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 155.3,
+      "ticks": 3,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": true,
+      "runs": 3,
+      "tokens_in": 166000,
+      "tokens_out": 5065,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 9,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 9,
+        "deliverable_files": [
+          "README.md",
+          "conversor.py",
+          "tests/test_conversor.py"
+        ]
+      }
+    }
+  }
+}

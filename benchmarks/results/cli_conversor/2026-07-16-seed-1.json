@@ -1,0 +1,63 @@
+{
+  "case": "cli_conversor",
+  "seed": 1,
+  "started_at": "2026-07-16T15:07:44+0200",
+  "workdir": "runtime/bench/20260716-150744",
+  "config": {
+    "solo_model": "gpt-5.4",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "max_ticks": 20,
+    "max_minutes": 12.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 924.6,
+      "ticks": 1,
+      "runs": 24,
+      "tokens_in": 1091201,
+      "tokens_out": 24960,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 9,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 9,
+        "deliverable_files": [
+          "README.md",
+          "conversor.py",
+          "tests/test_acceptance_conversor.py",
+          "tests/test_conversor.py"
+        ]
+      }
+    },
+    "solo": {
+      "arm": "solo",
+      "final_status": "done",
+      "wall_seconds": 242.3,
+      "runs": 1,
+      "tokens_in": 329782,
+      "tokens_out": 4557,
+      "cost_cents": 0,
+      "model": "gpt-5.4",
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 9,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 9,
+        "deliverable_files": [
+          "README.md",
+          "conversor.py",
+          "tests/test_conversor.py"
+        ]
+      }
+    }
+  }
+}

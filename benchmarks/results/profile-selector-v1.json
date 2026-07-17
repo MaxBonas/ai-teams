@@ -1,0 +1,94 @@
+{
+  "cases": 12,
+  "correct": 12,
+  "accuracy": 1.0,
+  "unsafe_solo": 0,
+  "overteam": 0,
+  "passes_safety_gate": true,
+  "results": [
+    {
+      "id": "small_config",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "bounded_cli",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "medium_ambiguity_reversible",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "docs_cleanup",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "security_sensitive",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "critical_migration",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "ambiguous_architecture",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_ambiguity_requires_separate_planning_and_execution",
+      "correct": true
+    },
+    {
+      "id": "independent_acceptance",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "independent_verification_requested",
+      "correct": true
+    },
+    {
+      "id": "parallel_front_back",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "multiple_parallel_workstreams",
+      "correct": true
+    },
+    {
+      "id": "irreversible_schema",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "irreversible_change_uses_team_default",
+      "correct": true
+    },
+    {
+      "id": "missing_ambiguity",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "incomplete_signals_use_safe_team_default",
+      "correct": true
+    },
+    {
+      "id": "missing_risk_contract",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "incomplete_signals_use_safe_team_default",
+      "correct": true
+    }
+  ]
+}

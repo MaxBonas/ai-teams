@@ -76,3 +76,17 @@ def test_empty_workspace_scores_zero_passed(tmp_path: Path) -> None:
 
     assert score["hidden_passed"] == 0
     assert score["hidden_exit"] != 0
+
+
+def test_candidate_pytest_module_cannot_shadow_hidden_runner(tmp_path: Path) -> None:
+    (tmp_path / "conversor.py").write_text(_CORRECT, encoding="utf-8")
+    (tmp_path / "pytest.py").write_text(
+        "print('999 passed')\nraise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+
+    score = score_workspace(tmp_path, HIDDEN)
+
+    assert score["hidden_exit"] == 0
+    assert score["hidden_passed"] >= 9
+    assert score["hidden_passed"] != 999

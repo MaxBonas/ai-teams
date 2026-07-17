@@ -1,0 +1,14 @@
+[
+  {"id":"small_config","expected":"solo_lead","criticality":"low","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"bounded_cli","expected":"solo_lead","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"medium_ambiguity_reversible","expected":"solo_lead","criticality":"medium","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"docs_cleanup","expected":"solo_lead","criticality":"low","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"security_sensitive","expected":"full_team","criticality":"high","ambiguity":"low","independent_verification":true,"parallel_workstreams":1,"reversible":true},
+  {"id":"critical_migration","expected":"full_team","criticality":"critical","ambiguity":"medium","independent_verification":true,"parallel_workstreams":2,"reversible":false},
+  {"id":"ambiguous_architecture","expected":"full_team","criticality":"medium","ambiguity":"high","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"independent_acceptance","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":true,"parallel_workstreams":1,"reversible":true},
+  {"id":"parallel_front_back","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":2,"reversible":true},
+  {"id":"irreversible_schema","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":false},
+  {"id":"missing_ambiguity","expected":"full_team","criticality":"low","ambiguity":null,"independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"missing_risk_contract","expected":"full_team","criticality":null,"ambiguity":null,"independent_verification":null,"parallel_workstreams":null,"reversible":null}
+]

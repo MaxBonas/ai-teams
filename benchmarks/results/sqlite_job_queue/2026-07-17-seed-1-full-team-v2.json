@@ -1,0 +1,47 @@
+{
+  "case": "sqlite_job_queue",
+  "seed": 1,
+  "started_at": "2026-07-17T12:09:53+0200",
+  "workdir": "runtime/bench/20260717-120953",
+  "config": {
+    "harness_version": 2,
+    "solo_model": "gpt-5.4",
+    "team_profiles": [
+      "codex_subscription",
+      "openai_api"
+    ],
+    "team_run_profile": "full_team",
+    "max_ticks": 12,
+    "max_minutes": 12.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 569.0,
+      "ticks": 3,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": true,
+      "limit_reached": false,
+      "runs": 3,
+      "tokens_in": 1367361,
+      "tokens_out": 16121,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 10,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 10,
+        "deliverable_files": [
+          "README.md",
+          "jobqueue.py",
+          "queue_cli.py",
+          "tests/test_acceptance_sqlite_jobqueue.py",
+          "tests/test_jobqueue.py"
+        ]
+      }
+    }
+  }
+}

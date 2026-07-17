@@ -1,0 +1,73 @@
+{
+  "db": "runtime/bench/20260716-150744/team/.aiteam/aiteam.db",
+  "outcome": {
+    "issues_by_status": {
+      "cancelled": 1,
+      "done": 8
+    },
+    "accepted_root_issues": 1
+  },
+  "economy": {
+    "input_tokens": 1091201,
+    "output_tokens": 24960,
+    "total_tokens": 1116161,
+    "cost_cents": 0,
+    "tokens_per_accepted_root": 1116161.0
+  },
+  "coordination": {
+    "runs_by_status": {
+      "completed": 22,
+      "skipped": 2
+    },
+    "wakeups_by_status": {
+      "finished": 16,
+      "skipped": 5
+    },
+    "wakeups_per_issue_avg": 2.33,
+    "wakeups_per_issue_max": 7,
+    "repeated_agent_issue_runs": [
+      {
+        "agent_id": "role:lead",
+        "issue_id": "issue:intake",
+        "runs": 9
+      },
+      {
+        "agent_id": "role:test_runner",
+        "issue_id": "941a6090-90c2-4442-9d50-c8531902353b",
+        "runs": 5
+      },
+      {
+        "agent_id": "role:engineer",
+        "issue_id": "e4d6888f-ecf2-4ea7-9cf5-29f8bc5c8585",
+        "runs": 3
+      },
+      {
+        "agent_id": "role:engineer",
+        "issue_id": "ecab9e03-a119-4201-ba2f-11db693e29cc",
+        "runs": 2
+      }
+    ],
+    "fix_issues": 1,
+    "test_failure_reports": 5,
+    "reviewer_rejection_reports": 0,
+    "approvals_contradicted_by_later_test_failure": 1,
+    "terminal_issue_skips": 2,
+    "lead_unblock_attempts": 11
+  },
+  "context": {
+    "workspace_digest_events": 14,
+    "unchanged_digest_reuses": 10,
+    "context_curator_issues": 0
+  },
+  "reports": {
+    "approved": 1,
+    "blocked": 1,
+    "done": 3,
+    "failed": 5
+  },
+  "liveness": {
+    "nonterminal_runs": 0,
+    "claimed_or_running_wakeups": 0,
+    "healthy": true
+  }
+}
