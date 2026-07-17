@@ -61,8 +61,8 @@ Siguiente orden:
 1. Ejecutar nuevas semillas reales del selector en casos medios reversibles y tareas complejas de otra naturaleza. Las 28 fronteras deterministas protegen la política, pero no sustituyen varianza de LLM.
 2. Ejecutar tres semillas aceptadas de cada rúbrica `lead_quorum` con proveedores que respeten el contrato estructurado; Codex + Ollama ya validó diversidad, coste, degradación y UI, pero Qwen 32B no produjo un aporte válido.
 3. Verificar `usage` real de Gemini subscription durante esas runs. La identidad provider/channel ya se resuelve desde el perfil durable en vez del descriptor CLI compartido.
-4. Activar y evaluar resumen causal cuando el contexto exceda presupuesto.
-5. Integrar el resumen de evals SQL en `loop-health` cuando se toque esa superficie.
+4. Construir el eval semántico de pérdida de decisiones para el resumen causal. La activación durable por presupuesto (8.000 caracteres no sintetizados), los bloques incrementales y la sustitución en wake payload ya están implementados y cubiertos.
+5. Consumir en frontend, cuando aporte valor, el nuevo campo aditivo `orchestrator_evals` de `GET /api/loop-health`; backend ya comparte economía, contexto, quorum y liveness con el harness SQL offline.
 6. Extraer piezas de `RunExecutor` solo de forma oportunista; actualmente concentra 7.059 líneas.
 
 ## Riesgos conocidos
@@ -74,6 +74,7 @@ Siguiente orden:
 - Nuevas anclas reales: `config_redactor` empata 3/3 pero `solo_lead` cuesta 4,68× tokens de entrada y 5,17× tiempo; `tenant_authorizer` favorece a Codex directo 4/5 frente a `full_team` 2/5. El default conservador no debe relajarse ni presentarse como calibrado con estas semillas.
 - `benchmarks/results/quorum-sqlite-seed-1.json` es evidencia de una run incompleta, no un resultado A/B: Plan A obtuvo 91,3 % y el segundo auditor falló con `subscription_cli_not_found`.
 - `benchmarks/results/quorum-provider-failover-local-seed-1.json` es una segunda evidencia incompleta pero útil: Plan A obtuvo 78,26 %, Codex aportó una auditoría válida y Qwen 32B consumió 4.100 tokens de entrada/164 de salida en dos intentos sin cumplir `AGENT-REPORT`; la sesión terminó `degraded` con escalado durable. El runtime reintenta una sola vez, excluye ese reintento del guard de evidencia idéntica y cancela wakeups sobrantes al degradar.
+- `benchmarks/results/quorum-provider-failover-gemma-seed-1.json` confirma que Gemma 4 local tampoco es todavía un segundo auditor utilizable: Codex produjo el único aporte válido; Gemma terminó primero `skipped` y después `failed` por selección de herramienta. El runtime continúa ahora auditores `skipped`/`failed`, normaliza fallos declarados sin código a `agent_reported_failure` y degrada/escalada de forma durable al agotar el reintento. Es evidencia de failover, no una semilla A/B aceptada.
 - El QuorumStepper fue comprobado contra esa SQLite real: distingue ahora `degraded` de “No requerido”, expone `1/2` aportes, gate pendiente, causa y provenance del aporte válido. Evidencia visual local en `output/playwright/quorum-stepper-degraded.png` (no versionada).
 - El benchmark ya tiene resultados versionados y juez oculto aislado (harness v3); faltan más semillas y familias de tarea antes de extraer conclusiones estadísticas.
 - La higiene local quedó endurecida después de encontrar 11,1 GB en `.pytest-workspace-tmp`: `pytest_local.bat` y el wrapper estable crean sesiones aisladas, limpian en un proceso posterior al cierre de handles SQLite, desactivan cache/bytecode y preservan el exit code de pytest. `scripts/cleanup_test_artifacts.py` permite el barrido manual.

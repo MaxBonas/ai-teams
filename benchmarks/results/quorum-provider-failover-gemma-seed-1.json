@@ -1,0 +1,225 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "provider_failover_v1",
+  "completed": false,
+  "failure": "quorum session 4f9111ff-98b6-49ae-a798-624a9b4f5338 has no accepted final plan",
+  "diagnostics": {
+    "session": {
+      "id": "4f9111ff-98b6-49ae-a798-624a9b4f5338",
+      "issue_id": "issue:intake",
+      "status": "degraded",
+      "base_plan_revision_id": "011ce226-19cf-47c3-bf68-ddff4cef1ca3",
+      "final_plan_revision_id": null,
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": "auditor_report_format_exhausted"
+    },
+    "base": {
+      "score": 23.0,
+      "max_score": 23.0,
+      "score_pct": 100.0,
+      "hard_failures": [],
+      "passes_hard_gate": true,
+      "word_count": 2400,
+      "criteria": [
+        {
+          "id": "objective",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "objetiv"
+          ],
+          "required": false
+        },
+        {
+          "id": "closure",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "done|completad"
+          ],
+          "required": false
+        },
+        {
+          "id": "decomposition",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "sub-?issue|tarea|fase|paso"
+          ],
+          "required": false
+        },
+        {
+          "id": "ownership",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "owner|responsable|reporta|asignad"
+          ],
+          "required": false
+        },
+        {
+          "id": "evidence",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "evidencia|recibo|artefacto|diff|test"
+          ],
+          "required": false
+        },
+        {
+          "id": "risk",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "riesgo|fallo|rotura|rollback"
+          ],
+          "required": false
+        },
+        {
+          "id": "escalation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "escal|bloque|intervenci.{0,10}human|usuario"
+          ],
+          "required": false
+        },
+        {
+          "id": "continuation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "siguiente run|continuaci|wakeup|heartbeat|reanud"
+          ],
+          "required": false
+        },
+        {
+          "id": "failure_taxonomy",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "429|rate.limit|timeout|auth|invalid.request"
+          ],
+          "required": true
+        },
+        {
+          "id": "idempotency",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "idempoten|deduplic"
+          ],
+          "required": true
+        },
+        {
+          "id": "circuit_breaker",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "circuit.breaker|cortacircuit"
+          ],
+          "required": true
+        },
+        {
+          "id": "bounded_retries",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+          ],
+          "required": false
+        },
+        {
+          "id": "cost_cap",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+          ],
+          "required": true
+        },
+        {
+          "id": "quality_guard",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "quality|calidad|capacidad.{0,20}modelo|equivalencia"
+          ],
+          "required": false
+        },
+        {
+          "id": "observability",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "telemetr|m[eé]trica|cost_events|run_events"
+          ],
+          "required": false
+        },
+        {
+          "id": "recovery_test",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "chaos|fault.injection|simular.{0,20}(429|timeout)|test.{0,20}failover"
+          ],
+          "required": false
+        }
+      ],
+      "penalties": [
+        {
+          "id": "unbounded_fallback",
+          "applied": 0.0,
+          "matched": []
+        }
+      ]
+    },
+    "contributions": [
+      {
+        "ordinal": 1,
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:7bac1d6e-2af5-4467-adb5-de82abccca62"
+      }
+    ],
+    "auditor_runs": [
+      {
+        "id": "run:7bac1d6e-2af5-4467-adb5-de82abccca62",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 13184, \"input_tokens\": 25168, \"output_tokens\": 1294, \"reasoning_output_tokens\": 41}"
+      },
+      {
+        "id": "run:9ada7812-5203-4bee-bd11-0f204e1bceb0",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "skipped",
+        "provider": "ollama",
+        "model": "gemma4:e4b",
+        "channel": "local",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 2051, \"output_tokens\": 68, \"reasoning_output_tokens\": 0}"
+      },
+      {
+        "id": "run:f88e4e06-2c78-420b-8814-f483033a243a",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "failed",
+        "provider": "ollama",
+        "model": "gemma4:e4b",
+        "channel": "local",
+        "error_code": "agent_reported_failure",
+        "error": "agent reported failure",
+        "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 2051, \"output_tokens\": 60, \"reasoning_output_tokens\": 0}"
+      }
+    ]
+  },
+  "provenance": {}
+}

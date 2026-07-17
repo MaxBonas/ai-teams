@@ -1379,13 +1379,15 @@ class RunExecutor:
                 logger.warning("role.violation log failed for run %s", run_id, exc_info=True)
 
         final_status = result.status if result.status in _TERMINAL_EXEC_STATUSES else "completed"
+        final_error = result.error or ("agent reported failure" if final_status == "failed" else None)
+        final_error_code = result.error_code or ("agent_reported_failure" if final_status == "failed" else None)
         finished = finish_run(
             self.db_path,
             run_id=run_id,
             status=final_status,
             exit_code=result.exit_code,
-            error=result.error,
-            error_code=result.error_code,
+            error=final_error,
+            error_code=final_error_code,
             usage=result.usage,
             actual_cost_cents=result.actual_cost_cents,
             result={"output_preview": result.output[:256]} if result.output else None,
@@ -4002,7 +4004,7 @@ class RunExecutor:
         reviewing with no wakeups. One corrective retry is allowed; a second
         format failure degrades the session and wakes the Lead durably.
         """
-        if run_status != "completed" or not issue_id:
+        if run_status not in {"completed", "skipped", "failed"} or not issue_id:
             return
         issue = get_issue(self.db_path, issue_id=issue_id) or {}
         metadata = _decode_json(issue.get("metadata_json") or "{}")

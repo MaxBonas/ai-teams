@@ -1367,6 +1367,7 @@ def test_executor_fails_run_on_adapter_error(tmp_path: Path) -> None:
 
     assert run["status"] == "failed"
     assert run["error"] == "adapter error"
+    assert run["error_code"] == "agent_reported_failure"
     assert run["exit_code"] == 1
     assert wakeup["status"] == "failed"
 

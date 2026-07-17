@@ -25,6 +25,7 @@ from aiteam.hiring_economics import detect_policy_deviations, provider_router_he
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
 from aiteam.provider_governor import GOVERNOR
 from aiteam.run_profiles import LEAD_QUORUM, select_execution_profile
+from scripts.orchestrator_evals import evaluate_db
 
 router = APIRouter()
 
@@ -489,6 +490,20 @@ async def get_loop_health(request: Request):
         except Exception:
             decision_latency = {}
 
+        # Reutiliza exactamente las mismas métricas que el harness offline para
+        # que el panel operativo y los benchmarks no diverjan en sus definiciones.
+        # Es aditivo: consumidores antiguos de loop-health conservan su contrato.
+        try:
+            _eval = evaluate_db(db)
+            orchestrator_evals = {
+                "economy": _eval["economy"],
+                "context": _eval["context"],
+                "quorum": _eval["quorum"],
+                "liveness": _eval["liveness"],
+            }
+        except (FileNotFoundError, ValueError, sqlite3.Error):
+            orchestrator_evals = {"available": False}
+
         # Estado del cap de coste diario (real, por-token) para el dashboard.
         cost_cap: dict[str, Any] = {"enabled": False}
         try:
@@ -531,6 +546,7 @@ async def get_loop_health(request: Request):
             "router_health_24h": router_health_24h,
             "providers_unhealthy": providers_unhealthy,
             "decision_latency": decision_latency,
+            "orchestrator_evals": orchestrator_evals,
             "cost_cap": cost_cap,
             "policy_deviations": policy_deviations,
             "summary": {
