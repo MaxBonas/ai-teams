@@ -1,0 +1,99 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "auth_migration_causal_v1",
+  "source_chars": 1208,
+  "summary_chars": 321,
+  "compression_ratio": 0.2657,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 9,
+  "required_total": 9,
+  "required_retention_rate": 1.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": true,
+  "accepted": true,
+  "criteria": [
+    {
+      "id": "jwt_rs256",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "JWT.{0,20}RS256"
+      ]
+    },
+    {
+      "id": "dual_validation_24h",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "doble validaci[oó]n.{0,30}24 horas"
+      ]
+    },
+    {
+      "id": "legacy_kid_gate",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "legacy_kid_hits.{0,40}cero.{0,30}dos horas"
+      ]
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "42 passed"
+      ]
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,50}rollback_keys\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,40}dry-run"
+      ]
+    },
+    {
+      "id": "regional_cache_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cach[eé]s\\s+regionales.{0,40}15 minutos"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0,5 ?%.{0,40}401.{0,40}cinco minutos"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de scope.{0,60}(sesiones|proveedor de identidad)"
+      ]
+    }
+  ]
+}

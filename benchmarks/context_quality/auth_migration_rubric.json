@@ -1,0 +1,15 @@
+{
+  "id": "auth_migration_causal_v1",
+  "max_compression_ratio": 0.30,
+  "criteria": [
+    {"id": "jwt_rs256", "kind": "decision", "patterns": ["JWT.{0,20}RS256"], "required": true},
+    {"id": "dual_validation_24h", "kind": "decision", "patterns": ["doble validaci[oó]n.{0,30}24 horas"], "required": true},
+    {"id": "legacy_kid_gate", "kind": "constraint", "patterns": ["legacy_kid_hits.{0,40}cero.{0,30}dos horas"], "required": true},
+    {"id": "evidence", "kind": "evidence", "patterns": ["42 passed"], "required": true},
+    {"id": "next_owner", "kind": "owner", "patterns": ["Engineer.{0,50}rollback_keys\\.py"], "required": true},
+    {"id": "review_acceptance", "kind": "acceptance", "patterns": ["Reviewer.{0,40}dry-run"], "required": true},
+    {"id": "regional_cache_risk", "kind": "risk", "patterns": ["cach[eé]s\\s+regionales.{0,40}15 minutos"], "required": true},
+    {"id": "escalation_threshold", "kind": "escalation", "patterns": ["0,5 ?%.{0,40}401.{0,40}cinco minutos"], "required": true},
+    {"id": "scope", "kind": "scope", "patterns": ["fuera de scope.{0,60}(sesiones|proveedor de identidad)"], "required": true}
+  ]
+}

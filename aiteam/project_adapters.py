@@ -382,18 +382,43 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
     """
     quorum_ids = ["role:quorum_auditor_1", "role:quorum_auditor_2"]
     created: list[str] = []
+    profiles_by_id = {str(profile.get("id") or ""): profile for profile in profiles}
+    used_profile_ids: set[str] = set()
+    used_providers: set[str] = set()
     with sqlite3.connect(str(db_path), timeout=20.0) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         lead_id = _lead_agent_id(conn)
         for agent_id in quorum_ids:
             existing = conn.execute(
-                "SELECT id FROM agents WHERE id = ?", (agent_id,)
+                "SELECT id, adapter_config_json FROM agents WHERE id = ?", (agent_id,)
             ).fetchone()
             if existing:
+                try:
+                    existing_config = json.loads(str(existing["adapter_config_json"] or "{}"))
+                except (TypeError, ValueError):
+                    existing_config = {}
+                existing_profile_id = str(existing_config.get("profile_id") or "")
+                existing_profile = profiles_by_id.get(existing_profile_id, {})
+                if existing_profile_id:
+                    used_profile_ids.add(existing_profile_id)
+                existing_provider = str(existing_profile.get("provider") or "")
+                if existing_provider:
+                    used_providers.add(existing_provider)
                 continue
-            selection = choose_adapter_for_role("quorum_auditor", "senior", profiles)
+            # Independencia por construcción: el segundo auditor intenta primero
+            # otro proveedor y después, si no existe, al menos otro perfil/canal.
+            candidates = [
+                profile for profile in profiles
+                if str(profile.get("provider") or "") not in used_providers
+            ] or [
+                profile for profile in profiles
+                if str(profile.get("id") or "") not in used_profile_ids
+            ] or profiles
+            selection = choose_adapter_for_role("quorum_auditor", "senior", candidates)
             adapter_type = str((selection or {}).get("adapter_type") or "openai_api")
+            selected_profile_id = str((selection or {}).get("adapter_profile_id") or "")
+            selected_profile = profiles_by_id.get(selected_profile_id, {})
             adapter_config = json.dumps(
                 (selection or {}).get("adapter_config") or {}, ensure_ascii=False, sort_keys=True
             )
@@ -427,6 +452,11 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
                 "SELECT changes()"
             ).fetchone()[0]:
                 created.append(agent_id)
+                if selected_profile_id:
+                    used_profile_ids.add(selected_profile_id)
+                selected_provider = str(selected_profile.get("provider") or "")
+                if selected_provider:
+                    used_providers.add(selected_provider)
         conn.commit()
     return created
 

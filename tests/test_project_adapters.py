@@ -213,6 +213,29 @@ def _init_quorum_db(db_path: Path) -> None:
 
 
 class TestEnsureQuorumAgents:
+    def test_assigns_distinct_providers_when_available(self, tmp_path: Path):
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profiles = [
+            {**_make_profile("subscription_cli", channel="subscription"),
+             "id": "codex_subscription", "provider": "openai-codex"},
+            {**_make_profile("anthropic_sonnet", channel="api"),
+             "id": "anthropic_api", "provider": "anthropic"},
+        ]
+
+        ensure_quorum_agents(db, profiles=profiles)
+
+        with sqlite3.connect(str(db)) as conn:
+            configs = [
+                json.loads(row[0]) for row in conn.execute(
+                    "SELECT adapter_config_json FROM agents "
+                    "WHERE role='quorum_auditor' ORDER BY id"
+                ).fetchall()
+            ]
+        assert {config["profile_id"] for config in configs} == {
+            "codex_subscription", "anthropic_api"
+        }
+
     def test_creates_both_auditors_when_absent(self, tmp_path: Path):
         db = tmp_path / "aiteam.db"
         _init_quorum_db(db)

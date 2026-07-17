@@ -1,6 +1,6 @@
 # Orquestación multi-modelo en AI Teams
 
-Actualizado: `2026-07-17`
+Actualizado: `2026-07-18`
 
 Fuente canónica para diseñar, revisar y evaluar routing, delegación, adapters, cascadas, quorum, verificación, contexto, liveness y economía multi-LLM. Las skills de Claude y Codex deben apuntar aquí, no copiar este contenido.
 
@@ -180,6 +180,9 @@ verificar provenance y economía por auditor, provider, modelo y canal.
 Los auditores reciben la misma revisión A y no ven inicialmente las respuestas
 de otros auditores. La síntesis corresponde al Lead; encadenar opiniones antes
 de la primera evaluación reduce independencia y puede crear consenso aparente.
+El bootstrap asigna proveedores distintos a los auditores cuando hay perfiles
+suficientes; si no puede, conserva perfiles distintos como segundo mejor
+aislamiento y deja que el gate durable diagnostique la diversidad insuficiente.
 
 La implementación imperativa legacy de quorum fue retirada. El único camino vivo
 es el contrato durable SQLite: no hay activación por `AITEAM_AUTO_QUORUM`, prompts
@@ -213,7 +216,15 @@ Construir cada payload con:
 
 Evitar transcripts completos cuando basten resumen estructurado y referencias durables. No eliminar resultados de herramientas o decisiones que puedan cambiar el curso del receptor.
 
-El contrato está mayoritariamente implementado mediante delegation metadata, focus paths, RBAC, user directives y dieta de payload. La deuda concreta es activar de forma consistente un resumen causal cuando el hilo supere presupuesto.
+La calidad de una síntesis se evalúa en dos ejes independientes: debe respetar
+el presupuesto de compresión y conservar todas las anclas causales ocultas
+(decisiones, restricciones, riesgos, evidencia, owners y escalados). El harness
+determinista vive en `scripts/context_summary_evals.py`; una síntesis corta que
+pierde una decisión y una síntesis completa que excede presupuesto fallan.
+
+El contrato está implementado mediante delegation metadata, focus paths, RBAC,
+user directives, dieta de payload y resumen causal incremental. La deuda concreta
+es calibrar la retención semántica con varias síntesis reales.
 
 ## Paralelismo
 
