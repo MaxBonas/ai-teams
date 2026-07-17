@@ -1,5 +1,5 @@
 const env = import.meta.env as Record<string, string | undefined>;
-const API_BASE = env.VITE_API_URL || 'http://127.0.0.1:8010';
+export const API_BASE = env.VITE_API_URL || 'http://127.0.0.1:8010';
 const WORKSPACE_KEY = 'AITEAM_V2_WORKSPACE_PATH';
 
 export function getWorkspacePath(): string {

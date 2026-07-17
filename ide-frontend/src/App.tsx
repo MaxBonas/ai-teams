@@ -20,9 +20,8 @@ import {
   RefreshCcw,
   Send,
   Users,
-  X,
 } from 'lucide-react';
-import { apiFetch, getWorkspacePath, setWorkspacePath } from './lib/api';
+import { API_BASE, apiFetch, getWorkspacePath, setWorkspacePath } from './lib/api';
 
 interface HealthPayload {
   status?: string;
@@ -97,7 +96,72 @@ interface Issue {
   assignee_agent_id?: string | null;
   priority?: number;
   created_at?: string;
+  metadata_json?: string | null;
+  phase?: IssuePhase;
+  active_run?: ActiveIssueRun | null;
+  active_agent?: ActiveIssueAgent | null;
 }
+
+type IssuePhase = 'planning' | 'engineer' | 'tests' | 'review' | 'gate' | 'done';
+
+interface ActiveIssueRun {
+  id: string;
+  status: string;
+  agent_id?: string | null;
+  adapter_type?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  channel?: string | null;
+  started_at?: string | null;
+}
+
+interface ActiveIssueAgent {
+  id: string;
+  role: string;
+  name: string;
+}
+
+interface QuorumContribution {
+  ordinal: number;
+  provider?: string | null;
+  model?: string | null;
+  channel?: string | null;
+  result?: Record<string, unknown> | string | null;
+  valid: boolean;
+}
+
+interface QuorumPayload {
+  success: boolean;
+  issue_id: string;
+  session: {
+    id: string;
+    issue_id: string;
+    status: string;
+    requested_contributions: number;
+    min_valid_contributions: number;
+    skipped_reason?: string | null;
+    final_plan_revision_id?: string | null;
+  };
+  contributions: QuorumContribution[];
+  gate: {
+    ready: boolean;
+    status: string;
+    valid_contributions: number;
+    total_contributions: number;
+    distinct_providers: number;
+    missing_valid: number;
+    diversity_satisfied: boolean;
+  };
+}
+
+const ISSUE_PHASES: Array<{ key: IssuePhase; short: string; label: string }> = [
+  { key: 'planning', short: 'Plan', label: 'Planificación' },
+  { key: 'engineer', short: 'Dev', label: 'Ingeniería' },
+  { key: 'tests', short: 'Test', label: 'Pruebas' },
+  { key: 'review', short: 'Rev', label: 'Revisión' },
+  { key: 'gate', short: 'Gate', label: 'Gate' },
+  { key: 'done', short: 'Done', label: 'Finalizada' },
+];
 
 interface Agent {
   id: string;
@@ -306,6 +370,114 @@ const PROFILE_OPTIONS = [
   { value: 'solo_lead', label: 'Solo Lead', desc: 'Lead ejecuta directamente sin contratar' },
 ];
 
+// Perfil de ejecución de una issue, leído de metadata_json (persistido por el backend).
+const PROFILE_BADGES: Record<string, { label: string; cls: string }> = {
+  full_team: { label: 'Equipo completo', cls: 'team' },
+  lead_quorum: { label: 'Lead + Quorum', cls: 'quorum' },
+  solo_lead: { label: 'Solo Lead', cls: 'solo' },
+};
+
+function issueProfile(issue: Issue | null | undefined): string | null {
+  if (!issue?.metadata_json) return null;
+  try {
+    const meta = JSON.parse(issue.metadata_json) as Record<string, unknown>;
+    const profile = String(meta.profile || '').trim().toLowerCase();
+    return profile in PROFILE_BADGES ? profile : null;
+  } catch {
+    return null;
+  }
+}
+
+function ProfileBadge({ profile, compact }: { profile: string | null; compact?: boolean }) {
+  if (!profile) return null;
+  const badge = PROFILE_BADGES[profile];
+  if (!badge) return null;
+  return (
+    <span className={`profile-badge profile-${badge.cls}${compact ? ' profile-badge-compact' : ''}`}>
+      {badge.label}
+    </span>
+  );
+}
+
+function IssuePipeline({ issue }: { issue: Issue }) {
+  if (!issue.phase) return null;
+  const currentIndex = ISSUE_PHASES.findIndex((phase) => phase.key === issue.phase);
+  const actor = issue.active_agent?.name || issue.active_run?.agent_id || '';
+  return (
+    <div className="issue-pipeline" aria-label={`Fase actual: ${ISSUE_PHASES[currentIndex]?.label || issue.phase}`}>
+      <div className="issue-pipeline-track">
+        {ISSUE_PHASES.map((phase, index) => (
+          <span
+            key={phase.key}
+            className={`issue-pipeline-step${index < currentIndex ? ' complete' : ''}${index === currentIndex ? ' current' : ''}`}
+            title={phase.label}
+          >
+            <i />
+            <small>{phase.short}</small>
+          </span>
+        ))}
+      </div>
+      {actor && issue.phase !== 'done' ? (
+        <span className="issue-pipeline-actor" title={issue.active_run?.model || undefined}>
+          {actor}{issue.active_run?.status ? ` · ${statusLabel(issue.active_run.status)}` : ''}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function QuorumStepper({ quorum, loading }: { quorum: QuorumPayload | null; loading: boolean }) {
+  if (loading) return <div className="quorum-stepper quorum-loading">Leyendo quorum…</div>;
+  if (!quorum) return null;
+
+  const { session, contributions, gate } = quorum;
+  const skipped = Boolean(session.skipped_reason) || session.status === 'skipped';
+  const synthesized = Boolean(session.final_plan_revision_id);
+  const requestComplete = skipped || contributions.length > 0 || gate.ready;
+  const auditComplete = skipped || gate.valid_contributions >= session.min_valid_contributions;
+  const steps = [
+    { label: 'Solicitud', detail: `${session.requested_contributions} aportes`, complete: requestComplete },
+    { label: 'Auditorías', detail: `${gate.valid_contributions}/${session.min_valid_contributions} válidas`, complete: auditComplete },
+    { label: 'Gate', detail: skipped ? 'omitido' : gate.ready ? 'superado' : `${gate.missing_valid} pendientes`, complete: skipped || gate.ready },
+    { label: 'Síntesis', detail: synthesized ? 'plan aceptado' : skipped ? 'no requerida' : 'pendiente', complete: skipped || synthesized },
+  ];
+
+  return (
+    <section className={`quorum-stepper${skipped ? ' skipped' : ''}`} aria-label="Estado del quorum de planificación">
+      <div className="quorum-stepper-header">
+        <div>
+          <span className="quorum-eyebrow">Quorum de planificación</span>
+          <strong>{skipped ? 'No requerido' : statusLabel(session.status)}</strong>
+        </div>
+        <span className={`quorum-gate-badge${gate.ready ? ' ready' : ''}`}>{gate.ready ? 'Gate listo' : 'Gate pendiente'}</span>
+      </div>
+      <div className="quorum-steps">
+        {steps.map((step, index) => (
+          <div className={`quorum-step${step.complete ? ' complete' : ''}`} key={step.label}>
+            <span className="quorum-step-node">{step.complete ? <CheckCircle2 size={15} /> : index + 1}</span>
+            <div><strong>{step.label}</strong><small>{step.detail}</small></div>
+          </div>
+        ))}
+      </div>
+      {skipped && <p className="quorum-skip-reason">{session.skipped_reason || 'El perfil de esta issue no requiere quorum.'}</p>}
+      {!skipped && contributions.length > 0 && (
+        <div className="quorum-contributions">
+          {contributions.map((contribution) => (
+            <details key={contribution.ordinal} className={contribution.valid ? 'valid' : 'invalid'}>
+              <summary>
+                <span>Auditoría {contribution.ordinal}</span>
+                <span>{contribution.provider || 'provider'} · {contribution.model || 'modelo'}</span>
+                <span>{contribution.valid ? 'válida' : 'inválida'}</span>
+              </summary>
+              <pre>{typeof contribution.result === 'string' ? contribution.result : pretty(contribution.result)}</pre>
+            </details>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 interface Comment {
   id: string;
   issue_id: string;
@@ -398,7 +570,12 @@ interface ProjectStatePayload {
 type TimelineType = 'issue' | 'comment' | 'interaction' | 'run' | 'activity' | 'cost' | 'tool';
 const TIMELINE_TYPES: TimelineType[] = ['issue', 'comment', 'interaction', 'run', 'activity', 'cost', 'tool'];
 
-type ViewMode = 'timeline' | 'issue' | 'plan' | 'runs' | 'chat' | 'files' | 'team' | 'config';
+type ViewMode = 'timeline' | 'issue' | 'plan' | 'runs' | 'chat' | 'inbox' | 'files' | 'team' | 'config';
+
+// Secciones del panel de configuración, agrupadas por ámbito.
+type ConfigSection =
+  | 'proyecto' | 'autonomia' | 'skills' | 'mcp' | 'danger'
+  | 'keys' | 'clis' | 'adapters' | 'sistema';
 
 interface ChatMessage {
   id: string;
@@ -562,6 +739,9 @@ function clip(text: string, max = 220): string {
 
 export default function App() {
   const [health, setHealth] = useState<HealthPayload | null>(null);
+  // El backend local no responde (proceso muerto o puerto equivocado) — pantalla
+  // dedicada en lugar del onboarding: el proyecto sigue en disco.
+  const [backendDown, setBackendDown] = useState(false);
   const [workspace, setWorkspace] = useState(getWorkspacePath());
   const [workspaceConfigured, setWorkspaceConfigured] = useState(false);
   const [projectsRoot, setProjectsRoot] = useState('');
@@ -582,6 +762,8 @@ export default function App() {
   const [selectedIssueId, setSelectedIssueId] = useState('issue:intake');
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [planDocument, setPlanDocument] = useState<PlanDocument | null>(null);
+  const [quorum, setQuorum] = useState<QuorumPayload | null>(null);
+  const [quorumLoading, setQuorumLoading] = useState(false);
   const [timelineTypeFilter, setTimelineTypeFilter] = useState<TimelineType | ''>('');
   const [issueFilter, setIssueFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [commentDraft, setCommentDraft] = useState('');
@@ -624,8 +806,10 @@ export default function App() {
   // scrolling up "unsticks" it so reading old messages isn't interrupted.
   const chatStickToBottomRef = useRef(true);
   const [chatJumpVisible, setChatJumpVisible] = useState(false);
-  // Popup de decisiones pendientes (respuesta sin depender del scroll del chat)
-  const [pendingPopupOpen, setPendingPopupOpen] = useState(false);
+  // Bandeja de decisiones: interacción seleccionada en la vista 'inbox'
+  const [selectedInteractionId, setSelectedInteractionId] = useState<string | null>(null);
+  // Sección activa del panel de configuración (dos ámbitos: proyecto / aplicación)
+  const [cfgSection, setCfgSection] = useState<ConfigSection>('proyecto');
   // Workspace files browser
   const [wsFiles, setWsFiles] = useState<Array<{ path: string; size_bytes: number; mime: string }>>([]);
   const [wsSelectedFile, setWsSelectedFile] = useState<string | null>(null);
@@ -664,6 +848,12 @@ export default function App() {
   const doneIssues = issues.filter((issue) => issue.status === 'done').length;
   const activeIssues = issues.filter((issue) => !['done', 'cancelled'].includes(issue.status)).length;
   const latestRun = runs[0] || null;
+  // "Despertar" actúa sobre el assignee de la issue seleccionada — hacerlo explícito.
+  const wakeTargetId = selectedIssue?.assignee_agent_id || 'role:lead';
+  const wakeTargetName = agents.find((a) => a.id === wakeTargetId)?.name
+    || wakeTargetId.replace(/^role:/, '').replace(/_/g, ' ');
+  const projectDisplayName = workspace ? (workspace.replaceAll('\\', '/').split('/').filter(Boolean).pop() || 'Proyecto') : 'AI Teams';
+  const selectedIssueProfile = issueProfile(selectedIssue);
   const profileState = (profile: AdapterProfile) => {
     const provider = String(profile.provider || '').toLowerCase();
     const secretProvider = provider.includes('google') || provider.includes('gemini')
@@ -832,6 +1022,38 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    // Solo los perfiles de planificación multicultural crean una sesión. Evita
+    // sondear (y registrar 404 de red) en cada issue de ejecución ordinaria.
+    if (!workspaceConfigured || !selectedIssueId || selectedIssueProfile !== 'lead_quorum') {
+      setQuorum(null);
+      setQuorumLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setQuorumLoading(true);
+    apiFetch(`/api/issues/${encodeURIComponent(selectedIssueId)}/quorum`, { signal: controller.signal })
+      .then(async (response) => {
+        if (response.status === 404) return null;
+        const json = (await response.json()) as QuorumPayload & { detail?: string };
+        if (!response.ok) throw new Error(json.detail || `quorum:${response.status}`);
+        return json;
+      })
+      .then((payload) => {
+        if (!controller.signal.aborted) setQuorum(payload);
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) {
+          setQuorum(null);
+          setError(reason instanceof Error ? reason.message : 'No se pudo leer el quorum');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setQuorumLoading(false);
+      });
+    return () => controller.abort();
+  }, [selectedIssueId, selectedIssueProfile, workspaceConfigured]);
+
   const loadProjectData = async (issueId = selectedIssueId, typeFilter = timelineTypeFilter) => {
     const params = new URLSearchParams({
       timeline_limit: '300',
@@ -981,8 +1203,15 @@ export default function App() {
     setLoading(true);
     setError('');
     try {
-      const [healthResponse, workspaceResponse] = await Promise.all([
-        apiFetch('/api/health'),
+      let healthResponse: Response;
+      try {
+        healthResponse = await apiFetch('/api/health');
+      } catch {
+        setBackendDown(true);
+        return;
+      }
+      setBackendDown(false);
+      const [workspaceResponse] = await Promise.all([
         apiFetch('/api/workspace'),
         loadAppSettings(),
       ]);
@@ -1015,12 +1244,24 @@ export default function App() {
 
   useEffect(() => {
     void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Backend caído: reintento automático cada 5 s hasta reconectar.
+  useEffect(() => {
+    if (!backendDown) return undefined;
+    const id = setInterval(() => {
+      void refresh();
+    }, 5_000);
+    return () => clearInterval(id);
+    // refresh es estable a efectos prácticos; mismo idiom que los demás intervalos
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendDown]);
 
   // Shared poll entry for both intervals: while a /api/project/state request
   // is still pending, later ticks are dropped instead of stacking requests
   // (the 20 s and 2 s intervals otherwise fire concurrently during runs).
-  const pollProjectData = async (issueId: string, typeFilter: string) => {
+  const pollProjectData = async (issueId: string, typeFilter: TimelineType | '') => {
     if (projectStatePollBusy.current) return;
     projectStatePollBusy.current = true;
     try {
@@ -1905,6 +2146,42 @@ export default function App() {
     }
   };
 
+  // Backend unreachable: honest state instead of the onboarding screen.
+  if (backendDown) {
+    return (
+      <main className="shell start-shell">
+        <header className="topbar">
+          <div className="topbar-brand">
+            <span className="brand-mark">▸</span>
+            <span className="brand-name">AI Teams</span>
+          </div>
+        </header>
+        <section className="panel start-panel backend-down-panel">
+          <div className="backend-down-icon">
+            <AlertCircle size={28} />
+          </div>
+          <h2 className="backend-down-title">El backend no responde</h2>
+          <p className="backend-down-text">
+            Tu proyecto y su historial están a salvo en disco. La interfaz no puede
+            mostrarlos hasta reconectar con el backend local.
+          </p>
+          <div className="backend-down-diag">
+            <div><span className="diag-bad">✕</span> <code>{API_BASE}</code> — sin respuesta</div>
+            <div><span className="diag-hint">→</span> Arranca el IDE con <code>start_ide.bat</code> (backend + frontend)</div>
+            <div><span className="diag-hint">→</span> Logs: <code>runtime\ide_logs\backend.err.log</code></div>
+          </div>
+          <div className="actions">
+            <button onClick={() => void refresh()} disabled={loading}>
+              <RefreshCcw size={15} className={loading ? 'spin' : ''} />
+              Reintentar conexión
+            </button>
+            <span className="backend-down-auto">Reintentando automáticamente cada 5 s…</span>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   // First-run: no projects root configured yet → show setup screen
   if (!settingsConfigured) {
     return (
@@ -2138,23 +2415,69 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-brand">
           <span className="brand-mark">▸</span>
-          <span className="brand-name">{workspace ? shortPath(workspace) : 'AI Teams'}</span>
+          <div className="topbar-project">
+            <button
+              className="topbar-project-btn"
+              onClick={() => { void loadProjectList(); setProjectListOpen((v) => !v); }}
+              title={workspace || 'Cambiar de proyecto'}
+            >
+              <span className="brand-name">{projectDisplayName}</span>
+              <span className="topbar-project-caret">▾</span>
+            </button>
+            {projectListOpen && (
+              <div className="project-list-popup topbar-project-popup">
+                {projectList.length === 0 ? (
+                  <p className="muted" style={{ padding: '8px' }}>Sin proyectos encontrados</p>
+                ) : (
+                  projectList.map((p) => (
+                    <button
+                      key={p.path}
+                      className={`project-list-item${p.current ? ' current' : ''}`}
+                      onClick={() => void switchProject(p.path)}
+                      disabled={p.current || loading}
+                      title={p.path}
+                    >
+                      <FolderOpen size={13} />
+                      <span className="project-list-name">{p.name}</span>
+                      {p.current && <span className="project-list-badge">activo</span>}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="top-actions">
+          <button
+            className={`secondary-button autonomy-pill${autonomyMode === 'autonomous' ? ' autonomous' : ''}`}
+            onClick={() => void saveAutonomy(autonomyMode === 'autonomous' ? 'supervised' : 'autonomous')}
+            disabled={autonomySaving || !workspaceConfigured}
+            title={autonomyMode === 'autonomous'
+              ? 'Autónomo: las escalaciones operativas se auto-resuelven; las de producto te esperan. Clic para pasar a Supervisado.'
+              : 'Supervisado: el equipo se detiene en cada escalación hasta que respondas. Clic para pasar a Autónomo.'}
+          >
+            <span className="autonomy-dot" />
+            {autonomyMode === 'autonomous' ? 'Autónomo' : 'Supervisado'}
+          </button>
           {hasPending && (
             <button
               className="secondary-button pending-alert-button"
-              onClick={() => setPendingPopupOpen(true)}
-              title="Hay decisiones pendientes — clic para verlas y responder"
+              onClick={() => setViewMode('inbox')}
+              title="Hay decisiones pendientes — clic para abrir la Bandeja"
             >
               <Bell size={16} />
               Pendiente
               <span className="notif-badge">{pendingInteractions.length}</span>
             </button>
           )}
-          <button className="secondary-button" onClick={() => void wakeLead()} disabled={loading || !selectedIssue}>
+          <button
+            className="secondary-button"
+            onClick={() => void wakeLead()}
+            disabled={loading || !selectedIssue}
+            title={`Encola un wakeup para ${wakeTargetName} en la issue seleccionada`}
+          >
             <Play size={16} />
-            Despertar
+            Despertar a {wakeTargetName}
           </button>
           {hasActiveRun && (
             <span className="live-indicator" title="Hay una run en progreso — actualizando cada 2 s">
@@ -2169,107 +2492,6 @@ export default function App() {
       </header>
 
       {error ? <div className="banner error">{error}</div> : null}
-
-      {pendingPopupOpen && (
-        <div className="modal-overlay" onClick={() => setPendingPopupOpen(false)}>
-          <div className="modal-card pending-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-info">
-                <h3 className="modal-title">Decisiones pendientes</h3>
-                <span className="modal-subtitle">
-                  {pendingInteractions.length > 0
-                    ? 'El equipo espera tu respuesta — puedes contestar desde aquí.'
-                    : 'No hay nada pendiente ahora mismo.'}
-                </span>
-              </div>
-              <button className="modal-close" onClick={() => setPendingPopupOpen(false)} title="Cerrar">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="pending-modal-body">
-              {pendingInteractions.length === 0 && (
-                <p className="muted">Todo respondido. Las nuevas preguntas del equipo aparecerán aquí y en el chat.</p>
-              )}
-              {pendingInteractions.map((interaction) => {
-                const issue = issues.find((item) => item.id === interaction.issue_id);
-                const isHiring = interaction.kind === 'suggest_tasks';
-                const isQuestion = interaction.kind === 'ask_user_questions';
-                const payload = interaction.payload || {};
-                const isExtension = String(payload.reason || '') === 'extension_install_requested';
-                return (
-                  <div key={interaction.id} className="pending-modal-card">
-                    <div className="chat-card-header">
-                      <AlertCircle size={13} />
-                      <strong>{interaction.title || interaction.kind}</strong>
-                      <time className="chat-time">{formatTime(interaction.created_at)}</time>
-                    </div>
-                    {issue && <div className="pending-modal-issue">Issue: {issue.title}</div>}
-                    {interaction.summary && <p className="chat-card-body">{interaction.summary}</p>}
-                    {isExtension && (
-                      // Aceptar instala código de terceros: el owner debe ver el
-                      // comando EXACTO que se ejecutará, no solo el resumen del Lead.
-                      <div className="extension-proposal-detail">
-                        <div><span className="ext-label">Servidor:</span> <strong>{String(payload.name || '?')}</strong></div>
-                        <div><span className="ext-label">Comando:</span> <code>{String(payload.source || '(sin comando — propuesta inválida)')}</code></div>
-                        <div>
-                          <span className="ext-label">Roles:</span>{' '}
-                          {Array.isArray(payload.applies_to_roles) && payload.applies_to_roles.length > 0
-                            ? (payload.applies_to_roles as string[]).join(', ')
-                            : 'sin roles asignados'}
-                        </div>
-                        {typeof payload.justification === 'string' && payload.justification && (
-                          <div><span className="ext-label">Evidencia:</span> {payload.justification}</div>
-                        )}
-                        <p className="ext-warning">
-                          Aceptar autoriza ejecutar este software de terceros en tu máquina (tras verificación de salud). Revisa el comando antes de aceptar.
-                        </p>
-                      </div>
-                    )}
-                    {isHiring ? (
-                      <p className="muted pending-modal-hiring-note">
-                        Propuesta de equipo — ábrela en el chat para ajustar adapters y modelos antes de contratar.
-                      </p>
-                    ) : (
-                      <div className="interaction-note-area">
-                        <textarea
-                          placeholder="Escribe tu respuesta... (opcional — si no escribes nada, se enviará solo Aceptar)"
-                          value={interactionNotes[interaction.id] || ''}
-                          onChange={(event) => setInteractionNotes((prev) => ({ ...prev, [interaction.id]: event.target.value }))}
-                          rows={3}
-                          disabled={loading}
-                        />
-                      </div>
-                    )}
-                    <div className="actions">
-                      <button
-                        onClick={() => void resolveInteraction(interaction, 'accept', isHiring ? undefined : interactionNotes[interaction.id])}
-                        disabled={loading}
-                      >
-                        {isQuestion ? 'Responder' : isHiring ? 'Contratar equipo' : 'Aceptar'}
-                      </button>
-                      <button
-                        className="danger-button"
-                        onClick={() => void resolveInteraction(interaction, 'reject')}
-                        disabled={loading}
-                      >
-                        {isQuestion ? 'Descartar' : 'Rechazar'}
-                      </button>
-                      {isHiring && (
-                        <button
-                          className="secondary-button"
-                          onClick={() => { setPendingPopupOpen(false); setViewMode('chat'); }}
-                        >
-                          Ver en chat
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
 
       <section className="workspace-grid">
         <aside className="nav-column">
@@ -2380,7 +2602,9 @@ export default function App() {
                           <small>
                             <span className={`issue-status-tag tag-${closed ? 'closed' : 'open'}`}>{statusLabel(issue.status)}</span>
                             {' · '}{issue.assignee_agent_id || 'sin owner'}
+                            <ProfileBadge profile={issueProfile(issue)} compact />
                           </small>
+                          <IssuePipeline issue={issue} />
                         </button>
                       );
                     })}
@@ -2483,18 +2707,26 @@ export default function App() {
               className="sidebar-create-btn"
               onClick={() => void createTask()}
               disabled={loading || !newTaskDraft.trim()}
+              title={PROFILE_OPTIONS.find((p) => p.value === newTaskProfile)?.desc}
             >
               <Send size={14} />
-              Crear tarea
+              Crear tarea · {PROFILE_BADGES[newTaskProfile]?.label || newTaskProfile}
             </button>
           </div>
         </aside>
 
         <section className="work-column">
           <nav className="view-tabs" aria-label="Vistas">
-            <button className={viewMode === 'chat' ? 'tab active tab-chat' : `tab tab-chat${hasPending ? ' tab-chat-pending' : ''}`} onClick={() => setViewMode('chat')}>
-              {hasPending ? <Bell size={16} /> : <MessageSquare size={16} />}
+            <button className={viewMode === 'chat' ? 'tab active tab-chat' : 'tab tab-chat'} onClick={() => setViewMode('chat')}>
+              <MessageSquare size={16} />
               Chat
+            </button>
+            <button
+              className={viewMode === 'inbox' ? 'tab active tab-chat' : `tab tab-chat${hasPending ? ' tab-chat-pending' : ''}`}
+              onClick={() => setViewMode('inbox')}
+            >
+              <Bell size={16} />
+              Bandeja
               {hasPending ? <span className="notif-badge">{pendingInteractions.length}</span> : null}
             </button>
             <button className={viewMode === 'timeline' ? 'tab active' : 'tab'} onClick={() => setViewMode('timeline')}>
@@ -2603,7 +2835,10 @@ export default function App() {
                       <h2>{selectedIssue.title}</h2>
                       <p>{selectedIssue.description || selectedIssue.title}</p>
                     </div>
-                    <span className={`status-pill status-${selectedIssue.status}`}>{statusLabel(selectedIssue.status)}</span>
+                    <div className="issue-header-tags">
+                      <ProfileBadge profile={selectedIssueProfile} />
+                      <span className={`status-pill status-${selectedIssue.status}`}>{statusLabel(selectedIssue.status)}</span>
+                    </div>
                   </div>
                   <div className="issue-meta">
                     <span>Owner: {selectedIssue.assignee_agent_id || 'sin asignar'}</span>
@@ -2659,6 +2894,7 @@ export default function App() {
                   </span>
                 ) : null}
               </div>
+              <QuorumStepper quorum={quorum} loading={quorumLoading} />
               {planDocument ? (
                 <>
                   <h3 style={{ margin: '0 0 0.5rem' }}>{planDocument.title}</h3>
@@ -2675,14 +2911,15 @@ export default function App() {
           ) : null}
 
           {viewMode === 'chat' ? (
-            <section className={`panel chat-panel-main${hasPending ? ' has-pending' : ''}`}>
-              {hasPending && (
-                <div className="pending-banner">
-                  <AlertCircle size={16} />
-                  <strong>{pendingInteractions.length} decisión{pendingInteractions.length > 1 ? 'es' : ''} pendiente{pendingInteractions.length > 1 ? 's' : ''}</strong>
-                  <span>El Lead espera tu respuesta</span>
-                </div>
-              )}
+            <section className="panel chat-panel-main">
+              <div className="chat-context-bar">
+                <MessageSquare size={13} />
+                <span>
+                  Conversación con <strong>Lead</strong>
+                  {selectedIssue ? <> · issue <strong>{clip(selectedIssue.title, 60)}</strong></> : null}
+                </span>
+                <ProfileBadge profile={selectedIssueProfile} compact />
+              </div>
               <div className="chat-feed chat-feed-main" ref={chatFeedRef} onScroll={handleChatScroll}>
                 {chatMessages.length === 0 && (
                   <p className="muted chat-empty">Sin mensajes aún. Escribe algo al Lead o despiértalo para empezar.</p>
@@ -2690,118 +2927,24 @@ export default function App() {
                 {chatMessages.map((msg) => {
                   if (msg.item_type === 'interaction') {
                     const isPending = msg.interaction_status === 'pending';
-                    const matchedInteraction = interactions.find((i) => i.id === msg.source_id);
-                    if (!matchedInteraction && !isPending) return null;
-                    const isHiring = msg.kind === 'suggest_tasks';
-                    const rawPayload = msg.payload;
-                    const proposedTeam: ProposedTeamMember[] = (rawPayload?.proposed_team as ProposedTeamMember[]) || [];
-                    const suggestedIssues = (rawPayload?.suggested_issues as Array<Record<string,unknown>>) || [];
-                    const hiringProfile = String(rawPayload?.profile || 'full_team');
-                    const isDirect = rawPayload?.direct_work === true;
-                    const hiringTeam = matchedInteraction ? (hiringDrafts[matchedInteraction.id] ?? proposedTeam) : proposedTeam;
                     return (
-                      <div key={msg.id} className={`chat-interaction-card${isPending ? ' pending' : ' resolved'}`}>
-                        <div className="chat-card-header">
-                          {isPending ? <AlertCircle size={13} /> : <CheckCircle2 size={13} />}
+                      <div key={msg.id} className={`chat-deciref${isPending ? ' pending' : ' resolved'}`}>
+                        {isPending ? <AlertCircle size={14} /> : <CheckCircle2 size={14} />}
+                        <div className="chat-deciref-body">
                           <strong>{msg.title || msg.kind}</strong>
-                          {!isPending && <span className="chat-resolved-badge">{msg.interaction_status}</span>}
+                          {(msg.summary || msg.body) && (
+                            <span className="chat-deciref-sub">{clip(msg.summary || msg.body, 120)}</span>
+                          )}
                         </div>
-                        <p className="chat-card-body">{msg.body}</p>
-                        {isPending && matchedInteraction && isHiring && (
-                          <div className="hiring-panel">
-                            <div className="hiring-badge">Perfil: {hiringProfile}</div>
-                            {isDirect ? (
-                              <p className="hiring-direct">Solo Lead — ejecutará directamente sin contratar equipo.</p>
-                            ) : (
-                              <>
-                                {hiringTeam.length > 0 && (
-                                  <>
-                                    <div className="hiring-header">Equipo — ajusta el adapter antes de contratar:</div>
-                                    {hiringTeam.map((member, idx) => (
-                                      <div className="hiring-member" key={member.id}>
-                                        <span className="hiring-role">{member.role}</span>
-                                        <span className="hiring-name">{member.name}</span>
-                                        <select
-                                          value={String(member.adapter_profile_id || (member.adapter_config || {}).profile_id || '')}
-                                          onChange={(e) => void updateHiringMemberProfile(matchedInteraction.id, hiringTeam, idx, e.target.value)}
-                                        >
-                                          <option value="">Sin perfil</option>
-                                          {adapterProfiles.filter((p) => p.status !== 'blocked_by_provider').map((profile) => (
-                                            <option key={profile.id} value={profile.id}>{profile.label}</option>
-                                          ))}
-                                        </select>
-                                        {(() => {
-                                          const pId = String(member.adapter_profile_id || (member.adapter_config || {}).profile_id || '');
-                                          const roleKey = `${pId}:${member.role || ''}`;
-                                          const roleOpts = roleModelOptions[roleKey];
-                                          const flatOpts = adapterProfiles.find((p) => p.id === pId)?.model_options || [];
-                                          const displayOpts: RoleModelOption[] = roleOpts ?? flatOpts;
-                                          const topRec = roleOpts?.find((o) => o.recommended);
-                                          return (
-                                            <>
-                                              <select
-                                                value={String(member.model || (member.adapter_config || {}).model || '')}
-                                                onChange={(e) => updateHiringMemberModel(matchedInteraction.id, hiringTeam, idx, e.target.value)}
-                                              >
-                                                <option value="">Modelo default</option>
-                                                {displayOpts.map((option) => (
-                                                  <option key={option.value} value={option.value}>
-                                                    {option.recommended ? '★ ' : ''}{option.label}{option.price_note ? ` (${option.price_note})` : ''}
-                                                  </option>
-                                                ))}
-                                              </select>
-                                              {topRec?.fit_reason && (
-                                                <div className="hiring-model-hint" style={{ gridColumn: '3 / -1' }}>{topRec.fit_reason}</div>
-                                              )}
-                                            </>
-                                          );
-                                        })()}
-                                      </div>
-                                    ))}
-                                  </>
-                                )}
-                                {suggestedIssues.length > 0 && (
-                                  <>
-                                    <div className="hiring-header" style={{ marginTop: '0.5rem' }}>Issues que se crearán:</div>
-                                    {suggestedIssues.map((iss) => (
-                                      <div className="hiring-issue" key={String(iss.id)}>
-                                        <span className="hiring-delegation">{String(iss.delegation_type || 'work')}</span>
-                                        <span className="hiring-issue-title">{String(iss.title || '')}</span>
-                                        <span className="hiring-assignee">→ {String(iss.assignee_agent_id || iss.role || '?')}</span>
-                                      </div>
-                                    ))}
-                                  </>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        )}
-                        {isPending && matchedInteraction && !isHiring && (
-                          <div className="interaction-note-area">
-                            <textarea
-                              placeholder="Escribe tu respuesta al Lead... (opcional — si no escribes nada, se enviará solo Aceptar)"
-                              value={interactionNotes[matchedInteraction.id] || ''}
-                              onChange={(e) => setInteractionNotes((prev) => ({ ...prev, [matchedInteraction.id]: e.target.value }))}
-                              rows={3}
-                              disabled={loading}
-                            />
-                          </div>
-                        )}
-                        {isPending && matchedInteraction && (
-                          <div className="actions">
-                            <button
-                              onClick={() => void resolveInteraction(
-                                matchedInteraction, 'accept',
-                                isHiring ? undefined : interactionNotes[matchedInteraction.id]
-                              )}
-                              disabled={loading}
-                            >
-                              {isHiring ? (isDirect ? 'Iniciar (solo Lead)' : 'Contratar equipo') : 'Aceptar'}
-                            </button>
-                            <button className="danger-button" onClick={() => void resolveInteraction(matchedInteraction, 'reject')} disabled={loading}>
-                              Rechazar
-                            </button>
-                          </div>
+                        {isPending ? (
+                          <button
+                            className="secondary-button chat-deciref-go"
+                            onClick={() => { setSelectedInteractionId(msg.source_id); setViewMode('inbox'); }}
+                          >
+                            Revisar en Bandeja →
+                          </button>
+                        ) : (
+                          <span className="chat-resolved-badge">{statusLabel(msg.interaction_status || '')}</span>
                         )}
                         <time className="chat-time">{formatTime(msg.created_at)}</time>
                       </div>
@@ -2821,7 +2964,9 @@ export default function App() {
                         <span className="chat-author">{authorLabel}</span>
                         <time className="chat-time">{formatTime(msg.created_at)}</time>
                       </div>
-                      <div className="chat-bubble-body">{msg.body}</div>
+                      <div className="chat-bubble-body">
+                        {isUser ? msg.body : renderMarkdownLite(msg.body)}
+                      </div>
                     </div>
                   );
                 })}
@@ -2832,6 +2977,12 @@ export default function App() {
                 </button>
               )}
               <div className="chat-input-row chat-input-row-main">
+                <span
+                  className="chat-dest-chip"
+                  title={`El mensaje se envía al Lead en la issue "${selectedIssue?.title || 'intake'}" (la seleccionada en el sidebar)`}
+                >
+                  → Lead · {clip(selectedIssue?.title || 'intake', 26)}
+                </span>
                 <input
                   type="text"
                   className="chat-input"
@@ -2859,6 +3010,206 @@ export default function App() {
                   <RefreshCcw size={14} />
                 </button>
               </div>
+            </section>
+          ) : null}
+
+          {viewMode === 'inbox' ? (
+            <section className="panel inbox-panel">
+              {(() => {
+                const resolved = interactions
+                  .filter((i) => i.status !== 'pending')
+                  .sort((a, b) => parseTime(b.resolved_at || b.created_at) - parseTime(a.resolved_at || a.created_at))
+                  .slice(0, 20);
+                const ordered = [...pendingInteractions, ...resolved];
+                const current = ordered.find((i) => i.id === selectedInteractionId) || pendingInteractions[0] || ordered[0] || null;
+                const currentIssue = current ? issues.find((item) => item.id === current.issue_id) : null;
+                const isPending = current?.status === 'pending';
+                const isHiring = current?.kind === 'suggest_tasks';
+                const isQuestion = current?.kind === 'ask_user_questions';
+                const payload = (current?.payload || {}) as Record<string, unknown>;
+                const isExtension = String(payload.reason || '') === 'extension_install_requested';
+                const proposedTeam: ProposedTeamMember[] = (payload.proposed_team as ProposedTeamMember[]) || [];
+                const suggestedIssues = (payload.suggested_issues as Array<Record<string, unknown>>) || [];
+                const hiringProfile = String(payload.profile || 'full_team');
+                const isDirect = payload.direct_work === true;
+                const hiringTeam = current ? (hiringDrafts[current.id] ?? proposedTeam) : proposedTeam;
+                return (
+                  <div className="inbox-layout">
+                    <aside className="inbox-list">
+                      <div className="inbox-list-header">
+                        <Bell size={14} />
+                        <span>Decisiones</span>
+                        {hasPending && <span className="notif-badge">{pendingInteractions.length}</span>}
+                      </div>
+                      {ordered.length === 0 && (
+                        <p className="muted inbox-empty">
+                          Nada pendiente. Las preguntas y propuestas del equipo aparecerán aquí.
+                        </p>
+                      )}
+                      {ordered.map((interaction) => (
+                        <button
+                          key={interaction.id}
+                          className={`inbox-item${interaction.id === current?.id ? ' active' : ''}${interaction.status === 'pending' ? ' pending' : ' resolved'}`}
+                          onClick={() => setSelectedInteractionId(interaction.id)}
+                        >
+                          <span className="inbox-item-kind">
+                            {interaction.kind}{' · '}{formatTime(interaction.created_at)}
+                          </span>
+                          <span className="inbox-item-title">{interaction.title || interaction.kind}</span>
+                          <span className={`inbox-item-status status-${interaction.status}`}>{statusLabel(interaction.status)}</span>
+                        </button>
+                      ))}
+                    </aside>
+                    <div className="inbox-detail">
+                      {!current ? (
+                        <p className="muted">Selecciona una decisión de la lista.</p>
+                      ) : (
+                        <>
+                          <div className="inbox-detail-header">
+                            {isPending ? <AlertCircle size={15} /> : <CheckCircle2 size={15} />}
+                            <h3>{current.title || current.kind}</h3>
+                            {!isPending && <span className="chat-resolved-badge">{statusLabel(current.status)}</span>}
+                            {isHiring && <ProfileBadge profile={hiringProfile in PROFILE_BADGES ? hiringProfile : null} compact />}
+                          </div>
+                          {currentIssue && (
+                            <button
+                              className="inbox-detail-issue"
+                              onClick={() => { setSelectedIssueId(currentIssue.id); setViewMode('issue'); }}
+                              title="Abrir la issue"
+                            >
+                              Issue: {currentIssue.title}
+                            </button>
+                          )}
+                          {current.summary && <p className="inbox-detail-summary">{current.summary}</p>}
+
+                          {isExtension && (
+                            // Aceptar instala código de terceros: el owner debe ver el
+                            // comando EXACTO que se ejecutará, no solo el resumen del Lead.
+                            <div className="extension-proposal-detail">
+                              <div><span className="ext-label">Servidor:</span> <strong>{String(payload.name || '?')}</strong></div>
+                              <div><span className="ext-label">Comando:</span> <code>{String(payload.source || '(sin comando — propuesta inválida)')}</code></div>
+                              <div>
+                                <span className="ext-label">Roles:</span>{' '}
+                                {Array.isArray(payload.applies_to_roles) && payload.applies_to_roles.length > 0
+                                  ? (payload.applies_to_roles as string[]).join(', ')
+                                  : 'sin roles asignados'}
+                              </div>
+                              {typeof payload.justification === 'string' && payload.justification && (
+                                <div><span className="ext-label">Evidencia:</span> {payload.justification}</div>
+                              )}
+                              <p className="ext-warning">
+                                Aceptar autoriza ejecutar este software de terceros en tu máquina (tras verificación de salud). Revisa el comando antes de aceptar.
+                              </p>
+                            </div>
+                          )}
+
+                          {isHiring && isDirect && (
+                            <p className="hiring-direct">Solo Lead — ejecutará directamente sin contratar equipo.</p>
+                          )}
+                          {isHiring && !isDirect && hiringTeam.length > 0 && (
+                            <div className="inbox-hiring">
+                              <div className="hiring-header">Equipo propuesto — ajusta adapter y modelo antes de contratar:</div>
+                              <div className="inbox-table-scroll">
+                                <table className="hiring-table">
+                                  <thead>
+                                    <tr><th>Rol</th><th>Agente</th><th>Adapter</th><th>Modelo</th><th>Por qué</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {hiringTeam.map((member, idx) => {
+                                      const pId = String(member.adapter_profile_id || (member.adapter_config || {}).profile_id || '');
+                                      const roleKey = `${pId}:${member.role || ''}`;
+                                      const roleOpts = roleModelOptions[roleKey];
+                                      const flatOpts = adapterProfiles.find((p) => p.id === pId)?.model_options || [];
+                                      const displayOpts: RoleModelOption[] = roleOpts ?? flatOpts;
+                                      const topRec = roleOpts?.find((o) => o.recommended);
+                                      return (
+                                        <tr key={member.id}>
+                                          <td className="hiring-table-role">{member.role}</td>
+                                          <td className="hiring-table-name">{member.name}</td>
+                                          <td>
+                                            <select
+                                              value={pId}
+                                              onChange={(e) => isPending && void updateHiringMemberProfile(current.id, hiringTeam, idx, e.target.value)}
+                                              disabled={!isPending}
+                                            >
+                                              <option value="">Sin perfil</option>
+                                              {adapterProfiles.filter((p) => p.status !== 'blocked_by_provider').map((profile) => (
+                                                <option key={profile.id} value={profile.id}>{profile.label}</option>
+                                              ))}
+                                            </select>
+                                          </td>
+                                          <td>
+                                            <select
+                                              value={String(member.model || (member.adapter_config || {}).model || '')}
+                                              onChange={(e) => isPending && updateHiringMemberModel(current.id, hiringTeam, idx, e.target.value)}
+                                              disabled={!isPending}
+                                            >
+                                              <option value="">Modelo default</option>
+                                              {displayOpts.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                  {option.recommended ? '★ ' : ''}{option.label}{option.price_note ? ` (${option.price_note})` : ''}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </td>
+                                          <td className="hiring-table-why">{topRec?.fit_reason || member.rationale || '—'}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                              {suggestedIssues.length > 0 && (
+                                <>
+                                  <div className="hiring-header">Issues que se crearán:</div>
+                                  {suggestedIssues.map((iss) => (
+                                    <div className="hiring-issue" key={String(iss.id)}>
+                                      <span className="hiring-delegation">{String(iss.delegation_type || 'work')}</span>
+                                      <span className="hiring-issue-title">{String(iss.title || '')}</span>
+                                      <span className="hiring-assignee">→ {String(iss.assignee_agent_id || iss.role || '?')}</span>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {isPending && !isHiring && (
+                            <div className="interaction-note-area">
+                              <textarea
+                                placeholder="Escribe tu respuesta... (opcional — si no escribes nada, se enviará solo Aceptar)"
+                                value={interactionNotes[current.id] || ''}
+                                onChange={(event) => setInteractionNotes((prev) => ({ ...prev, [current.id]: event.target.value }))}
+                                rows={3}
+                                disabled={loading}
+                              />
+                            </div>
+                          )}
+
+                          {isPending && (
+                            <div className="actions inbox-actions">
+                              <button
+                                className="danger-button"
+                                onClick={() => void resolveInteraction(current, 'reject')}
+                                disabled={loading}
+                              >
+                                {isQuestion ? 'Descartar' : 'Rechazar'}
+                              </button>
+                              <button
+                                onClick={() => void resolveInteraction(current, 'accept', isHiring ? undefined : interactionNotes[current.id])}
+                                disabled={loading}
+                              >
+                                {isQuestion ? 'Responder' : isHiring ? (isDirect ? 'Iniciar (solo Lead)' : 'Contratar equipo') : 'Aceptar'}
+                              </button>
+                            </div>
+                          )}
+                          <time className="chat-time">{formatTime(current.created_at)}</time>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </section>
           ) : null}
 
@@ -3022,410 +3373,391 @@ export default function App() {
 
           {viewMode === 'config' ? (
             <section className="panel config-panel">
-              <div className="panel-title">
-                <KeyRound size={18} />
-                Configuración
-              </div>
+              <div className="config-layout">
+                <nav className="config-nav" aria-label="Secciones de configuración">
+                  <div className="config-nav-group">Este proyecto · {projectDisplayName}</div>
+                  <button className={`config-nav-item${cfgSection === 'proyecto' ? ' active' : ''}`} onClick={() => setCfgSection('proyecto')}>Proyecto activo</button>
+                  <button className={`config-nav-item${cfgSection === 'autonomia' ? ' active' : ''}`} onClick={() => setCfgSection('autonomia')}>Autonomía</button>
+                  <button className={`config-nav-item${cfgSection === 'skills' ? ' active' : ''}`} onClick={() => setCfgSection('skills')}>Skills del proyecto</button>
+                  <button className={`config-nav-item${cfgSection === 'mcp' ? ' active' : ''}`} onClick={() => setCfgSection('mcp')}>Extensiones MCP</button>
+                  <button className={`config-nav-item config-nav-danger${cfgSection === 'danger' ? ' active' : ''}`} onClick={() => setCfgSection('danger')}>Zona de peligro</button>
+                  <div className="config-nav-group">Aplicación · global</div>
+                  <button className={`config-nav-item${cfgSection === 'keys' ? ' active' : ''}`} onClick={() => setCfgSection('keys')}>Credenciales API</button>
+                  <button className={`config-nav-item${cfgSection === 'clis' ? ' active' : ''}`} onClick={() => setCfgSection('clis')}>CLIs de suscripción</button>
+                  <button className={`config-nav-item${cfgSection === 'adapters' ? ' active' : ''}`} onClick={() => setCfgSection('adapters')}>Adapters y salud</button>
+                  <button className={`config-nav-item${cfgSection === 'sistema' ? ' active' : ''}`} onClick={() => setCfgSection('sistema')}>Carpeta y sistema</button>
+                </nav>
 
-              {/* ── 1. Espacio de trabajo ────────────────────────────────── */}
-              <div className="config-section">
-                <h3 className="config-section-title">
-                  Espacio de trabajo
-                  <InfoTip tip="Gestiona dónde se guardan los proyectos y cuál está activo ahora mismo." wide />
-                </h3>
-
-                {/* Carpeta raíz */}
-                <div className="config-subsection">
-                  <div className="config-subsection-label">
-                    Carpeta raíz de proyectos
-                    <InfoTip tip="Todos los proyectos se crean como subcarpetas aquí. Cambiarla no mueve proyectos existentes. También configurable con AITEAM_PROJECTS_ROOT en .env (tiene prioridad)." wide />
-                  </div>
-                  <div className="config-field-row">
-                    <input
-                      className="config-path-input"
-                      value={settingsDraft || projectsRoot}
-                      onChange={(ev) => setSettingsDraft(ev.target.value)}
-                      placeholder="Ruta absoluta de la carpeta de proyectos"
-                    />
-                    <button
-                      className="config-inline-btn"
-                      onClick={() => void saveAppSettings().then(() => void refresh())}
-                      disabled={loading || !(settingsDraft || '').trim()}
-                    >
-                      Guardar
-                    </button>
-                  </div>
-                  {projectsRoot && (
-                    <p className="config-hint">Efectiva: <code>{projectsRoot}</code></p>
-                  )}
-                </div>
-
-                {/* Proyecto activo */}
-                <div className="config-subsection">
-                  <div className="config-subsection-label">
-                    Proyecto activo
-                    <InfoTip tip="El proyecto que el backend tiene abierto ahora. Cada proyecto tiene su propia base de datos SQLite." wide />
-                  </div>
-                  <dl className="config-dl config-dl-compact">
-                    <dt>Estado</dt>
-                    <dd>
-                      <span className={`cfg-status-chip${health?.status === 'ok' ? ' ok' : ''}`}>
-                        {health?.status || '—'}
-                      </span>
-                    </dd>
-                    <dt>Modo</dt><dd>{health?.mode || '—'}</dd>
-                    <dt>Ruta</dt><dd className="config-path">{workspace || '—'}</dd>
-                  </dl>
-                  <div className="project-switcher">
-                    <button
-                      className="secondary-button project-switch-btn"
-                      onClick={() => { void loadProjectList(); setProjectListOpen((v) => !v); }}
-                    >
-                      <FolderOpen size={14} />
-                      Cambiar proyecto
-                    </button>
-                    {projectListOpen && (
-                      <div className="project-list-popup">
-                        {projectList.length === 0 ? (
-                          <p className="muted" style={{ padding: '8px' }}>Sin proyectos encontrados</p>
-                        ) : (
-                          projectList.map((p) => (
-                            <button
-                              key={p.path}
-                              className={`project-list-item${p.current ? ' current' : ''}`}
-                              onClick={() => void switchProject(p.path)}
-                              disabled={p.current || loading}
-                              title={p.path}
-                            >
-                              <FolderOpen size={13} />
-                              <span className="project-list-name">{p.name}</span>
-                              {p.current && <span className="project-list-badge">activo</span>}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <details className="config-advanced">
-                    <summary>Abrir ruta manualmente (avanzado)</summary>
-                    <div className="config-field-row" style={{ marginTop: '8px' }}>
-                      <input
-                        value={workspaceDraft}
-                        onChange={(event) => setWorkspaceDraft(event.target.value)}
-                        placeholder="Ruta absoluta al proyecto"
-                      />
-                      <button className="config-inline-btn" onClick={() => void saveWorkspace()} disabled={loading}>
-                        Aplicar
-                      </button>
-                    </div>
-                  </details>
-                </div>
-
-                {/* Autonomía (P5) */}
-                <div className="config-subsection">
-                  <div className="config-subsection-label">
-                    Autonomía
-                    <InfoTip
-                      tip="Supervisado: todas las escalaciones esperan tu decisión. Autónomo: las escalaciones operativas (breakers, bucles, hijos bloqueados) se auto-resuelven con su opción segura una vez por issue; las decisiones de producto (cierre de ciclo, alcance, preguntas) siempre te esperan."
-                      wide
-                    />
-                  </div>
-                  <div className="config-field-row">
-                    <button
-                      className={autonomyMode === 'supervised' ? 'config-inline-btn' : 'secondary-button'}
-                      onClick={() => void saveAutonomy('supervised')}
-                      disabled={autonomySaving || !workspaceConfigured}
-                    >
-                      Supervisado
-                    </button>
-                    <button
-                      className={autonomyMode === 'autonomous' ? 'config-inline-btn' : 'secondary-button'}
-                      onClick={() => void saveAutonomy('autonomous')}
-                      disabled={autonomySaving || !workspaceConfigured}
-                    >
-                      Autónomo
-                    </button>
-                  </div>
-                  <p className="config-hint">
-                    Modo actual: <code>{autonomyMode}</code>
-                    {autonomyMode === 'autonomous'
-                      ? ' — las interacciones operativas se resuelven solas (una vez por issue y motivo).'
-                      : ' — el equipo se detiene en cada escalación hasta que respondas.'}
-                  </p>
-                </div>
-
-                {/* Extensiones — skills de proyecto (self-extension PR1) */}
-                <div className="config-subsection">
-                  <div className="config-subsection-label">
-                    Skills del proyecto
-                    <InfoTip
-                      tip="Conocimiento local que se inyecta a los roles indicados en cada run, ADEMÁS de su skill base. Refina el rol (p.ej. 'las escenas Unity se regeneran con Tools > Create Test Scene'); nunca contradice tus directivas. Deja los roles vacíos para aplicar a todos."
-                      wide
-                    />
-                  </div>
-                  {projectSkills.length > 0 && (
-                    <div className="skill-list">
-                      {projectSkills.map((skill) => (
-                        <div key={skill.name} className={`skill-item${skill.status === 'active' ? '' : ' retired'}`}>
-                          <div className="skill-item-head">
-                            <strong>{skill.name}</strong>
-                            <span className="skill-roles">
-                              {(skill.applies_to_roles && skill.applies_to_roles.length > 0)
-                                ? skill.applies_to_roles.join(', ')
-                                : 'todos los roles'}
-                            </span>
-                            {skill.status !== 'active' && <span className="skill-badge">retirada</span>}
-                          </div>
-                          <div className="skill-item-actions">
-                            <button className="config-inline-btn" onClick={() => editProjectSkill(skill)}>Editar</button>
-                            <button className="secondary-button" onClick={() => void toggleProjectSkill(skill)}>
-                              {skill.status === 'active' ? 'Retirar' : 'Activar'}
-                            </button>
-                            <button className="danger-button" onClick={() => void deleteProjectSkill(skill)}>Borrar</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="skill-form">
-                    <input
-                      placeholder="Nombre (p.ej. unity-scene-regen)"
-                      value={skillDraft.name}
-                      onChange={(e) => setSkillDraft((d) => ({ ...d, name: e.target.value }))}
-                    />
-                    <input
-                      placeholder="Roles separados por coma (vacío = todos)"
-                      value={skillDraft.roles}
-                      onChange={(e) => setSkillDraft((d) => ({ ...d, roles: e.target.value }))}
-                    />
-                    <textarea
-                      placeholder="Conocimiento en markdown que verán los agentes…"
-                      value={skillDraft.body}
-                      onChange={(e) => setSkillDraft((d) => ({ ...d, body: e.target.value }))}
-                      rows={4}
-                    />
-                    <button
-                      className="config-inline-btn"
-                      onClick={() => void saveProjectSkill()}
-                      disabled={skillSaving || !workspaceConfigured || !skillDraft.name.trim() || !skillDraft.body.trim()}
-                    >
-                      {skillSaving ? 'Guardando…' : 'Guardar skill'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Extensiones MCP — solo lectura (self-extension PR2) */}
-                <div className="config-subsection">
-                  <div className="config-subsection-label">
-                    Extensiones MCP
-                    <InfoTip
-                      tip="El Lead propone integrar un servidor MCP (herramientas externas, p.ej. control de Unity) cuando el equipo se topa con un límite real. Instalar código de terceros SIEMPRE espera tu aprobación — responde la tarjeta en el chip 'Pendiente'. Aquí solo se listan las ya aprobadas/rechazadas."
-                      wide
-                    />
-                  </div>
-                  {mcpServers.length === 0 ? (
-                    <p className="config-hint">
-                      Ninguna todavía. Cuando el Lead identifique una necesidad real, te llegará una propuesta al chip &quot;Pendiente&quot;.
-                    </p>
+                <div className="config-main">
+                  {['proyecto', 'autonomia', 'skills', 'mcp', 'danger'].includes(cfgSection) ? (
+                    <p className="config-scope-note">Ámbito: solo este proyecto. Los demás proyectos no cambian.</p>
                   ) : (
-                    <div className="skill-list">
-                      {mcpServers.map((server) => (
-                        <div key={server.name} className={`skill-item${server.status === 'active' ? '' : ''}`}>
-                          <div className="skill-item-head">
-                            <strong>{server.name}</strong>
-                            <span className="skill-roles">
-                              {(server.applies_to_roles && server.applies_to_roles.length > 0)
-                                ? server.applies_to_roles.join(', ')
-                                : 'sin roles asignados'}
-                            </span>
-                            <span className="skill-badge">{server.status || 'approved'}</span>
-                          </div>
-                          {server.source && <p className="config-hint" style={{ margin: 0 }}><code>{server.source}</code></p>}
-                          {server.justification && <p className="config-hint" style={{ margin: 0 }}>{server.justification}</p>}
+                    <p className="config-scope-note">Ámbito: toda la aplicación — afecta a todos los proyectos.</p>
+                  )}
+
+                  {cfgSection === 'proyecto' && (
+                    <div className="config-subsection">
+                      <div className="config-subsection-label">
+                        Proyecto activo
+                        <InfoTip tip="El proyecto que el backend tiene abierto ahora. Cada proyecto tiene su propia base de datos SQLite. Para cambiar de proyecto usa el selector del nombre en la barra superior." wide />
+                      </div>
+                      <dl className="config-dl config-dl-compact">
+                        <dt>Estado</dt>
+                        <dd>
+                          <span className={`cfg-status-chip${health?.status === 'ok' ? ' ok' : ''}`}>
+                            {health?.status || '—'}
+                          </span>
+                        </dd>
+                        <dt>Modo</dt><dd>{health?.mode || '—'}</dd>
+                        <dt>Ruta</dt><dd className="config-path">{workspace || '—'}</dd>
+                      </dl>
+                      <details className="config-advanced">
+                        <summary>Abrir ruta manualmente (avanzado)</summary>
+                        <div className="config-field-row" style={{ marginTop: '8px' }}>
+                          <input
+                            value={workspaceDraft}
+                            onChange={(event) => setWorkspaceDraft(event.target.value)}
+                            placeholder="Ruta absoluta al proyecto"
+                          />
+                          <button className="config-inline-btn" onClick={() => void saveWorkspace()} disabled={loading}>
+                            Aplicar
+                          </button>
                         </div>
-                      ))}
+                      </details>
                     </div>
+                  )}
+
+                  {cfgSection === 'autonomia' && (
+                    <div className="config-subsection">
+                      <div className="config-subsection-label">
+                        Autonomía
+                        <InfoTip
+                          tip="Supervisado: todas las escalaciones esperan tu decisión. Autónomo: las escalaciones operativas (breakers, bucles, hijos bloqueados) se auto-resuelven con su opción segura una vez por issue; las decisiones de producto (cierre de ciclo, alcance, preguntas) siempre te esperan."
+                          wide
+                        />
+                      </div>
+                      <div className="config-field-row">
+                        <button
+                          className={autonomyMode === 'supervised' ? 'config-inline-btn' : 'secondary-button'}
+                          onClick={() => void saveAutonomy('supervised')}
+                          disabled={autonomySaving || !workspaceConfigured}
+                        >
+                          Supervisado
+                        </button>
+                        <button
+                          className={autonomyMode === 'autonomous' ? 'config-inline-btn' : 'secondary-button'}
+                          onClick={() => void saveAutonomy('autonomous')}
+                          disabled={autonomySaving || !workspaceConfigured}
+                        >
+                          Autónomo
+                        </button>
+                      </div>
+                      <p className="config-hint">
+                        Modo actual: <code>{autonomyMode}</code>
+                        {autonomyMode === 'autonomous'
+                          ? ' — las interacciones operativas se resuelven solas (una vez por issue y motivo).'
+                          : ' — el equipo se detiene en cada escalación hasta que respondas.'}
+                        {' '}También conmutable desde la barra superior.
+                      </p>
+                    </div>
+                  )}
+
+                  {cfgSection === 'skills' && (
+                    <div className="config-subsection">
+                      <div className="config-subsection-label">
+                        Skills del proyecto
+                        <InfoTip
+                          tip="Conocimiento local que se inyecta a los roles indicados en cada run, ADEMÁS de su skill base. Refina el rol (p.ej. 'las escenas Unity se regeneran con Tools > Create Test Scene'); nunca contradice tus directivas. Deja los roles vacíos para aplicar a todos."
+                          wide
+                        />
+                      </div>
+                      {projectSkills.length > 0 && (
+                        <div className="skill-list">
+                          {projectSkills.map((skill) => (
+                            <div key={skill.name} className={`skill-item${skill.status === 'active' ? '' : ' retired'}`}>
+                              <div className="skill-item-head">
+                                <strong>{skill.name}</strong>
+                                <span className="skill-roles">
+                                  {(skill.applies_to_roles && skill.applies_to_roles.length > 0)
+                                    ? skill.applies_to_roles.join(', ')
+                                    : 'todos los roles'}
+                                </span>
+                                {skill.status !== 'active' && <span className="skill-badge">retirada</span>}
+                              </div>
+                              <div className="skill-item-actions">
+                                <button className="config-inline-btn" onClick={() => editProjectSkill(skill)}>Editar</button>
+                                <button className="secondary-button" onClick={() => void toggleProjectSkill(skill)}>
+                                  {skill.status === 'active' ? 'Retirar' : 'Activar'}
+                                </button>
+                                <button className="danger-button" onClick={() => void deleteProjectSkill(skill)}>Borrar</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="skill-form">
+                        <input
+                          placeholder="Nombre (p.ej. unity-scene-regen)"
+                          value={skillDraft.name}
+                          onChange={(e) => setSkillDraft((d) => ({ ...d, name: e.target.value }))}
+                        />
+                        <input
+                          placeholder="Roles separados por coma (vacío = todos)"
+                          value={skillDraft.roles}
+                          onChange={(e) => setSkillDraft((d) => ({ ...d, roles: e.target.value }))}
+                        />
+                        <textarea
+                          placeholder="Conocimiento en markdown que verán los agentes…"
+                          value={skillDraft.body}
+                          onChange={(e) => setSkillDraft((d) => ({ ...d, body: e.target.value }))}
+                          rows={4}
+                        />
+                        <button
+                          className="config-inline-btn"
+                          onClick={() => void saveProjectSkill()}
+                          disabled={skillSaving || !workspaceConfigured || !skillDraft.name.trim() || !skillDraft.body.trim()}
+                        >
+                          {skillSaving ? 'Guardando…' : 'Guardar skill'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {cfgSection === 'mcp' && (
+                    <div className="config-subsection">
+                      <div className="config-subsection-label">
+                        Extensiones MCP
+                        <InfoTip
+                          tip="El Lead propone integrar un servidor MCP (herramientas externas, p.ej. control de Unity) cuando el equipo se topa con un límite real. Instalar código de terceros SIEMPRE espera tu aprobación — responde la tarjeta en la Bandeja. Aquí solo se listan las ya aprobadas/rechazadas."
+                          wide
+                        />
+                      </div>
+                      {mcpServers.length === 0 ? (
+                        <p className="config-hint">
+                          Ninguna todavía. Cuando el Lead identifique una necesidad real, te llegará una propuesta a la Bandeja.
+                        </p>
+                      ) : (
+                        <div className="skill-list">
+                          {mcpServers.map((server) => (
+                            <div key={server.name} className="skill-item">
+                              <div className="skill-item-head">
+                                <strong>{server.name}</strong>
+                                <span className="skill-roles">
+                                  {(server.applies_to_roles && server.applies_to_roles.length > 0)
+                                    ? server.applies_to_roles.join(', ')
+                                    : 'sin roles asignados'}
+                                </span>
+                                <span className="skill-badge">{server.status || 'approved'}</span>
+                              </div>
+                              {server.source && <p className="config-hint" style={{ margin: 0 }}><code>{server.source}</code></p>}
+                              {server.justification && <p className="config-hint" style={{ margin: 0 }}>{server.justification}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {cfgSection === 'danger' && (
+                    <div className="config-subsection danger-config-section">
+                      <div className="config-subsection-label danger-config-title">
+                        Zona de peligro
+                        <InfoTip tip="Las acciones de esta sección son irreversibles. No hay papelera de reciclaje: el proyecto se borra permanentemente del disco." wide />
+                      </div>
+                      <div className="danger-zone">
+                        <div className="danger-zone-desc">
+                          <strong>Eliminar proyecto actual</strong>
+                          <p>
+                            Borra la carpeta completa del proyecto{workspace ? `: ${shortPath(workspace)}` : ''}.
+                            Esta acción no se puede deshacer.
+                          </p>
+                        </div>
+                        <div className="delete-row">
+                          <input
+                            value={deleteConfirm}
+                            onChange={(event) => setDeleteConfirm(event.target.value)}
+                            placeholder="Escribe DELETE para confirmar"
+                          />
+                          <button
+                            className="danger-button"
+                            onClick={() => void deleteProject()}
+                            disabled={loading || deleteConfirm !== 'DELETE'}
+                          >
+                            Eliminar proyecto
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {cfgSection === 'keys' && (
+                    <div className="config-subsection">
+                      <div className="config-subsection-label">
+                        API Keys
+                        <InfoTip tip="Cada key activa los adapters de API directa de ese proveedor. Se envían al backend local y se cifran en vault; una vez guardadas solo se indica si existen — no se pueden leer de vuelta." wide />
+                      </div>
+                      <div className="api-key-rows">
+                        {([
+                          { id: 'openai',    label: 'OpenAI',         desc: 'GPT-4.1, o1, o3…' },
+                          { id: 'google',    label: 'Google Gemini',  desc: 'Gemini 2.5 Flash / Pro…' },
+                          { id: 'anthropic', label: 'Anthropic',      desc: 'Claude Sonnet / Opus 4.5' },
+                        ] as const).map((prov) => {
+                          const saved = secrets.some((s) => s.provider === prov.id && s.has_secret);
+                          const isActive = secretProvider === prov.id;
+                          return (
+                            <div key={prov.id} className={`api-key-row${saved ? ' key-saved' : ''}`}>
+                              <div className="api-key-row-meta">
+                                <span className={`api-key-dot${saved ? ' saved' : ''}`} />
+                                <span className="api-key-label">{prov.label}</span>
+                                <span className="api-key-models">{prov.desc}</span>
+                                <span className={`api-key-badge${saved ? ' ok' : ''}`}>
+                                  {saved ? 'key guardada ✓' : 'sin key'}
+                                </span>
+                              </div>
+                              <div className="api-key-row-input">
+                                <input
+                                  type="password"
+                                  placeholder={saved ? '●●●●●●  (guardada — pega nueva para actualizar)' : 'sk-…  Pega tu API key aquí'}
+                                  value={isActive ? secretValue : ''}
+                                  onFocus={() => setSecretProvider(prov.id)}
+                                  onChange={(e) => { setSecretProvider(prov.id); setSecretValue(e.target.value); }}
+                                />
+                                <button
+                                  className="config-inline-btn"
+                                  disabled={loading || !isActive || !secretValue.trim()}
+                                  onClick={() => void saveSecret()}
+                                >
+                                  {saved ? 'Actualizar' : 'Guardar'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {cfgSection === 'clis' && (
+                    <div className="config-subsection">
+                      <div className="config-subsection-label">
+                        CLIs de suscripción
+                        <InfoTip tip="Si tienes una suscripción activa a ChatGPT Plus, Claude Pro o Gemini Advanced, el CLI correspondiente puede ejecutar agentes sin consumir créditos de API. Requiere instalar el CLI y hacer login en tu cuenta." wide />
+                      </div>
+                      <div className="cli-status-grid">
+                        {cliStatus.map((item) => (
+                          <div key={item.id} className={`cli-card${item.available ? ' ok' : ''}`}>
+                            <div className="cli-card-header">
+                              <span className={`cli-dot${item.available ? ' ok' : ''}`} />
+                              <span className="cli-card-label">{item.label}</span>
+                              <span className="cli-card-avail">{item.available ? 'disponible' : 'no instalado'}</span>
+                            </div>
+                            <code className="cli-command">{item.login_command || item.command}</code>
+                            {item.login_supported && (
+                              <button
+                                type="button"
+                                onClick={() => void launchCliLogin(item.id)}
+                                disabled={loading || !item.available}
+                                title={item.login_hint}
+                              >
+                                Login
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {cfgSection === 'adapters' && (
+                    <div className="config-subsection">
+                      <div className="config-subsection-label">
+                        Estado de adapters
+                        <InfoTip tip="Prueba un adapter para verificar que su credencial es válida y la llamada funciona. El resultado se guarda y actualiza los indicadores de conexión en toda la UI." wide />
+                      </div>
+                      <div className="adapter-test-list">
+                        {adapterProfiles.map((profile) => {
+                          const pState = profileState(profile);
+                          const healthStatus = profile.health?.status || 'untested';
+                          return (
+                            <div
+                              key={profile.id}
+                              className={`adapter-test-row${pState.connected ? ' connected' : ''}${profile.status === 'blocked_by_provider' ? ' blocked' : ''}`}
+                            >
+                              <span className={`adapter-row-dot${pState.connected ? ' connected' : profile.status === 'blocked_by_provider' ? ' blocked' : ''}`} />
+                              <div className="adapter-test-info">
+                                <span className="adapter-test-label">{profile.label}</span>
+                                <span className="adapter-test-meta">{profile.adapter_type} · {profile.channel}</span>
+                              </div>
+                              <span className={`adapter-test-status hs-${healthStatus}`}>
+                                {profile.status === 'blocked_by_provider' ? 'bloqueado por proveedor'
+                                  : healthStatus === 'ok'    ? `funcional${profile.health?.reason ? ` · ${profile.health.reason}` : ''}`
+                                  : healthStatus === 'failed'    ? `falló: ${profile.health?.reason || 'test'}`
+                                  : healthStatus === 'installed' ? 'instalado, auth sin verificar'
+                                  : 'sin probar'}
+                              </span>
+                              <button
+                                className="secondary-button"
+                                type="button"
+                                disabled={loading || profile.status === 'blocked_by_provider'}
+                                onClick={() => void testAdapterProfile(profile.id)}
+                              >
+                                Probar
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {cfgSection === 'sistema' && (
+                    <>
+                      <div className="config-subsection">
+                        <div className="config-subsection-label">
+                          Carpeta raíz de proyectos
+                          <InfoTip tip="Todos los proyectos se crean como subcarpetas aquí. Cambiarla no mueve proyectos existentes. También configurable con AITEAM_PROJECTS_ROOT en .env (tiene prioridad)." wide />
+                        </div>
+                        <div className="config-field-row">
+                          <input
+                            className="config-path-input"
+                            value={settingsDraft || projectsRoot}
+                            onChange={(ev) => setSettingsDraft(ev.target.value)}
+                            placeholder="Ruta absoluta de la carpeta de proyectos"
+                          />
+                          <button
+                            className="config-inline-btn"
+                            onClick={() => void saveAppSettings().then(() => void refresh())}
+                            disabled={loading || !(settingsDraft || '').trim()}
+                          >
+                            Guardar
+                          </button>
+                        </div>
+                        {projectsRoot && (
+                          <p className="config-hint">Efectiva: <code>{projectsRoot}</code></p>
+                        )}
+                      </div>
+                      <div className="config-subsection">
+                        <div className="config-subsection-label">Sistema</div>
+                        <dl className="config-dl config-dl-compact">
+                          <dt>Backend</dt><dd><code>{window.location.origin}</code></dd>
+                          <dt>Modo</dt><dd>{health?.mode || '—'}</dd>
+                          <dt>Var. entorno</dt>
+                          <dd>
+                            <code>AITEAM_PROJECTS_ROOT</code> en <code>.env</code> sobreescribe la carpeta raíz guardada.
+                            <InfoTip tip="Si defines AITEAM_PROJECTS_ROOT en el archivo .env del proyecto, tiene prioridad sobre lo que configures en esta pantalla. Útil para CI/CD o instalaciones sin UI." wide />
+                          </dd>
+                        </dl>
+                      </div>
+                      {lastResult ? (
+                        <details className="config-subsection config-debug">
+                          <summary>Última acción — debug</summary>
+                          <pre className="last-result-body">{pretty(lastResult).slice(0, 1200)}</pre>
+                        </details>
+                      ) : null}
+                    </>
                   )}
                 </div>
               </div>
-
-              {/* ── 2. Credenciales y Adapters ────────────────────────────── */}
-              <div className="config-section">
-                <h3 className="config-section-title">
-                  Credenciales y Adapters
-                  <InfoTip tip="Las API keys se envían al backend local y se cifran en vault. No se guardan en el navegador ni en localStorage." wide />
-                </h3>
-
-                {/* API Keys */}
-                <div className="config-subsection">
-                  <div className="config-subsection-label">
-                    API Keys
-                    <InfoTip tip="Cada key activa los adapters de API directa de ese proveedor. Una vez guardada solo se indica si existe — no se puede leer de vuelta." wide />
-                  </div>
-                  <div className="api-key-rows">
-                    {([
-                      { id: 'openai',    label: 'OpenAI',         desc: 'GPT-4.1, o1, o3…' },
-                      { id: 'google',    label: 'Google Gemini',  desc: 'Gemini 2.5 Flash / Pro…' },
-                      { id: 'anthropic', label: 'Anthropic',      desc: 'Claude Sonnet / Opus 4.5' },
-                    ] as const).map((prov) => {
-                      const saved = secrets.some((s) => s.provider === prov.id && s.has_secret);
-                      const isActive = secretProvider === prov.id;
-                      return (
-                        <div key={prov.id} className={`api-key-row${saved ? ' key-saved' : ''}`}>
-                          <div className="api-key-row-meta">
-                            <span className={`api-key-dot${saved ? ' saved' : ''}`} />
-                            <span className="api-key-label">{prov.label}</span>
-                            <span className="api-key-models">{prov.desc}</span>
-                            <span className={`api-key-badge${saved ? ' ok' : ''}`}>
-                              {saved ? 'key guardada ✓' : 'sin key'}
-                            </span>
-                          </div>
-                          <div className="api-key-row-input">
-                            <input
-                              type="password"
-                              placeholder={saved ? '●●●●●●  (guardada — pega nueva para actualizar)' : 'sk-…  Pega tu API key aquí'}
-                              value={isActive ? secretValue : ''}
-                              onFocus={() => setSecretProvider(prov.id)}
-                              onChange={(e) => { setSecretProvider(prov.id); setSecretValue(e.target.value); }}
-                            />
-                            <button
-                              className="config-inline-btn"
-                              disabled={loading || !isActive || !secretValue.trim()}
-                              onClick={() => void saveSecret()}
-                            >
-                              {saved ? 'Actualizar' : 'Guardar'}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* CLIs de suscripción */}
-                <div className="config-subsection">
-                  <div className="config-subsection-label">
-                    CLIs de suscripción
-                    <InfoTip tip="Si tienes una suscripción activa a ChatGPT Plus, Claude Pro o Gemini Advanced, el CLI correspondiente puede ejecutar agentes sin consumir créditos de API. Requiere instalar el CLI y hacer login en tu cuenta." wide />
-                  </div>
-                  <div className="cli-status-grid">
-                    {cliStatus.map((item) => (
-                      <div key={item.id} className={`cli-card${item.available ? ' ok' : ''}`}>
-                        <div className="cli-card-header">
-                          <span className={`cli-dot${item.available ? ' ok' : ''}`} />
-                          <span className="cli-card-label">{item.label}</span>
-                          <span className="cli-card-avail">{item.available ? 'disponible' : 'no instalado'}</span>
-                        </div>
-                        <code className="cli-command">{item.login_command || item.command}</code>
-                        {item.login_supported && (
-                          <button
-                            type="button"
-                            onClick={() => void launchCliLogin(item.id)}
-                            disabled={loading || !item.available}
-                            title={item.login_hint}
-                          >
-                            Login
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Estado de adapters */}
-                <div className="config-subsection">
-                  <div className="config-subsection-label">
-                    Estado de adapters
-                    <InfoTip tip="Prueba un adapter para verificar que su credencial es válida y la llamada funciona. El resultado se guarda y actualiza los indicadores de conexión en toda la UI." wide />
-                  </div>
-                  <div className="adapter-test-list">
-                    {adapterProfiles.map((profile) => {
-                      const pState = profileState(profile);
-                      const healthStatus = profile.health?.status || 'untested';
-                      return (
-                        <div
-                          key={profile.id}
-                          className={`adapter-test-row${pState.connected ? ' connected' : ''}${profile.status === 'blocked_by_provider' ? ' blocked' : ''}`}
-                        >
-                          <span className={`adapter-row-dot${pState.connected ? ' connected' : profile.status === 'blocked_by_provider' ? ' blocked' : ''}`} />
-                          <div className="adapter-test-info">
-                            <span className="adapter-test-label">{profile.label}</span>
-                            <span className="adapter-test-meta">{profile.adapter_type} · {profile.channel}</span>
-                          </div>
-                          <span className={`adapter-test-status hs-${healthStatus}`}>
-                            {profile.status === 'blocked_by_provider' ? 'bloqueado por proveedor'
-                              : healthStatus === 'ok'    ? `funcional${profile.health?.reason ? ` · ${profile.health.reason}` : ''}`
-                              : healthStatus === 'failed'    ? `falló: ${profile.health?.reason || 'test'}`
-                              : healthStatus === 'installed' ? 'instalado, auth sin verificar'
-                              : 'sin probar'}
-                          </span>
-                          <button
-                            className="secondary-button"
-                            type="button"
-                            disabled={loading || profile.status === 'blocked_by_provider'}
-                            onClick={() => void testAdapterProfile(profile.id)}
-                          >
-                            Probar
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* ── 3. Sistema ───────────────────────────────────────────── */}
-              <div className="config-section">
-                <h3 className="config-section-title">Sistema</h3>
-                <dl className="config-dl config-dl-compact">
-                  <dt>Backend</dt><dd><code>{window.location.origin}</code></dd>
-                  <dt>Modo</dt><dd>{health?.mode || '—'}</dd>
-                  <dt>Var. entorno</dt>
-                  <dd>
-                    <code>AITEAM_PROJECTS_ROOT</code> en <code>.env</code> sobreescribe la carpeta raíz guardada.
-                    <InfoTip tip="Si defines AITEAM_PROJECTS_ROOT en el archivo .env del proyecto, tiene prioridad sobre lo que configures en esta pantalla. Útil para CI/CD o instalaciones sin UI." wide />
-                  </dd>
-                </dl>
-              </div>
-
-              {/* ── 4. Zona de peligro ───────────────────────────────────── */}
-              <div className="config-section danger-config-section">
-                <h3 className="config-section-title danger-config-title">
-                  Zona de peligro
-                  <InfoTip tip="Las acciones de esta sección son irreversibles. No hay papelera de reciclaje: el proyecto se borra permanentemente del disco." wide />
-                </h3>
-                <div className="danger-zone">
-                  <div className="danger-zone-desc">
-                    <strong>Eliminar proyecto actual</strong>
-                    <p>
-                      Borra la carpeta completa del proyecto{workspace ? `: ${shortPath(workspace)}` : ''}.
-                      Esta acción no se puede deshacer.
-                    </p>
-                  </div>
-                  <div className="delete-row">
-                    <input
-                      value={deleteConfirm}
-                      onChange={(event) => setDeleteConfirm(event.target.value)}
-                      placeholder="Escribe DELETE para confirmar"
-                    />
-                    <button
-                      className="danger-button"
-                      onClick={() => void deleteProject()}
-                      disabled={loading || deleteConfirm !== 'DELETE'}
-                    >
-                      Eliminar proyecto
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Debug: última acción (colapsable) ───────────────────── */}
-              {lastResult ? (
-                <details className="config-section config-debug">
-                  <summary>Última acción — debug</summary>
-                  <pre className="last-result-body">{pretty(lastResult).slice(0, 1200)}</pre>
-                </details>
-              ) : null}
             </section>
           ) : null}
 
