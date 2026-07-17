@@ -29,6 +29,8 @@ build/
 # Pytest
 .pytest_cache/
 .pytest-*/
+.pytest-workspace-tmp/
+.pytest-user-config-tmp/
 .coverage
 htmlcov/
 pytest_out.txt
@@ -49,6 +51,8 @@ ide-frontend/tsc_errors.txt
 
 # Local snapshots / tooling artifacts
 .aiteam_snapshots/
+.playwright-cli/
+output/
 
 # Runtime state (local por maquina; no versionable)
 runtime/*

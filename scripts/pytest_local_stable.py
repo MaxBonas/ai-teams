@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import gc
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -26,6 +28,17 @@ def _mkdir(path: Path) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _remove_tree(path: Path) -> None:
+    if not path.exists():
+        return
+
+    def make_writeable(function, value, _exc_info) -> None:
+        os.chmod(value, stat.S_IWRITE | stat.S_IREAD)
+        function(value)
+
+    shutil.rmtree(path, onerror=make_writeable)
 
 
 def _prepare_workspace_temp(root: Path) -> tuple[Path, Path]:
@@ -105,7 +118,6 @@ def _patch_pytest_tmp_path_factory(base_temp: Path) -> None:
         return
 
     original_mktemp = TempPathFactory.mktemp
-    original_getbasetemp = TempPathFactory.getbasetemp
 
     def safe_getbasetemp(self) -> Path:
         basetemp = getattr(self, "_basetemp", None)
@@ -130,6 +142,7 @@ def _patch_pytest_tmp_path_factory(base_temp: Path) -> None:
 def main(argv: list[str]) -> int:
     repo_root = _repo_root()
     os.chdir(repo_root)
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     temp_root, base_temp = _prepare_workspace_temp(repo_root)
@@ -137,16 +150,25 @@ def main(argv: list[str]) -> int:
     _patch_pytest_cleanup()
     _patch_pytest_tmp_path_factory(base_temp)
 
-    import pytest
+    try:
+        import pytest
 
-    final_args = [
-        "-p",
-        "no:cacheprovider",
-        "--basetemp",
-        str(base_temp),
-        *argv,
-    ]
-    return int(pytest.main(final_args))
+        final_args = [
+            "-p",
+            "no:cacheprovider",
+            "--basetemp",
+            str(base_temp),
+            *argv,
+        ]
+        result = int(pytest.main(final_args))
+        gc.collect()
+        from scripts.cleanup_test_artifacts import cleanup
+
+        for failure in cleanup(include_live=True):
+            print(f"cleanup warning: {failure}", file=sys.stderr)
+        return result
+    finally:
+        _remove_tree(temp_root)
 
 
 if __name__ == "__main__":

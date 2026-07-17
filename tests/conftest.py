@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import uuid
 from pathlib import Path
 
@@ -41,6 +42,40 @@ _TEST_ENV_OVERRIDES = {
     "AITEAM_COST_BREAKER_CENTS": "0",
 }
 _PREVIOUS_TEST_ENV: dict[str, str | None] = {}
+_TEMP_PARENT = Path.cwd() / ".pytest-workspace-tmp"
+_TEMP_SESSION = _TEMP_PARENT / f"session-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def _remove_test_tree(path: Path) -> None:
+    """Remove test artifacts on Windows, including read-only nested Git files."""
+
+    if not path.exists():
+        return
+
+    def make_writeable(function, value, _exc_info) -> None:
+        os.chmod(value, stat.S_IWRITE | stat.S_IREAD)
+        function(value)
+
+    shutil.rmtree(path, onerror=make_writeable)
+
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _clean_stale_test_sessions() -> None:
+    _TEMP_PARENT.mkdir(exist_ok=True)
+    for candidate in _TEMP_PARENT.iterdir():
+        if candidate == _TEMP_SESSION:
+            continue
+        match = re.fullmatch(r"session-(\d+)-[0-9a-f]+", candidate.name)
+        if match and _pid_is_running(int(match.group(1))):
+            continue
+        _remove_test_tree(candidate)
 
 
 def _apply_test_env_overrides() -> None:
@@ -62,6 +97,8 @@ def _restore_test_env_overrides() -> None:
 
 def pytest_configure(config) -> None:
     _apply_test_env_overrides()
+    _clean_stale_test_sessions()
+    _TEMP_SESSION.mkdir(parents=True, exist_ok=True)
 
 
 def pytest_unconfigure(config) -> None:
@@ -87,12 +124,10 @@ def tmp_path(request):
     normal `Path.mkdir` inside the repo avoids that OS-level flake.
     """
 
-    root = Path.cwd() / ".pytest-workspace-tmp"
-    root.mkdir(exist_ok=True)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", request.node.nodeid)[-80:]
-    path = root / f"{safe_name}-{uuid.uuid4().hex[:8]}"
+    path = _TEMP_SESSION / f"{safe_name}-{uuid.uuid4().hex[:8]}"
     path.mkdir()
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
+    # SQLite and TestClient can retain Windows handles until pytest exits.
+    # scripts/pytest_local.bat cleans the whole session from a fresh process
+    # after preserving pytest's exit code.
+    yield path
