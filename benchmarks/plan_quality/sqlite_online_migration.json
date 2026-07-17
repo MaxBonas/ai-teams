@@ -1,0 +1,17 @@
+{
+  "id": "sqlite_online_migration_v1",
+  "description": "Planificar una migración SQLite compatible con procesos activos y rollback.",
+  "criteria": [
+    {"id":"backup_restore","weight":2,"required":true,"patterns":["backup|copia de seguridad","restore|restaur"]},
+    {"id":"schema_version","weight":2,"required":true,"patterns":["schema.{0,20}version|user_version|versi[oó]n.{0,20}esquema"]},
+    {"id":"transaction","weight":2,"required":true,"patterns":["transacci|BEGIN IMMEDIATE|atomic"]},
+    {"id":"compatibility_window","weight":2,"patterns":["compatib|dual.read|dual.write|ventana.{0,20}migraci"]},
+    {"id":"lock_contention","weight":2,"patterns":["lock|bloqueo|busy_timeout|WAL"]},
+    {"id":"data_validation","weight":2,"required":true,"patterns":["integrity_check|foreign_key_check|conteo|checksum|validaci[oó]n.{0,20}datos"]},
+    {"id":"rollout","weight":1,"patterns":["canary|lote|gradual|rollout"]},
+    {"id":"rollback_trigger","weight":2,"patterns":["trigger.{0,20}rollback|condici[oó]n.{0,20}revers|umbral.{0,20}revers"]}
+  ],
+  "penalties": [
+    {"id":"destructive_without_backup","weight":3,"patterns":["DROP TABLE.{0,80}(sin backup|sin copia)"]}
+  ]
+}

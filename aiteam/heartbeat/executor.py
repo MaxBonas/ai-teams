@@ -52,11 +52,16 @@ from aiteam.run_liveness import (
     classify_run_liveness,
     collect_run_evidence,
 )
-from aiteam.run_profiles import FULL_TEAM, SOLO_LEAD, normalize_run_profile
+from aiteam.run_profiles import FULL_TEAM, LEAD_QUORUM, SOLO_LEAD, normalize_run_profile
 from aiteam.skills import compose_skill
 from aiteam.tools.catalog import check_capability, default_capabilities_for_role, get_agent_capabilities
 from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntime
-from aiteam.user_config import inject_adapter_secrets, profile_is_connected, resolve_adapter_config
+from aiteam.user_config import (
+    inject_adapter_secrets,
+    load_adapter_profiles,
+    profile_is_connected,
+    resolve_adapter_config,
+)
 from aiteam.workspace_evidence import WorkspaceDelta, diff_snapshots, snapshot_workspace, workspace_root_for_db
 
 
@@ -271,6 +276,58 @@ class RunExecutor:
                     max_comments=_max_comments,
                 )
                 payload["wake_context"] = ctx
+                # Quorum auditors review the immutable Plan A, not workspace
+                # files or sibling implementation. Do not expose other auditor
+                # answers here: first-pass independence is contractual.
+                _audited_issue = get_issue(self.db_path, issue_id=issue_id_str) or {}
+                _audited_meta = _decode_json(_audited_issue.get("metadata_json") or "{}")
+                if (
+                    agent_role in {"lead", "team_lead"}
+                    and normalize_run_profile(_audited_meta.get("profile") or "") == LEAD_QUORUM
+                ):
+                    with contextlib.closing(_connect(self.db_path)) as _conn:
+                        _has_quorum = _conn.execute(
+                            "SELECT 1 FROM quorum_sessions WHERE issue_id=? LIMIT 1",
+                            (issue_id_str,),
+                        ).fetchone()
+                    if _has_quorum is None:
+                        _quorum_instruction = (
+                            "⚠ CONTRATO LEAD_QUORUM OBLIGATORIO: esta run debe emitir update_plan "
+                            "con el Plan A completo. NO emitas set_status:done, NO pidas dispensar "
+                            "tests y NO crees issues de implementación. Al persistirse Plan A, el "
+                            "control plane creará automáticamente dos auditorías independientes."
+                        )
+                        existing_instruction = str(payload.get("mandatory_instruction") or "").strip()
+                        payload["mandatory_instruction"] = (
+                            _quorum_instruction
+                            + (f"\n\n{existing_instruction}" if existing_instruction else "")
+                        )
+                _audit_session_id = str(_audited_meta.get("quorum_session_id") or "").strip()
+                if _audit_session_id:
+                    with contextlib.closing(_connect(self.db_path)) as _conn:
+                        _base = _conn.execute(
+                            """
+                            SELECT qs.base_plan_revision_id, r.title, r.body, r.revision_number
+                            FROM quorum_sessions qs
+                            JOIN issue_document_revisions r ON r.id=qs.base_plan_revision_id
+                            WHERE qs.id=?
+                            """,
+                            (_audit_session_id,),
+                        ).fetchone()
+                    if _base is not None:
+                        payload["quorum_review"] = {
+                            "session_id": _audit_session_id,
+                            "base_plan_revision_id": _base["base_plan_revision_id"],
+                            "plan": {
+                                "title": _base["title"],
+                                "body": _base["body"],
+                                "revision_number": _base["revision_number"],
+                            },
+                            "instruction": (
+                                "Revisa exclusivamente esta revisión inmutable del plan. "
+                                "No exijas workspace_files ni implementación."
+                            ),
+                        }
                 _quorum_session_id = str(ctx.get("quorum_session_id") or "").strip()
                 if _quorum_session_id and str(ctx.get("wake_reason") or "") in {
                     "quorum_ready", "quorum_degraded"
@@ -719,12 +776,17 @@ class RunExecutor:
                 )
 
         effective_model = str(adapter_cfg.get("model") or runtime.descriptor.model or "").strip() or None
+        effective_provider, effective_channel = self._effective_adapter_identity(
+            runtime_provider=runtime.descriptor.provider,
+            runtime_channel=runtime.descriptor.channel,
+            adapter_cfg=adapter_cfg,
+        )
         self._record_run_adapter_metadata(
             run_id=run_id,
             adapter_type=runtime.descriptor.adapter_type,
-            provider=runtime.descriptor.provider,
+            provider=effective_provider,
             model=effective_model,
-            channel=runtime.descriptor.channel,
+            channel=effective_channel,
         )
         # Keep the in-memory run aligned with the durable row.  Downstream
         # provenance writers (notably quorum contributions) run before the DB
@@ -732,9 +794,9 @@ class RunExecutor:
         run = {
             **run,
             "adapter_type": runtime.descriptor.adapter_type,
-            "provider": runtime.descriptor.provider,
+            "provider": effective_provider,
             "model": effective_model,
-            "channel": runtime.descriptor.channel,
+            "channel": effective_channel,
         }
         mark_run_running(self.db_path, run_id=run_id)
         # Auto-advance the issue todo → in_progress before the LLM runs.
@@ -788,8 +850,8 @@ class RunExecutor:
             reason="adapter selected for run execution",
             metadata={
                 "requested_adapter_type": adapter_type,
-                "channel": runtime.descriptor.channel,
-                "provider": runtime.descriptor.provider,
+                "channel": effective_channel,
+                "provider": effective_provider,
                 "model": effective_model,
             },
         )
@@ -2732,13 +2794,19 @@ class RunExecutor:
             _comment_report = _parse_agent_report(body)
             if _comment_report:
                 try:
-                    record_agent_report(
+                    _stored_comment_report = record_agent_report(
                         self.db_path,
                         issue_id=issue_id,
                         agent_id=agent_id,
                         run_id=str(run.get("id")),
                         agent_role=agent_role,
                         parsed=_comment_report,
+                    )
+                    self._maybe_record_quorum_contribution(
+                        issue_id=issue_id,
+                        agent_id=agent_id,
+                        run=run,
+                        report=_stored_comment_report,
                     )
                 except Exception:
                     logger.warning("agent report persistence (add_comment) failed for issue %s", issue_id, exc_info=True)
@@ -2791,6 +2859,12 @@ class RunExecutor:
                 pass
             except Exception:
                 logger.warning("update_plan action failed for issue %s", issue_id, exc_info=True)
+
+        # ``lead_quorum`` is already an explicit user choice. Once Plan A is
+        # durable, start its independent reviews without asking for a second
+        # hiring approval. This also supports Leads that emitted a plan-shaped
+        # add_comment: _maybe_materialize_plan_comment ran immediately above.
+        self._maybe_start_explicit_quorum(issue_id=issue_id, run_id=str(run.get("id") or ""))
 
         quorum_action = actions.get("accept_quorum_synthesis")
         if isinstance(quorum_action, dict):
@@ -3669,6 +3743,32 @@ class RunExecutor:
                 (adapter_type, provider, model, normalized_channel, run_id),
             )
 
+    @staticmethod
+    def _effective_adapter_identity(
+        *,
+        runtime_provider: str | None,
+        runtime_channel: str | None,
+        adapter_cfg: dict[str, Any],
+    ) -> tuple[str | None, str | None]:
+        """Resolve provenance from the durable profile, not a shared CLI runtime.
+
+        ``subscription_cli`` is intentionally one runtime for Codex, Gemini and
+        local CLIs.  Its descriptor therefore cannot identify the provider used
+        by an individual run.  The selected profile can, and is also the source
+        used by hiring and quorum diversity.
+        """
+        profile_id = str(adapter_cfg.get("profile_id") or "").strip()
+        if profile_id:
+            profile = next(
+                (item for item in load_adapter_profiles() if str(item.get("id") or "") == profile_id),
+                None,
+            )
+            if profile:
+                provider = str(profile.get("provider") or "").strip() or runtime_provider
+                channel = str(profile.get("channel") or "").strip() or runtime_channel
+                return provider, channel
+        return runtime_provider, runtime_channel
+
     def _maybe_materialize_plan_comment(
         self,
         *,
@@ -3732,6 +3832,57 @@ class RunExecutor:
                 (issue_id, f"lead:cycle-review:{issue_id}"),
             ).fetchone()
         return str(row["status"]) if row else None
+
+    def _maybe_start_explicit_quorum(self, *, issue_id: str, run_id: str) -> dict[str, Any] | None:
+        """Start Plan-A reviews after an explicit ``lead_quorum`` selection.
+
+        The profile selection is the user's approval for planning auditors; it
+        must not depend on a second ``suggest_tasks`` interaction intended for
+        implementation hiring.
+        """
+        issue = get_issue(self.db_path, issue_id=issue_id) or {}
+        metadata = _decode_json(issue.get("metadata_json") or "{}")
+        if normalize_run_profile(metadata.get("profile") or "") != LEAD_QUORUM:
+            return None
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            existing = conn.execute(
+                "SELECT id FROM quorum_sessions WHERE issue_id=? ORDER BY created_at DESC LIMIT 1",
+                (issue_id,),
+            ).fetchone()
+        if existing is not None:
+            return None
+        plan = get_document(self.db_path, issue_id=issue_id, key="plan")
+        revision_id = str((plan or {}).get("current_revision_id") or "").strip()
+        if not revision_id:
+            return None
+        proposal = build_team_proposal(
+            issue,
+            adapter_profiles=project_profiles(Path(self.db_path).parent),
+            profile=LEAD_QUORUM,
+        )
+        proposal["plan_revision_id"] = revision_id
+        outcome = apply_accepted_team_proposal(
+            self.db_path,
+            parent_issue_id=issue_id,
+            proposal=proposal,
+            source_run_id=run_id or None,
+        )
+        session = self._initialize_quorum_session(
+            parent_issue_id=issue_id,
+            proposal=proposal,
+            created_issue_ids=outcome["created_issues"],
+        )
+        if session is not None:
+            log_activity(
+                self.db_path,
+                action="quorum.auto_started",
+                target_type="quorum_session",
+                target_id=str(session["id"]),
+                actor_agent_id="role:lead",
+                run_id=run_id or None,
+                payload={"issue_id": issue_id, "base_plan_revision_id": revision_id},
+            )
+        return session
 
     def _initialize_quorum_session(
         self,
@@ -5350,6 +5501,19 @@ class RunExecutor:
         )
 
     def _quality_close_denied(self, *, issue_id: str) -> str | None:
+        issue = get_issue(self.db_path, issue_id=issue_id) or {}
+        metadata = _decode_json(issue.get("metadata_json") or "{}")
+        if normalize_run_profile(metadata.get("profile") or "") == LEAD_QUORUM:
+            with contextlib.closing(_connect(self.db_path)) as conn:
+                session = conn.execute(
+                    "SELECT status FROM quorum_sessions WHERE issue_id=? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (issue_id,),
+                ).fetchone()
+            if session is None:
+                return "lead_quorum_plan_and_session_required"
+            if str(session["status"] or "") != "accepted":
+                return "lead_quorum_accepted_plan_required"
         try:
             rows = self._child_issue_rows(issue_id)
         except Exception:
@@ -5442,6 +5606,7 @@ class RunExecutor:
         proyecto queda esperando una decisión humana, no en deadlock mudo.
         """
         marker = f"[gate:{reason}]"
+        is_quorum_gate = reason.startswith("lead_quorum_")
         try:
             with contextlib.closing(_connect(self.db_path)) as conn:
                 prior_notices = conn.execute(
@@ -5466,21 +5631,28 @@ class RunExecutor:
                     kind="request_confirmation",
                     payload={
                         "parent_issue_id": issue_id,
-                        "reason": _RUNTIME_VERIFICATION_WAIVER_REASON,
+                        "reason": "lead_quorum_plan_missing" if is_quorum_gate else _RUNTIME_VERIFICATION_WAIVER_REASON,
                         "gate_reason": reason,
                         "version": 1,
                     },
                     continuation_policy="wake_assignee",
                     idempotency_key=f"gate-escalation:{reason}:{issue_id}",
                     source_run_id=run_id,
-                    title="Gate de tests bloquea el cierre y el equipo no produce evidencia",
-                    summary=(
+                    title=(
+                        "El Lead no materializa el Plan A requerido"
+                        if is_quorum_gate else "Gate de tests bloquea el cierre y el equipo no produce evidencia"
+                    ),
+                    summary=((
+                        "El perfil lead_quorum requiere un Plan A durable antes de lanzar auditores. "
+                        f"Tras {prior_notices} avisos el Lead no emitió update_plan. Revisa el adapter "
+                        "o reintenta la planificación; no existe un plan aceptable que dispensar."
+                    ) if is_quorum_gate else (
                         "El quality gate exige una suite de tests ejecutada con exit 0, pero tras "
                         f"{prior_notices} avisos correctivos ningún test_runner ha registrado esa "
                         "evidencia (entorno posiblemente incapaz de ejecutar los tests). "
                         "¿Aceptas cerrar dispensando la verificación runtime, o rechazas y "
                         "esperas a que el entorno pueda ejecutar la suite?"
-                    ),
+                    )),
                 )
             return
 
@@ -5489,7 +5661,12 @@ class RunExecutor:
                 create_comment(
                     self.db_path,
                     issue_id=issue_id,
-                    body=(
+                    body=((
+                        f"⚙ Sistema {marker}: cierre DENEGADO — `lead_quorum` exige persistir Plan A "
+                        "mediante `update_plan` y completar dos auditorías independientes antes de "
+                        "aceptar Plan B. En la próxima run emite `update_plan`; no cierres la issue, "
+                        "no delegues implementación y no pidas dispensar tests."
+                    ) if is_quorum_gate else (
                         f"⚙ Sistema {marker}: cierre DENEGADO por el quality gate — hay tests en el "
                         "workspace pero ningún test_runner reporta exit 0, así que la issue NO quedó "
                         "cerrada aunque lo hayas intentado. Para desbloquear: (a) delega una sub-issue "
@@ -5497,7 +5674,7 @@ class RunExecutor:
                         "evidencia), o (b) si el entorno no puede ejecutar los tests, escala una "
                         f"request_confirmation con reason='{_RUNTIME_VERIFICATION_WAIVER_REASON}' en el "
                         "payload: si el usuario la acepta, este gate queda dispensado."
-                    ),
+                    )),
                     author_user_id="system",
                 )
         with contextlib.suppress(Exception):
@@ -7055,5 +7232,5 @@ def _looks_like_plan(body: str) -> bool:
         return False
     if text.startswith(("plan inicial", "plan detallado", "# plan", "## plan")):
         return True
-    markers = ("objetivo", "objective", "sub-issue", "delegacion", "delegación", "riesgo", "criterio")
-    return text.startswith("plan") and sum(1 for marker in markers if marker in text) >= 2
+    markers = ("objetivo", "objective", "sub-issue", "delegacion", "delegación", "riesgo", "risk", "criterio")
+    return sum(1 for marker in markers if marker in text) >= 3

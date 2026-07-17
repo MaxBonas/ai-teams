@@ -1,0 +1,17 @@
+{
+  "id": "provider_failover_v1",
+  "description": "Planificar failover multi-proveedor sin duplicar efectos ni disparar coste.",
+  "criteria": [
+    {"id":"failure_taxonomy","weight":2,"required":true,"patterns":["429|rate.limit|timeout|auth|invalid.request"]},
+    {"id":"idempotency","weight":2,"required":true,"patterns":["idempoten|deduplic"]},
+    {"id":"circuit_breaker","weight":2,"required":true,"patterns":["circuit.breaker|cortacircuit"]},
+    {"id":"bounded_retries","weight":2,"patterns":["backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"]},
+    {"id":"cost_cap","weight":2,"required":true,"patterns":["cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"]},
+    {"id":"quality_guard","weight":2,"patterns":["quality|calidad|capacidad.{0,20}modelo|equivalencia"]},
+    {"id":"observability","weight":1,"patterns":["telemetr|m[eé]trica|cost_events|run_events"]},
+    {"id":"recovery_test","weight":2,"patterns":["chaos|fault.injection|simular.{0,20}(429|timeout)|test.{0,20}failover"]}
+  ],
+  "penalties": [
+    {"id":"unbounded_fallback","weight":4,"patterns":["reintentar indefinidamente|fallback sin l[ií]mite|unbounded retry"]}
+  ]
+}

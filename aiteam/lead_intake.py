@@ -14,7 +14,6 @@ from aiteam.hiring_economics import log_hiring_decision
 from aiteam.project_adapters import apply_adapter_policy_to_member
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES
 from aiteam.run_profiles import (
-    FULL_TEAM,
     LEAD_QUORUM,
     SOLO_LEAD,
     AgentBlueprint,
@@ -77,11 +76,24 @@ def build_team_proposal(
     )
     pconf = profile_config(effective_profile)
 
-    proposed_team = [
-        _blueprint_to_member(a, adapter_profiles=adapter_profiles or [])
-        for a in blueprint.agents
-        if a.role not in {"team_lead", "lead"}
-    ]  # Lead is already created
+    proposed_team: list[dict[str, Any]] = []
+    used_quorum_providers: set[str] = set()
+    for agent in blueprint.agents:
+        if agent.role in {"team_lead", "lead"}:
+            continue
+        candidates = adapter_profiles or []
+        if effective_profile == LEAD_QUORUM:
+            diverse = [
+                item for item in candidates
+                if str(item.get("provider") or item.get("id") or "") not in used_quorum_providers
+            ]
+            candidates = diverse or candidates
+        member = _blueprint_to_member(agent, adapter_profiles=candidates)
+        if effective_profile == LEAD_QUORUM:
+            selected_id = str(member.get("adapter_profile_id") or "")
+            selected = next((item for item in (adapter_profiles or []) if str(item.get("id") or "") == selected_id), {})
+            used_quorum_providers.add(str(selected.get("provider") or selected_id))
+        proposed_team.append(member)
 
     suggested_issues = _suggested_issues_for_profile(effective_profile, parent_issue_id, proposed_team)
 
@@ -190,30 +202,10 @@ def _suggested_issues_for_profile(
         ]
 
     if profile == LEAD_QUORUM:
-        # Lead + quorum auditors review the plan; no worker delegation
-        reviewer_ids = [m["id"] for m in proposed_team if "quorum" in m["role"] or "reviewer" in m["role"]]
+        # Plan A already lives on the root issue. Only independent auditor
+        # children are needed; a second Lead planning child duplicates work and
+        # receives the wrong sibling/parent context.
         return [
-            {
-                "id": child_id("plan"),
-                "title": "Planificar y presentar al quorum",
-                "description": "El Lead crea el plan detallado que los auditores revisarán antes de ejecutar.",
-                "role": "lead",
-                "assignee_agent_id": "role:lead",
-                "complexity": "high",
-                "priority": 100,
-                "delegation_type": "planning",
-                "cost_tier": "lead",
-                "report_to": None,
-                "reviewed_by": reviewer_ids[0] if reviewer_ids else None,
-                "evidence_required": [
-                    "objetivo y criterio de cierre",
-                    "fases y dependencias",
-                    "riesgos y plan de mitigación",
-                    "aprobación del quorum",
-                ],
-                "risk_checks": ["alcance ambiguo", "plan sin revisión independiente"],
-            },
-        ] + [
             {
                 "id": child_id(f"quorum_{i+1}"),
                 "title": f"Revisión de quorum {i+1}",

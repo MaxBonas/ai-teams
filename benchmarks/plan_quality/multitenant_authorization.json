@@ -1,0 +1,17 @@
+{
+  "id": "multitenant_authorization_v1",
+  "description": "Planificar aislamiento de autorización multi-tenant con migración segura.",
+  "criteria": [
+    {"id":"tenant_boundary","weight":2,"required":true,"patterns":["tenant.{0,20}(boundary|l[ií]mite|aislamiento)|aislamiento.{0,20}tenant"]},
+    {"id":"deny_default","weight":2,"required":true,"patterns":["deny.by.default|denegar por defecto|default.deny"]},
+    {"id":"object_level_authz","weight":2,"required":true,"patterns":["object.level|recurso.{0,30}autoriz|autorizaci[oó]n.{0,30}objeto"]},
+    {"id":"cache_scope","weight":2,"patterns":["cache.{0,30}tenant|clave.{0,30}tenant|invalidaci[oó]n.{0,20}cache"]},
+    {"id":"negative_tests","weight":2,"required":true,"patterns":["test.{0,30}(negativ|cross.tenant)|acceso cruzado|IDOR"]},
+    {"id":"audit","weight":1,"patterns":["audit|trazabilidad|activity.log"]},
+    {"id":"migration","weight":2,"patterns":["backfill|migraci[oó]n|compatibilidad"]},
+    {"id":"incident_rollback","weight":2,"patterns":["rollback|feature.flag|kill.switch|revers"]}
+  ],
+  "penalties": [
+    {"id":"client_side_authz","weight":4,"patterns":["autorizaci[oó]n solo en (el )?(cliente|frontend)|client.side only"]}
+  ]
+}

@@ -54,13 +54,13 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 
 ## Prioridades vigentes
 
-Completado en este bloque: fotografía y limpieza documental, canario deny → corrección → recuperación, conocimiento canónico compartido en `docs/ORCHESTRATION*.md`, benchmarks/evals SQL, retirada del `TaskBoard` huérfano, gate contra reejecuciones idénticas de Test Runner, gobernanza determinista de `solo_lead`, contrato durable de quorum, activación backend de perfiles y primer caso empírico medio/alto del selector. El quorum tiene ahora estados terminales absorbentes, auditoría por rutas vivas y provenance económica e2e determinista. El benchmark `sqlite_job_queue` dio 10/10 a `full_team` y 9/10 a `solo_lead`; también destapó el autocierre ausente de `test_designer` y un falso verde por shadowing de pytest, ambos corregidos.
+Completado en este bloque: fotografía y limpieza documental, canario deny → corrección → recuperación, conocimiento canónico compartido en `docs/ORCHESTRATION*.md`, benchmarks/evals SQL, retirada del `TaskBoard` huérfano, gate contra reejecuciones idénticas de Test Runner, gobernanza determinista de `solo_lead`, contrato durable de quorum, activación backend de perfiles y primer caso empírico medio/alto del selector. La matriz determinista del selector cubre ahora 28 fronteras en siete familias (28/28, sin falsos `solo_lead` ni sobreuso). Existe además un harness específico de calidad Plan A → Plan B para `lead_quorum`, con tres rúbricas ocultas y provenance económica. La primera ejecución real produjo Plan A pero quedó incompleta al no estar instalado Gemini CLI; ese intento descubrió y motivó correcciones de activación, contexto, contribuciones e identidad durable de proveedor.
 
 Siguiente orden:
 
-1. Ampliar la calibración empírica del selector con más semillas, casos medios reversibles y tareas complejas de otra naturaleza. Ya hay dos anclas: `cli_conversor` favorece `solo_lead`; `sqlite_job_queue` justifica `full_team` por calidad (10/10 frente a 9/10), aunque consume 1,84× tokens y 1,73× tiempo.
-2. Crear un benchmark de calidad de planes para quorum, separado del benchmark de programación.
-3. Verificar telemetría de usage en canales CLI no Codex antes de compararlos; esto completará la validación externa de costes del quorum.
+1. Ejecutar nuevas semillas reales del selector en casos medios reversibles y tareas complejas de otra naturaleza. Las 28 fronteras deterministas protegen la política, pero no sustituyen varianza de LLM.
+2. Instalar/conectar un segundo proveedor permitido y ejecutar tres semillas de cada rúbrica `lead_quorum`; no sustituir diversidad real por dos runs de Codex.
+3. Verificar `usage` real de Gemini subscription durante esas runs. La identidad provider/channel ya se resuelve desde el perfil durable en vez del descriptor CLI compartido.
 4. Activar y evaluar resumen causal cuando el contexto exceda presupuesto.
 5. Integrar el resumen de evals SQL en `loop-health` cuando se toque esa superficie.
 6. Extraer piezas de `RunExecutor` solo de forma oportunista; actualmente concentra 7.059 líneas.
@@ -69,7 +69,8 @@ Siguiente orden:
 
 - `RunExecutor` concentra muchas políticas; el orden de preflights y gates requiere tests dirigidos.
 - El bloque principal quedó consolidado en `codex/orchestration-hardening`; `.claude/skills/aiteams-frontend/` permanece sin seguimiento y fuera de los commits por origen no atribuido.
-- La telemetría de usage de CLIs no Codex, especialmente `gemini_subscription`, debe verificarse antes de comparar costes entre proveedores.
+- La telemetría de usage de CLIs no Codex, especialmente `gemini_subscription`, debe verificarse antes de comparar costes entre proveedores. En esta máquina `gemini` no está instalado y no hay claves API en el vault.
+- `benchmarks/results/quorum-sqlite-seed-1.json` es evidencia de una run incompleta, no un resultado A/B: Plan A obtuvo 91,3 % y el segundo auditor falló con `subscription_cli_not_found`.
 - El benchmark ya tiene resultados versionados y juez oculto aislado (harness v3); faltan más semillas y familias de tarea antes de extraer conclusiones estadísticas.
 - Los documentos históricos de migración pueden contener estados de fase ya superados; el banner del documento indica cómo leerlos.
 - Prompts externos o antiguos que mencionen `AITEAM_AUTO_QUORUM` están obsoletos: el único disparador vivo es el perfil explícito `lead_quorum`.

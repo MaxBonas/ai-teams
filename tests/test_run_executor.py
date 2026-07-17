@@ -3880,6 +3880,32 @@ def test_daily_cost_cap_disabled_by_default(tmp_path: Path, monkeypatch) -> None
     assert runtime.calls == 1, "sin cap configurado, el gasto no bloquea nada"
 
 
+def test_subscription_run_provenance_uses_selected_profile_identity(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE agents SET adapter_config_json = ? WHERE id = 'agent-1'",
+            (json.dumps({"profile_id": "gemini_subscription", "model": "gemini-2.5-flash"}),),
+        )
+        conn.commit()
+
+    runtime = _CountingRuntime()
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    dispatch = _dispatch_one(db_path)
+    executor.execute(dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        run = conn.execute("SELECT provider, model, channel FROM runs").fetchone()
+    assert dict(run) == {
+        "provider": "google-gemini",
+        "model": "gemini-2.5-flash",
+        "channel": "subscription",
+    }
+
+
 # ── Cascada de calidad: escalado de modelo antes de cambio de canal ───────────
 
 def _escalation_db(tmp_path: Path, *, model: str = "gpt-5.4-mini") -> Path:

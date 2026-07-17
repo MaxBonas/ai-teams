@@ -7,7 +7,7 @@ from pathlib import Path
 from aiteam.adapters.registry import AdapterDescriptor, AdapterRegistry, ExecutionResult
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.db.wakeups import enqueue_wakeup
-from aiteam.heartbeat.executor import RunExecutor
+from aiteam.heartbeat.executor import RunExecutor, _looks_like_plan
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
 from aiteam.adapters.work_contract import ops_to_actions
 
@@ -64,6 +64,121 @@ def _report() -> dict:
         "result": "changes_requested",
         "evidence": "Riesgo concreto sobre la revisión A.",
     }
+
+
+def test_markdown_plan_is_materializable_without_plan_prefix() -> None:
+    assert _looks_like_plan(
+        "**Objective** migrar\n\n**Sub-issues** fases\n\n**Risk model** bloqueo"
+    ) is True
+
+
+def test_explicit_quorum_auto_starts_from_durable_plan_without_hiring_interaction(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DELETE FROM issues WHERE parent_id='issue:root'")
+        conn.commit()
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+
+    session = executor._maybe_start_explicit_quorum(issue_id="issue:root", run_id="")
+
+    assert session is not None
+    with sqlite3.connect(str(db_path)) as conn:
+        children = conn.execute(
+            "SELECT COUNT(*) FROM issues WHERE parent_id='issue:root' AND role='reviewer'"
+        ).fetchone()[0]
+        wakes = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE reason='assignment' AND status='queued' "
+            "AND agent_id LIKE 'role:quorum_auditor_%'"
+        ).fetchone()[0]
+        interactions = conn.execute(
+            "SELECT COUNT(*) FROM issue_thread_interactions WHERE kind='suggest_tasks'"
+        ).fetchone()[0]
+    assert children == 2
+    assert wakes == 2
+    assert interactions == 0
+
+
+def test_quorum_auditor_receives_immutable_plan_not_other_contributions(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DELETE FROM issues WHERE parent_id='issue:root'")
+        conn.commit()
+    setup = RunExecutor(db_path, AdapterRegistry([]))
+    assert setup._maybe_start_explicit_quorum(issue_id="issue:root", run_id="") is not None
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET adapter_type='openai_api' WHERE id='role:quorum_auditor_1'")
+        conn.commit()
+
+    class _Capture:
+        descriptor = AdapterDescriptor(adapter_type="openai_api", channel="api", provider="openai")
+
+        def __init__(self) -> None:
+            self.payload = {}
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            self.payload = json.loads(str(wake_context["wake_payload_json"]))
+            return {}
+
+        def execute(self, run, env) -> ExecutionResult:
+            return ExecutionResult(status="completed", output="audit")
+
+    runtime = _Capture()
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:quorum_auditor_1")
+    assert dispatch is not None
+    RunExecutor(db_path, AdapterRegistry([runtime])).execute(dispatch)
+    assert runtime.payload["quorum_review"]["base_plan_revision_id"] == "rev:a"
+    assert runtime.payload["quorum_review"]["plan"]["body"] == "A"
+    assert "contributions" not in runtime.payload["quorum_review"]
+
+
+def test_quorum_report_in_add_comment_records_contribution(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    session = executor._initialize_quorum_session(
+        parent_issue_id="issue:root", proposal=_proposal(), created_issue_ids=["issue:q1", "issue:q2"]
+    )
+    assert session is not None
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO runs (id,agent_id,issue_id,status,provider,model,channel) "
+            "VALUES ('run:add','role:q1','issue:q1','running','openai','m','api')"
+        )
+        conn.commit()
+    executor._apply_result_actions(
+        run={"id": "run:add", "issue_id": "issue:q1", "provider": "openai", "model": "m", "channel": "api"},
+        agent_id="role:q1",
+        agent_role="reviewer",
+        result=ExecutionResult(
+            status="completed",
+            actions={"add_comments": [
+                "---AGENT-REPORT---\nrole: reviewer\nresult: changes_requested\n"
+                "issue_status: blocked\nnext_owner: lead\ntech_match: n/a\n"
+                "blocker: risk\nevidence: finding"
+            ]},
+        ),
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT provider,valid FROM quorum_contributions WHERE session_id=?", (session["id"],)
+        ).fetchone()
+    assert row == ("openai", 1)
+
+
+def test_explicit_quorum_cannot_close_before_accepted_plan(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    assert executor._quality_close_denied(issue_id="issue:root") == "lead_quorum_plan_and_session_required"
+    session = executor._initialize_quorum_session(
+        parent_issue_id="issue:root",
+        proposal=_proposal(),
+        created_issue_ids=["issue:q1", "issue:q2"],
+    )
+    assert session is not None
+    assert executor._quality_close_denied(issue_id="issue:root") == "lead_quorum_accepted_plan_required"
 
 
 class _CostedAuditorRuntime:

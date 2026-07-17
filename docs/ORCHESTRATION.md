@@ -261,6 +261,21 @@ Mantener spec, workspace inicial, límites y suite oculta. Repetir ejecuciones n
 
 Cada check de un canario debe poder fallar. Separar garantías que alimentan `ok` de contadores informativos.
 
+### Benchmark de planes `lead_quorum`
+
+Evaluar el valor incremental sobre el mismo artefacto: revisión A congelada,
+auditorías independientes y revisión B aceptada. La rúbrica específica permanece
+fuera del contexto de los modelos y mide cobertura, hard gates, diversidad,
+tokens, coste, latencia y provenance. No usar tests de código como métrica
+principal ni concluir con una semilla. El harness vive en
+`scripts/benchmark_quorum_plans.py`; los casos versionados cubren migración
+SQLite, autorización multi-tenant y failover de proveedores.
+
+Una ejecución incompleta también es un resultado de liveness: debe conservar
+Plan A, estado de sesión, contribuciones y errores de runs. No se puede declarar
+calibrado el quorum hasta repetir cada familia con al menos dos proveedores
+operativos y varias semillas.
+
 ## Mapa del repositorio
 
 | Decisión | Código principal |

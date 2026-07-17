@@ -24,6 +24,7 @@ def evaluate_cases(path: Path = DEFAULT_CASES) -> dict[str, Any]:
     unsafe_solo = 0
     overteam = 0
     correct = 0
+    by_family: dict[str, dict[str, int]] = {}
     for case in cases:
         expected = str(case.get("expected") or "")
         if expected not in {SOLO_LEAD, FULL_TEAM}:
@@ -39,9 +40,17 @@ def evaluate_cases(path: Path = DEFAULT_CASES) -> dict[str, Any]:
         correct += int(is_correct)
         unsafe_solo += int(expected == FULL_TEAM and selected.profile == SOLO_LEAD)
         overteam += int(expected == SOLO_LEAD and selected.profile == FULL_TEAM)
+        family = str(case.get("family") or "unclassified")
+        bucket = by_family.setdefault(family, {"cases": 0, "correct": 0, "unsafe_solo": 0, "overteam": 0})
+        bucket["cases"] += 1
+        bucket["correct"] += int(is_correct)
+        bucket["unsafe_solo"] += int(expected == FULL_TEAM and selected.profile == SOLO_LEAD)
+        bucket["overteam"] += int(expected == SOLO_LEAD and selected.profile == FULL_TEAM)
         results.append(
             {
                 "id": case.get("id"),
+                "family": family,
+                "difficulty": case.get("difficulty"),
                 "expected": expected,
                 "selected": selected.profile,
                 "reason": selected.reason,
@@ -56,6 +65,13 @@ def evaluate_cases(path: Path = DEFAULT_CASES) -> dict[str, Any]:
         "unsafe_solo": unsafe_solo,
         "overteam": overteam,
         "passes_safety_gate": unsafe_solo == 0,
+        "by_family": {
+            family: {
+                **metrics,
+                "accuracy": round(metrics["correct"] / metrics["cases"], 4),
+            }
+            for family, metrics in sorted(by_family.items())
+        },
         "results": results,
     }
 

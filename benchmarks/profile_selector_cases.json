@@ -1,14 +1,36 @@
 [
-  {"id":"small_config","expected":"solo_lead","criticality":"low","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
-  {"id":"bounded_cli","expected":"solo_lead","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
-  {"id":"medium_ambiguity_reversible","expected":"solo_lead","criticality":"medium","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
-  {"id":"docs_cleanup","expected":"solo_lead","criticality":"low","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
-  {"id":"security_sensitive","expected":"full_team","criticality":"high","ambiguity":"low","independent_verification":true,"parallel_workstreams":1,"reversible":true},
-  {"id":"critical_migration","expected":"full_team","criticality":"critical","ambiguity":"medium","independent_verification":true,"parallel_workstreams":2,"reversible":false},
-  {"id":"ambiguous_architecture","expected":"full_team","criticality":"medium","ambiguity":"high","independent_verification":false,"parallel_workstreams":1,"reversible":true},
-  {"id":"independent_acceptance","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":true,"parallel_workstreams":1,"reversible":true},
-  {"id":"parallel_front_back","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":2,"reversible":true},
-  {"id":"irreversible_schema","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":false},
-  {"id":"missing_ambiguity","expected":"full_team","criticality":"low","ambiguity":null,"independent_verification":false,"parallel_workstreams":1,"reversible":true},
-  {"id":"missing_risk_contract","expected":"full_team","criticality":null,"ambiguity":null,"independent_verification":null,"parallel_workstreams":null,"reversible":null}
+  {"id":"small_config","family":"maintenance","difficulty":"small","expected":"solo_lead","criticality":"low","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"docs_cleanup","family":"maintenance","difficulty":"small","expected":"solo_lead","criticality":"low","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"rename_internal_symbol","family":"maintenance","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"dependency_pin_patch","family":"maintenance","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+
+  {"id":"bounded_cli","family":"backend","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"pagination_bug","family":"backend","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"pure_parser_extension","family":"backend","difficulty":"medium","expected":"solo_lead","criticality":"low","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"sqlite_job_queue","family":"backend","difficulty":"complex","expected":"full_team","criticality":"medium","ambiguity":"medium","independent_verification":true,"parallel_workstreams":2,"reversible":true},
+
+  {"id":"copy_change","family":"frontend","difficulty":"small","expected":"solo_lead","criticality":"low","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"single_form_validation","family":"frontend","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"parallel_front_back","family":"frontend","difficulty":"complex","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":2,"reversible":true},
+  {"id":"accessible_checkout_redesign","family":"frontend","difficulty":"complex","expected":"full_team","criticality":"medium","ambiguity":"high","independent_verification":true,"parallel_workstreams":2,"reversible":true},
+
+  {"id":"security_sensitive","family":"security","difficulty":"complex","expected":"full_team","criticality":"high","ambiguity":"low","independent_verification":true,"parallel_workstreams":1,"reversible":true},
+  {"id":"authz_cache_fix","family":"security","difficulty":"medium","expected":"full_team","criticality":"high","ambiguity":"medium","independent_verification":true,"parallel_workstreams":1,"reversible":true},
+  {"id":"secret_redaction","family":"security","difficulty":"medium","expected":"full_team","criticality":"high","ambiguity":"low","independent_verification":true,"parallel_workstreams":1,"reversible":true},
+  {"id":"threat_model_architecture","family":"security","difficulty":"complex","expected":"full_team","criticality":"critical","ambiguity":"high","independent_verification":true,"parallel_workstreams":2,"reversible":false},
+
+  {"id":"critical_migration","family":"data","difficulty":"complex","expected":"full_team","criticality":"critical","ambiguity":"medium","independent_verification":true,"parallel_workstreams":2,"reversible":false},
+  {"id":"irreversible_schema","family":"data","difficulty":"complex","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":false},
+  {"id":"reversible_index_addition","family":"data","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"backfill_with_rollback","family":"data","difficulty":"complex","expected":"full_team","criticality":"high","ambiguity":"medium","independent_verification":true,"parallel_workstreams":2,"reversible":true},
+
+  {"id":"ambiguous_architecture","family":"architecture","difficulty":"complex","expected":"full_team","criticality":"medium","ambiguity":"high","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"independent_acceptance","family":"architecture","difficulty":"medium","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":true,"parallel_workstreams":1,"reversible":true},
+  {"id":"single_adapter_refactor","family":"architecture","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"provider_failover_design","family":"architecture","difficulty":"complex","expected":"full_team","criticality":"high","ambiguity":"high","independent_verification":true,"parallel_workstreams":3,"reversible":true},
+
+  {"id":"missing_ambiguity","family":"incomplete","difficulty":"unknown","expected":"full_team","criticality":"low","ambiguity":null,"independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"missing_risk_contract","family":"incomplete","difficulty":"unknown","expected":"full_team","criticality":null,"ambiguity":null,"independent_verification":null,"parallel_workstreams":null,"reversible":null},
+  {"id":"missing_reversibility","family":"incomplete","difficulty":"unknown","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":null},
+  {"id":"missing_stream_count","family":"incomplete","difficulty":"unknown","expected":"full_team","criticality":"low","ambiguity":"low","independent_verification":false,"parallel_workstreams":null,"reversible":true}
 ]

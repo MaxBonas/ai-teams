@@ -9,6 +9,7 @@ from aiteam.run_profiles import (
     profile_config,
     select_execution_profile,
 )
+from aiteam.lead_intake import build_team_proposal
 from aiteam.policies import (
     QUORUM_MAX_CONTRIBUTIONS,
     QUORUM_MAX_SYNTHESIS_ATTEMPTS,
@@ -56,6 +57,20 @@ def test_lead_quorum_blueprint_uses_senior_auditors_without_worker_hiring() -> N
     assert QUORUM_MIN_VALID_CONTRIBUTIONS == 2
     assert QUORUM_MAX_CONTRIBUTIONS >= QUORUM_MIN_VALID_CONTRIBUTIONS
     assert QUORUM_MAX_SYNTHESIS_ATTEMPTS == 2
+
+
+def test_lead_quorum_assigns_distinct_providers_when_available() -> None:
+    proposal = build_team_proposal(
+        {"id": "issue:q", "title": "Plan", "metadata": {"profile": "lead_quorum"}},
+        adapter_profiles=[
+            {"id": "codex_subscription", "provider": "openai", "channel": "subscription", "adapter_type": "subscription_cli"},
+            {"id": "gemini_subscription", "provider": "google", "channel": "subscription", "adapter_type": "subscription_cli"},
+        ],
+    )
+    assert [member["adapter_profile_id"] for member in proposal["proposed_team"]] == [
+        "codex_subscription", "gemini_subscription",
+    ]
+    assert len(proposal["suggested_issues"]) == 2
 
 
 def test_full_team_blueprint_models_programming_team_and_cost_delegation() -> None:
