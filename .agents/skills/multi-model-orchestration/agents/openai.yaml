@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orquestación multi-modelo"
+  short_description: "Routing, verificación y economía multi-LLM"
+  default_prompt: "Usa $multi-model-orchestration para analizar o diseñar una decisión avanzada de orquestación multi-LLM en AI Teams."

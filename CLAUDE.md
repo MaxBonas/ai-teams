@@ -8,7 +8,7 @@ suscripción), y un heartbeat secuencial procesa los runs de uno en uno.
 ## Comandos verificados
 
 - **Tests (todos)**: `venv/Scripts/python.exe -m pytest tests/ -q --tb=short`
-  (o `.\scripts\pytest_local.bat tests -q`). Estado 2026-07-15: **802 passing**.
+  (o `.\scripts\pytest_local.bat tests -q`). Estado 2026-07-16: **853 passing**.
 - **Backend**: `venv/Scripts/python.exe -m uvicorn api.main:app --host 0.0.0.0 --port 8010`
   (arranca el heartbeat). Frontend: puerto 9490. Lanzador conjunto: `start_ide.bat`.
 - **Auditar un proyecto capa-2**: `venv/Scripts/python.exe scripts/audit_project_db.py "<workspace>"`
@@ -51,9 +51,9 @@ suscripción), y un heartbeat secuencial procesa los runs de uno en uno.
 
 ## Skills de este repo
 
-- `multi-model-orchestration`: patrones 2026 de routing/cascadas/verificación
-  cruzada mapeados al código — consultar al tocar adapters, policies, governor,
-  hiring_economics, quorum o gates.
+- `multi-model-orchestration`: adaptador de descubrimiento hacia la fuente canónica
+  `docs/ORCHESTRATION.md` y su registro `docs/ORCHESTRATION_SOURCES.md`; consultar
+  al tocar adapters, policies, governor, hiring_economics, quorum o gates.
 - `layer2-audit`: auditoría barata en tokens de proyectos capa-2.
 
 ## Entorno Windows

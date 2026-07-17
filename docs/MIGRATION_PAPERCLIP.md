@@ -1,8 +1,15 @@
 # Migracion Paperclip Patterns — Plan Interno
 
-Fecha: `2026-05-04`
-Estado: plan rector activo. Fase 1 implementada en paralelo; no se ha aplicado migracion real al runtime salvo ejecucion explicita con `--apply`.
+Fecha original: `2026-05-04`
+Estado actualizado: migración estructural completada; documento conservado como plan rector e historial de decisiones.
 Decision: AI Teams conserva SQLite y el frontend Vite/React.
+
+> **Lectura actual (`2026-07-16`)**: el runtime activo ya ejecuta adapters mediante
+> `HeartbeatLoop`/`RunExecutor`, reconcilia runs y wakeups, persiste interactions,
+> reports, costes y actividad en SQLite, y dispone de cockpit v2, canario e2e y
+> benchmark frente a un agente único. Los párrafos `Estado:` de cada fase son
+> fotografías históricas de la migración y pueden describir pendientes ya resueltos.
+> Consultar `HANDOFF.md`, `task.md`, código y tests para el estado operativo vigente.
 
 Este documento reemplaza como guia de arquitectura activa al roadmap incremental anterior. La documentacion antigua fue retirada de la fuente viva; si hace falta contexto historico, usar Git.
 
@@ -113,7 +120,7 @@ Las tres causas estructurales a corregir son:
 
 ### Entidades principales
 
-- `issues`: unidad de trabajo normalizada; sustituye gradualmente a `WorkTask` como fuente primaria.
+- `issues`: unidad de trabajo normalizada y fuente primaria del control plane activo.
 - `agents`: rol interno + adapter fijo + politica de heartbeat/budget.
 - `team_blueprints`: equipo propuesto por el Lead para un proyecto/run.
 - `agent_assignments`: contratacion/asignacion efectiva de agentes a issues, con razon y politica de coste.
@@ -172,7 +179,7 @@ Objetivo: fijar pronto el contrato funcional diferencial de AI Teams antes de im
 - Mantener compatibilidad con los 6 roles actuales, pero permitir equipos dinamicos por proyecto.
 - Tests: un run `full_team` empieza con Lead, genera blueprint y crea/asigna agentes adaptados al objetivo.
 
-Estado: base interna implementada en `aiteam/run_profiles.py`. Ya existen perfiles canonicos, normalizacion de aliases legacy, blueprints de equipo de programacion y politica de delegacion economica. Pendiente engancharlo al inicio real de runs cuando el scheduler v2 sustituya el flujo viejo.
+Estado: implementado. `aiteam/run_profiles.py` define perfiles canónicos, blueprints y política de delegación; el scheduler/executor los transporta y gobierna. `POST /api/projects/new` acepta un override canónico, lo persiste en goal/issue/wakeup y aprovisiona auditores al iniciar `lead_quorum`.
 
 ### Fase 2 — Checkout atomico
 
@@ -181,12 +188,12 @@ Objetivo: eliminar la causa mas fragil de bloqueo en Windows.
 - Implementar `aiteam/db/issues.py::checkout(...)`.
 - Exponer endpoint `POST /api/issues/{id}/checkout`.
 - Reescribir tests de `FileLockRegistry` hacia checkout concurrente con SQLite WAL.
-- Mantener `TaskBoard.claim_task()` solo como shim temporal que llama al checkout cuando la issue existe.
+- Mantener `TaskBoard.claim_task()` solo como shim temporal durante la migración. Cumplido y retirado `2026-07-16` tras confirmar cero consumidores activos.
 - Eliminar `runtime/file_locks.json` y el registro de locks de archivo como mecanismo de concurrencia.
 
 Regla: `409` no se reintenta.
 
-Estado: primitiva DB implementada en `aiteam/db/issues.py` con `UPDATE ... RETURNING`, conflicto como `None` e idempotencia para mismo agente/run. Endpoint `POST /api/issues/{id}/checkout` montado en `api/routers/control_plane.py`; conflicto HTTP `409`. `FileLockRegistry` fue retirado del camino principal y `TaskBoard.claim_task()` usa checkout v2 cuando existe issue normalizada. `TaskBoard` ya fue reducido a shim minimo sin reglas legacy de support pre-phase/gates blandos. Pendiente sustituirlo por repositorio `issues`.
+Estado histórico: primitiva DB implementada en `aiteam/db/issues.py` con `UPDATE ... RETURNING`, conflicto como `None` e idempotencia para mismo agente/run. Endpoint `POST /api/issues/{id}/checkout` montado en `api/routers/control_plane.py`; conflicto HTTP `409`. `FileLockRegistry` fue retirado del camino principal y el shim `TaskBoard` quedó temporalmente conectado al checkout v2. Estado actual (`2026-07-16`): el shim fue eliminado y `issues` es el camino activo.
 
 ### Fase 3 — Runs durables
 
@@ -287,7 +294,7 @@ Objetivo: reducir superficie de mantenimiento despues de mover estado/ejecucion.
 
 Solo cuando el nuevo camino este verde:
 
-- borrar restos de `TaskBoard` legacy cuando `issues` sea fuente primaria
+- borrar restos de `TaskBoard` legacy cuando `issues` sea fuente primaria — completado `2026-07-16` tras confirmar cero consumidores activos
 - mantener eliminado `workflow_planner.py`
 - sustituir `router.py` por registry simple
 - borrar JSONL como writers primarios

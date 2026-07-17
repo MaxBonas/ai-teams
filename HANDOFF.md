@@ -2,96 +2,100 @@
 
 # Handoff actual
 
-Fecha: `2026-05-04`
+Fecha: `2026-07-17`
 
-AI Teams esta en limpieza profunda y reconstruccion Paperclip-like. La compatibilidad con proyectos antiguos, dogfooding y la suite legacy deja de ser objetivo.
+AI Teams ya no está en reconstrucción inicial. Es un control plane multiagente Paperclip-like funcional, centrado en SQLite, y se encuentra en fase de endurecimiento operativo, validación con proveedores reales y medición frente a un agente único.
 
-## Fuentes vivas
+## Autoridad documental
 
-- `task.md`
-- `docs/MIGRATION_PAPERCLIP.md`
-- `docs/PAPERCLIP_GUIDE.md`
-- `docs/INDEX.md`
-- `docs/HISTORY.md`
-- `AGENTS.md`
+Orden de prioridad:
 
-## Estado tecnico
+1. `AGENTS.md`: reglas de desarrollo y producto objetivo.
+2. `task.md`: estado y backlog resumido.
+3. `docs/MIGRATION_PAPERCLIP.md`: plan rector e historial de la migración.
+4. `docs/PAPERCLIP_GUIDE.md`: patrones Paperclip adaptados.
+5. `docs/RUN_PROBLEMS_REGISTRY.md`: fallos observados y mitigaciones.
+6. Código activo y tests.
 
-Actualizacion reciente:
+`CLAUDE.md` y `.claude/skills/` orientan sesiones de Claude Code. `.agents/skills/` orienta Codex. Ninguna instrucción específica de proveedor prevalece sobre `AGENTS.md`.
 
-- Paperclip queda documentado como guia practica en `docs/PAPERCLIP_GUIDE.md`: consultar su codigo local para liveness, wakeups, interactions, adapters y recovery; adaptar patrones sin perder Lead-first, hiring dinamico y delegacion economica.
-- Crear proyecto nuevo exige seleccionar al menos un adapter de usuario. La allowlist queda en `.aiteam/project_config.json`.
-- El Lead inicial y el hiring dinamico usan solo adapters disponibles en el proyecto: seniors/quorum/reviewers prefieren modelos avanzados; workers/QA prefieren modelos baratos o locales cuando existen.
-- El panel de hiring permite corregir perfil y modelo por agente antes de aceptar.
-- El cockpit incluye borrado de proyecto actual con confirmacion exacta `DELETE`; el backend solo borra carpetas dentro de la raiz de proyectos, rechaza symlinks y vuelve a workspace no configurado.
+## Estado técnico
 
-Implementado en la sesion anterior (pre-resumen):
+Implementado y activo:
 
-- schema v2 SQLite en `aiteam/db/schema.sql`
-- migrador dry-run/apply en `scripts/migrate_to_v2.py`
-- modelo de perfiles en `aiteam/run_profiles.py`
-- checkout atomico en `aiteam/db/issues.py`
-- runs durables y wakeups en `aiteam/db/runs.py`, `aiteam/db/wakeups.py`
-- scheduler en `aiteam/heartbeat/scheduler.py`
-- `SubprocessAdapterRuntime` en `aiteam/adapters/subprocess_adapter.py`
-- `RunExecutor` + `HeartbeatLoop` en `aiteam/heartbeat/executor.py` y `loop.py`
-- `reconcile_stale_runs` en startup via lifespan en `api/main.py`
-- `issue_thread_interactions` (create/list/get/resolve) en `aiteam/db/interactions.py` y `api/routers/interactions.py`
-- `activity_log` en `aiteam/db/activity_log.py`
-- CRUD: goals, agents, issues, runs en `aiteam/db/` + `api/routers/`
+- SQLite como motor único del control plane: issues, agents, assignments, runs, wakeups, interactions, reports, costes, actividad y acceso a herramientas.
+- `HeartbeatLoop` + `HeartbeatScheduler` + `RunExecutor` como camino real de ejecución, con reconciliation y liveness en cada tick.
+- Checkout atómico, dependencias, wakeups durables y continuación de padres al cerrar hijos.
+- Adapters reales para canales API y suscripción, con allowlist por proyecto, health probes y recovery/escalado.
+- Lead-first, hiring dinámico y perfiles `solo_lead`, `lead_quorum` y `full_team`.
+- Delegación económica por tier/capacidad, quality cascade y límite diario de coste.
+- Reports estructurados con provenance, receipts Git, revisión anclada al diff, aceptación independiente y `test_runner` determinista.
+- Cross-provider review vinculante en criticidad alta y quorum para decisiones complejas.
+- Context diet, focus files, payload delta y memoria operativa mediante `learning_facts`.
+- Cockpit Vite/React sobre APIs v2, timeline durable, decisiones humanas, equipo, runs y costes.
+- Canario e2e sin LLM y benchmark A/B contra `codex exec` único.
+- Canario Lead + Quorum sin LLM con gate de aportes, síntesis y cierre durable de planificación, sin ejecución.
 
-Implementado en esta sesion:
+La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-- **`aiteam/db/comments.py`** — `create_comment`, `list_comments`, `get_comment` sobre tabla `issue_comments`, `ORDER BY created_at ASC, rowid ASC`
-- **`api/routers/comments.py`** — 3 endpoints: `POST /api/issues/{issue_id}/comments`, `GET /api/issues/{issue_id}/comments`, `GET /api/comments/{comment_id}`; ya enganchado en `api/main.py`
-- **`aiteam/skills.py`** — `load_skill(role, skills_dir=None)` y `list_skills()`; mapea alias de rol a archivo en `skills/`; devuelve `None` si no existe
-- **Skills markdown** en `skills/`: `lead.md`, `engineer.md`, `reviewer.md`, `qa.md`, `quorum_senior.md`
-- **`RunExecutor`** actualizado: `_agent_info()` lee `adapter_type` Y `role`; inyecta `AITEAM_AGENT_ROLE` y `AITEAM_AGENT_SKILL` (contenido markdown) como vars de entorno al proceso agente; `StaticAdapterRuntime.build_env()` expone ambas vars
-- **Fase 6.1 — Approvals sensibles v2**: `RunExecutor` bloquea issues con `criticality` `high` o `critical` antes de `mark_run_running()`. Si no hay approval, crea `request_confirmation` idempotente (`compliance:{issue_id}:criticality`), deja el run en `queued` y cierra el wakeup actual como `skipped/approval_required`; `resolve_interaction()` ya encola el wakeup de continuacion. Si la interaction esta `accepted`, ejecuta; si esta `rejected`, marca run/wakeup como `failed` con `error_code='approval_rejected'`.
-- **Fase 3.1 — FinOps v2**: `aiteam/db/finops.py` implementa `record_cost`, `check_budget`, `BudgetStatus` y periodos mensuales. `cost_events` incluye `period` e indice `(agent_id, period)`. `RunExecutor` registra `actual_cost_cents` en `cost_events`, actualiza `agents.spent_monthly_cents` y bloquea agentes con presupuesto mensual excedido mediante `request_confirmation` titulada `Budget exceeded`.
-- **CLI v2 minimo**: `aiteam/cli.py` ya no importa router/adapters legacy; mantiene `system-check`, `migrate-to-v2` y `budget-status`. Se retiro `scripts/benchmark_parallel_throughput.py` por depender del router eliminado.
-- **Lead builtin Paperclip-like**: `lead_builtin` propone equipo/backlog via `suggest_tasks`; aceptar crea agentes `engineer/reviewer/qa`, issues hijas y wakeups de asignacion; los roles `role_builtin` reportan al Lead; el Lead resume child reports y pide una confirmacion ligera para cerrar el ciclo.
-- **Cockpit frontend v2**: Vite ya no muestra una vista unica cruda de wakeups/runs. Tiene primera apertura de proyecto, timeline cronologico, vista de issue/thread, runs, equipo, decisions pendientes y alta de nueva tarea para el Lead dentro del proyecto activo.
-- **Nuevas tareas por proyecto**: el usuario puede crear una issue nueva asignada al Lead; el cockpit encola `new_task`, drena el control plane y el Lead genera sub-issues con IDs derivados de la issue padre, no `issue:intake:*`.
-- **Timeline backend**: `GET /api/timeline` compone issues, comments, interactions creadas/resueltas y runs desde SQLite en orden cronologico; el frontend ya consume esta fuente durable en vez de reconstruir la timeline solo en React.
-- **Timeline Fase 8 parcial**: `/api/timeline` tambien incluye `activity_log`, `cost_events` y `tool_access`, preparando la observabilidad unificada del cockpit.
-- **Activity logging sistematico base**: routers de issues/comments/interactions y `RunExecutor` registran `activity_log` para creacion/actualizacion de issues, comments, interactions y cambios de estado producidos por agentes. La timeline ya puede mostrar acciones humanas/API y trabajo interno del executor.
-- **Activity logging control-plane**: routers de goals, agents, wakeups, checkout y `run-once` tambien escriben `activity_log`. La timeline ya cubre objetivos, hiring/config de agentes, cola de wakeups y ejecuciones manuales del control plane.
-- **Tool access v2 base**: `aiteam/db/tool_access.py` registra/lista decisiones de herramientas. `RunExecutor` registra el adapter usado como `tool_access` (`allowed`) y adapters no registrados como `denied` antes de fallback manual. Nuevo endpoint `GET /api/tool-access` para auditoria directa; `/api/timeline` ya muestra estos eventos.
-- **MCP node_repl**: si `node_repl` falla por conflicto de versiones de Node, verificar que la version de Node en `PATH` sea la correcta y que no haya otra instalacion anterior solapando. `node_repl` debe responder con la version activa.
-- **Recovery/no-op de Lead**: si un proyecto viejo tiene la confirmacion de cierre aceptada pero la issue padre sigue abierta, el Lead reconcilia y marca `done`. Si se despierta al Lead sin trabajo pendiente, la run queda `skipped/no_pending_lead_work` en vez de `completed` vacio.
-- **Cockpit legible para runs recientes**: la timeline carga lo mas reciente primero, `/api/timeline` etiqueta runs en espanol y la UI muestra una banda de ultima run con resumen humano.
-- **Fase 7.1 — Skills desde rescate**: las skills de Lead, Engineer, Reviewer, QA y Quorum ahora codifican contrato de heartbeat inspirado en Paperclip: checkout/409, progreso durable, no polling, blockers explicitos, bajo ruido y delegacion economica.
-- **Delegation payload enriquecido**: `lead_intake` incluye por sub-issue `delegation_type`, `cost_tier`, `report_to`, `reviewed_by`, `evidence_required` y `risk_checks`; se persiste en metadata de issue y payload de wakeup.
-- **Fase 7.2 — Plan documents v2**: nueva tabla `issue_documents` + `issue_document_revisions`, helpers `aiteam/db/documents.py` y endpoints `GET/PUT /api/issues/{issue_id}/documents/{key}` con conflicto `base_revision_id` (`409`) estilo Paperclip. `GET /api/issues/{id}` incluye `plan_document` si existe.
-- **Tests**: coverage nueva en `tests/test_run_executor.py`, `tests/test_finops_db.py`, `tests/test_cli_v2.py` y `tests/test_issue_documents.py` — suite completa: **126 tests, todos en verde**
+## Trabajo reciente
 
-## Siguiente prioridad
+- Health de perfiles locales basado en runtime y modelo, no en autenticación de Codex.
+- Corrección de intención de edición para delegaciones `Fix` asignadas a roles read-only.
+- Context diet y harness de benchmark frente a Codex solo.
+- Métricas deterministas de calidad y pasada QA adversarial.
+- Tests de aceptación independientes y review anclada al diff.
+- Garantía de wakeup al padre cuando un hijo cierra.
+- Notificaciones de escalado y métrica de latencia de decisiones.
+- Feedback de salud de proveedores hacia el routing.
+- Memoria operativa entre proyectos.
+- Canario e2e de convergencia completa.
+- Revisión cross-provider, Git receipts, quality cascade, paralelismo opt-in y cap diario de coste.
 
-Por orden de impacto:
+## Prioridades vigentes
 
-1. **Lead LLM/API real sobre documentos**: sustituir el Lead builtin determinista por Lead LLM/API que escriba/actualice el documento `plan`, pida confirmacion sobre esa revision y cree sub-issues via API usando la skill, perfiles y politica de coste.
+Completado en este bloque: fotografía y limpieza documental, canario deny → corrección → recuperación, conocimiento canónico compartido en `docs/ORCHESTRATION*.md`, benchmarks/evals SQL, retirada del `TaskBoard` huérfano, gate contra reejecuciones idénticas de Test Runner, gobernanza determinista de `solo_lead`, contrato durable de quorum, activación backend de perfiles y primer caso empírico medio/alto del selector. El quorum tiene ahora estados terminales absorbentes, auditoría por rutas vivas y provenance económica e2e determinista. El benchmark `sqlite_job_queue` dio 10/10 a `full_team` y 9/10 a `solo_lead`; también destapó el autocierre ausente de `test_designer` y un falso verde por shadowing de pytest, ambos corregidos.
 
-2. **Fase 8 — SQLite logs consolidation**: refinar la UI para filtrar timeline por tipo/issue/actor y extender `tool_access` cuando existan wrappers MCP/herramientas reales.
+Siguiente orden:
 
-3. **Frontend cockpit v2.1**: seguir mejorando navegacion por timeline/runs, filtros por status/owner, y accion clara para crear/cambiar proyecto sin depender del workspace guardado. Ya existe banda de ultima run y timeline descendente.
+1. Ampliar la calibración empírica del selector con más semillas, casos medios reversibles y tareas complejas de otra naturaleza. Ya hay dos anclas: `cli_conversor` favorece `solo_lead`; `sqlite_job_queue` justifica `full_team` por calidad (10/10 frente a 9/10), aunque consume 1,84× tokens y 1,73× tiempo.
+2. Crear un benchmark de calidad de planes para quorum, separado del benchmark de programación.
+3. Verificar telemetría de usage en canales CLI no Codex antes de compararlos; esto completará la validación externa de costes del quorum.
+4. Activar y evaluar resumen causal cuando el contexto exceda presupuesto.
+5. Integrar el resumen de evals SQL en `loop-health` cuando se toque esa superficie.
+6. Extraer piezas de `RunExecutor` solo de forma oportunista; actualmente concentra 7.059 líneas.
 
-4. **Budget policy ampliada**: si hace falta mas adelante, portar desde `docs/legacy_rescue/` senales de presion, forecast mensual y anomalias; el gate basico ya existe.
+## Riesgos conocidos
 
-## Verificacion recomendada
+- `RunExecutor` concentra muchas políticas; el orden de preflights y gates requiere tests dirigidos.
+- El bloque principal quedó consolidado en `codex/orchestration-hardening`; `.claude/skills/aiteams-frontend/` permanece sin seguimiento y fuera de los commits por origen no atribuido.
+- La telemetría de usage de CLIs no Codex, especialmente `gemini_subscription`, debe verificarse antes de comparar costes entre proveedores.
+- El benchmark ya tiene resultados versionados y juez oculto aislado (harness v3); faltan más semillas y familias de tarea antes de extraer conclusiones estadísticas.
+- Los documentos históricos de migración pueden contener estados de fase ya superados; el banner del documento indica cómo leerlos.
+- Prompts externos o antiguos que mencionen `AITEAM_AUTO_QUORUM` están obsoletos: el único disparador vivo es el perfil explícito `lead_quorum`.
+- Windows puede retener handles de SQLite o temporales de pytest.
+
+## Verificación
+
+Suite completa verificada el `2026-07-17`:
 
 ```powershell
 .\scripts\pytest_local.bat tests -q --tb=short
-# debe salir: 126 passed
+# 888 passed in 226.10s
 ```
 
-```python
-# smoke check skills
-from aiteam.skills import load_skill, list_skills
-assert load_skill("lead") is not None
-assert "AITEAM_AGENT_SKILL" in __import__('aiteam.adapters.registry', fromlist=['StaticAdapterRuntime']).StaticAdapterRuntime(
-    __import__('aiteam.adapters.registry', fromlist=['AdapterDescriptor']).AdapterDescriptor(adapter_type='manual', channel='manual')
-).build_env(run_id='r1', wake_context={'agent_role': 'lead', 'agent_skill': 'x'})
+Canario e2e:
+
+```powershell
+.\scripts\python_local.bat scripts\e2e_canary.py
+.\scripts\python_local.bat scripts\e2e_quorum_canary.py
+.\scripts\python_local.bat scripts\e2e_solo_lead_canary.py
 ```
 
-Si Windows bloquea temporales de pytest, limpiar manualmente al reiniciar la sesion o usar un `--basetemp` nuevo.
+Auditoría de un proyecto capa 2:
+
+```powershell
+.\scripts\python_local.bat scripts\audit_project_db.py "<workspace>"
+```
+
+No sustituir una ejecución actual por la cifra de este documento: registrar fecha y resultado cuando cambie sustancialmente la suite.

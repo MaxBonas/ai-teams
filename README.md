@@ -145,10 +145,10 @@ Abre el navegador en **http://localhost:9490**
 
 3. **Configurar adapters**: en la pestaña **Config**, verifica qué adapters CLI están disponibles (Codex, Gemini, Claude Code) y autentica los que vayas a usar.
 
-4. **Nueva tarea**: escribe la tarea en el panel izquierdo y selecciona el perfil de ejecución:
+4. **Nueva tarea**: escribe la tarea en el panel izquierdo y selecciona el perfil:
    - **Equipo completo**: Lead + Engineer + Reviewer (recomendado)
-   - **Lead + Quorum**: planificación con revisión múltiple
-   - **Solo Lead**: para tareas simples de planificación
+   - **Lead + Quorum**: solo planificación con revisión multicultural; no programa
+   - **Solo Lead**: un único agente todopoderoso que planifica, programa y verifica directamente
 
 5. **Seguimiento**: usa las pestañas Chat, Timeline, Runs e Issue para seguir el progreso del equipo.
 
@@ -240,6 +240,6 @@ AI Teams es un **agent workspace para desarrollo de software**:
 - Se crea primero un Lead; el Lead decide el proyecto y forma el equipo
 - El usuario propone tareas y el Lead las convierte en issues vivos
 - El equipo avanza por heartbeats hasta completar, bloquearse o pedir una decisión
-- `solo_lead`, `lead_quorum` y `full_team` son perfiles de ejecución de primera clase
+- `solo_lead` y `full_team` son perfiles de ejecución; `lead_quorum` es un perfil terminal de planificación
 - Los seniors planifican, supervisan y ejecutan lo complejo; los workers baratos hacen lectura, investigación y tareas simples
 - Suscripciones LLM y APIs se pueden usar de forma independiente
