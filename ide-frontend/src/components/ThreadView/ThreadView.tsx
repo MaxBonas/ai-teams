@@ -7,7 +7,7 @@
  *
  * Full (modal): all comments chronological, fetched lazily on first open.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -304,24 +304,24 @@ export function ThreadView({ issueId, preloadedComments }: ThreadViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
 
-  const fetchCompact = useCallback(() => {
-    setLoading(true);
-    setError(null);
+  useEffect(() => {
+    let cancelled = false;
     apiFetch(`/api/issues/${encodeURIComponent(issueId)}/thread?view=compact`)
       .then((r) => r.json())
       .then((json) => {
+        if (cancelled) return;
         setCompact(json as CompactThreadData);
         setLoading(false);
       })
       .catch((err: unknown) => {
+        if (cancelled) return;
         setError(String(err));
         setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [issueId]);
-
-  useEffect(() => {
-    fetchCompact();
-  }, [fetchCompact]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 

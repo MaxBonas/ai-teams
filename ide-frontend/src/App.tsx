@@ -353,7 +353,8 @@ const FIELD_TIPS = {
 // ── InfoTip component ────────────────────────────────────────────────────────
 function InfoTip({ tip, wide }: { tip: string; wide?: boolean }) {
   return (
-    <span className={`info-tip${wide ? ' info-tip-wide' : ''}`}>
+    // tabIndex hace el tooltip alcanzable por teclado (el CSS ya cubre :focus-within)
+    <span className={`info-tip${wide ? ' info-tip-wide' : ''}`} tabIndex={0}>
       <svg className="info-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/>
         <path d="M8 7.5v3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
@@ -569,6 +570,17 @@ interface ProjectStatePayload {
 
 type TimelineType = 'issue' | 'comment' | 'interaction' | 'run' | 'activity' | 'cost' | 'tool';
 const TIMELINE_TYPES: TimelineType[] = ['issue', 'comment', 'interaction', 'run', 'activity', 'cost', 'tool'];
+
+// Etiquetas de cara al usuario para los tipos técnicos de la actividad.
+const TIMELINE_TYPE_LABELS: Record<TimelineType, string> = {
+  issue: 'Issues',
+  comment: 'Comentarios',
+  interaction: 'Decisiones',
+  run: 'Runs',
+  activity: 'Sistema',
+  cost: 'Coste',
+  tool: 'Herramientas',
+};
 
 type ViewMode = 'timeline' | 'issue' | 'plan' | 'runs' | 'chat' | 'inbox' | 'files' | 'team' | 'config';
 
@@ -1247,6 +1259,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cerrar el modal de configuración de agente con Escape.
+  useEffect(() => {
+    if (!configModalAgent) return undefined;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        setConfigModalAgent(null);
+        setAgentDraft({});
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [configModalAgent]);
+
   // Backend caído: reintento automático cada 5 s hasta reconectar.
   useEffect(() => {
     if (!backendDown) return undefined;
@@ -1335,7 +1360,6 @@ export default function App() {
 
   useEffect(() => {
     if (viewMode === 'chat') chatStickToBottomRef.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
   // Lazy-load project skills + MCP servers only when the Config tab is open.
@@ -1344,7 +1368,6 @@ export default function App() {
       void loadProjectSkills();
       void loadMcpServers();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, workspaceConfigured]);
 
   const loadWsFiles = async () => {
@@ -2717,6 +2740,7 @@ export default function App() {
 
         <section className="work-column">
           <nav className="view-tabs" aria-label="Vistas">
+            <span className="tab-group-label">Proyecto</span>
             <button className={viewMode === 'chat' ? 'tab active tab-chat' : 'tab tab-chat'} onClick={() => setViewMode('chat')}>
               <MessageSquare size={16} />
               Chat
@@ -2731,21 +2755,7 @@ export default function App() {
             </button>
             <button className={viewMode === 'timeline' ? 'tab active' : 'tab'} onClick={() => setViewMode('timeline')}>
               <Clock3 size={16} />
-              Timeline
-            </button>
-            <button className={viewMode === 'issue' ? 'tab active' : 'tab'} onClick={() => setViewMode('issue')}>
-              <MessageSquare size={16} />
-              Issue
-            </button>
-            <button className={viewMode === 'plan' ? 'tab active' : 'tab'} onClick={() => setViewMode('plan')}>
-              <FileText size={16} />
-              Plan
-              {planDocument ? <span className="tab-badge">v{planDocument.revision_number}</span> : null}
-            </button>
-            <button className={viewMode === 'runs' ? 'tab active' : 'tab'} onClick={() => setViewMode('runs')}>
-              <GitBranch size={16} />
-              Runs
-              {hasActiveRun ? <span className="tab-badge tab-badge-active" title="Run en progreso" /> : null}
+              Actividad
             </button>
             <button
               className={viewMode === 'files' ? 'tab active' : 'tab'}
@@ -2771,13 +2781,33 @@ export default function App() {
               <KeyRound size={16} />
               Config
             </button>
+            <span
+              className="tab-group-label tab-group-issue"
+              title={selectedIssue ? `Vistas de la issue seleccionada: ${selectedIssue.title}` : 'Vistas de la issue seleccionada'}
+            >
+              Issue{selectedIssue ? ` · ${clip(selectedIssue.title, 24)}` : ''}
+            </span>
+            <button className={viewMode === 'issue' ? 'tab active' : 'tab'} onClick={() => setViewMode('issue')}>
+              <MessageSquare size={16} />
+              Detalle
+            </button>
+            <button className={viewMode === 'plan' ? 'tab active' : 'tab'} onClick={() => setViewMode('plan')}>
+              <FileText size={16} />
+              Plan
+              {planDocument ? <span className="tab-badge">v{planDocument.revision_number}</span> : null}
+            </button>
+            <button className={viewMode === 'runs' ? 'tab active' : 'tab'} onClick={() => setViewMode('runs')}>
+              <GitBranch size={16} />
+              Runs
+              {hasActiveRun ? <span className="tab-badge tab-badge-active" title="Run en progreso" /> : null}
+            </button>
           </nav>
 
           {viewMode === 'timeline' ? (
             <section className="panel timeline-panel">
               <div className="panel-title">
                 <Clock3 size={18} />
-                Timeline
+                Actividad
               </div>
               <div className="filter-chips">
                 <button
@@ -2792,7 +2822,7 @@ export default function App() {
                     className={timelineTypeFilter === t ? 'chip active' : 'chip'}
                     onClick={() => { setTimelineTypeFilter(t); void loadProjectData(selectedIssueId, t); }}
                   >
-                    {t}
+                    {TIMELINE_TYPE_LABELS[t]}
                   </button>
                 ))}
               </div>
@@ -2858,6 +2888,7 @@ export default function App() {
                   <div className="thread">
                     {selectedIssue ? (
                       <ThreadView
+                        key={selectedIssue.id}
                         issueId={selectedIssue.id}
                         preloadedComments={selectedComments}
                       />
