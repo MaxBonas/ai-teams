@@ -276,6 +276,14 @@ idempotente al mismo curador. Un segundo fallo bloquea la issue y despierta al
 Lead. `audit_project_db.py` considera bug tanto un retry sin run/wakeup vivo como
 un recovery agotado sin wakeup al Lead.
 
+Un comentario individual que supera 24.000 caracteres no se envía entero ni se
+trunca. El target lo divide mediante offsets durables `[start_char_offset,
+end_char_offset)` y cada bloque persiste ese rango. Mientras reste contenido,
+el documento conserva `partial_comment_id` y `partial_char_offset` y no avanza
+`synthesized_through_comment_id`; solo el segmento final mueve el cursor de
+comentario y limpia el estado parcial. Así el límite de payload no falsea la
+provenance ni oculta texto que el curador nunca vio.
+
 ## Paralelismo
 
 Paralelizar por independencia informativa, no por disponibilidad de roles:

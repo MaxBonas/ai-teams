@@ -60,6 +60,8 @@ OP_SCHEMA: dict[str, Any] = {
         "start_comment_id": {"type": "string"},
         "end_comment_id": {"type": "string"},
         "char_count_original": {"type": "integer", "minimum": 1},
+        "start_char_offset": {"type": "integer", "minimum": 0},
+        "end_char_offset": {"type": "integer", "minimum": 1},
     },
     "required": ["type"],
     "additionalProperties": False,
@@ -279,7 +281,7 @@ def build_execution_contract() -> str:
         "- Append the ---AGENT-REPORT--- block as the last part of any report comment before setting status.\n"
         "- context_curator ONLY: payload.context_curation_target contains the exact parent-thread slice. "
         "Persist its causal summary with append_context_summary using path=target_issue_id, body=<summary>, "
-        "start_comment_id, end_comment_id and char_count_original copied exactly from that payload. "
+        "start_comment_id, end_comment_id, char_count_original, start_char_offset and end_char_offset copied exactly from that payload. "
         "The summary must retain decisions, constraints, risks, evidence, owners and escalations and stay at or below 30%. "
         "Keep every owner explicitly linked to its deliverable, every reviewer to its acceptance evidence, "
         "and every threshold to metric, value, window and action.\n"
@@ -424,6 +426,8 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
                 "start_comment_id": str(op.get("start_comment_id") or "").strip(),
                 "end_comment_id": str(op.get("end_comment_id") or "").strip(),
                 "char_count_original": int(op.get("char_count_original") or 0),
+                "start_char_offset": int(op.get("start_char_offset") or 0),
+                "end_char_offset": int(op.get("end_char_offset") or 0),
             }
 
     if interactions:

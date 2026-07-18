@@ -166,6 +166,8 @@ def append_summary_block(
     issue_id: str,
     block: dict[str, Any],
     synthesized_through_comment_id: str | None = None,
+    partial_comment_id: str | None = None,
+    partial_char_offset: int | None = None,
     run_id: str | None = None,
 ) -> dict[str, Any]:
     """Append a synthesis block to the ``context_summary`` document.
@@ -180,7 +182,9 @@ def append_summary_block(
         }
 
     Creates the document if it doesn't exist yet.  If *synthesized_through_comment_id*
-    is provided it replaces the stored value (always advance forward, never backward).
+    is provided it replaces the stored value. Oversized comments use
+    *partial_comment_id* + *partial_char_offset* until their final segment; a
+    completed segment clears that partial cursor.
 
     Thread-safe: delegates to :func:`put_document` which uses ``BEGIN IMMEDIATE``.
     """
@@ -201,6 +205,12 @@ def append_summary_block(
     current_data["blocks"].append(block)
     if synthesized_through_comment_id is not None:
         current_data["synthesized_through_comment_id"] = synthesized_through_comment_id
+    if partial_comment_id is not None and partial_char_offset is not None:
+        current_data["partial_comment_id"] = partial_comment_id
+        current_data["partial_char_offset"] = int(partial_char_offset)
+    else:
+        current_data.pop("partial_comment_id", None)
+        current_data.pop("partial_char_offset", None)
 
     return put_document(
         db_path,

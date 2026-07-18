@@ -2604,7 +2604,10 @@ class RunExecutor:
                 _expected = build_context_curation_target(self.db_path, issue_id=_parent_id)
                 if not _expected:
                     raise ValueError("no unsynthesized parent context is available")
-                for _field in ("target_issue_id", "start_comment_id", "end_comment_id", "char_count_original"):
+                for _field in (
+                    "target_issue_id", "start_comment_id", "end_comment_id",
+                    "char_count_original", "start_char_offset", "end_char_offset",
+                ):
                     if str(_context_action.get(_field) or "") != str(_expected.get(_field) or ""):
                         raise ValueError(f"context summary {_field} does not match the durable source slice")
                 _summary_body = str(_context_action.get("summary_markdown") or "").strip()
@@ -2612,6 +2615,14 @@ class RunExecutor:
                     raise ValueError("context summary body is empty")
                 if len(_summary_body) / int(_expected["char_count_original"]) > 0.30:
                     raise ValueError("context summary exceeds the 30% compression budget")
+                with contextlib.closing(_connect(self.db_path)) as _conn:
+                    _end_row = _conn.execute(
+                        "SELECT LENGTH(body) AS body_chars FROM issue_comments WHERE id=? AND issue_id=?",
+                        (_expected["end_comment_id"], _parent_id),
+                    ).fetchone()
+                _end_is_complete = bool(
+                    _end_row and int(_expected["end_char_offset"]) >= int(_end_row["body_chars"] or 0)
+                )
                 append_summary_block(
                     self.db_path,
                     issue_id=_parent_id,
@@ -2620,8 +2631,14 @@ class RunExecutor:
                         "start_comment_id": _expected["start_comment_id"],
                         "end_comment_id": _expected["end_comment_id"],
                         "char_count_original": _expected["char_count_original"],
+                        "start_char_offset": _expected["start_char_offset"],
+                        "end_char_offset": _expected["end_char_offset"],
                     },
-                    synthesized_through_comment_id=str(_expected["end_comment_id"]),
+                    synthesized_through_comment_id=(
+                        str(_expected["end_comment_id"]) if _end_is_complete else None
+                    ),
+                    partial_comment_id=(None if _end_is_complete else str(_expected["end_comment_id"])),
+                    partial_char_offset=(None if _end_is_complete else int(_expected["end_char_offset"])),
                     run_id=str(run.get("id") or "") or None,
                 )
                 _context_summary_persisted = True

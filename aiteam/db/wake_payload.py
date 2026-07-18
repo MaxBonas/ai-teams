@@ -25,9 +25,17 @@ def build_context_curation_target(
         ).fetchone()
         if row:
             try:
-                marker = str(json.loads(str(row["body"] or "{}")).get("synthesized_through_comment_id") or "") or None
+                summary_state = json.loads(str(row["body"] or "{}"))
+                marker = str(summary_state.get("synthesized_through_comment_id") or "") or None
+                partial_comment_id = str(summary_state.get("partial_comment_id") or "") or None
+                partial_char_offset = int(summary_state.get("partial_char_offset") or 0)
             except (TypeError, ValueError):
                 marker = None
+                partial_comment_id = None
+                partial_char_offset = 0
+        else:
+            partial_comment_id = None
+            partial_char_offset = 0
         marker_rowid = 0
         if marker:
             marker_row = conn.execute(
@@ -47,26 +55,41 @@ def build_context_curation_target(
 
     selected: list[dict[str, Any]] = []
     char_count = 0
+    truncated_comment = False
     for row in rows:
         body = str(row["body"] or "")
-        if selected and char_count + len(body) > max_chars:
+        start_offset = partial_char_offset if str(row["id"]) == partial_comment_id else 0
+        remaining = body[start_offset:]
+        available = max_chars - char_count
+        if available <= 0:
             break
+        chunk = remaining[:available]
+        if not chunk:
+            continue
         selected.append({
             "id": row["id"],
             "author": row["author_user_id"] or row["author_agent_id"] or "system",
             "created_at": row["created_at"],
-            "body": body,
+            "body": chunk,
         })
-        char_count += len(body)
+        char_count += len(chunk)
+        if len(chunk) < len(remaining):
+            truncated_comment = True
+            break
     if not selected or char_count <= 0:
         return None
     return {
         "target_issue_id": issue_id,
         "start_comment_id": selected[0]["id"],
         "end_comment_id": selected[-1]["id"],
+        "start_char_offset": partial_char_offset if selected[0]["id"] == partial_comment_id else 0,
+        "end_char_offset": (
+            (partial_char_offset if selected[-1]["id"] == partial_comment_id else 0)
+            + len(selected[-1]["body"])
+        ),
         "char_count_original": char_count,
         "max_compression_ratio": 0.30,
-        "has_more_unsynthesized": len(selected) < len(rows),
+        "has_more_unsynthesized": truncated_comment or len(selected) < len(rows),
         "comments": selected,
     }
 
