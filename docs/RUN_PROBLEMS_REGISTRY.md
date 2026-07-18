@@ -261,7 +261,7 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 ### P-1: Agente API-only en rol engineer
 **Síntoma:** Agente produce texto/plan, issue no avanza.  
 **Detección:** `liveness_state = "blocked"`, `reason = "api_only_engineer_no_workspace_changes"`  
-**Acción:** Reasignar a adapter CLI/local (Codex CLI, Gemini CLI, Ollama/subprocess local).
+**Acción:** Reasignar a adapter CLI/local (Codex, Antigravity, Ollama/subprocess local).
 
 ### P-2: Agente CLI sin cambios en workspace tras múltiples intentos
 **Síntoma:** `liveness_state = "plan_only"` o `"empty_response"` en 2+ runs consecutivas.  
@@ -348,7 +348,7 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 **Acción (2026-05-13):** Umbral cambia a `_CONTEXT_CURATOR_CHAR_THRESHOLD = 8_000` (chars no sintetizados). "No sintetizados" = comentarios con `rowid > rowid(synthesized_through_comment_id)` del doc `context_summary`. Curator `done` ya **NO** bloquea re-spawn — permite bloques incrementales. Solo curatores activos (todo/in_progress/blocked) bloquean. El curator publica bloques vía `POST /api/issues/{id}/context-summary/blocks` (ratio ≤ 30% validado). Tests: `tests/test_context_curator_auto_trigger.py` (16 tests), `tests/test_append_summary_block.py` (13 tests).
 
 ### P-16: lead_executor creado con adapter incorrecto (Lead usa subscription_cli, ejecutor recibe openai_api)
-**Síntoma:** El Lead usa `subscription_cli` (Claude Code / Gemini CLI) pero cuando routing determina LEAD_SELF y se crea `role:lead_executor`, el agente recibe `adapter_type=openai_api` por defecto. El executor no puede ejecutar workspace changes en modo API-only y queda bloqueado con `liveness_reason=api_only_no_workspace`.  
+**Síntoma:** El Lead usa `subscription_cli` (Codex / Antigravity) pero cuando routing determina LEAD_SELF y se crea `role:lead_executor`, el agente recibe `adapter_type=openai_api` por defecto. El executor no puede ejecutar workspace changes en modo API-only y queda bloqueado con `liveness_reason=api_only_no_workspace`.
 **Causa:** `_ensure_role_agent` creaba el agente con el adapter elegido por scoring genérico (`choose_adapter_for_role`), sin relación con el adapter del Lead. Para un ejecutor senior del Lead, el adapter debería ser idéntico al del Lead.  
 **Detección:** `SELECT a.adapter_type FROM agents a WHERE a.id = 'role:lead_executor'` difiere de `SELECT adapter_type FROM agents WHERE id = 'role:lead'`.  
 **Acción (2026-05-13):** `_ensure_role_agent` en executor: caso especial para `lead_executor` — lee `adapter_type` y `adapter_config_json` del Lead desde DB y los hereda directamente. `seniority='senior'`. Tests: `tests/test_lead_executor.py` (11 tests).

@@ -3955,7 +3955,7 @@ def test_subscription_run_provenance_uses_selected_profile_identity(tmp_path: Pa
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             "UPDATE agents SET adapter_config_json = ? WHERE id = 'agent-1'",
-            (json.dumps({"profile_id": "gemini_subscription", "model": "gemini-2.5-flash"}),),
+            (json.dumps({"profile_id": "antigravity_subscription", "model": "Gemini 3.1 Pro (High)"}),),
         )
         conn.commit()
 
@@ -3968,8 +3968,8 @@ def test_subscription_run_provenance_uses_selected_profile_identity(tmp_path: Pa
         conn.row_factory = sqlite3.Row
         run = conn.execute("SELECT provider, model, channel FROM runs").fetchone()
     assert dict(run) == {
-        "provider": "google-gemini",
-        "model": "gemini-2.5-flash",
+        "provider": "google-antigravity",
+        "model": "Gemini 3.1 Pro (High)",
         "channel": "subscription",
     }
 

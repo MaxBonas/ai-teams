@@ -382,7 +382,7 @@ def format_team_proposal(proposal: dict[str, Any]) -> str:
                     f"que NO puede escribir archivos en el workspace."
                 )
             lines += [
-                "   El engineer necesita un adapter CLI/local (subscription_cli, Codex CLI, Gemini CLI u Ollama)",
+                "   El engineer necesita un adapter CLI/local (subscription_cli, Codex, Antigravity u Ollama)",
                 "   para producir evidencia de implementación. Si aceptas con este adapter el engineer",
                 "   quedará bloqueado inmediatamente con liveness_reason=api_only_engineer_no_workspace_changes.",
                 "   Cambia el adapter antes de aceptar o ajusta el proyecto para usar subscription_cli.",

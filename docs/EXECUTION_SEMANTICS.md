@@ -192,14 +192,14 @@ Reglas:
 Perfiles base:
 
 - `codex_subscription`: usa `codex exec` no interactivo.
-- `gemini_subscription`: preparado para CLI de Gemini cuando este instalado.
+- `antigravity_subscription`: canal de suscripcion Google mediante `agy`, con autenticacion nativa de Antigravity y ejecucion headless aislada.
 - `claude_subscription_blocked`: visible, pero marcado como bloqueado por proveedor.
 - `openai_api`, `gemini_api`, `anthropic_api`: usan refs de secretos.
 - `local_qwen_ollama` y `local_gem4_lmstudio`: usan Codex OSS con proveedor local `ollama` o `lmstudio`; el campo `model` puede cambiarse por agente.
 
 Login de suscripciones:
 
-- El cockpit puede llamar a `/api/user-adapters/login` para abrir una ventana local de login (`codex login`, `gemini auth login`, Claude auth).
+- El cockpit puede llamar a `/api/user-adapters/login` para abrir una ventana local de login (`codex login`, Claude auth). Antigravity gestiona su autenticacion fuera de este launcher y AI Teams la verifica con una llamada headless.
 - El login no pasa por el navegador: se lanza como proceso local del usuario y las credenciales quedan en el storage propio de cada CLI.
 - Si el CLI no esta instalado, el endpoint devuelve `404` y el cockpit lo muestra como no disponible.
 - En Windows, el backend no invoca `cmd.exe /k "<exe>" ...` directamente. Escribe un launcher `.cmd` en el config dir del usuario y ejecuta ese script para evitar errores de quoting con rutas `WindowsApps` o espacios.

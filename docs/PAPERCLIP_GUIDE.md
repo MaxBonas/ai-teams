@@ -44,7 +44,7 @@ AI Teams debe usar `issue_thread_interactions` como pausa durable, no como final
 Paperclip trata los CLIs locales como canales con dos modos de auth:
 
 - Codex: `OPENAI_API_KEY` o auth nativa en `~/.codex/auth.json`.
-- Gemini: `GEMINI_API_KEY`/`GOOGLE_API_KEY` o `gemini auth login`.
+- Gemini API: `GEMINI_API_KEY`/`GOOGLE_API_KEY`. Suscripcion Google: Antigravity CLI (`agy`) con su autenticacion nativa; el Gemini CLI legacy no forma parte del sistema activo.
 
 AI Teams sigue esa separacion:
 

@@ -18,6 +18,7 @@ from aiteam.adapters.subscription_cli_adapter import (
     _resolve_cli_cmd,
 )
 from aiteam.adapters.registry import AdapterDescriptor
+from aiteam.adapters.work_contract import parse_submit_work
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.project_adapters import reconcile_project_agent_policy
 
@@ -61,6 +62,16 @@ class TestResolveCLICmd:
         result = _resolve_cli_cmd("codex")
         assert result == "codex"
 
+    def test_resolves_antigravity_from_local_app_data(self, tmp_path, monkeypatch):
+        binary = tmp_path / "agy" / "bin" / "agy.exe"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"")
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+        monkeypatch.setattr("aiteam.adapters.subscription_cli_adapter.shutil.which", lambda _: None)
+
+        assert _resolve_cli_cmd("agy") == str(binary)
+
     def test_already_resolved_exe_not_re_resolved(self, monkeypatch):
         """A name that already ends with .cmd is not double-resolved."""
         monkeypatch.setattr(os, "name", "nt")
@@ -70,10 +81,43 @@ class TestResolveCLICmd:
             return f"C:/npm/{name}"
         monkeypatch.setattr("aiteam.adapters.subscription_cli_adapter.shutil.which", fake_which)
         result = _resolve_cli_cmd("codex.cmd")
-        # Should not try codex.cmd.cmd or codex.cmd.exe
         assert result == "C:/npm/codex.cmd"
         assert all(".cmd.cmd" not in c for c in calls)
 
+
+def test_antigravity_command_uses_headless_plan_contract(tmp_path, monkeypatch):
+    binary = tmp_path / "agy.exe"
+    binary.write_bytes(b"")
+    runtime = ClaudeSubscriptionCliRuntime(
+        AdapterDescriptor(adapter_type="subscription_cli", channel="subscription", provider="google-antigravity"),
+        command=[str(binary)],
+        cli_kind="antigravity",
+        model="Gemini 3.1 Pro (High)",
+        timeout_sec=90,
+    )
+
+    command = runtime._build_claude_command("SYSTEM", "USER")
+
+    assert command[0] == str(binary)
+    assert command[1:4] == ["--new-project", "--print", "SYSTEM\n\nUSER\n\nReturn ONLY the submit_work JSON object required by the contract. Do not wrap it in Markdown."]
+    assert ["--mode", "plan"] == command[4:6]
+    assert "--sandbox" in command
+    assert command[-2:] == ["--model", "Gemini 3.1 Pro (High)"]
+
+
+def test_submit_work_parser_skips_non_json_braces_before_valid_object():
+    raw = 'agy log {not json}\n' + json.dumps({
+        "status": "completed", "summary": "ok", "ops": []
+    }) + '\ntelemetry {also not json}'
+
+    parsed = parse_submit_work(raw)
+
+    assert parsed["status"] == "completed"
+
+
+def test_submit_work_parser_invalid_braces_fail_without_recursion():
+    with pytest.raises(ValueError, match="submit_work JSON object not found"):
+        parse_submit_work("prefix {not valid} suffix")
 
 # ---------------------------------------------------------------------------
 # _parse_codex_output

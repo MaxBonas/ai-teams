@@ -310,6 +310,6 @@ operativos y varias semillas.
 - Extraer piezas de `RunExecutor` solo oportunistamente por necesidad funcional y con tests.
 - Toda feature de adapter debe responder qué registra en `cost_events`.
 - API y suscripción son canales distintos aunque compartan proveedor/modelo.
-- Verificar usage de `gemini_subscription` antes de usarlo en comparaciones económicas.
+- Verificar usage de `antigravity_subscription` antes de usarlo en comparaciones economicas: `agy --print` no expone todavia telemetria comparable a Codex.
 - No reintroducir router legacy, rondas, JSONL primario ni `[WORKFLOW_PLAN]`.
 - No convertir hallazgos externos en thresholds sin calibración local.

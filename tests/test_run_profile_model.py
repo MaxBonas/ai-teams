@@ -64,11 +64,11 @@ def test_lead_quorum_assigns_distinct_providers_when_available() -> None:
         {"id": "issue:q", "title": "Plan", "metadata": {"profile": "lead_quorum"}},
         adapter_profiles=[
             {"id": "codex_subscription", "provider": "openai", "channel": "subscription", "adapter_type": "subscription_cli"},
-            {"id": "gemini_subscription", "provider": "google", "channel": "subscription", "adapter_type": "subscription_cli"},
+            {"id": "antigravity_subscription", "provider": "google-antigravity", "channel": "subscription", "adapter_type": "subscription_cli"},
         ],
     )
     assert [member["adapter_profile_id"] for member in proposal["proposed_team"]] == [
-        "codex_subscription", "gemini_subscription",
+        "codex_subscription", "antigravity_subscription",
     ]
     assert len(proposal["suggested_issues"]) == 2
 

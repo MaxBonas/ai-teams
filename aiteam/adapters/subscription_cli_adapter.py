@@ -202,6 +202,19 @@ class ClaudeSubscriptionCliRuntime:
     def _build_claude_command(self, system_prompt: str, user_prompt: str) -> list[str]:
         """Build command for Claude Code CLI (non-interactive -p mode)."""
         command = list(self.command or ["claude"])
+        if len(command) == 1:
+            command[0] = _resolve_cli_cmd(command[0])
+        if self.cli_kind == "antigravity":
+            prompt = (
+                f"{system_prompt}\n\n{user_prompt}\n\n"
+                "Return ONLY the submit_work JSON object required by the contract. "
+                "Do not wrap it in Markdown."
+            )
+            command.extend(["--new-project", "--print", prompt, "--mode", "plan", "--sandbox"])
+            command.extend(["--print-timeout", f"{self.timeout_sec}s"])
+            if self.model:
+                command.extend(["--model", self.model])
+            return command
         if self.cli_kind == "generic":
             command.append(user_prompt)
             return command
@@ -532,6 +545,11 @@ def _resolve_cli_cmd(name: str) -> str:
             if resolved:
                 return resolved
     resolved = shutil.which(name)
+    if resolved is None and os.name == "nt" and name.lower() == "agy":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        candidate = Path(local_app_data) / "agy" / "bin" / "agy.exe" if local_app_data else None
+        if candidate is not None and candidate.is_file():
+            return str(candidate)
     return resolved or name
 
 

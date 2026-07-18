@@ -33,16 +33,16 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         },
     },
     {
-        "id": "gemini_subscription",
-        "label": "Gemini CLI subscription",
+        "id": "antigravity_subscription",
+        "label": "Antigravity CLI subscription",
         "adapter_type": "subscription_cli",
         "channel": "subscription",
-        "provider": "google-gemini",
+        "provider": "google-antigravity",
         "config": {
-            "cli_kind": "generic",
-            "command": ["gemini"],
-            "api_key_ref": "secret:google:default",
-            "api_key_env": "GEMINI_API_KEY",
+            "cli_kind": "antigravity",
+            "command": ["agy"],
+            "model": "Gemini 3.1 Pro (High)",
+            "sandbox": "read-only",
         },
     },
     {
@@ -224,18 +224,18 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "price_note": "Ultra-económico · Tier 3 Scouts/Worker",
         },
     ],
-    "gemini_subscription": [
+    "antigravity_subscription": [
         {
-            "value": "gemini-2.5-pro", "label": "Gemini 2.5 Pro",
+            "value": "Gemini 3.1 Pro (High)", "label": "Gemini 3.1 Pro (High)",
             "tier": "premium", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": ["lead", "quorum_auditor", "quorum_senior"],
-            "price_note": "Flagship Gemini · Tier 1 · suscripción",
+            "price_note": "Antigravity subscription · Tier 1 Lead/Quorum",
         },
         {
-            "value": "gemini-2.5-flash", "label": "Gemini 2.5 Flash",
+            "value": "Gemini 3.5 Flash (High)", "label": "Gemini 3.5 Flash (High)",
             "tier": "standard", "caps": ["synthesis", "coding", "long_ctx"],
-            "best_for": ["engineer", "reviewer"],
-            "price_note": "Tier 2 · suscripción",
+            "best_for": ["reviewer", "context_curator"],
+            "price_note": "Antigravity subscription · síntesis rápida",
         },
     ],
     "anthropic_api": [
@@ -677,7 +677,7 @@ def model_options_for_role(profile_id: str, role: str) -> list[dict[str, Any]]:
 
 def cli_status() -> list[dict[str, Any]]:
     codex = _resolve_cli_executable("codex")
-    gemini = _resolve_cli_executable("gemini")
+    antigravity = _resolve_cli_executable("agy")
     claude = _resolve_cli_executable("claude")
     ollama = _resolve_cli_executable("ollama")
     return [
@@ -693,15 +693,13 @@ def cli_status() -> list[dict[str, Any]]:
             "login_hint": "Abre `codex login` en una ventana local. Si lo lanzas en PowerShell con ruta absoluta, usa el prefijo &.",
         },
         {
-            "id": "gemini",
-            "label": "Gemini CLI",
-            "command": "gemini",
-            "resolved_command": gemini,
-            "available": gemini is not None,
-            "login_supported": True,
-            "login_command": _login_display_command(["gemini", "auth", "login"]),
-            "alternate_login_commands": [_login_display_command(["gemini", "auth"])],
-            "login_hint": "Abre `gemini auth login`; tambien puede usar GEMINI_API_KEY o GOOGLE_API_KEY.",
+            "id": "antigravity",
+            "label": "Antigravity CLI",
+            "command": "agy",
+            "resolved_command": antigravity,
+            "available": antigravity is not None,
+            "login_supported": False,
+            "login_hint": "La autenticacion se gestiona mediante Antigravity y se verifica con una llamada headless.",
         },
         {
             "id": "claude",
@@ -730,7 +728,6 @@ def launch_subscription_login(cli_id: str) -> dict[str, Any]:
     cli_key = _safe_key(cli_id)
     commands: dict[str, list[str]] = {
         "codex": ["codex", "login"],
-        "gemini": ["gemini", "auth", "login"],
         "claude": ["claude", "auth"],
     }
     command = commands.get(cli_key)
@@ -788,16 +785,11 @@ def _known_cli_candidates(command: str) -> list[Path]:
     if os.name != "nt":
         return []
     local_appdata = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    roaming_appdata = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
     key = _safe_key(command)
     if key == "codex":
         return [local_appdata / "OpenAI" / "Codex" / "bin" / "codex.exe"]
-    if key == "gemini":
-        return [
-            roaming_appdata / "npm" / "gemini.cmd",
-            roaming_appdata / "npm" / "gemini.exe",
-            local_appdata / "Programs" / "Gemini CLI" / "gemini.cmd",
-        ]
+    if key == "agy":
+        return [local_appdata / "agy" / "bin" / "agy.exe"]
     return []
 
 

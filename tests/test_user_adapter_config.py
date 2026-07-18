@@ -26,8 +26,10 @@ def test_user_adapter_profiles_include_subscriptions_and_local_models(tmp_path: 
 
     assert profiles["codex_subscription"]["adapter_type"] == "subscription_cli"
     assert profiles["codex_subscription"]["config"]["api_key_ref"] == "secret:openai:default"
-    assert profiles["gemini_subscription"]["provider"] == "google-gemini"
-    assert profiles["gemini_subscription"]["config"]["api_key_ref"] == "secret:google:default"
+    assert "gemini_subscription" not in profiles
+    assert profiles["gemini_api"]["config"]["api_key_ref"] == "secret:google:default"
+    assert profiles["antigravity_subscription"]["config"]["cli_kind"] == "antigravity"
+    assert profiles["antigravity_subscription"]["config"]["model"] == "Gemini 3.1 Pro (High)"
     assert profiles["claude_subscription_blocked"]["status"] == "blocked_by_provider"
     assert profiles["local_qwen_ollama"]["config"]["model"] == "qwen2.5-coder:14b"
     assert profiles["local_gem4_lmstudio"]["config"]["local_provider"] == "lmstudio"

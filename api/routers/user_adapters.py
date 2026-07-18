@@ -154,7 +154,7 @@ def _test_profile(profile: dict[str, Any]) -> dict[str, Any]:
     if adapter_type == "subscription_cli":
         command = config.get("command") if isinstance(config.get("command"), list) else []
         executable = str(command[0]) if command else "codex"
-        resolved = shutil.which(executable)
+        resolved = _resolve_cli_executable_for_probe(executable)
         if resolved is None:
             return {"status": "failed", "checked_at": now, "reason": "cli_not_found", "detail": executable}
         try:
@@ -242,16 +242,33 @@ def _subscription_auth_probe(profile: dict[str, Any], config: dict[str, Any]) ->
             "hint": "Ejecuta `codex login` o guarda una OpenAI API key.",
         }
 
-    if "gemini" in provider:
-        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-            return {"status": "ok", "reason": "gemini_env_key_present", "detail": "GEMINI_API_KEY/GOOGLE_API_KEY presente"}
-        return {
-            "status": "installed",
-            "reason": "gemini_auth_not_verified",
-            "hint": "Ejecuta `gemini auth login` o guarda una Google Gemini API key.",
-        }
+    if "antigravity" in provider or cli_kind == "antigravity":
+        command = config.get("command") if isinstance(config.get("command"), list) else ["agy"]
+        executable = _resolve_cli_executable_for_probe(str(command[0] or "agy"))
+        if executable:
+            try:
+                probe = subprocess.run(
+                    [executable, "--new-project", "--print", "Reply exactly OK", "--mode", "plan", "--sandbox", "--print-timeout", "30s"],
+                    capture_output=True, text=True, timeout=45, encoding="utf-8", errors="replace",
+                )
+                if probe.returncode == 0 and "OK" in (probe.stdout or ""):
+                    return {"status": "ok", "reason": "antigravity_keyring_auth_present", "detail": "Antigravity auth verificado en vivo"}
+                return {"status": "installed", "reason": "antigravity_auth_not_verified", "hint": (probe.stderr or probe.stdout or "").strip()[:300]}
+            except Exception as exc:
+                return {"status": "installed", "reason": "antigravity_auth_probe_failed", "hint": str(exc)[:300]}
 
     return {"status": "installed", "reason": "cli_installed_auth_not_verified"}
+
+
+def _resolve_cli_executable_for_probe(name: str) -> str | None:
+    resolved = shutil.which(name)
+    if resolved:
+        return resolved
+    if os.name == "nt" and name.lower() == "agy":
+        candidate = Path(os.environ.get("LOCALAPPDATA") or "") / "agy" / "bin" / "agy.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def _local_runtime_probe(config: dict[str, Any]) -> dict[str, Any]:

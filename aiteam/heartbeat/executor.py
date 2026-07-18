@@ -6763,7 +6763,7 @@ class RunExecutor:
                 lines.append(
                     "  → Acción sugerida: verificar que el agente usa ops write_file/append_file "
                     "en su respuesta, o reasignar a un adapter CLI/local "
-                    "(subscription_cli, Codex CLI, Gemini CLI u Ollama)."
+                    "(subscription_cli, Codex, Antigravity u Ollama)."
                 )
             lines.append("")
         lines.append(

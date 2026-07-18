@@ -444,9 +444,13 @@ def parse_submit_work(value: Any) -> dict[str, Any]:
         if fenced:
             return parse_submit_work(fenced.group(1))
         start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            return parse_submit_work(text[start : end + 1])
+        decoder = json.JSONDecoder()
+        while start >= 0:
+            try:
+                parsed, _ = decoder.raw_decode(text[start:])
+                return parse_submit_work(parsed)
+            except (json.JSONDecodeError, ValueError):
+                start = text.find("{", start + 1)
     raise ValueError("submit_work JSON object not found")
 
 
