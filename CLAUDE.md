@@ -14,7 +14,7 @@ suscripción), y un heartbeat secuencial procesa los runs de uno en uno.
 - **Auditar un proyecto capa-2**: `venv/Scripts/python.exe scripts/audit_project_db.py "<workspace>"`
   (ver skill `layer2-audit`).
 - **Venv**: Python 3.12 en `venv/`. Rama activa: `master`. GitHub es la fuente de
-  verdad — `git fetch` antes de asumir que local está al día (ORCH-01 también commitea).
+  verdad — `git fetch` antes de asumir que local está al día.
 
 ## Arquitectura (dónde vive cada cosa)
 
