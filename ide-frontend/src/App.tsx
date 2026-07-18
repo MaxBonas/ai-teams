@@ -151,6 +151,7 @@ interface QuorumPayload {
     distinct_providers: number;
     missing_valid: number;
     diversity_satisfied: boolean;
+    reduced_quorum: boolean;
   };
 }
 
@@ -452,6 +453,7 @@ function QuorumStepper({ quorum, loading }: { quorum: QuorumPayload | null; load
           <strong>{skipped ? 'No requerido' : statusLabel(session.status)}</strong>
         </div>
         <span className={`quorum-gate-badge${gate.ready ? ' ready' : ''}`}>{gate.ready ? 'Gate listo' : 'Gate pendiente'}</span>
+        {gate.reduced_quorum && <span className="quorum-gate-badge">Quorum reducido · 1 senior</span>}
       </div>
       <div className="quorum-steps">
         {steps.map((step, index) => (
@@ -809,6 +811,7 @@ export default function App() {
   const [secretProvider, setSecretProvider] = useState('openai');
   const [secretValue, setSecretValue] = useState('');
   const [selectedProjectAdapterIds, setSelectedProjectAdapterIds] = useState<string[]>([]);
+  const [leadAdapterProfileId, setLeadAdapterProfileId] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState('');
   // Project initialization loading state
   const [projectInitializing, setProjectInitializing] = useState(false);
@@ -1507,6 +1510,7 @@ export default function App() {
           name: projectName,
           initial_task: initialTask,
           adapter_profile_ids: selectedProjectAdapterIds,
+          lead_adapter_profile_id: leadAdapterProfileId,
         }),
       });
       const json = (await response.json()) as WorkspacePayload;
@@ -2115,11 +2119,16 @@ export default function App() {
   const toggleProjectAdapter = (profileId: string) => {
     const profile = adapterProfiles.find((item) => item.id === profileId);
     if (!profile || !profileState(profile).selectable) return;
-    setSelectedProjectAdapterIds((current) =>
-      current.includes(profileId)
-        ? current.filter((id) => id !== profileId)
-        : [...current, profileId],
-    );
+    setSelectedProjectAdapterIds((current) => {
+      if (current.includes(profileId)) {
+        const next = current.filter((id) => id !== profileId);
+        if (leadAdapterProfileId === profileId) setLeadAdapterProfileId(next[0] || '');
+        return next;
+      }
+      const next = [...current, profileId];
+      if (!leadAdapterProfileId) setLeadAdapterProfileId(profileId);
+      return next;
+    });
   };
 
   const fetchRoleModelOptions = async (profileId: string, role: string): Promise<RoleModelOption[]> => {
@@ -2308,6 +2317,23 @@ export default function App() {
               <strong>{selectedProjectAdapterIds.length}</strong>
               <span>seleccionados</span>
             </div>
+            <label>
+              Lead del proyecto
+              <select
+                value={leadAdapterProfileId}
+                onChange={(event) => setLeadAdapterProfileId(event.target.value)}
+              >
+                <option value="">Selecciona el proveedor/modelo base del Lead</option>
+                {adapterProfiles
+                  .filter((profile) => selectedProjectAdapterIds.includes(profile.id))
+                  .map((profile) => (
+                    <option key={profile.id} value={profile.id}>{profile.label}</option>
+                  ))}
+              </select>
+            </label>
+            <p className="hint">
+              Este agente será la autoridad Lead y redactará Plan A y Plan B. Podrás cambiar su adapter y modelo después en Equipo; Codex también puede actuar como senior del quorum.
+            </p>
             <div className="adapter-choice-list">
               {adapterProfiles.filter((profile) => profile.status !== 'blocked_by_provider').map((profile) => {
                 const state = profileState(profile);
@@ -2414,7 +2440,7 @@ export default function App() {
             </div>
           </div>
           <div className="actions">
-            <button onClick={() => void createProject()} disabled={loading || !projectName.trim() || selectedProjectAdapterIds.length === 0}>
+            <button onClick={() => void createProject()} disabled={loading || !projectName.trim() || selectedProjectAdapterIds.length === 0 || !leadAdapterProfileId}>
               Crear proyecto
             </button>
           </div>

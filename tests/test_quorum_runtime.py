@@ -12,6 +12,43 @@ from aiteam.heartbeat.scheduler import HeartbeatScheduler
 from aiteam.adapters.work_contract import ops_to_actions
 
 
+def _deep_plan(label: str = "Plan") -> str:
+    sections = [
+        "## Objetivo y alcance\nDefinir el objetivo completo y los límites verificables del trabajo.",
+        "## Estado actual y contexto\nDescribir el baseline, arquitectura actual y decisiones ya vigentes.",
+        "## Supuestos y restricciones\nEnumerar cada supuesto, constraint operativo y dependencia externa.",
+        "## Arquitectura y enfoque\nJustificar el approach, alternativas descartadas y consecuencias.",
+        "## Fases, dependencias y owners\nAsignar responsable, secuencia y dependencia para cada fase.",
+        "## Riesgos y rollback\nModelar riesgos, modos de fallo, reversibilidad y rollback.",
+        "## Verificación y evidencia\nDefinir criterios de aceptación, tests, recibos y evidencia.",
+        "## Preguntas abiertas y escalado\nRegistrar bloqueos, preguntas y condiciones de escalado.",
+        "## Continuación\nDetallar la siguiente run, su owner y el handoff esperado.",
+    ]
+    detail = " ".join(["Detalle causal accionable con decisión, consecuencia y evidencia esperada."] * 35)
+    return f"# {label}\n\n" + "\n\n".join(sections) + "\n\n" + detail
+
+
+def _audit_block(finding_id: str = "finding-runtime") -> str:
+    return (
+        "---QUORUM-AUDIT---\n"
+        + json.dumps({
+            "executive_assessment": "Evaluación senior independiente del enfoque y de sus consecuencias operativas.",
+            "strengths": ["La secuencia explícita y el rollback deben preservarse."],
+            "assumptions_challenged": ["La disponibilidad continua requiere validación adicional."],
+            "findings": [{
+                "id": finding_id,
+                "severity": "medium",
+                "summary": "Existe un riesgo concreto que el plan debe resolver explícitamente.",
+                "reasoning": "Si el supuesto falla, la siguiente fase pierde evidencia y bloquea la recuperación.",
+                "justification": "La transición durable necesita un recibo verificable antes de continuar.",
+                "recommendation": "Añadir un gate explícito con owner, evidencia y criterio de rollback.",
+                "tradeoffs": "Aumenta algo la latencia pero reduce ambigüedad y riesgo de recuperación.",
+            }],
+        }, ensure_ascii=False)
+        + "\n"
+    )
+
+
 def _init(db_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -35,12 +72,14 @@ def _init(db_path: Path) -> None:
             )
         conn.execute(
             "INSERT INTO issue_documents (id, issue_id, key, title, body, current_revision_id) "
-            "VALUES ('doc:plan', 'issue:root', 'plan', 'Plan', 'A', 'rev:a')"
+            "VALUES ('doc:plan', 'issue:root', 'plan', 'Plan', ?, 'rev:a')",
+            (_deep_plan("Plan A"),),
         )
         conn.execute(
             "INSERT INTO issue_document_revisions "
             "(id, document_id, issue_id, key, title, body, revision_number) "
-            "VALUES ('rev:a', 'doc:plan', 'issue:root', 'plan', 'Plan', 'A', 1)"
+            "VALUES ('rev:a', 'doc:plan', 'issue:root', 'plan', 'Plan', ?, 1)",
+            (_deep_plan("Plan A"),),
         )
         conn.commit()
 
@@ -99,6 +138,28 @@ def test_explicit_quorum_auto_starts_from_durable_plan_without_hiring_interactio
     assert interactions == 0
 
 
+def test_shallow_plan_is_rejected_and_lead_gets_durable_revision_wakeup(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DELETE FROM issues WHERE parent_id='issue:root'")
+        conn.execute("UPDATE issue_documents SET body='Objetivo y riesgos' WHERE id='doc:plan'")
+        conn.execute("UPDATE issue_document_revisions SET body='Objetivo y riesgos' WHERE id='rev:a'")
+        conn.commit()
+
+    session = RunExecutor(db_path, AdapterRegistry([]))._maybe_start_explicit_quorum(
+        issue_id="issue:root", run_id=""
+    )
+
+    assert session is None
+    with sqlite3.connect(str(db_path)) as conn:
+        wake = conn.execute(
+            "SELECT reason, status FROM wakeup_requests WHERE reason='quorum_plan_revision_required'"
+        ).fetchone()
+        assert wake == ("quorum_plan_revision_required", "queued")
+        assert conn.execute("SELECT COUNT(*) FROM quorum_sessions").fetchone()[0] == 0
+
+
 def test_quorum_auditor_receives_immutable_plan_not_other_contributions(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init(db_path)
@@ -129,8 +190,33 @@ def test_quorum_auditor_receives_immutable_plan_not_other_contributions(tmp_path
     assert dispatch is not None
     RunExecutor(db_path, AdapterRegistry([runtime])).execute(dispatch)
     assert runtime.payload["quorum_review"]["base_plan_revision_id"] == "rev:a"
-    assert runtime.payload["quorum_review"]["plan"]["body"] == "A"
+    assert runtime.payload["quorum_review"]["plan"]["body"] == _deep_plan("Plan A")
+    assert runtime.payload["quorum_review"]["objective"]["title"] == "Plan"
     assert "contributions" not in runtime.payload["quorum_review"]
+
+
+def test_quorum_session_adapts_to_one_hired_senior(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    proposal = _proposal()
+    proposal["proposed_team"] = [{"id": "role:q1"}]
+    proposal["suggested_issues"][1]["assignee_agent_id"] = "role:q1"
+    proposal["suggested_issues"][2]["assignee_agent_id"] = "role:q2"
+
+    session = RunExecutor(db_path, AdapterRegistry([]))._initialize_quorum_session(
+        parent_issue_id="issue:root",
+        proposal=proposal,
+        created_issue_ids=["issue:q1", "issue:q2"],
+    )
+
+    assert session is not None
+    assert session["requested_contributions"] == 1
+    assert session["min_valid_contributions"] == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        metadata = json.loads(conn.execute(
+            "SELECT metadata_json FROM issues WHERE id='issue:root'"
+        ).fetchone()[0])
+    assert metadata["quorum_objective_snapshot"]["base_plan_revision_id"] == "rev:a"
 
 
 def test_quorum_report_in_add_comment_records_contribution(tmp_path: Path) -> None:
@@ -154,7 +240,7 @@ def test_quorum_report_in_add_comment_records_contribution(tmp_path: Path) -> No
         result=ExecutionResult(
             status="completed",
             actions={"add_comments": [
-                "---AGENT-REPORT---\nrole: reviewer\nresult: changes_requested\n"
+                _audit_block("finding-add-1") + "---AGENT-REPORT---\nrole: reviewer\nresult: changes_requested\n"
                 "issue_status: blocked\nnext_owner: lead\ntech_match: n/a\n"
                 "blocker: risk\nevidence: finding"
             ]},
@@ -181,7 +267,7 @@ def test_quorum_report_in_add_comment_records_contribution(tmp_path: Path) -> No
         result=ExecutionResult(
             status="completed",
             actions={"add_comments": [
-                "---AGENT-REPORT---\nrole: reviewer\nresult: approved\n"
+                _audit_block("finding-add-2") + "---AGENT-REPORT---\nrole: reviewer\nresult: approved\n"
                 "issue_status: done\nnext_owner: lead\ntech_match: n/a\n"
                 "blocker: none\nevidence: independent finding"
             ]},
@@ -304,7 +390,7 @@ class _CostedAuditorRuntime:
         return ExecutionResult(
             status="completed",
             output=(
-                "Revisión independiente completada.\n\n"
+                "Revisión independiente completada.\n\n" + _audit_block("finding-cost") +
                 "---AGENT-REPORT---\n"
                 "role: reviewer\n"
                 "result: changes_requested\n"
@@ -341,7 +427,8 @@ def _finish_auditor(
         "channel": "api",
     }
     executor._maybe_record_quorum_contribution(
-        issue_id=issue_id, agent_id=agent_id, run=run, report=_report()
+        issue_id=issue_id, agent_id=agent_id, run=run, report=_report(),
+        source_body=_audit_block(f"{issue_id}:report"),
     )
     executor._enqueue_supervisor_report(
         issue_id=issue_id, reporting_agent_id=agent_id, source_run_id=run_id
@@ -613,7 +700,7 @@ def test_lead_synthesis_action_updates_plan_and_finishes_planning(tmp_path: Path
 
     actions = ops_to_actions(
         [
-            {"type": "update_plan", "title": "Plan B", "body": "Plan consolidado B"},
+            {"type": "update_plan", "title": "Plan B", "body": _deep_plan("Plan B consolidado")},
             {
                 "type": "accept_quorum_synthesis",
                 "path": session["id"],
@@ -621,12 +708,12 @@ def test_lead_synthesis_action_updates_plan_and_finishes_planning(tmp_path: Path
                     {
                         "finding_id": "issue:q1:report",
                         "decision": "accept",
-                        "rationale": "mitiga riesgo uno",
+                        "rationale": "Incorporado porque mitiga de forma verificable el riesgo uno.",
                     },
                     {
                         "finding_id": "issue:q2:report",
                         "decision": "qualify",
-                        "rationale": "ajusta riesgo dos",
+                        "rationale": "Matizado porque ajusta el riesgo dos sin perder reversibilidad.",
                     },
                 ],
             },
@@ -662,7 +749,7 @@ def test_lead_synthesis_action_updates_plan_and_finishes_planning(tmp_path: Path
     assert issue_status == "done"
     assert issue_metadata["profile"] == "lead_quorum"
     assert issue_metadata["planning_status"] == "accepted_plan"
-    assert dict(plan) == {"body": "Plan consolidado B", "revision_number": 2}
+    assert dict(plan) == {"body": _deep_plan("Plan B consolidado"), "revision_number": 2}
     assert accepted_wakes == 0
 
 
@@ -686,12 +773,12 @@ def test_invalid_synthesis_escalates_after_bounded_retries(tmp_path: Path) -> No
     )
     incomplete_actions = ops_to_actions(
         [
-            {"type": "update_plan", "title": "Plan incompleto", "body": "B"},
+            {"type": "update_plan", "title": "Plan incompleto", "body": _deep_plan("Plan B incompleto")},
             {
                 "type": "accept_quorum_synthesis",
                 "path": session["id"],
                 "dispositions": [
-                    {"finding_id": "issue:q1:report", "decision": "accept", "rationale": "uno"}
+                    {"finding_id": "issue:q1:report", "decision": "accept", "rationale": "Se incorpora por su impacto causal demostrado."}
                 ],
             },
         ]
@@ -772,7 +859,7 @@ def test_quorum_ready_payload_drives_real_adapter_synthesis(tmp_path: Path) -> N
                 {
                     "finding_id": finding["id"],
                     "decision": "accept",
-                    "rationale": "incorporado en plan B",
+                    "rationale": "Incorporado en Plan B por su impacto causal y verificable.",
                 }
                 for contribution in quorum["contributions"]
                 for finding in contribution["findings"]
@@ -781,7 +868,7 @@ def test_quorum_ready_payload_drives_real_adapter_synthesis(tmp_path: Path) -> N
                 status="completed",
                 output="Síntesis estructurada.",
                 actions={
-                    "update_plan": {"title": "Plan B", "body": "Plan B desde quorum"},
+                    "update_plan": {"title": "Plan B", "body": _deep_plan("Plan B desde quorum")},
                     "accept_quorum_synthesis": {
                         "session_id": quorum["session_id"],
                         "dispositions": dispositions,
@@ -802,6 +889,9 @@ def test_quorum_ready_payload_drives_real_adapter_synthesis(tmp_path: Path) -> N
         ).fetchone()[0])
     assert runtime.payload["quorum"]["base_plan_revision_id"] == "rev:a"
     assert len(runtime.payload["quorum"]["contributions"]) == 2
+    assert runtime.payload["quorum"]["objective"]["title"] == "Plan"
+    assert runtime.payload["quorum"]["contributions"][0]["audit"]["strengths"]
+    assert "Lead real" in runtime.payload["quorum"]["lead_instruction"]
     assert status == "accepted"
     assert metadata["profile"] == "lead_quorum"
     assert metadata["planning_status"] == "accepted_plan"

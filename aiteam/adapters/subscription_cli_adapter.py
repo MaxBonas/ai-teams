@@ -19,6 +19,7 @@ from aiteam.adapters.work_contract import (
     ops_to_actions,
     parse_submit_work,
 )
+from aiteam.quorum_quality import quorum_audit_contract_instruction
 
 # Output schema for Codex CLI. Includes an `ops` array so codex agents can
 # delegate and manage work (create_issue, set_status, create_interaction, …)
@@ -316,6 +317,7 @@ def _build_system_prompt(env: dict[str, str]) -> str:
             "- En ese bloque usa role: quorum_auditor, result: approved|changes_requested|blocked, "
             "issue_status: done, next_owner: lead, blocker y evidence no vacía.\n"
             "- result: pass, passed o passed_with_findings NO son válidos para el gate de quorum."
+            "\n" + quorum_audit_contract_instruction()
         )
     return contract
 
@@ -347,8 +349,9 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         role_key in _ORCHESTRATION_ROLES
         and str(payload_data.get("profile") or "").strip().lower() == "solo_lead"
     )
+    is_quorum_auditor = role_key in {"quorum_auditor", "quorum_senior"}
     is_orchestrator = role_key in _ORCHESTRATION_ROLES and not is_solo_direct
-    is_read_only = is_orchestrator or role_key in _READ_ONLY_ROLES
+    is_read_only = is_orchestrator or is_quorum_auditor or role_key in _READ_ONLY_ROLES
     skill = env.get("AITEAM_AGENT_SKILL", "").strip()
     workspace = env.get("AITEAM_WORKSPACE_ROOT", "").strip()
     payload = env.get("AITEAM_WAKE_PAYLOAD_JSON", "").strip()
@@ -407,6 +410,15 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
             "  - Para dirigir a un hijo bloqueado → update_child_issue. Para cerrar la issue → "
             '{"type":"set_status","status":"done"}.',
             "Solo escribe un comentario (add_comment) para dejar constancia; el trabajo real va en `ops`.",
+        ]
+    elif is_quorum_auditor:
+        parts += [
+            "Eres un AUDITOR SENIOR independiente y reportas al Lead real del proyecto.",
+            "No implementes, no edites archivos, no delegues y no dialogues con otros auditores.",
+            "Audita únicamente el objetivo congelado y el Plan A incluidos en payload.quorum_review.",
+            "Argumenta fortalezas, supuestos cuestionados, consecuencias, alternativas y trade-offs.",
+            quorum_audit_contract_instruction(),
+            "Finaliza con add_comment y set_status done; nunca uses accept_quorum_synthesis.",
         ]
     elif is_read_only:
         parts += [

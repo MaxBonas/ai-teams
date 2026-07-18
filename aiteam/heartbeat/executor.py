@@ -44,6 +44,14 @@ from aiteam.lead_intake import apply_accepted_team_proposal, build_team_proposal
 from aiteam.hiring_economics import log_hiring_decision
 from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
 from aiteam.provider_governor import GOVERNOR
+from aiteam.quorum_quality import (
+    QUORUM_AUDIT_MARKER,
+    evaluate_plan_depth,
+    parse_quorum_audit,
+    plan_contract_instruction,
+    quorum_audit_contract_instruction,
+    validate_quorum_audit,
+)
 from aiteam.run_liveness import (
     MAX_CONTINUATION_ATTEMPTS,
     LivenessResult,
@@ -113,6 +121,9 @@ def _safe_truncate_output(text: str, max_len: int = _COMMENT_BODY_MAX) -> str:
     if len(text) <= max_len:
         return text
     block_start = text.rfind(_AGENT_REPORT_MARKER)
+    quorum_block_start = text.rfind(QUORUM_AUDIT_MARKER)
+    if quorum_block_start >= 0 and (block_start < 0 or quorum_block_start < block_start):
+        block_start = quorum_block_start
     if block_start == -1:
         # No structured block — plain truncation is safe
         return text[:max_len]
@@ -295,7 +306,8 @@ class RunExecutor:
                             "⚠ CONTRATO LEAD_QUORUM OBLIGATORIO: esta run debe emitir update_plan "
                             "con el Plan A completo. NO emitas set_status:done, NO pidas dispensar "
                             "tests y NO crees issues de implementación. Al persistirse Plan A, el "
-                            "control plane creará automáticamente dos auditorías independientes."
+                            "control plane creará automáticamente auditorías independientes.\n"
+                            + plan_contract_instruction()
                         )
                         existing_instruction = str(payload.get("mandatory_instruction") or "").strip()
                         payload["mandatory_instruction"] = (
@@ -307,9 +319,13 @@ class RunExecutor:
                     with contextlib.closing(_connect(self.db_path)) as _conn:
                         _base = _conn.execute(
                             """
-                            SELECT qs.base_plan_revision_id, r.title, r.body, r.revision_number
+                            SELECT qs.base_plan_revision_id, r.title, r.body, r.revision_number,
+                                   parent.title AS objective_title,
+                                   parent.description AS objective_description,
+                                   parent.metadata_json AS objective_metadata_json
                             FROM quorum_sessions qs
                             JOIN issue_document_revisions r ON r.id=qs.base_plan_revision_id
+                            JOIN issues parent ON parent.id=qs.issue_id
                             WHERE qs.id=?
                             """,
                             (_audit_session_id,),
@@ -323,9 +339,20 @@ class RunExecutor:
                                 "body": _base["body"],
                                 "revision_number": _base["revision_number"],
                             },
+                            "objective": (
+                                _decode_json(_base["objective_metadata_json"] or "{}").get(
+                                    "quorum_objective_snapshot"
+                                )
+                                or {
+                                    "title": _base["objective_title"],
+                                    "description": _base["objective_description"],
+                                }
+                            ),
                             "instruction": (
                                 "Revisa exclusivamente esta revisión inmutable del plan. "
-                                "No exijas workspace_files ni implementación."
+                                "No exijas workspace_files ni implementación. "
+                                "El Lead es el owner real: argumenta con profundidad y entrégale tu informe.\n"
+                                + quorum_audit_contract_instruction()
                             ),
                         }
                     if str(ctx.get("wake_reason") or "") == "quorum_report_retry":
@@ -333,7 +360,8 @@ class RunExecutor:
                             "CORRECCIÓN OBLIGATORIA: tu run anterior terminó sin un AGENT-REPORT "
                             "estructurado y por tanto no cuenta para el quorum. Debes usar `add_comment` "
                             "e incluir al final exactamente un bloque `---AGENT-REPORT---` con role, "
-                            "result, issue_status, next_owner, blocker y evidence. No termines solo con summary."
+                            "result, issue_status, next_owner, blocker y evidence, además del bloque "
+                            f"`{QUORUM_AUDIT_MARKER}` completo. No termines solo con summary."
                         )
                         existing_instruction = str(payload.get("mandatory_instruction") or "").strip()
                         payload["mandatory_instruction"] = correction + (
@@ -346,6 +374,12 @@ class RunExecutor:
                     try:
                         payload["quorum"] = quorum_synthesis_context(
                             self.db_path, session_id=_quorum_session_id
+                        )
+                        payload["quorum"]["lead_instruction"] = (
+                            "Eres el Lead real y conservas la decisión final. Lee todos los informes, "
+                            "contrasta argumentos y crea un Plan B robusto. Para cada finding usa accept, "
+                            "qualify o discard con rationale sustantiva; preserva fortalezas y explica "
+                            "trade-offs y alternativas. " + plan_contract_instruction(final=True)
                         )
                     except Exception:
                         logger.warning(
@@ -1109,6 +1143,7 @@ class RunExecutor:
                             agent_id=agent_id,
                             run=run,
                             report=_stored_report,
+                            source_body=result.output,
                         )
                     except Exception:
                         logger.warning("agent report persistence failed for run %s", run_id, exc_info=True)
@@ -2853,6 +2888,7 @@ class RunExecutor:
                         agent_id=agent_id,
                         run=run,
                         report=_stored_comment_report,
+                        source_body=body,
                     )
                 except Exception:
                     logger.warning("agent report persistence (add_comment) failed for issue %s", issue_id, exc_info=True)
@@ -2885,9 +2921,18 @@ class RunExecutor:
 
         # update_plan: LLM-written plan document
         plan_action = actions.get("update_plan")
+        _quorum_action_candidate = actions.get("accept_quorum_synthesis")
         _new_plan_revision_id = ""
         if isinstance(plan_action, dict) and plan_action.get("body"):
             try:
+                if isinstance(_quorum_action_candidate, dict):
+                    final_depth = evaluate_plan_depth(str(plan_action["body"]))
+                    if not final_depth["valid"]:
+                        raise ValueError(
+                            "final quorum plan is not deep enough: "
+                            f"missing={final_depth['missing_dimensions']}, "
+                            f"words={final_depth['word_count']}/{final_depth['min_words']}"
+                        )
                 existing = get_document(self.db_path, issue_id=issue_id, key="plan")
                 updated_plan = put_document(
                     self.db_path,
@@ -2903,8 +2948,8 @@ class RunExecutor:
                 _new_plan_revision_id = str(updated_plan.get("current_revision_id") or "")
             except DocumentConflict:
                 pass
-            except Exception:
-                logger.warning("update_plan action failed for issue %s", issue_id, exc_info=True)
+            except Exception as exc:
+                logger.warning("update_plan action failed for issue %s: %s", issue_id, exc)
 
         # ``lead_quorum`` is already an explicit user choice. Once Plan A is
         # durable, start its independent reviews without asking for a second
@@ -2912,7 +2957,7 @@ class RunExecutor:
         # add_comment: _maybe_materialize_plan_comment ran immediately above.
         self._maybe_start_explicit_quorum(issue_id=issue_id, run_id=str(run.get("id") or ""))
 
-        quorum_action = actions.get("accept_quorum_synthesis")
+        quorum_action = _quorum_action_candidate
         if isinstance(quorum_action, dict):
             session_id = str(quorum_action.get("session_id") or "").strip()
             dispositions = quorum_action.get("dispositions")
@@ -3901,6 +3946,50 @@ class RunExecutor:
         revision_id = str((plan or {}).get("current_revision_id") or "").strip()
         if not revision_id:
             return None
+        plan_depth = evaluate_plan_depth(str((plan or {}).get("body") or ""))
+        if not plan_depth["valid"]:
+            with contextlib.closing(_connect(self.db_path)) as conn:
+                already_reported = conn.execute(
+                    "SELECT 1 FROM activity_log WHERE action='quorum.plan_depth_rejected' "
+                    "AND target_id=? LIMIT 1",
+                    (revision_id,),
+                ).fetchone()
+            if already_reported is None:
+                create_comment(
+                    self.db_path,
+                    issue_id=issue_id,
+                    author_user_id="system",
+                    body=(
+                        "⚙ Sistema: Plan A todavía no cumple el contrato profundo de quorum. "
+                        f"Faltan dimensiones: {', '.join(plan_depth['missing_dimensions']) or 'ninguna'}; "
+                        f"palabras: {plan_depth['word_count']}/{plan_depth['min_words']}. "
+                        "El Lead debe publicar una revisión más completa antes de auditar."
+                    ),
+                    metadata={"source": "quorum_plan_depth_gate", "revision_id": revision_id},
+                )
+                log_activity(
+                    self.db_path,
+                    action="quorum.plan_depth_rejected",
+                    target_type="plan_revision",
+                    target_id=revision_id,
+                    actor_agent_id="role:lead",
+                    run_id=run_id or None,
+                    payload={"issue_id": issue_id, **plan_depth},
+                )
+                enqueue_wakeup(
+                    self.db_path,
+                    agent_id=str(issue.get("assignee_agent_id") or "role:lead"),
+                    source="quorum",
+                    reason="quorum_plan_revision_required",
+                    trigger_detail=f"quorum:plan-depth:{revision_id}",
+                    payload={
+                        "issue_id": issue_id,
+                        "wake_reason": "quorum_plan_revision_required",
+                        "plan_depth": plan_depth,
+                    },
+                    idempotency_key=f"quorum-plan-depth:{revision_id}",
+                )
+            return None
         proposal = build_team_proposal(
             issue,
             adapter_profiles=project_profiles(Path(self.db_path).parent),
@@ -3946,6 +4035,16 @@ class RunExecutor:
             for item in (proposal.get("suggested_issues") or [])
             if isinstance(item, dict) and str(item.get("delegation_type") or "") == "risk_review"
         ]
+        proposed_auditor_ids = {
+            str(item.get("id") or "")
+            for item in (proposal.get("proposed_team") or [])
+            if isinstance(item, dict) and str(item.get("id") or "")
+        }
+        if proposed_auditor_ids:
+            auditor_specs = [
+                item for item in auditor_specs
+                if str(item.get("assignee_agent_id") or "") in proposed_auditor_ids
+            ]
         if not auditor_specs:
             return None
         session = create_quorum_session(
@@ -3956,6 +4055,20 @@ class RunExecutor:
         )
         created_set = {str(item) for item in created_issue_ids}
         with contextlib.closing(_connect(self.db_path)) as conn:
+            parent_row = conn.execute(
+                "SELECT title, description, metadata_json FROM issues WHERE id=?", (parent_issue_id,)
+            ).fetchone()
+            parent_metadata = _decode_json(parent_row["metadata_json"] if parent_row else "{}")
+            parent_metadata["quorum_objective_snapshot"] = {
+                "session_id": session["id"],
+                "title": str(parent_row["title"] or "") if parent_row else "",
+                "description": str(parent_row["description"] or "") if parent_row else "",
+                "base_plan_revision_id": base_revision_id,
+            }
+            conn.execute(
+                "UPDATE issues SET metadata_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (json.dumps(parent_metadata, ensure_ascii=False, sort_keys=True), parent_issue_id),
+            )
             for ordinal, spec in enumerate(auditor_specs, start=1):
                 child_id = str(spec.get("id") or "").strip()
                 if not child_id or child_id not in created_set:
@@ -4106,6 +4219,7 @@ class RunExecutor:
         agent_id: str,
         run: dict[str, Any],
         report: dict[str, Any],
+        source_body: str = "",
     ) -> dict[str, Any] | None:
         issue = get_issue(self.db_path, issue_id=issue_id) or {}
         metadata = _decode_json(issue.get("metadata_json") or "{}")
@@ -4114,7 +4228,30 @@ class RunExecutor:
             return None
         evidence = str(report.get("evidence") or report.get("blocker") or "").strip()
         result = str(report.get("result") or "").strip().lower()
-        finding_summary = evidence or f"Auditor result: {result}"
+        parsed_audit = parse_quorum_audit(source_body)
+        audit_validation = validate_quorum_audit(parsed_audit)
+        findings = audit_validation["findings"] if audit_validation["valid"] else []
+        if audit_validation["valid"] and isinstance(parsed_audit, dict):
+            evidence = json.dumps(
+                {
+                    "executive_assessment": parsed_audit.get("executive_assessment"),
+                    "strengths": parsed_audit.get("strengths"),
+                    "assumptions_challenged": parsed_audit.get("assumptions_challenged"),
+                    "agent_report_evidence": evidence,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        if not findings:
+            log_activity(
+                self.db_path,
+                action="quorum.audit_contract_invalid",
+                target_type="issue",
+                target_id=issue_id,
+                actor_agent_id=agent_id,
+                run_id=str(run.get("id") or "") or None,
+                payload={"session_id": session_id, "errors": audit_validation["errors"]},
+            )
         contribution = record_quorum_contribution(
             self.db_path,
             session_id=session_id,
@@ -4126,13 +4263,7 @@ class RunExecutor:
             channel=str(run.get("channel") or "") or None,
             result=result,
             evidence=evidence,
-            findings=[
-                {
-                    "id": f"{issue_id}:report",
-                    "severity": "high" if result == "blocked" else "medium",
-                    "summary": finding_summary,
-                }
-            ],
+            findings=findings,
         )
         log_activity(
             self.db_path,

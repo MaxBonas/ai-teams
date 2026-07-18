@@ -70,12 +70,33 @@ def test_quorum_requires_two_valid_provider_diverse_contributions(tmp_path: Path
     assert ready == {
         "ready": True,
         "status": "ready",
+        "requested_contributions": 2,
+        "min_valid_contributions": 2,
+        "reduced_quorum": False,
         "valid_contributions": 2,
         "total_contributions": 2,
         "distinct_providers": 2,
         "missing_valid": 0,
         "diversity_satisfied": True,
     }
+
+
+def test_reduced_quorum_accepts_one_available_senior(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    session = create_quorum_session(
+        db_path, issue_id="issue:q", base_plan_revision_id="rev:single",
+        requested_contributions=1,
+    )
+    assert session["requested_contributions"] == 1
+    assert session["min_valid_contributions"] == 1
+
+    _contribute(db_path, session["id"], "role:q1", 1, "openai")
+
+    gate = evaluate_quorum_session(db_path, session_id=session["id"])
+    assert gate["ready"] is True
+    assert gate["diversity_satisfied"] is True
+    assert gate["reduced_quorum"] is True
 
 
 def test_quorum_rejects_narration_without_structured_findings(tmp_path: Path) -> None:
@@ -160,8 +181,8 @@ def test_accepted_synthesis_finishes_planning_without_starting_execution(tmp_pat
         synthesis_run_id="run:synthesis",
         final_plan_revision_id="rev-b",
         dispositions=[
-            {"finding_id": "finding-1", "decision": "accept", "rationale": "reduce riesgo"},
-            {"finding_id": "finding-2", "decision": "qualify", "rationale": "ajuste menor"},
+            {"finding_id": "finding-1", "decision": "accept", "rationale": "Reduce el riesgo con evidencia verificable suficiente."},
+            {"finding_id": "finding-2", "decision": "qualify", "rationale": "Se matiza para conservar el enfoque y limitar el coste."},
         ],
     )
     assert accepted["status"] == "accepted"
@@ -186,14 +207,17 @@ def test_accepted_synthesis_finishes_planning_without_starting_execution(tmp_pat
         synthesis_run_id="run:synthesis",
         final_plan_revision_id="rev-b",
         dispositions=[
-            {"finding_id": "finding-1", "decision": "accept", "rationale": "reduce riesgo"},
-            {"finding_id": "finding-2", "decision": "qualify", "rationale": "ajuste menor"},
+            {"finding_id": "finding-1", "decision": "accept", "rationale": "Reduce el riesgo con evidencia verificable suficiente."},
+            {"finding_id": "finding-2", "decision": "qualify", "rationale": "Se matiza para conservar el enfoque y limitar el coste."},
         ],
     )
     assert repeated["status"] == "accepted"
     assert evaluate_quorum_session(db_path, session_id=session["id"]) == {
         "ready": False,
         "status": "accepted",
+        "requested_contributions": 2,
+        "min_valid_contributions": 2,
+        "reduced_quorum": False,
         "valid_contributions": 2,
         "total_contributions": 2,
         "distinct_providers": 2,
@@ -232,5 +256,5 @@ def test_synthesis_requires_disposition_for_every_finding(tmp_path: Path) -> Non
             session_id=session["id"],
             synthesis_run_id="run:s",
             final_plan_revision_id="rev:b",
-            dispositions=[{"finding_id": "finding-1", "decision": "accept"}],
+            dispositions=[{"finding_id": "finding-1", "decision": "accept", "rationale": "Se acepta por su impacto causal claramente justificado."}],
         )

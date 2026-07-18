@@ -127,8 +127,14 @@ def run_canary(workdir: Path) -> dict[str, Any]:
         synthesis_run_id="run:synthesis",
         final_plan_revision_id="rev:b",
         dispositions=[
-            {"finding_id": "risk:persistence", "decision": "accept", "rationale": "reduce pérdida"},
-            {"finding_id": "risk:migration", "decision": "qualify", "rationale": "migración gradual"},
+            {
+                "finding_id": "risk:persistence", "decision": "accept",
+                "rationale": "Se incorpora porque reduce la pérdida con evidencia durable verificable.",
+            },
+            {
+                "finding_id": "risk:migration", "decision": "qualify",
+                "rationale": "Se matiza para conservar una migración gradual y reversible.",
+            },
         ],
     )
 

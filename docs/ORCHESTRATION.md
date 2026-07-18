@@ -19,6 +19,12 @@ Optimizar simultáneamente:
 
 Más agentes no implican mejor resultado. Toda complejidad nueva debe demostrar valor frente a un baseline más simple.
 
+`Lead` es una autoridad (`role:lead`), no una marca ni un proveedor. El usuario
+elige su perfil al crear el proyecto y puede cambiar adapter/modelo después en
+Equipo. OpenAI/Codex, Anthropic, Antigravity u otro canal compatible pueden
+ocupar el Lead o una plaza senior del quorum. Plan A, el wakeup de síntesis y
+Plan B pertenecen siempre al agente que ocupa `role:lead`.
+
 ## Flujo de decisión
 
 1. Inspeccionar código, tests y estado durable; no confiar en documentos históricos sin contraste.
@@ -151,8 +157,9 @@ cree después una tarea de ejecución explícita.
 Contrato mínimo:
 
 - revisión A del documento `plan` como base común e inmutable de la sesión;
-- dos contribuciones válidas e independientes, con máximo operativo definido en
-  `aiteam/policies.py`;
+- dos contribuciones válidas e independientes como objetivo canónico; si el
+  equipo aceptado solo contiene un senior además del Lead, el gate se adapta a
+  una contribución y registra explícitamente el quorum reducido;
 - identidad, adapter, provider, modelo, canal, run, evidencia y coste persistidos;
 - gate determinista sobre cantidad, validez, diversidad exigible y presupuesto;
 - revisión B sintetizada por el Lead, con disposición `aceptar`, `matizar` o
@@ -183,6 +190,31 @@ de la primera evaluación reduce independencia y puede crear consenso aparente.
 El bootstrap asigna proveedores distintos a los auditores cuando hay perfiles
 suficientes; si no puede, conserva perfiles distintos como segundo mejor
 aislamiento y deja que el gate durable diagnostique la diversidad insuficiente.
+
+Antes de abrir la sesión, el control plane congela también el objetivo vigente
+de la issue (título, descripción y revisión base). Cada prompt nuevo de este
+modo debe vivir en su propia issue de planificación; aclaraciones anteriores al
+freeze se incorporan al objetivo, pero no mutan silenciosamente una sesión ya
+iniciada.
+
+Plan A y Plan B deben superar un contrato determinista de profundidad: mínimo
+300 palabras y cobertura explícita de objetivo/alcance, estado actual,
+supuestos/restricciones, arquitectura y alternativas, fases/dependencias/owners,
+riesgos/rollback, verificación/evidencia, preguntas/escalado y continuación. El
+gate solo valida estructura; la calidad abierta sigue correspondiendo a los LLM
+y al benchmark.
+
+Cada senior entrega al Lead un bloque `QUORUM-AUDIT` estructurado con evaluación
+ejecutiva, fortalezas, supuestos cuestionados y findings. Cada finding conserva
+severidad, razonamiento causal, justificación, recomendación y trade-offs. La
+contribución no cuenta si esa argumentación falta o es superficial. Los
+auditores solo pueden comentar y cerrar su issue: RBAC les prohíbe editar,
+delegar, preguntar al usuario o aceptar la síntesis.
+
+El Lead recibe los informes completos una vez satisfecho el gate. Para aceptar
+Plan B debe disponer todos los findings mediante `accept`, `qualify` o `discard`,
+con rationale sustantiva, y publicar en la misma run una revisión final que
+vuelva a superar el contrato de profundidad.
 
 La implementación imperativa legacy de quorum fue retirada. El único camino vivo
 es el contrato durable SQLite: no hay activación por `AITEAM_AUTO_QUORUM`, prompts

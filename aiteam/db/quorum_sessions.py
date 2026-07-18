@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from aiteam.policies import (
+    QUORUM_ABSOLUTE_MIN_VALID_CONTRIBUTIONS,
     QUORUM_MAX_CONTRIBUTIONS,
     QUORUM_MIN_VALID_CONTRIBUTIONS,
 )
@@ -27,9 +28,10 @@ def create_quorum_session(
     requested_contributions: int = QUORUM_MIN_VALID_CONTRIBUTIONS,
 ) -> dict[str, Any]:
     requested = max(
-        QUORUM_MIN_VALID_CONTRIBUTIONS,
+        QUORUM_ABSOLUTE_MIN_VALID_CONTRIBUTIONS,
         min(int(requested_contributions), QUORUM_MAX_CONTRIBUTIONS),
     )
+    min_valid = min(QUORUM_MIN_VALID_CONTRIBUTIONS, requested)
     with contextlib.closing(_connect(db_path)) as conn:
         row = conn.execute(
             """
@@ -39,6 +41,7 @@ def create_quorum_session(
             ) VALUES (?, ?, ?, ?, ?, 'planning_complete')
             ON CONFLICT(issue_id, base_plan_revision_id) DO UPDATE SET
                 requested_contributions = excluded.requested_contributions,
+                min_valid_contributions = excluded.min_valid_contributions,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING *
             """,
@@ -47,7 +50,7 @@ def create_quorum_session(
                 issue_id,
                 base_plan_revision_id,
                 requested,
-                QUORUM_MIN_VALID_CONTRIBUTIONS,
+                min_valid,
             ),
         ).fetchone()
     return dict(row)
@@ -166,6 +169,9 @@ def evaluate_quorum_session(
     return {
         "ready": ready,
         "status": status,
+        "requested_contributions": int(session["requested_contributions"]),
+        "min_valid_contributions": min_valid,
+        "reduced_quorum": min_valid == QUORUM_ABSOLUTE_MIN_VALID_CONTRIBUTIONS,
         "valid_contributions": len(valid_rows),
         "total_contributions": len(rows),
         "distinct_providers": len(providers),
@@ -229,17 +235,29 @@ def quorum_synthesis_context(db_path: Path, *, session_id: str) -> dict[str, Any
             """,
             (session_id,),
         ).fetchall()
+        issue = conn.execute(
+            "SELECT title, description, metadata_json FROM issues WHERE id=?",
+            (session["issue_id"],),
+        ).fetchone()
+        issue_metadata = _decode_dict(issue["metadata_json"] if issue else "{}")
     return {
         "session_id": session_id,
         "issue_id": session["issue_id"],
         "base_plan_revision_id": session["base_plan_revision_id"],
         "status": session["status"],
+        "objective": issue_metadata.get("quorum_objective_snapshot") or {
+            "title": issue["title"] if issue else "",
+            "description": issue["description"] if issue else "",
+        },
         "required_action": "update_plan_then_accept_quorum_synthesis",
         "contributions": [
             {
                 **{key: row[key] for key in row.keys() if key != "findings_json"},
                 "valid": bool(row["valid"]),
                 "findings": _decode_list(row["findings_json"]),
+                "audit": _decode_dict(row["evidence"]) or {
+                    "agent_report_evidence": row["evidence"]
+                },
             }
             for row in contributions
         ],
@@ -303,6 +321,18 @@ def accept_quorum_synthesis(
     }
     if any(decision not in allowed_decisions for decision in disposition_by_finding.values()):
         raise ValueError("invalid quorum disposition; expected accept, qualify or discard")
+    shallow_rationales = [
+        str(item.get("finding_id") or "").strip()
+        for item in dispositions
+        if isinstance(item, dict)
+        and str(item.get("finding_id") or "").strip()
+        and len(str(item.get("rationale") or "").strip()) < 20
+    ]
+    if shallow_rationales:
+        raise ValueError(
+            "quorum dispositions require substantive rationale for: "
+            + ", ".join(sorted(shallow_rationales))
+        )
 
     with contextlib.closing(_connect(db_path)) as conn:
         session = conn.execute(

@@ -126,6 +126,22 @@ class TestFilterForbiddenOps:
         assert dropped[0]["type"] == "update_plan"
         assert len(allowed) == 2
 
+    def test_quorum_auditor_can_only_report_and_finish(self) -> None:
+        ops = [
+            {"type": "add_comment", "body": "Auditoría"},
+            {"type": "set_status", "status": "done"},
+            {"type": "write_file", "path": "app.py", "body": "x"},
+            {"type": "create_interaction", "kind": "request_confirmation"},
+            {"type": "accept_quorum_synthesis", "path": "session:q"},
+        ]
+
+        allowed, dropped = filter_forbidden_ops_for_role(ops, role="quorum_auditor")
+
+        assert {op["type"] for op in allowed} == {"add_comment", "set_status"}
+        assert {op["type"] for op in dropped} == {
+            "write_file", "create_interaction", "accept_quorum_synthesis"
+        }
+
     def test_filter_role_case_insensitive(self) -> None:
         """Role comparison should be case-insensitive."""
         ops = [{"type": "create_issue", "title": "New task", "role": "engineer"}]

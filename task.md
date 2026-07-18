@@ -4,6 +4,10 @@ Fecha: `2026-07-17`
 
 Plan rector activo: `docs/MIGRATION_PAPERCLIP.md`.
 
+- [x] Generalizar la autoridad del quorum: Lead configurable por el usuario al
+  crear el proyecto o desde Equipo; ningún proveedor queda codificado como Lead
+  y Codex puede participar como senior auditor.
+
 ## Limpieza profunda
 
 - [x] Retirar documentacion legacy, archivo historico interno y docs desalineados.
@@ -91,7 +95,8 @@ Plan rector activo: `docs/MIGRATION_PAPERCLIP.md`.
 - [x] **Frontend - pedir cambios en hiring**: la Bandeja ofrece feedback obligatorio y outcome durable `changes_requested`; no aplica hiring, despierta al Lead con la nota y conserva la propuesta resuelta en el historial. La siguiente propuesta debe crear una interacción nueva.
 - [x] **Frontend - validar QuorumStepper capa-2**: sesión real con Codex subscription + Ollama/Qwen local verificada en navegador. El modelo local omitió dos veces el reporte estructurado: la sesión degradó de forma durable, el Lead recibió wakeup, el stepper muestra `1/2`, gate pendiente y motivo, y `audit_project_db.py` dejó todos los invariantes en verde. Sigue faltando una run aceptada para calibrar Plan A/B.
 - [x] **Frontend - lint de ThreadView**: retirada la actualización síncrona de estado invocada desde `useEffect`; carga compacta asíncrona cancelable y remount por `issueId`, sin cambiar placeholder ni comportamiento visible.
-- [x] **Contrato durable Lead + Quorum**: `lead_quorum` es solo planificación multicultural; exige dos aportes válidos y provider-diversos, registra síntesis/disposiciones y termina con `accepted_plan`, sin ejecutar código.
+- [x] **Contrato durable Lead + Quorum**: `lead_quorum` es solo planificación multicultural; prefiere dos aportes provider-diversos y se adapta a uno si es el único senior contratado, registra síntesis/disposiciones y termina con `accepted_plan`, sin ejecutar código.
+- [x] **Quorum profundo Lead-owned**: objetivo y Plan A se congelan; Plan A/Plan B tienen gate estructural de profundidad; seniors entregan `QUORUM-AUDIT` con razonamiento, justificación, recomendación y trade-offs; RBAC los limita a informar al Lead; Plan B exige rationale por finding. Dos seniors son el objetivo, pero un equipo aceptado de uno produce quorum reducido válido.
 - [x] **Canario quorum sin tokens**: `scripts/e2e_quorum_canary.py` protege plan A → auditores → gate → plan B → transición y liveness sobre SQLite.
 - [x] **Integración quorum en runtime**: aceptación multicanal crea sesión/issues sin replay LLM; reports generan contribuciones; `quorum_ready` inyecta findings; el Lead emite plan B + disposiciones y el executor cierra la planificación. Degradaciones y síntesis inválidas escalan con cap.
 - [x] **Activación backend de perfiles al crear proyecto**: `POST /api/projects/new` valida el perfil canónico, lo persiste en goal/issue/wakeup y aprovisiona los dos auditores cuando se solicita `lead_quorum`; el benchmark usa este mismo bootstrap sin parche SQL.

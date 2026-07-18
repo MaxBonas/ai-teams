@@ -30,13 +30,18 @@ JUNIOR_ROLES = frozenset({"engineer", "test_runner", "worker", "file_scout", "we
 # Roles that must never edit workspace files: they delegate (Lead) or report
 # (scouts/curator). Enforced via CLI read-only sandbox, the preventive
 # file_ops gate, and the role.violation audit.
-NON_EDITING_ROLES = frozenset({"lead", "team_lead", "file_scout", "web_scout", "context_curator"})
+NON_EDITING_ROLES = frozenset({
+    "lead", "team_lead", "file_scout", "web_scout", "context_curator",
+    "quorum_auditor", "quorum_senior",
+})
 
 # ── Quorum de planificación ──────────────────────────────────────────────────
 # El quorum reduce riesgo de decisiones críticas y ambiguas; no es un equipo
-# de ejecución ni un multiplicador universal de agentes. Dos revisiones
-# independientes son el contrato mínimo del perfil canónico. El máximo evita
-# fan-out/coste sin límite mientras se calibra valor con benchmarks propios.
+# de ejecución ni un multiplicador universal de agentes. Dos revisiones son
+# el objetivo canónico; si el equipo aceptado solo contiene un senior externo
+# al Lead, una revisión válida sigue permitiendo síntesis y queda observable
+# como quorum reducido. El máximo evita fan-out/coste sin límite.
+QUORUM_ABSOLUTE_MIN_VALID_CONTRIBUTIONS = 1
 QUORUM_MIN_VALID_CONTRIBUTIONS = 2
 QUORUM_MAX_CONTRIBUTIONS = 4
 QUORUM_MAX_SYNTHESIS_ATTEMPTS = 2
@@ -241,6 +246,8 @@ OPS_FORBIDDEN_FOR_TIER2 = frozenset({
 
 def forbidden_ops_for_role(role: str) -> frozenset[str]:
     role_key = str(role or "").strip().lower()
+    if role_key in {"quorum_auditor", "quorum_senior"}:
+        return OPS_FORBIDDEN_FOR_TIER3
     if role_key in TIER3_ROLES:
         return OPS_FORBIDDEN_FOR_TIER3
     if role_key in TIER2_ROLES:

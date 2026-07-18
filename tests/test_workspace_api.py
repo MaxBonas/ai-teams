@@ -242,6 +242,69 @@ def test_create_solo_lead_project_bootstraps_only_the_lead(tmp_path: Path, monke
     assert agents == [("role:lead", "lead")]
 
 
+def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={
+                "name": "AnthropicLead",
+                "adapter_profile_ids": ["codex_subscription", "anthropic_api"],
+                "lead_adapter_profile_id": "anthropic_api",
+                "run_profile": "lead_quorum",
+            },
+        )
+        payload = response.json()
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 200
+    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        lead = conn.execute(
+            "SELECT adapter_config_json, metadata_json FROM agents WHERE id='role:lead'"
+        ).fetchone()
+        codex_auditor = conn.execute(
+            """
+            SELECT id FROM agents
+            WHERE role='quorum_auditor'
+              AND json_extract(adapter_config_json, '$.profile_id')='codex_subscription'
+            """
+        ).fetchone()
+
+    assert json.loads(lead["adapter_config_json"])["profile_id"] == "anthropic_api"
+    assert json.loads(lead["metadata_json"])["selected_by_user"] is True
+    assert codex_auditor is not None
+
+
+def test_create_project_rejects_lead_profile_outside_project_connections(tmp_path: Path, monkeypatch) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={
+                "name": "InvalidLead",
+                "adapter_profile_ids": ["anthropic_api"],
+                "lead_adapter_profile_id": "codex_subscription",
+            },
+        )
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 400
+    assert not (source_root / "InvalidLead").exists()
+
+
 def test_create_project_rejects_unknown_run_profile(tmp_path: Path, monkeypatch) -> None:
     source_root = tmp_path / "Ai_Teams"
     source_root.mkdir()

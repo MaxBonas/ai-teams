@@ -52,6 +52,7 @@ class NewProjectRequest(BaseModel):
     name: str
     initial_task: str | None = None
     adapter_profile_ids: list[str] = Field(default_factory=list)
+    lead_adapter_profile_id: str | None = None
     run_profile: Literal["solo_lead", "lead_quorum", "full_team"] = FULL_TEAM
 
 class DeleteProjectRequest(BaseModel):
@@ -145,6 +146,13 @@ async def create_project(payload: NewProjectRequest, request: Request):
     # run that dies silently. Warn by default; hard-block when the operator
     # sets AITEAM_REQUIRE_CONNECTED_ADAPTER=1.
     selected_profiles = available_project_profiles(payload.adapter_profile_ids)
+    if payload.lead_adapter_profile_id and payload.lead_adapter_profile_id not in {
+        str(profile.get("id") or "") for profile in selected_profiles
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="El perfil elegido para el Lead debe estar entre las conexiones del proyecto",
+        )
     _unconnected = [str(p.get("id") or "") for p in selected_profiles if not profile_is_connected(p)]
     adapter_warning: str | None = None
     if selected_profiles and len(_unconnected) == len(selected_profiles):
@@ -169,6 +177,7 @@ async def create_project(payload: NewProjectRequest, request: Request):
         target,
         initial_task=payload.initial_task,
         run_profile=run_profile,
+        lead_adapter_profile_id=payload.lead_adapter_profile_id,
     )
     # VCS del workspace: solo en proyectos RECIÉN creados por la app (un
     # workspace externo seleccionado a posteriori nunca se toca — sin marker
@@ -387,6 +396,7 @@ def _initialize_project_runtime(
     *,
     initial_task: str | None = None,
     run_profile: str = FULL_TEAM,
+    lead_adapter_profile_id: str | None = None,
 ) -> None:
     run_profile = normalize_run_profile(run_profile)
     runtime_dir = resolve_runtime_dir(project_path, PROJECT_ROOT)
@@ -398,7 +408,13 @@ def _initialize_project_runtime(
             encoding="utf-8",
         )
     db_path = runtime_dir / "aiteam.db"
-    lead_adapter = choose_adapter_for_role("lead", "lead", project_profiles(runtime_dir))
+    profiles = project_profiles(runtime_dir)
+    lead_profiles = (
+        [profile for profile in profiles if str(profile.get("id") or "") == lead_adapter_profile_id]
+        if lead_adapter_profile_id
+        else profiles
+    )
+    lead_adapter = choose_adapter_for_role("lead", "lead", lead_profiles)
     lead_adapter_type = str((lead_adapter or {}).get("adapter_type") or "lead_builtin")
     lead_adapter_config = json.dumps((lead_adapter or {}).get("adapter_config") or {}, ensure_ascii=False, sort_keys=True)
     with sqlite3.connect(str(db_path)) as conn:
@@ -423,7 +439,15 @@ def _initialize_project_runtime(
                 json.dumps(default_capabilities_for_role("lead"), ensure_ascii=False),
                 0,
                 0,
-                '{"source":"project_bootstrap"}',
+                json.dumps(
+                    {
+                        "source": "project_bootstrap",
+                        "lead_adapter_profile_id": (lead_adapter or {}).get("adapter_profile_id"),
+                        "selected_by_user": bool(lead_adapter_profile_id),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
             ),
         )
         task = str(initial_task or "").strip()

@@ -184,6 +184,22 @@ def test_quorum_auditor_system_prompt_enforces_gate_vocabulary_and_authority():
     assert "result: approved|changes_requested|blocked" in prompt
     assert "NO uses accept_quorum_synthesis" in prompt
     assert "result: pass, passed o passed_with_findings NO son válidos" in prompt
+    assert "---QUORUM-AUDIT---" in prompt
+
+
+def test_codex_quorum_auditor_prompt_treats_lead_as_owner_and_forbids_implementation():
+    prompt = _build_codex_prompt(
+        {
+            "AITEAM_AGENT_ROLE": "quorum_auditor",
+            "AITEAM_AGENT_SKILL": "Audita el plan.",
+            "AITEAM_WAKE_PAYLOAD_JSON": json.dumps({"quorum_review": {"plan": {"body": "A"}}}),
+        },
+        {"issue_id": "issue:q"},
+    )
+
+    assert "Lead real del proyecto" in prompt
+    assert "No implementes, no edites archivos" in prompt
+    assert "---QUORUM-AUDIT---" in prompt
 
 # ---------------------------------------------------------------------------
 # _parse_codex_output

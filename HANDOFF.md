@@ -68,6 +68,8 @@ Siguiente orden:
 ## Riesgos conocidos
 
 - `RunExecutor` concentra muchas políticas; el orden de preflights y gates requiere tests dirigidos.
+- El gate profundo valida cobertura y presupuesto, no verdad ni calidad semántica. Debe seguir calibrándose con `benchmark_quorum_plans.py`; no elevar más thresholds basándose en una sola familia.
+- Un quorum de un senior es una degradación de redundancia aceptada por disponibilidad, no equivalente empíricamente a dos proveedores. Exponerlo claramente en UI/telemetría si se usa con frecuencia.
 - El bloque principal quedó consolidado en `codex/orchestration-hardening`; `.claude/skills/aiteams-frontend/` permanece sin seguimiento y fuera de los commits por origen no atribuido.
 - La telemetria de usage de `antigravity_subscription` debe verificarse antes de comparar costes: `agy --print` autentica y responde, pero no entrega usage comparable en su salida normal.
 - Antigravity CLI 1.1.4 es un segundo proveedor operativo para quorum: existe una sesión aceptada cross-provider y una contribución válida con Gemini 3.1 Pro High. El adapter transporta payloads largos mediante archivo temporal autorizado, conserva plan+sandbox y normaliza solo los envelopes observados. Sigue sin usage/cost_event comparable y el cumplimiento de `AGENT-REPORT` presenta varianza en ambos proveedores.
