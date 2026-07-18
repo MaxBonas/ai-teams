@@ -80,6 +80,28 @@ def test_all_versioned_plan_rubrics_are_valid() -> None:
     rubrics = [json.loads(path.read_text(encoding="utf-8")) for path in root.glob("*.json")]
     assert len(rubrics) >= 3
     for rubric in rubrics:
-        assert rubric["id"].endswith("_v1")
+        assert rubric["id"].rsplit("_v", 1)[-1].isdigit()
         assert len(rubric["criteria"]) >= 8
         assert any(item.get("required") for item in rubric["criteria"])
+
+
+def test_multitenant_rubric_accepts_spanish_enforcement_equivalents() -> None:
+    rubric_path = (
+        Path(__file__).resolve().parents[1]
+        / "benchmarks"
+        / "plan_quality"
+        / "multitenant_authorization.json"
+    )
+    rubric = json.loads(rubric_path.read_text(encoding="utf-8"))
+    plan = (
+        "Objetivo y criterio de cierre. Fases con owner y evidencia de tests. "
+        "Riesgos, rollback, escalado y continuación en la siguiente run. "
+        "Deny-by-default y una frontera de enforcement no opcional. "
+        "Cada lectura resuelve el recurso dentro del tenant activo y aplica policy checks por recurso. "
+        "Cache con namespace tenant, pruebas negativas cross-tenant, auditoría y backfill de migración."
+    )
+
+    score = score_plan(plan, rubric)
+
+    assert score["passes_hard_gate"] is True
+    assert score["hard_failures"] == []

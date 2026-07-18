@@ -76,8 +76,11 @@ El flujo esperado es:
    informes profundos, wakeup, Plan B y sesión accepted.
 2. Repetir más semillas en `sqlite_online_migration`,
    `multitenant_authorization` y `provider_failover`. Multitenant ya tiene una
-   degradada diagnóstica y una accepted 91,30→100 (+8,70); comparar distribución,
-   hard gates, latencia, tokens, coste y regresiones, no una sola victoria.
+   degradada diagnóstica y dos accepted: con la rúbrica v2, 91,30→100 (+8,70)
+   y 100→100 (0), media +4,35. La v1 dio un falso negativo léxico en la
+   segunda sesión aceptada; conservar ambas versiones y comparar distribución,
+   hard gates, latencia, tokens, coste, efecto techo y regresiones, no una sola
+   victoria.
 3. Mejorar telemetría de Antigravity cuando el CLI exponga usage. Hasta entonces,
    registrar `usage=None` y no inventar costes.
 
