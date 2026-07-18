@@ -753,6 +753,84 @@ def test_lead_synthesis_action_updates_plan_and_finishes_planning(tmp_path: Path
     assert accepted_wakes == 0
 
 
+def test_shallow_plan_b_rejection_carries_depth_diagnostics(tmp_path: Path) -> None:
+    """Un Plan B superficial debe rechazarse con SUS dimensiones ausentes, no con
+    la causa genérica de 'falta update_plan' (el Lead sí lo emitió)."""
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    session = executor._initialize_quorum_session(
+        parent_issue_id="issue:root",
+        proposal=_proposal(),
+        created_issue_ids=["issue:q1", "issue:q2"],
+    )
+    assert session is not None
+    _finish_auditor(
+        executor, db_path, issue_id="issue:q1", agent_id="role:q1",
+        run_id="run:q1", provider="openai",
+    )
+    _finish_auditor(
+        executor, db_path, issue_id="issue:q2", agent_id="role:q2",
+        run_id="run:q2", provider="google",
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO runs (id, agent_id, issue_id, status) "
+            "VALUES ('run:shallow', 'role:lead', 'issue:root', 'running')"
+        )
+        conn.commit()
+
+    shallow_actions = ops_to_actions(
+        [
+            {"type": "update_plan", "title": "Plan B", "body": "Plan corto sin secciones obligatorias."},
+            {
+                "type": "accept_quorum_synthesis",
+                "path": session["id"],
+                "dispositions": [
+                    {"finding_id": "issue:q1:report", "decision": "accept", "rationale": "Se incorpora por su impacto causal demostrado."},
+                    {"finding_id": "issue:q2:report", "decision": "discard", "rationale": "Se descarta porque duplica el control ya existente."},
+                ],
+            },
+        ]
+    )
+    executor._apply_result_actions(
+        run={"id": "run:shallow", "issue_id": "issue:root"},
+        agent_id="role:lead",
+        agent_role="lead",
+        result=ExecutionResult(status="completed", actions=shallow_actions),
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rejection = conn.execute(
+            "SELECT payload_json FROM activity_log "
+            "WHERE action='quorum.synthesis_rejected' AND target_id=?",
+            (session["id"],),
+        ).fetchone()
+        correction = conn.execute(
+            "SELECT body FROM issue_comments WHERE issue_id='issue:root' "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        plan_revision = conn.execute(
+            "SELECT revision_number FROM issue_documents WHERE issue_id='issue:root' AND key='plan'"
+        ).fetchone()[0]
+        session_status = conn.execute(
+            "SELECT status FROM quorum_sessions WHERE id=?", (session["id"],)
+        ).fetchone()[0]
+
+    assert rejection is not None
+    reason = json.loads(rejection["payload_json"])["reason"]
+    assert "contrato de profundidad" in reason
+    assert "dimensiones ausentes" in reason
+    assert "palabras:" in reason
+    assert "requires update_plan" not in reason
+    # El comentario correctivo lleva el mismo diagnóstico al Lead.
+    assert "contrato de profundidad" in correction["body"]
+    # El plan superficial no se persistió y la sesión no quedó aceptada.
+    assert plan_revision == 1
+    assert session_status != "accepted"
+
+
 def test_invalid_synthesis_escalates_after_bounded_retries(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init(db_path)

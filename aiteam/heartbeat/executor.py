@@ -2923,16 +2923,22 @@ class RunExecutor:
         plan_action = actions.get("update_plan")
         _quorum_action_candidate = actions.get("accept_quorum_synthesis")
         _new_plan_revision_id = ""
+        # Diagnóstico del gate de profundidad del Plan B. Se evalúa FUERA del
+        # try genérico: si cayera en su except, el Lead recibiría después la
+        # causa equivocada ("requires update_plan in the same run") y podría
+        # quemar sus reintentos sin saber qué dimensiones faltan.
+        _final_plan_depth_error = ""
         if isinstance(plan_action, dict) and plan_action.get("body"):
+            if isinstance(_quorum_action_candidate, dict):
+                final_depth = evaluate_plan_depth(str(plan_action["body"]))
+                if not final_depth["valid"]:
+                    _final_plan_depth_error = (
+                        "el Plan B no cumple el contrato de profundidad — dimensiones ausentes: "
+                        f"{', '.join(final_depth['missing_dimensions']) or 'ninguna'}; "
+                        f"palabras: {final_depth['word_count']}/{final_depth['min_words']}"
+                    )
+        if isinstance(plan_action, dict) and plan_action.get("body") and not _final_plan_depth_error:
             try:
-                if isinstance(_quorum_action_candidate, dict):
-                    final_depth = evaluate_plan_depth(str(plan_action["body"]))
-                    if not final_depth["valid"]:
-                        raise ValueError(
-                            "final quorum plan is not deep enough: "
-                            f"missing={final_depth['missing_dimensions']}, "
-                            f"words={final_depth['word_count']}/{final_depth['min_words']}"
-                        )
                 existing = get_document(self.db_path, issue_id=issue_id, key="plan")
                 updated_plan = put_document(
                     self.db_path,
@@ -2968,7 +2974,10 @@ class RunExecutor:
                 if session is None or str(session.get("issue_id") or "") != issue_id:
                     raise ValueError("quorum session does not belong to the current Lead issue")
                 if not _new_plan_revision_id:
-                    raise ValueError("quorum synthesis requires update_plan in the same run")
+                    raise ValueError(
+                        _final_plan_depth_error
+                        or "quorum synthesis requires update_plan in the same run"
+                    )
                 if not isinstance(dispositions, list):
                     raise ValueError("quorum synthesis dispositions must be a list")
                 accept_quorum_synthesis(
