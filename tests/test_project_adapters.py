@@ -356,6 +356,25 @@ class TestIssueApiQuorumBootstrap:
             ids = {r[0] for r in conn.execute("SELECT id FROM agents").fetchall()}
         assert "role:quorum_auditor_1" not in ids
 
+    def test_team_panel_quorum_reconcile_creates_canonical_agents_idempotently(self, tmp_path: Path):
+        from fastapi.testclient import TestClient
+        from api.main import app
+        self._setup(tmp_path)
+        client = TestClient(app)
+
+        first = client.post("/api/agents/quorum/reconcile")
+        second = client.post("/api/agents/quorum/reconcile")
+
+        assert first.status_code == 200
+        assert first.json()["created_agent_ids"] == [
+            "role:quorum_auditor_1", "role:quorum_auditor_2"
+        ]
+        assert {agent["id"] for agent in first.json()["agents"]} == {
+            "role:quorum_auditor_1", "role:quorum_auditor_2"
+        }
+        assert second.status_code == 200
+        assert second.json()["created_agent_ids"] == []
+
 
 # ── ensure_tier3_agents ───────────────────────────────────────────────────────
 

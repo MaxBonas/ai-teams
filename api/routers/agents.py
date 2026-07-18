@@ -12,6 +12,7 @@ from api.utils import PROJECT_ROOT, _require_api_auth_request, _workspace_from_r
 from aiteam.db.activity_log import log_activity
 from aiteam.db.agents import create_agent, get_agent, list_agents, update_agent
 from aiteam.db.finops import check_budget
+from aiteam.project_adapters import ensure_quorum_agents, project_profiles
 from aiteam.user_config import assert_no_inline_secret
 
 router = APIRouter()
@@ -68,6 +69,38 @@ async def post_agent(body: CreateAgentRequest, request: Request):
         payload={"role": row.get("role"), "name": row.get("name"), "adapter_type": row.get("adapter_type")},
     )
     return {"success": True, "agent": _decode(row)}
+
+
+@router.post("/api/agents/quorum/reconcile")
+async def post_quorum_agents_reconcile(request: Request):
+    """Aprovisiona los dos auditores canónicos que consume ``lead_quorum``.
+
+    No usa el hiring conversacional: el contrato del quorum referencia IDs
+    estables y necesita asignación provider-diversa desde el bootstrap.
+    """
+    _require_api_auth_request(request)
+    db = _db(request)
+    try:
+        created = ensure_quorum_agents(db, profiles=project_profiles(db.parent))
+        agents = [
+            get_agent(db, agent_id=agent_id)
+            for agent_id in ("role:quorum_auditor_1", "role:quorum_auditor_2")
+        ]
+    except sqlite3.OperationalError as exc:
+        raise _schema_err(exc)
+    log_activity(
+        db,
+        action="quorum.agents_reconciled",
+        target_type="project",
+        target_id="current",
+        actor_user_id="user",
+        payload={"created_agent_ids": created},
+    )
+    return {
+        "success": True,
+        "created_agent_ids": created,
+        "agents": [_decode(agent) for agent in agents if agent is not None],
+    }
 
 
 @router.get("/api/agents")

@@ -2047,6 +2047,13 @@ export default function App() {
   async function hireCatalogRole(roleId: string, roleDef: RoleDef) {
     setLoading(true);
     try {
+      if (roleId === 'role:quorum_auditor_1' || roleId === 'role:quorum_auditor_2') {
+        const response = await apiFetch('/api/agents/quorum/reconcile', { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || `quorum_hire:${response.status}`);
+        await loadProjectData(selectedIssueId);
+        return;
+      }
       await apiFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3864,7 +3871,7 @@ export default function App() {
                     // Normalize: agent.role may be 'lead' or 'role:lead'; catalog keys are 'role:*'
                     const activeRoles = new Set(agents.flatMap((a) => {
                       const r = a.role ?? '';
-                      return [r, r.startsWith('role:') ? r : `role:${r}`];
+                      return [a.id, r, r.startsWith('role:') ? r : `role:${r}`];
                     }));
                     const available = Object.entries(ROLE_CATALOG).filter(([roleId]) => !activeRoles.has(roleId));
                     if (!available.length) return null;
