@@ -96,7 +96,7 @@ def test_curator_persists_verified_block_before_closing(tmp_path: Path) -> None:
         assert conn.execute("SELECT status FROM issues WHERE id=?", (child_id,)).fetchone()[0] == "done"
 
 
-def test_curator_cannot_close_without_verified_block(tmp_path: Path) -> None:
+def test_curator_gets_one_corrective_retry_then_escalates(tmp_path: Path) -> None:
     db, parent_id, child_id = _project(tmp_path)
     actions = ops_to_actions([
         {
@@ -119,5 +119,47 @@ def test_curator_cannot_close_without_verified_block(tmp_path: Path) -> None:
 
     assert get_context_summary(db, issue_id=parent_id) is None
     with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT status FROM issues WHERE id=?", (child_id,)).fetchone()[0] == "blocked"
+        conn.row_factory = sqlite3.Row
+        issue = conn.execute(
+            "SELECT status, metadata_json FROM issues WHERE id=?", (child_id,)
+        ).fetchone()
+        retry = conn.execute(
+            "SELECT agent_id, reason, payload_json FROM wakeup_requests "
+            "WHERE source='context_curator_recovery'"
+        ).fetchone()
+    assert issue["status"] == "in_progress"
+    assert '"corrective_attempts": 1' in issue["metadata_json"]
+    assert retry["agent_id"] == "role:context_curator"
+    assert retry["reason"] == "context_summary_corrective_retry"
+    assert "does not match the durable source slice" in retry["payload_json"]
 
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO runs (id,agent_id,issue_id,status) VALUES "
+            "('run:curator-retry','role:context_curator',?,'running')",
+            (child_id,),
+        )
+        conn.commit()
+    RunExecutor(db, build_default_registry())._apply_result_actions(
+        run={"id": "run:curator-retry", "issue_id": child_id},
+        agent_id="role:context_curator",
+        agent_role="context_curator",
+        result=ExecutionResult(status="completed", actions=actions),
+    )
+
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        issue = conn.execute(
+            "SELECT status, metadata_json FROM issues WHERE id=?", (child_id,)
+        ).fetchone()
+        lead_wakes = conn.execute(
+            "SELECT COUNT(*) AS n FROM wakeup_requests WHERE agent_id='role:lead'"
+        ).fetchone()["n"]
+        retry_wakes = conn.execute(
+            "SELECT COUNT(*) AS n FROM wakeup_requests WHERE source='context_curator_recovery'"
+        ).fetchone()["n"]
+    assert issue["status"] == "blocked"
+    assert '"corrective_attempts": 2' in issue["metadata_json"]
+    assert '"state": "escalated"' in issue["metadata_json"]
+    assert retry_wakes == 1
+    assert lead_wakes == 1

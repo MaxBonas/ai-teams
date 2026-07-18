@@ -2592,6 +2592,7 @@ class RunExecutor:
         # recibió. Recalculamos source/rango/ratio: el modelo no decide estos
         # invariantes ni puede escribir sobre otra issue.
         _context_summary_persisted = False
+        _context_summary_error = "missing append_context_summary operation"
         _context_action = actions.get("append_context_summary")
         if isinstance(_context_action, dict) and str(agent_role or "").strip().lower() == "context_curator":
             try:
@@ -2639,6 +2640,7 @@ class RunExecutor:
                     },
                 )
             except Exception as exc:
+                _context_summary_error = str(exc)
                 logger.warning("append_context_summary rejected for issue %s: %s", issue_id, exc)
 
         if (
@@ -2647,12 +2649,66 @@ class RunExecutor:
             and not _context_summary_persisted
         ):
             actions = dict(actions)
-            actions["issue_status"] = "blocked"
-            actions["notify_supervisor"] = True
-            actions.setdefault("add_comments", []).append(
-                "⚙ Sistema: cierre denegado; el curador no persistió un bloque "
-                "append_context_summary válido y verificable."
+            _curator_issue = get_issue(self.db_path, issue_id=issue_id) or {}
+            _curator_metadata = _decode_json(_curator_issue.get("metadata_json") or "{}")
+            _recovery = _curator_metadata.get("context_curator_recovery")
+            if not isinstance(_recovery, dict):
+                _recovery = {}
+            _attempts = int(_recovery.get("corrective_attempts") or 0)
+            _diagnostic = (
+                "El bloque append_context_summary fue rechazado: "
+                f"{_context_summary_error}. Reutiliza exactamente "
+                "payload.context_curation_target y vuelve a emitir el artefacto."
             )
+            _curator_metadata["context_curator_recovery"] = {
+                "corrective_attempts": min(_attempts + 1, 2),
+                "last_error": _context_summary_error,
+                "last_run_id": str(run.get("id") or ""),
+                "state": "retry_queued" if _attempts == 0 else "escalated",
+            }
+            update_issue(self.db_path, issue_id=issue_id, metadata=_curator_metadata)
+            actions.setdefault("add_comments", []).append(f"⚙ Sistema: {_diagnostic}")
+            if _attempts == 0:
+                # Conserva in_progress: Tier 3 no tiene autoridad para volver a
+                # todo. La wakeup durable crea la siguiente run sobre la misma
+                # issue una vez finalice la actual.
+                actions.pop("issue_status", None)
+                actions.pop("notify_supervisor", None)
+                enqueue_wakeup(
+                    self.db_path,
+                    agent_id=agent_id,
+                    source="context_curator_recovery",
+                    reason="context_summary_corrective_retry",
+                    payload={
+                        "issue_id": issue_id,
+                        "diagnostic": _diagnostic,
+                        "corrective_attempt": 1,
+                        "source_run_id": str(run.get("id") or ""),
+                    },
+                    idempotency_key=f"context-curator-recovery:{issue_id}:1",
+                    trigger_detail=_context_summary_error,
+                )
+                log_activity(
+                    self.db_path,
+                    action="context_summary.recovery_queued",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id") or ""),
+                    payload={"attempt": 1, "error": _context_summary_error},
+                )
+            else:
+                actions["issue_status"] = "blocked"
+                actions["notify_supervisor"] = True
+                log_activity(
+                    self.db_path,
+                    action="context_summary.recovery_exhausted",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id") or ""),
+                    payload={"attempts": _attempts + 1, "error": _context_summary_error},
+                )
 
         # ── Interaction gate: max 1 pending interaction per issue at a time ─────
         # Presenting multiple confirmation popups simultaneously confuses users:

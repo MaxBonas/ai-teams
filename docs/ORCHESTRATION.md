@@ -269,6 +269,13 @@ semilla cada uno. Antigravity tardó 76,6 s frente a 28,1-30,5 s y no expone usa
 comparable. Esta muestra descarta una promoción global inmediata: hay que repetir
 colas, probar otro proveedor en auth y calibrar un escalado acotado tras fallo.
 
+El recovery productivo está acotado a una sola corrección automática. Ante el
+primer artefacto ausente o inválido, la issue conserva `in_progress`, persiste
+contador, error y run de origen, añade el diagnóstico al hilo y encola una wakeup
+idempotente al mismo curador. Un segundo fallo bloquea la issue y despierta al
+Lead. `audit_project_db.py` considera bug tanto un retry sin run/wakeup vivo como
+un recovery agotado sin wakeup al Lead.
+
 ## Paralelismo
 
 Paralelizar por independencia informativa, no por disponibilidad de roles:

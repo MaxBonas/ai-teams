@@ -182,6 +182,23 @@ def report(project_dir: Path, *, excerpts: bool) -> None:
             "SELECT COUNT(*) FROM issue_thread_interactions "
             "WHERE status NOT IN ('resolved','cancelled','accepted','rejected')"
         ),
+        "context curator retry sin continuacion durable": (
+            "SELECT COUNT(*) FROM issues i "
+            "WHERE lower(COALESCE(i.role,''))='context_curator' "
+            "AND json_extract(i.metadata_json, '$.context_curator_recovery.state')='retry_queued' "
+            "AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.issue_id=i.id AND r.status IN ('queued','running')) "
+            "AND NOT EXISTS (SELECT 1 FROM wakeup_requests w WHERE w.agent_id=i.assignee_agent_id "
+            "AND w.status IN ('queued','claimed','running') "
+            "AND json_extract(w.payload_json, '$.issue_id')=i.id)"
+        ),
+        "context curator agotado sin wakeup al Lead": (
+            "SELECT COUNT(*) FROM issues i "
+            "WHERE lower(COALESCE(i.role,''))='context_curator' "
+            "AND json_extract(i.metadata_json, '$.context_curator_recovery.state')='escalated' "
+            "AND NOT EXISTS (SELECT 1 FROM wakeup_requests w "
+            "WHERE w.status IN ('queued','claimed','running') "
+            "AND json_extract(w.payload_json, '$.child_issue_id')=i.id)"
+        ),
     }
     if has_quorum:
         checks.update(_quorum_invariant_checks())

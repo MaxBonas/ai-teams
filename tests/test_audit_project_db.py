@@ -72,3 +72,20 @@ def test_audit_accepts_reviewing_quorum_with_queued_auditor(tmp_path: Path, caps
     output = capsys.readouterr().out
 
     assert "OK quorum reviewing sin auditor/run/wakeup vivo: 0" in output
+
+
+def test_audit_flags_stranded_context_curator_recovery(tmp_path: Path, capsys) -> None:
+    project, db = _project(tmp_path)
+    with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO agents (id,role,name) VALUES ('curator','context_curator','Curator')")
+        conn.execute(
+            "INSERT INTO issues (id,parent_id,goal_id,title,status,role,assignee_agent_id,metadata_json) "
+            "VALUES ('curator-issue','root','g','Curate','in_progress','context_curator','curator',"
+            "'{\"context_curator_recovery\":{\"state\":\"retry_queued\",\"corrective_attempts\":1}}')"
+        )
+        conn.commit()
+
+    report(project, excerpts=False)
+    output = capsys.readouterr().out
+
+    assert "!! context curator retry sin continuacion durable: 1" in output
