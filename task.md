@@ -7,6 +7,9 @@ Plan rector activo: `docs/MIGRATION_PAPERCLIP.md`.
 - [x] Generalizar la autoridad del quorum: Lead configurable por el usuario al
   crear el proyecto o desde Equipo; ningún proveedor queda codificado como Lead
   y Codex puede participar como senior auditor.
+- [x] Congelar de forma efectiva el objetivo quorum: un prompt posterior debe
+  crear Nueva tarea; Chat no puede mutar una sesión existente. Persistencia
+  valida ownership Lead y que Plan B nazca en la misma run de síntesis.
 
 ## Limpieza profunda
 

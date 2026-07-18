@@ -44,6 +44,9 @@ El flujo esperado es:
   `quorum_plan_revision_required` para el Lead.
 - Al iniciar la sesión se persiste en metadata un
   `quorum_objective_snapshot` con objetivo y revisión base.
+- Una vez congelado, Chat rechaza nuevas directivas sobre esa issue con `409` y
+  dirige al usuario a crear una Nueva tarea `lead_quorum`; así un nuevo prompt
+  obtiene objetivo, Plan A y sesión propios en lugar de mutar el quorum anterior.
 - Los auditores reciben `quorum_review.objective` y el Plan A inmutable; no
   reciben contribuciones de otros seniors.
 - Cada auditor debe emitir un bloque `---QUORUM-AUDIT---` JSON con:
@@ -71,27 +74,20 @@ El flujo esperado es:
 1. Validar el flujo nuevo con un canario capa 2 completo y cross-provider:
    Lead configurable + uno o dos seniors (incluido Codex si procede), Plan A,
    informes profundos, wakeup, Plan B y sesión accepted.
-2. Añadir a la API/UI una señal clara de `reduced_quorum` cuando solo participe
-   un senior; no presentarlo como equivalente a dos proveedores.
-3. Repetir benchmarks en `sqlite_online_migration`,
+2. Repetir benchmarks en `sqlite_online_migration`,
    `multitenant_authorization` y `provider_failover`. Comparar Plan A/Plan B,
    hard gates, latencia, tokens, coste y regresiones.
-4. Diseñar semántica explícita para un prompt que cambie materialmente el
-   objetivo después del freeze: preferiblemente nueva issue/nueva sesión, nunca
-   mutación silenciosa de una sesión terminal.
-5. Mejorar telemetría de Antigravity cuando el CLI exponga usage. Hasta entonces,
+3. Mejorar telemetría de Antigravity cuando el CLI exponga usage. Hasta entonces,
    registrar `usage=None` y no inventar costes.
 
 ## Ideas para abordarlos
 
 - Mantén invariantes en código y juicio abierto en LLM. No añadas más prosa al
   prompt si puede validarse estructuralmente.
-- Para `reduced_quorum`, añade un campo derivado al endpoint existente sin romper
-  su shape: `reduced_quorum = min_valid_contributions == 1` y muéstralo como
-  advertencia, no error.
-- Para cambios de objetivo, compara un hash del snapshot con la issue vigente.
-  Si cambia antes de `accepted`, crea una nueva revisión Plan A y sesión; si la
-  anterior es terminal, crea una nueva issue de planificación enlazada.
+- Conserva `reduced_quorum` como advertencia explícita, no como equivalente
+  silencioso a dos proveedores.
+- Conserva la frontera del objetivo: después del freeze, todo nuevo objetivo va
+  a una Nueva tarea y sesión; no reabras ni reescribas sesiones terminales.
 - Evalúa profundidad semántica con rúbricas ocultas; el gate de keywords solo
   protege estructura y no debe convertirse en juez de verdad.
 - Conserva independencia: nunca pases informe A al auditor B antes de la

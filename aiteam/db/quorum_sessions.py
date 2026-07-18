@@ -342,13 +342,34 @@ def accept_quorum_synthesis(
             raise LookupError(f"quorum session not found: {session_id}")
         revision = conn.execute(
             """
-            SELECT id FROM issue_document_revisions
+            SELECT id, created_by_run_id FROM issue_document_revisions
             WHERE id = ? AND issue_id = ? AND key = 'plan'
             """,
             (final_plan_revision_id, session["issue_id"]),
         ).fetchone()
         if revision is None:
             raise ValueError("final plan revision does not exist for the quorum issue")
+        if str(revision["created_by_run_id"] or "") != str(synthesis_run_id or ""):
+            raise ValueError("final plan revision must be created by the synthesis run")
+        synthesis_owner = conn.execute(
+            """
+            SELECT r.agent_id, a.role
+            FROM runs r JOIN agents a ON a.id = r.agent_id
+            WHERE r.id = ? AND r.issue_id = ?
+            """,
+            (synthesis_run_id, session["issue_id"]),
+        ).fetchone()
+        issue_owner = conn.execute(
+            "SELECT assignee_agent_id FROM issues WHERE id = ?",
+            (session["issue_id"],),
+        ).fetchone()
+        if (
+            synthesis_owner is None
+            or str(synthesis_owner["role"] or "").strip().lower() not in {"lead", "team_lead"}
+            or issue_owner is None
+            or str(synthesis_owner["agent_id"] or "") != str(issue_owner["assignee_agent_id"] or "")
+        ):
+            raise ValueError("quorum synthesis must be owned by the configured Lead")
         contribution_rows = conn.execute(
             """
             SELECT findings_json FROM quorum_contributions

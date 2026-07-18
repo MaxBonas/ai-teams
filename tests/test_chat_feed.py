@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from api.routers.chat import _load_chat
+from api.routers.chat import _load_chat, _quorum_message_block_reason
 from aiteam.db.migration import SCHEMA_PATH
 
 
@@ -57,3 +57,17 @@ def test_chat_short_thread_unaffected(tmp_path: Path) -> None:
     assert [it["body"] for it in items] == ["hola", "respuesta del lead"]
     assert items[0]["sender"] == "user"
     assert items[1]["sender"] == "agent"
+
+
+def test_chat_cannot_silently_mutate_frozen_quorum_objective(tmp_path: Path) -> None:
+    db = tmp_path / "aiteam.db"
+    _init(db)
+    assert _quorum_message_block_reason(db, issue_id="issue:intake") is None
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO quorum_sessions (id, issue_id, base_plan_revision_id) VALUES ('q1', 'issue:intake', 'rev:a')"
+        )
+        conn.commit()
+    reason = _quorum_message_block_reason(db, issue_id="issue:intake")
+    assert reason is not None
+    assert "Nueva tarea" in reason

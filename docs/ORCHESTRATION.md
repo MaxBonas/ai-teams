@@ -195,7 +195,8 @@ Antes de abrir la sesión, el control plane congela también el objetivo vigente
 de la issue (título, descripción y revisión base). Cada prompt nuevo de este
 modo debe vivir en su propia issue de planificación; aclaraciones anteriores al
 freeze se incorporan al objetivo, pero no mutan silenciosamente una sesión ya
-iniciada.
+iniciada. Chat rechaza con `409` mensajes posteriores sobre una issue cuyo
+quorum ya existe y dirige al usuario a Nueva tarea.
 
 Plan A y Plan B deben superar un contrato determinista de profundidad: mínimo
 300 palabras y cobertura explícita de objetivo/alcance, estado actual,
@@ -214,7 +215,9 @@ delegar, preguntar al usuario o aceptar la síntesis.
 El Lead recibe los informes completos una vez satisfecho el gate. Para aceptar
 Plan B debe disponer todos los findings mediante `accept`, `qualify` o `discard`,
 con rationale sustantiva, y publicar en la misma run una revisión final que
-vuelva a superar el contrato de profundidad.
+vuelva a superar el contrato de profundidad. La persistencia comprueba además
+que esa revisión pertenece a la run de síntesis y que su agente es el Lead
+configurado y asignado a la issue.
 
 La implementación imperativa legacy de quorum fue retirada. El único camino vivo
 es el contrato durable SQLite: no hay activación por `AITEAM_AUTO_QUORUM`, prompts

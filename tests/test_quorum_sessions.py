@@ -164,8 +164,8 @@ def test_accepted_synthesis_finishes_planning_without_starting_execution(tmp_pat
         conn.execute(
             """
             INSERT INTO issue_document_revisions (
-                id, document_id, issue_id, key, title, body, revision_number
-            ) VALUES ('rev-b', 'doc:plan', 'issue:q', 'plan', 'Plan', 'Plan B', 2)
+                id, document_id, issue_id, key, title, body, revision_number, created_by_run_id
+            ) VALUES ('rev-b', 'doc:plan', 'issue:q', 'plan', 'Plan', 'Plan B', 2, 'run:synthesis')
             """
         )
         conn.commit()
@@ -243,8 +243,8 @@ def test_synthesis_requires_disposition_for_every_finding(tmp_path: Path) -> Non
         )
         conn.execute(
             "INSERT INTO issue_document_revisions "
-            "(id, document_id, issue_id, key, title, body, revision_number) "
-            "VALUES ('rev:b', 'doc:p', 'issue:q', 'plan', 'Plan', 'B', 1)"
+            "(id, document_id, issue_id, key, title, body, revision_number, created_by_run_id) "
+            "VALUES ('rev:b', 'doc:p', 'issue:q', 'plan', 'Plan', 'B', 1, 'run:s')"
         )
         conn.commit()
     session = create_quorum_session(db_path, issue_id="issue:q", base_plan_revision_id="rev:a")
@@ -257,4 +257,38 @@ def test_synthesis_requires_disposition_for_every_finding(tmp_path: Path) -> Non
             synthesis_run_id="run:s",
             final_plan_revision_id="rev:b",
             dispositions=[{"finding_id": "finding-1", "decision": "accept", "rationale": "Se acepta por su impacto causal claramente justificado."}],
+        )
+
+
+def test_persistence_rejects_synthesis_not_owned_by_configured_lead(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO runs (id, agent_id, issue_id, status) VALUES ('run:q1:synthesis', 'role:q1', 'issue:q', 'completed')"
+        )
+        conn.execute(
+            "INSERT INTO issue_documents (id, issue_id, key, title, body, current_revision_id) "
+            "VALUES ('doc:foreign', 'issue:q', 'plan', 'Plan', 'B', 'rev:foreign')"
+        )
+        conn.execute(
+            "INSERT INTO issue_document_revisions "
+            "(id, document_id, issue_id, key, title, body, revision_number, created_by_run_id) "
+            "VALUES ('rev:foreign', 'doc:foreign', 'issue:q', 'plan', 'Plan', 'B', 1, 'run:q1:synthesis')"
+        )
+        conn.commit()
+    session = create_quorum_session(db_path, issue_id="issue:q", base_plan_revision_id="rev:a")
+    _contribute(db_path, session["id"], "role:q1", 1, "openai")
+    _contribute(db_path, session["id"], "role:q2", 2, "google")
+
+    with pytest.raises(ValueError, match="configured Lead"):
+        accept_quorum_synthesis(
+            db_path,
+            session_id=session["id"],
+            synthesis_run_id="run:q1:synthesis",
+            final_plan_revision_id="rev:foreign",
+            dispositions=[
+                {"finding_id": "finding-1", "decision": "accept", "rationale": "Se acepta con una justificación causal suficiente."},
+                {"finding_id": "finding-2", "decision": "accept", "rationale": "Se acepta con una justificación causal suficiente."},
+            ],
         )

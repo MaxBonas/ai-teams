@@ -6,6 +6,10 @@ Fecha: `2026-07-17`
 
 AI Teams ya no está en reconstrucción inicial. Es un control plane multiagente Paperclip-like funcional, centrado en SQLite, y se encuentra en fase de endurecimiento operativo, validación con proveedores reales y medición frente a un agente único.
 
+El quorum profundo tiene defensa en profundidad: objetivo congelado frente a
+Chat, nuevos objetivos mediante Nueva tarea y aceptación SQLite limitada a un
+Plan B creado en la misma run por el Lead configurado.
+
 ## Autoridad documental
 
 Orden de prioridad:

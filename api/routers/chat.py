@@ -48,6 +48,10 @@ async def get_chat(request: Request, limit: int = 120):
     """Return a unified chat feed of Lead↔User messages and pending interactions."""
     _require_api_auth_request(request)
     db = _db(request)
+
+    frozen_reason = _quorum_message_block_reason(db, issue_id=body.issue_id)
+    if frozen_reason:
+        raise HTTPException(status_code=409, detail=frozen_reason)
     try:
         items = _load_chat(db, limit=limit)
     except sqlite3.OperationalError as exc:
@@ -109,6 +113,20 @@ async def post_chat_message(body: ChatMessageRequest, request: Request):
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _quorum_message_block_reason(db: Path, *, issue_id: str) -> str | None:
+    """Impide que un prompt posterior parezca alterar un objetivo ya congelado."""
+    with contextlib.closing(sqlite3.connect(str(db), timeout=20.0)) as conn:
+        row = conn.execute(
+            "SELECT status FROM quorum_sessions WHERE issue_id=? ORDER BY created_at DESC LIMIT 1",
+            (issue_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return (
+        "El objetivo de esta planificación quorum ya está congelado. "
+        "Crea una Nueva tarea con perfil Lead + Quorum para el nuevo objetivo."
+    )
 
 def _load_chat(db: Path, *, limit: int = 120) -> list[dict[str, Any]]:
     # Select the NEWEST `limit` items (inner ORDER BY … DESC), then present
