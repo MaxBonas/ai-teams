@@ -1,6 +1,6 @@
 {
   "benchmark": "context_summary_semantic_retention",
-  "rubric_id": "auth_migration_causal_v1",
+  "rubric_id": "auth_migration_causal_v4",
   "source_chars": 1208,
   "summary_chars": 321,
   "compression_ratio": 0.2657,
@@ -29,7 +29,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "doble validaci[oó]n.{0,30}24 horas"
+        "doble validaci[oó]n.{0,40}24 ?(h|horas)"
       ]
     },
     {
@@ -38,7 +38,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "legacy_kid_hits.{0,40}cero.{0,30}dos horas"
+        "legacy_kid_hits.{0,40}(0|cero).{0,30}(2 ?h|dos horas)"
       ]
     },
     {
@@ -47,7 +47,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "42 passed"
+        "42 (tests )?passed"
       ]
     },
     {
@@ -56,7 +56,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "Engineer.{0,50}rollback_keys\\.py"
+        "Engineer.{0,80}rollback_keys\\.py"
       ]
     },
     {
@@ -65,7 +65,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "Reviewer.{0,40}dry-run"
+        "Reviewer.{0,40}dry-run|dry-run.{0,40}Reviewer"
       ]
     },
     {
@@ -74,7 +74,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "cach[eé]s\\s+regionales.{0,40}15 minutos"
+        "cach[eé]s\\s+regionales.{0,50}15 ?(min|minutos)"
       ]
     },
     {
@@ -83,7 +83,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "0,5 ?%.{0,40}401.{0,40}cinco minutos"
+        "0[,.]5 ?%.{0,50}401.{0,50}(5 ?min|cinco minutos)|401.{0,50}0[,.]5 ?%.{0,50}(5 ?min|cinco minutos)"
       ]
     },
     {
@@ -92,7 +92,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "fuera de scope.{0,60}(sesiones|proveedor de identidad)"
+        "fuera de (scope|alcance).{0,70}(sesiones|proveedor de identidad)"
       ]
     }
   ]

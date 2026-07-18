@@ -261,10 +261,13 @@ El contrato está implementado mediante delegation metadata, focus paths, RBAC,
 user directives, dieta de payload y resumen causal incremental. El curador recibe
 un rango exacto del hilo padre y solo él puede emitir `append_context_summary`; el
 executor verifica rango, issue y ratio antes de persistir y deniega el cierre sin
-artefacto. El canario real `scripts/benchmark_context_curator.py` reveló que el
-modelo budget de Codex conserva 7-8/9 anclas en tres semillas (ninguna aceptada),
-mientras una primera semilla senior conserva 9/9. Falta repetir senior y ampliar
-proveedores/casos antes de cambiar el routing productivo.
+artefacto. El canario real `scripts/benchmark_context_curator.py` muestra una
+frontera dependiente de la tarea: en `auth_migration`, Codex mini conserva 7-8/9
+anclas en tres semillas (0/3 accepted) y `gpt-5.5` conserva 9/9 en 2/2; en
+`queue_rollout`, mini, senior y Antigravity/Gemini 3.5 Flash conservan 9/9 en una
+semilla cada uno. Antigravity tardó 76,6 s frente a 28,1-30,5 s y no expone usage
+comparable. Esta muestra descarta una promoción global inmediata: hay que repetir
+colas, probar otro proveedor en auth y calibrar un escalado acotado tras fallo.
 
 ## Paralelismo
 

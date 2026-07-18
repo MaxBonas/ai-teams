@@ -1,0 +1,15 @@
+{
+  "id": "queue_rollout_causal_v4",
+  "max_compression_ratio": 0.30,
+  "criteria": [
+    {"id":"idempotency_key","kind":"decision","patterns":["invoice_id.{0,30}attempt"],"required":true},
+    {"id":"cohort_shadow","kind":"decision","patterns":["cohorte.{0,30}10 ?%|10 ?%.{0,30}cohorte","shadow.{0,30}48 ?(h|horas)|48 ?(h|horas).{0,30}shadow"],"min_matches":2,"required":true},
+    {"id":"retry_dlq","kind":"constraint","patterns":["tres intentos.{0,60}(dead-letter|DLQ)|3 intentos.{0,60}(dead-letter|DLQ)|retries?.{0,30}3.{0,60}(dead-letter|DLQ)"],"required":true},
+    {"id":"replay_evidence","kind":"evidence","patterns":["10[., ]?000\\s+mensajes.{0,40}(0|cero).{0,30}duplicad"],"required":true},
+    {"id":"next_owner","kind":"owner","patterns":["Engineer.{0,80}replay_dlq\\.py"],"required":true},
+    {"id":"review_acceptance","kind":"acceptance","patterns":["Reviewer.{0,160}(dry-run|100 mensajes)|(dry-run|100 mensajes).{0,160}Reviewer"],"required":true},
+    {"id":"late_webhook_risk","kind":"risk","patterns":["webhooks?.{0,80}(20 ?min|20 minutos).{0,80}(tarde|fuera de orden)|webhooks?.{0,80}fuera de orden.{0,80}(20 ?min|20 minutos)"],"required":true},
+    {"id":"escalation_threshold","kind":"escalation","patterns":["0[,.]1 ?%.{0,60}(10 ?min|diez minutos).{0,100}(desactiva|apagar|rollback|consumidor (anterior|previo))"],"required":true},
+    {"id":"scope","kind":"scope","patterns":["fuera de (scope|alcance).{0,80}(broker|esquema de pagos)"],"required":true}
+  ]
+}

@@ -1,4 +1,13 @@
+import json
+from pathlib import Path
+
+import pytest
+
 from scripts.context_summary_evals import evaluate_summary
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CONTEXT_FIXTURES = ROOT / "benchmarks" / "context_quality"
 
 
 RUBRIC = {
@@ -39,12 +48,8 @@ def test_rejects_complete_summary_that_exceeds_context_budget() -> None:
 
 
 def test_auth_rubric_accepts_compact_units_and_reversed_acceptance_order() -> None:
-    import json
-    from pathlib import Path
-
     rubric = json.loads(
-        (Path(__file__).resolve().parents[1] / "benchmarks" / "context_quality" / "auth_migration_rubric.json")
-        .read_text(encoding="utf-8")
+        (CONTEXT_FIXTURES / "auth_migration_rubric.json").read_text(encoding="utf-8")
     )
     summary = (
         "JWT RS256; doble validación durante 24h. `legacy_kid_hits` debe ser 0 durante 2h. "
@@ -57,3 +62,26 @@ def test_auth_rubric_accepts_compact_units_and_reversed_acceptance_order() -> No
 
     assert report["required_retained"] == 9
     assert report["semantic_gate_passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expected_rubric_id"),
+    [
+        ("auth_migration", "auth_migration_causal_v4"),
+        ("queue_rollout", "queue_rollout_causal_v4"),
+    ],
+)
+def test_reference_context_summaries_pass_current_rubrics(
+    fixture: str,
+    expected_rubric_id: str,
+) -> None:
+    source = (CONTEXT_FIXTURES / f"{fixture}_thread.md").read_text(encoding="utf-8")
+    summary = (CONTEXT_FIXTURES / f"{fixture}_reference_summary.md").read_text(encoding="utf-8")
+    rubric = json.loads((CONTEXT_FIXTURES / f"{fixture}_rubric.json").read_text(encoding="utf-8"))
+
+    report = evaluate_summary(source, summary, rubric)
+
+    assert rubric["id"] == expected_rubric_id
+    assert report["required_retained"] == report["required_total"] == 9
+    assert report["within_budget"] is True
+    assert report["accepted"] is True

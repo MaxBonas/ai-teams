@@ -1,9 +1,9 @@
 {
   "benchmark": "context_summary_semantic_retention",
-  "rubric_id": "auth_migration_causal_v3",
+  "rubric_id": "auth_migration_causal_v4",
   "source_chars": 8501,
-  "summary_chars": 665,
-  "compression_ratio": 0.0782,
+  "summary_chars": 869,
+  "compression_ratio": 0.1022,
   "max_compression_ratio": 0.3,
   "within_budget": true,
   "required_retained": 8,
@@ -103,17 +103,17 @@
   "runtime": {
     "issue_status": "done",
     "run": {
-      "id": "run:998715f7-b9c6-417c-845a-ef2775ecf2fc",
+      "id": "run:75a8f9ef-82f4-4525-8cfa-64bd157477d7",
       "status": "completed",
       "error_code": null,
       "error": null,
       "agent_id": "role:context_curator"
     },
-    "wall_seconds": 15.2,
-    "input_tokens": 23488,
-    "output_tokens": 516,
+    "wall_seconds": 23.8,
+    "input_tokens": 23536,
+    "output_tokens": 643,
     "cost_cents": 0,
-    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-codex-seed-2\\.aiteam\\aiteam.db"
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-codex-seed-4\\.aiteam\\aiteam.db"
   },
-  "summary": "Objetivo: migración de autenticación reversible y sin downtime. Decisión: mantener JWT RS256 con rotación de claves y doble validación durante 24h; la clave antigua solo se elimina cuando `legacy_kid_hits` sea 0 durante 2h. Evidencia: Engineer ya implementó lector dual en `src/auth/keyring.py` y reporta `pytest tests/auth -q: 42 passed`; Reviewer valida compatibilidad. Pendiente: automatizar rollback con `scripts/rollback_keys.py` y revisar dry-run por Reviewer. Riesgo: cachés regionales JWKS pueden retener 15 min; si las 401 superan 0,5% durante 5 min, pausar rotación y escalar. Fuera de alcance: migrar sesiones existentes o cambiar proveedor de identidad."
+  "summary": "## Objetivo\nMigración de autenticación reversible y sin downtime.\n\n## Decisiones\n- Mantener JWT RS256.\n- Rotar claves con doble validación durante 24h.\n- No borrar la clave antigua hasta `legacy_kid_hits = 0` durante 2h.\n- Fuera de alcance: migrar sesiones existentes o cambiar proveedor de identidad.\n\n## Trabajo completado\n- Engineer: lector dual en `src/auth/keyring.py`; evidencia: `pytest tests/auth -q` => 42 passed.\n- Reviewer: valida compatibilidad, pero detecta que el rollback no está automatizado.\n\n## Estado actual\n- `done`: lector dual implementado y verificado.\n- `in_progress/todo`: crear `scripts/rollback_keys.py`.\n- `blocked`: aceptación del rollback pendiente de dry-run del Reviewer.\n\n## Riesgos / escalado\n- Cachés regionales pueden retener JWKS 15 min.\n- Umbral de pausa: >0,5% de respuestas 401 durante 5 min => pausar rotación y escalar al Lead."
 }

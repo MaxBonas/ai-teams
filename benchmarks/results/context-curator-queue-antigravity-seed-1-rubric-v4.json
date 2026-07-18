@@ -1,0 +1,122 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "queue_rollout_causal_v4",
+  "source_chars": 8610,
+  "summary_chars": 1531,
+  "compression_ratio": 0.1778,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 9,
+  "required_total": 9,
+  "required_retention_rate": 1.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": true,
+  "accepted": true,
+  "criteria": [
+    {
+      "id": "idempotency_key",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "invoice_id.{0,30}attempt"
+      ]
+    },
+    {
+      "id": "cohort_shadow",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cohorte.{0,30}10 ?%|10 ?%.{0,30}cohorte",
+        "shadow.{0,30}48 ?(h|horas)|48 ?(h|horas).{0,30}shadow"
+      ]
+    },
+    {
+      "id": "retry_dlq",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "tres intentos.{0,60}(dead-letter|DLQ)|3 intentos.{0,60}(dead-letter|DLQ)|retries?.{0,30}3.{0,60}(dead-letter|DLQ)"
+      ]
+    },
+    {
+      "id": "replay_evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "10[., ]?000\\s+mensajes.{0,40}(0|cero).{0,30}duplicad"
+      ]
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,80}replay_dlq\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,160}(dry-run|100 mensajes)|(dry-run|100 mensajes).{0,160}Reviewer"
+      ]
+    },
+    {
+      "id": "late_webhook_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "webhooks?.{0,80}(20 ?min|20 minutos).{0,80}(tarde|fuera de orden)|webhooks?.{0,80}fuera de orden.{0,80}(20 ?min|20 minutos)"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0[,.]1 ?%.{0,60}(10 ?min|diez minutos).{0,100}(desactiva|apagar|rollback|consumidor (anterior|previo))"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de (scope|alcance).{0,80}(broker|esquema de pagos)"
+      ]
+    }
+  ],
+  "profile_id": "antigravity_subscription",
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "Gemini 3.5 Flash (High)",
+    "channel": "subscription"
+  },
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:1efcf8ad-9ca7-4791-99b7-4182fdddfce5",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "wall_seconds": 76.6,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-queue-antigravity-seed-1\\.aiteam\\aiteam.db"
+  },
+  "summary": "# Síntesis: Rollout de Facturación Asíncrona\n\n### 1. Objetivo y Alcance\n* **Objetivo**: Desplegar el nuevo consumidor de facturación asíncrona garantizando cero duplicación de facturas y capacidad de rollback en menos de 10 minutos.\n* **Fuera de Alcance**: Migrar de broker de mensajería y modificar el esquema de pagos.\n\n### 2. Decisiones Confirmadas\n* **Idempotencia**: Clave de idempotencia compuesta por `invoice_id` y `attempt`.\n* **Estrategia de Despliegue**: Activación por Feature Flag al 10% de cohorte inicial; consumidor antiguo en shadow por 48 horas.\n* **Manejo de Errores**: Retries limitados a 3 intentos. Tras fallar, los mensajes se envían a la Dead-Letter Queue (DLQ) sin confirmarse como procesados.\n\n### 3. Trabajo Completado e Ingeniería\n* **Evidencia/Pruebas**: Platform ejecutó un replay de 10,000 mensajes con 0 facturas duplicadas.\n\n### 4. Responsabilidades y Criterios de Aceptación\n* **Owner (Engineer)**: Responsable de crear el script `scripts/replay_dlq.py`.\n* **Reviewer**: Responsable de validar y aceptar la transición. Evidencia de aceptación requerida: reproducción exitosa de un dry-run de 100 mensajes en staging.\n\n### 5. Riesgos y Escalados (Umbral de Alerta)\n* **Riesgo**: Webhooks fuera de orden con retrasos de hasta 20 minutos que pueden reabrir estados ya cerrados.\n* **Acción de Rollback (SRE/Lead)**:\n  * **Métrica/Umbral**: Tasa de facturas duplicadas > 0.1%.\n  * **Ventana**: 10 minutos.\n  * **Acción**: SRE desactiva la feature flag, revierte al consumidor anterior y escala al Lead."
+}

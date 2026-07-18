@@ -1,9 +1,9 @@
 {
   "benchmark": "context_summary_semantic_retention",
-  "rubric_id": "auth_migration_causal_v3",
-  "source_chars": 1208,
-  "summary_chars": 321,
-  "compression_ratio": 0.2657,
+  "rubric_id": "queue_rollout_causal_v4",
+  "source_chars": 1315,
+  "summary_chars": 369,
+  "compression_ratio": 0.2806,
   "max_compression_ratio": 0.3,
   "within_budget": true,
   "required_retained": 9,
@@ -15,39 +15,40 @@
   "accepted": true,
   "criteria": [
     {
-      "id": "jwt_rs256",
+      "id": "idempotency_key",
       "kind": "decision",
       "required": true,
       "retained": true,
       "matched": [
-        "JWT.{0,20}RS256"
+        "invoice_id.{0,30}attempt"
       ]
     },
     {
-      "id": "dual_validation_24h",
+      "id": "cohort_shadow",
       "kind": "decision",
       "required": true,
       "retained": true,
       "matched": [
-        "doble validaci[oó]n.{0,40}24 ?(h|horas)"
+        "cohorte.{0,30}10 ?%|10 ?%.{0,30}cohorte",
+        "shadow.{0,30}48 ?(h|horas)|48 ?(h|horas).{0,30}shadow"
       ]
     },
     {
-      "id": "legacy_kid_gate",
+      "id": "retry_dlq",
       "kind": "constraint",
       "required": true,
       "retained": true,
       "matched": [
-        "legacy_kid_hits.{0,40}(0|cero).{0,30}(2 ?h|dos horas)"
+        "tres intentos.{0,60}(dead-letter|DLQ)|3 intentos.{0,60}(dead-letter|DLQ)|retries?.{0,30}3.{0,60}(dead-letter|DLQ)"
       ]
     },
     {
-      "id": "evidence",
+      "id": "replay_evidence",
       "kind": "evidence",
       "required": true,
       "retained": true,
       "matched": [
-        "42 (tests )?passed"
+        "10[., ]?000\\s+mensajes.{0,40}(0|cero).{0,30}duplicad"
       ]
     },
     {
@@ -56,7 +57,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "Engineer.{0,50}rollback_keys\\.py"
+        "Engineer.{0,80}replay_dlq\\.py"
       ]
     },
     {
@@ -65,16 +66,16 @@
       "required": true,
       "retained": true,
       "matched": [
-        "Reviewer.{0,40}dry-run|dry-run.{0,40}Reviewer"
+        "Reviewer.{0,160}(dry-run|100 mensajes)|(dry-run|100 mensajes).{0,160}Reviewer"
       ]
     },
     {
-      "id": "regional_cache_risk",
+      "id": "late_webhook_risk",
       "kind": "risk",
       "required": true,
       "retained": true,
       "matched": [
-        "cach[eé]s\\s+regionales.{0,50}15 ?(min|minutos)"
+        "webhooks?.{0,80}(20 ?min|20 minutos).{0,80}(tarde|fuera de orden)|webhooks?.{0,80}fuera de orden.{0,80}(20 ?min|20 minutos)"
       ]
     },
     {
@@ -83,7 +84,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "0[,.]5 ?%.{0,50}401.{0,50}(5 ?min|cinco minutos)|401.{0,50}0[,.]5 ?%.{0,50}(5 ?min|cinco minutos)"
+        "0[,.]1 ?%.{0,60}(10 ?min|diez minutos).{0,100}(desactiva|apagar|rollback|consumidor (anterior|previo))"
       ]
     },
     {
@@ -92,7 +93,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "fuera de (scope|alcance).{0,70}(sesiones|proveedor de identidad)"
+        "fuera de (scope|alcance).{0,80}(broker|esquema de pagos)"
       ]
     }
   ]

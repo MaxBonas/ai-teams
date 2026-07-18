@@ -1,14 +1,14 @@
 {
   "benchmark": "context_summary_semantic_retention",
-  "rubric_id": "auth_migration_causal_v3",
+  "rubric_id": "auth_migration_causal_v4",
   "source_chars": 8501,
-  "summary_chars": 869,
-  "compression_ratio": 0.1022,
+  "summary_chars": 876,
+  "compression_ratio": 0.103,
   "max_compression_ratio": 0.3,
   "within_budget": true,
-  "required_retained": 8,
+  "required_retained": 7,
   "required_total": 9,
-  "required_retention_rate": 0.8889,
+  "required_retention_rate": 0.7778,
   "optional_retained": 0,
   "optional_total": 0,
   "semantic_gate_passed": false,
@@ -61,10 +61,8 @@
       "id": "review_acceptance",
       "kind": "acceptance",
       "required": true,
-      "retained": true,
-      "matched": [
-        "Reviewer.{0,40}dry-run|dry-run.{0,40}Reviewer"
-      ]
+      "retained": false,
+      "matched": []
     },
     {
       "id": "regional_cache_risk",
@@ -103,17 +101,17 @@
   "runtime": {
     "issue_status": "done",
     "run": {
-      "id": "run:75a8f9ef-82f4-4525-8cfa-64bd157477d7",
+      "id": "run:19b83cc3-843f-4a63-9ed4-2cdfc4adeda5",
       "status": "completed",
       "error_code": null,
       "error": null,
       "agent_id": "role:context_curator"
     },
-    "wall_seconds": 23.8,
-    "input_tokens": 23536,
-    "output_tokens": 643,
+    "wall_seconds": 29.9,
+    "input_tokens": 23499,
+    "output_tokens": 690,
     "cost_cents": 0,
-    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-codex-seed-4\\.aiteam\\aiteam.db"
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-codex-seed-3\\.aiteam\\aiteam.db"
   },
-  "summary": "## Objetivo\nMigración de autenticación reversible y sin downtime.\n\n## Decisiones\n- Mantener JWT RS256.\n- Rotar claves con doble validación durante 24h.\n- No borrar la clave antigua hasta `legacy_kid_hits = 0` durante 2h.\n- Fuera de alcance: migrar sesiones existentes o cambiar proveedor de identidad.\n\n## Trabajo completado\n- Engineer: lector dual en `src/auth/keyring.py`; evidencia: `pytest tests/auth -q` => 42 passed.\n- Reviewer: valida compatibilidad, pero detecta que el rollback no está automatizado.\n\n## Estado actual\n- `done`: lector dual implementado y verificado.\n- `in_progress/todo`: crear `scripts/rollback_keys.py`.\n- `blocked`: aceptación del rollback pendiente de dry-run del Reviewer.\n\n## Riesgos / escalado\n- Cachés regionales pueden retener JWKS 15 min.\n- Umbral de pausa: >0,5% de respuestas 401 durante 5 min => pausar rotación y escalar al Lead."
+  "summary": "**Objetivo**: migración de autenticación reversible y sin downtime. Mantener JWT RS256, rotar claves con doble validación durante 24h y no borrar la clave vieja hasta que `legacy_kid_hits` sea 0 durante 2h. Fuera de scope: migrar sesiones existentes o cambiar proveedor.\n\n**Decisiones**: se confirma RS256; rollback debe existir y ser verificable; si `legacy_kid_hits` o 401 suben, se pausa la rotación y se escala.\n\n**Trabajo completado**: Engineer implementó lector dual en `src/auth/keyring.py` y reportó `pytest tests/auth -q: 42 passed`. Reviewer aprobó compatibilidad pero señaló que el rollback sigue manual.\n\n**Estado**: compatible/dual-read listo; rollback `todo`; dry-run de rollback pendiente de revisión; rotación no debe avanzar sin esa pieza.\n\n**Riesgo**: cachés regionales pueden retener JWKS 15 min; si hay >0.5% de 401 durante 5 min, pausar y escalar al Lead."
 }
