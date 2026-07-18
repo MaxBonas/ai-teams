@@ -83,13 +83,17 @@ def test_chat_cannot_silently_mutate_frozen_quorum_objective(tmp_path: Path) -> 
 @pytest.fixture
 def chat_client(tmp_path: Path):
     """TestClient con workspace configurado y DB sembrada (mismo patrón que test_crud_api)."""
+    previous = utils.get_current_workspace()
     utils.set_current_workspace(tmp_path)
     # resolve_runtime_dir renombra runtime/ → .aiteam/ en workspaces externos;
     # sembramos directamente el destino final para poder reabrir la DB después.
     db = tmp_path / ".aiteam" / "aiteam.db"
     db.parent.mkdir(parents=True, exist_ok=True)
     _init(db)
-    return TestClient(app, raise_server_exceptions=True), db
+    try:
+        yield TestClient(app, raise_server_exceptions=True), db
+    finally:
+        utils.set_current_workspace(previous)
 
 
 def _freeze_intake(db: Path) -> None:

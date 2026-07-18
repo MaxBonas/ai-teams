@@ -428,7 +428,15 @@ function IssuePipeline({ issue }: { issue: Issue }) {
   );
 }
 
-function QuorumStepper({ quorum, loading }: { quorum: QuorumPayload | null; loading: boolean }) {
+function QuorumStepper({
+  quorum,
+  loading,
+  onCreateExecutionTask,
+}: {
+  quorum: QuorumPayload | null;
+  loading: boolean;
+  onCreateExecutionTask?: () => void;
+}) {
   if (loading) return <div className="quorum-stepper quorum-loading">Leyendo quorum…</div>;
   if (!quorum) return null;
 
@@ -464,6 +472,14 @@ function QuorumStepper({ quorum, loading }: { quorum: QuorumPayload | null; load
         ))}
       </div>
       {(skipped || degraded) && <p className="quorum-skip-reason">{session.skipped_reason || 'El perfil de esta issue no requiere quorum.'}</p>}
+      {session.status === 'accepted' && session.final_plan_revision_id && onCreateExecutionTask && (
+        <div className="quorum-next-step">
+          <span>Plan aceptado — la planificación terminó. El siguiente paso es ejecutarlo:</span>
+          <button className="quorum-cta" onClick={onCreateExecutionTask}>
+            Crear tarea de ejecución con este plan
+          </button>
+        </div>
+      )}
       {!skipped && contributions.length > 0 && (
         <div className="quorum-contributions">
           {contributions.map((contribution) => (
@@ -793,6 +809,10 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   // Team profile for new tasks
   const [newTaskProfile, setNewTaskProfile] = useState<string>('full_team');
+  // Perfil inicial conservador; quorum se elige explícitamente cuando el riesgo lo justifica.
+  const [newProjectRunProfile, setNewProjectRunProfile] = useState<string>('full_team');
+  // Plan aceptado adjunto a la próxima tarea (recibo por revisión, no texto copiado)
+  const [pendingPlanRef, setPendingPlanRef] = useState<{ revisionId: string; sourceIssueId: string } | null>(null);
   // Agent config inline edit (sidebar)
   const [, setEditingAgentId] = useState<string | null>(null);
   const [agentDraft, setAgentDraft] = useState<Partial<Agent>>({});
@@ -1511,6 +1531,7 @@ export default function App() {
           initial_task: initialTask,
           adapter_profile_ids: selectedProjectAdapterIds,
           lead_adapter_profile_id: leadAdapterProfileId,
+          run_profile: newProjectRunProfile,
         }),
       });
       const json = (await response.json()) as WorkspacePayload;
@@ -1662,7 +1683,14 @@ export default function App() {
           role: 'lead',
           complexity: 'medium',
           assignee_agent_id: 'role:lead',
-          metadata: { source: 'frontend_project_cockpit', wake_reason: 'new_task', profile: newTaskProfile },
+          metadata: {
+            source: 'frontend_project_cockpit',
+            wake_reason: 'new_task',
+            profile: newTaskProfile,
+            // El plan aceptado viaja como referencia a su revisión (recibo);
+            // el backend lo entrega en cada wake como inherited_plan.
+            ...(pendingPlanRef ? { source_plan_revision_id: pendingPlanRef.revisionId } : {}),
+          },
         }),
       });
       const issueJson = await issueResponse.json();
@@ -1701,6 +1729,7 @@ export default function App() {
 
       const runOnceJson = await runControlPlane();
       setNewTaskDraft('');
+      setPendingPlanRef(null);
       setSelectedIssueId(issue.id);
       setViewMode('chat');
       setLastResult({ issue: issueJson, comment: commentJson, wakeup: wakeupJson, run_once: runOnceJson });
@@ -2303,6 +2332,34 @@ export default function App() {
               onChange={(event) => setInitialTask(event.target.value)}
             />
           </label>
+
+          {/* ── Cómo empezar: el plan es la base ── */}
+          <div className="start-profile-picker">
+            <div className="hiring-header">Cómo empezar</div>
+            <div className="profile-selector">
+              {[
+                PROFILE_OPTIONS.find((p) => p.value === 'lead_quorum')!,
+                PROFILE_OPTIONS.find((p) => p.value === 'full_team')!,
+                PROFILE_OPTIONS.find((p) => p.value === 'solo_lead')!,
+              ].map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  className={`profile-chip${newProjectRunProfile === p.value ? ' active' : ''}`}
+                  onClick={() => setNewProjectRunProfile(p.value)}
+                  title={p.desc}
+                >
+                  {p.label}
+                  {p.value === 'lead_quorum' && <span className="chip-reco">Plan profundo</span>}
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              Para objetivos ambiguos o críticos, <strong>Lead + Quorum</strong> hace que seniors independientes
+              (idealmente de otro proveedor) auditen el plan del Lead antes de ejecutar nada:
+              el proyecto arranca planificando, no improvisando.
+            </p>
+          </div>
           <div className="project-adapter-picker">
             <div className="panel-title compact-title">
               <KeyRound size={16} />
@@ -2317,6 +2374,28 @@ export default function App() {
               <strong>{selectedProjectAdapterIds.length}</strong>
               <span>seleccionados</span>
             </div>
+            {(() => {
+              // Diversidad real de proveedor entre las conexiones YA seleccionadas:
+              // es lo que determina si el quorum tendrá perspectivas independientes.
+              const providers = new Set(
+                adapterProfiles
+                  .filter((p) => selectedProjectAdapterIds.includes(p.id) && profileState(p).connected)
+                  .map((p) => profileState(p).secretProvider || String(p.provider || '').toLowerCase())
+                  .filter(Boolean),
+              );
+              return providers.size >= 2 ? (
+                <div className="quorum-ready-note ok">
+                  ✓ Quorum multi-proveedor listo — {providers.size} proveedores distintos seleccionados.
+                  Los auditores del plan tendrán perspectivas realmente independientes.
+                </div>
+              ) : (
+                <div className="quorum-ready-note">
+                  Selecciona conexiones de <strong>al menos 2 proveedores distintos</strong>: el quorum
+                  audita el plan con seniors de otro proveedor y evita el sesgo de un solo modelo.
+                  Con uno solo funcionará, pero en modo reducido.
+                </div>
+              );
+            })()}
             <label>
               Lead del proyecto
               <select
@@ -2756,18 +2835,36 @@ export default function App() {
               value={newTaskDraft}
               onChange={(event) => setNewTaskDraft(event.target.value)}
             />
+            {pendingPlanRef && (
+              <div className="attached-plan-chip" title={`Revisión ${pendingPlanRef.revisionId} de ${pendingPlanRef.sourceIssueId}`}>
+                📋 Plan aceptado adjunto
+                <button
+                  className="attached-plan-clear"
+                  onClick={() => setPendingPlanRef(null)}
+                  title="Quitar el plan adjunto"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             <div className="profile-selector">
               {PROFILE_OPTIONS.map((p) => (
                 <button
                   key={p.value}
                   className={`profile-chip${newTaskProfile === p.value ? ' active' : ''}`}
                   onClick={() => setNewTaskProfile(p.value)}
-                  title={p.desc}
+                  title={p.value === 'lead_quorum' ? `${p.desc}. Úsalo para objetivos ambiguos o críticos que justifiquen auditoría senior.` : p.desc}
                 >
                   {p.label}
+                  {p.value === 'lead_quorum' && <span className="chip-reco chip-reco-mini">★</span>}
                 </button>
               ))}
             </div>
+            {newTaskProfile !== 'lead_quorum' && !pendingPlanRef && (
+              <p className="new-task-quorum-hint">
+                Si el objetivo es ambiguo o crítico, considera <strong>Lead + Quorum</strong> (★) para auditar el plan antes de ejecutar.
+              </p>
+            )}
             <button
               className="sidebar-create-btn"
               onClick={() => void createTask()}
@@ -2967,7 +3064,20 @@ export default function App() {
                   </span>
                 ) : null}
               </div>
-              <QuorumStepper quorum={quorum} loading={quorumLoading} />
+              <QuorumStepper
+                quorum={quorum}
+                loading={quorumLoading}
+                onCreateExecutionTask={() => {
+                  const revisionId = quorum?.session.final_plan_revision_id;
+                  if (!revisionId) return;
+                  setPendingPlanRef({ revisionId, sourceIssueId: quorum.session.issue_id });
+                  setNewTaskDraft(
+                    `Ejecuta el plan aceptado de "${selectedIssue?.title || quorum.session.issue_id}". `
+                    + 'El plan completo viaja adjunto como referencia (inherited_plan).',
+                  );
+                  setNewTaskProfile('full_team');
+                }}
+              />
               {planDocument ? (
                 <>
                   <h3 style={{ margin: '0 0 0.5rem' }}>{planDocument.title}</h3>

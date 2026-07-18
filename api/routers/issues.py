@@ -79,6 +79,25 @@ async def post_issue(body: CreateIssueRequest, request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     metadata["profile"] = selection.profile
     metadata["profile_selection"] = selection.to_metadata()
+    source_plan_revision_id = str(metadata.get("source_plan_revision_id") or "").strip()
+    if source_plan_revision_id:
+        try:
+            accepted_plan = _accepted_plan_reference(db, revision_id=source_plan_revision_id)
+        except sqlite3.OperationalError as exc:
+            raise _schema_err(exc)
+        if accepted_plan is None:
+            raise HTTPException(
+                status_code=400,
+                detail="source_plan_revision_id must reference the final plan of an accepted quorum",
+            )
+        metadata.update(
+            {
+                "source_plan_revision_id": accepted_plan["revision_id"],
+                "source_plan_issue_id": accepted_plan["issue_id"],
+                "source_quorum_session_id": accepted_plan["session_id"],
+                "source_plan_status": "accepted",
+            }
+        )
     try:
         row = create_issue(
             db, title=body.title, status=body.status, goal_id=body.goal_id,
@@ -117,6 +136,26 @@ async def post_issue(body: CreateIssueRequest, request: Request):
         },
     )
     return {"success": True, "issue": row, "profile_selection": selection.to_metadata()}
+
+
+def _accepted_plan_reference(db: Path, *, revision_id: str) -> dict[str, str] | None:
+    """Resolve una revisión únicamente si es el Plan B final de un quorum aceptado."""
+    with contextlib.closing(sqlite3.connect(str(db), timeout=20.0)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT r.id AS revision_id, r.issue_id, q.id AS session_id
+            FROM issue_document_revisions r
+            JOIN quorum_sessions q
+              ON q.issue_id = r.issue_id
+             AND q.final_plan_revision_id = r.id
+             AND q.status = 'accepted'
+            WHERE r.id = ? AND r.key = 'plan'
+            LIMIT 1
+            """,
+            (revision_id,),
+        ).fetchone()
+    return dict(row) if row is not None else None
 
 
 @router.get("/api/issues")

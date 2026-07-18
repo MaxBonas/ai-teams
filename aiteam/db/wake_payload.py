@@ -141,14 +141,48 @@ def build_wake_payload(
         plan_doc = None
         if plan_row:
             body = str(plan_row["body"] or "")
+            # 4000 chars: el contrato de profundidad exige planes de 300+ palabras
+            # con nueve secciones; el tope anterior (2000) truncaba el plan que el
+            # propio sistema obliga a escribir.
             plan_doc = {
                 "title": plan_row["title"],
-                "body": body if len(body) <= 2000 else body[:2000] + "…",
+                "body": body if len(body) <= 4000 else body[:4000] + "…",
                 "revision_number": plan_row["revision_number"],
                 "current_revision_id": plan_row["current_revision_id"],
                 "updated_at": plan_row["updated_at"],
-                "truncated": len(body) > 2000,
+                "truncated": len(body) > 4000,
             }
+
+        # Plan heredado: una tarea de ejecución creada desde un quorum aceptado
+        # referencia su revisión con source_plan_revision_id.
+        # El plan viaja con la tarea como recibo, no como narración copiada.
+        inherited_plan = None
+        _source_plan_revision_id = str(_issue_meta.get("source_plan_revision_id") or "").strip()
+        if _source_plan_revision_id:
+            inherited_row = conn.execute(
+                """
+                SELECT r.id, r.issue_id, r.title, r.body, r.revision_number,
+                       q.id AS quorum_session_id
+                FROM issue_document_revisions r
+                JOIN quorum_sessions q
+                  ON q.issue_id = r.issue_id
+                 AND q.final_plan_revision_id = r.id
+                 AND q.status = 'accepted'
+                WHERE r.id = ? AND r.key = 'plan'
+                """,
+                (_source_plan_revision_id,),
+            ).fetchone()
+            if inherited_row:
+                inherited_body = str(inherited_row["body"] or "")
+                inherited_plan = {
+                    "revision_id": inherited_row["id"],
+                    "source_issue_id": inherited_row["issue_id"],
+                    "quorum_session_id": inherited_row["quorum_session_id"],
+                    "title": inherited_row["title"],
+                    "body": inherited_body if len(inherited_body) <= 4000 else inherited_body[:4000] + "…",
+                    "revision_number": inherited_row["revision_number"],
+                    "truncated": len(inherited_body) > 4000,
+                }
 
         # Context summary document (key='context_summary') — block-based synthesis
         context_summary_row = conn.execute(
@@ -170,7 +204,8 @@ def build_wake_payload(
                 "updated_at": context_summary_row["updated_at"],
             }
 
-        # Parent summary
+        # Parent summary — incluye el plan del padre: un worker delegado ejecuta
+        # una pieza de ese plan y hasta ahora nunca lo veía (solo id/title/status).
         parent_summary = None
         if issue.get("parent_id"):
             parent_row = conn.execute(
@@ -179,6 +214,19 @@ def build_wake_payload(
             ).fetchone()
             if parent_row:
                 parent_summary = {"id": parent_row["id"], "title": parent_row["title"], "status": parent_row["status"]}
+                parent_plan_row = conn.execute(
+                    "SELECT title, body, revision_number FROM issue_documents "
+                    "WHERE issue_id = ? AND key = 'plan'",
+                    (issue["parent_id"],),
+                ).fetchone()
+                if parent_plan_row:
+                    parent_plan_body = str(parent_plan_row["body"] or "")
+                    parent_summary["plan"] = {
+                        "title": parent_plan_row["title"],
+                        "body": parent_plan_body if len(parent_plan_body) <= 2500 else parent_plan_body[:2500] + "…",
+                        "revision_number": parent_plan_row["revision_number"],
+                        "truncated": len(parent_plan_body) > 2500,
+                    }
 
         # Children summary — status of direct child issues (for supervisors/leads)
         children_rows = conn.execute(
@@ -268,6 +316,7 @@ def build_wake_payload(
         "fallback_fetch_needed": has_more_comments,
         "pending_interactions": interactions,
         "plan_document": plan_doc,
+        "inherited_plan": inherited_plan,
         "context_summary": context_summary_doc,
         "trigger_comment_id": comment_id,
         "children": children_summary,

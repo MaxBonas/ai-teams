@@ -118,9 +118,11 @@ async def post_chat_message(body: ChatMessageRequest, request: Request):
 
 def _quorum_message_block_reason(db: Path, *, issue_id: str) -> str | None:
     """Impide que un prompt posterior parezca alterar un objetivo ya congelado."""
+    # Cualquier sesión (viva o terminal) congela el objetivo: una issue de quorum
+    # nunca se reutiliza para un objetivo nuevo, por eso no se filtra por status.
     with contextlib.closing(sqlite3.connect(str(db), timeout=20.0)) as conn:
         row = conn.execute(
-            "SELECT status FROM quorum_sessions WHERE issue_id=? ORDER BY created_at DESC LIMIT 1",
+            "SELECT 1 FROM quorum_sessions WHERE issue_id=? LIMIT 1",
             (issue_id,),
         ).fetchone()
     if row is None:

@@ -174,8 +174,10 @@ def test_payload_includes_plan_document(tmp_path):
 
 
 def test_payload_truncates_long_plan(tmp_path):
+    # Presupuesto 4000: cubre un plan del contrato de profundidad (300+ palabras,
+    # nueve secciones) sin truncarlo; por encima se corta con marcador.
     db = _init(tmp_path)
-    long_body = "x" * 3000
+    long_body = "x" * 5000
     with sqlite3.connect(str(db)) as conn:
         conn.execute(
             "INSERT INTO issue_documents (id, issue_id, key, title, body, format, current_revision_id, revision_number) "
@@ -184,7 +186,7 @@ def test_payload_truncates_long_plan(tmp_path):
         )
     payload = build_wake_payload(db, issue_id="i1")
     assert payload["plan_document"]["truncated"] is True
-    assert len(payload["plan_document"]["body"]) <= 2010
+    assert len(payload["plan_document"]["body"]) <= 4010
 
 
 def test_payload_includes_parent_summary(tmp_path):
@@ -366,3 +368,129 @@ class TestChildrenEnrichment:
         payload = build_wake_payload(db, issue_id="parent")
         child = payload["children"][0]
         assert child["last_agent_report"]["result"] == "blocked"
+
+
+# ── El plan viaja con el trabajo (repercusión del plan del Lead) ─────────────
+
+def _seed_plan(db: Path, *, issue_id: str, body: str, revision_id: str = "rev:p1") -> None:
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO issue_documents (id, issue_id, key, title, body, current_revision_id) "
+            "VALUES (?, ?, 'plan', 'Plan', ?, ?)",
+            (f"doc:{issue_id}", issue_id, body, revision_id),
+        )
+        conn.execute(
+            "INSERT INTO issue_document_revisions (id, document_id, issue_id, key, title, body, revision_number) "
+            "VALUES (?, ?, ?, 'plan', 'Plan', ?, 1)",
+            (revision_id, f"doc:{issue_id}", issue_id, body),
+        )
+        conn.commit()
+
+
+def _accept_seeded_plan(db: Path, *, issue_id: str, revision_id: str, session_id: str = "qs:accepted") -> None:
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO quorum_sessions "
+            "(id, issue_id, base_plan_revision_id, status, final_plan_revision_id) "
+            "VALUES (?, ?, 'rev:base', 'accepted', ?)",
+            (session_id, issue_id, revision_id),
+        )
+        conn.commit()
+
+
+def test_child_issue_payload_includes_parent_plan(tmp_path):
+    """Un worker delegado ejecuta una pieza del plan del padre: debe verlo."""
+    db = _init(tmp_path)
+    _seed_plan(db, issue_id="i1", body="Plan maestro con fases y criterios de aceptación.")
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) "
+            "VALUES ('i2', 'g1', 'i1', 'Implementar fase 1', 'in_progress', 'engineer', 'a1')"
+        )
+        conn.commit()
+
+    payload = build_wake_payload(db, issue_id="i2")
+
+    assert payload["parent"]["id"] == "i1"
+    assert payload["parent"]["plan"]["body"].startswith("Plan maestro")
+    assert payload["parent"]["plan"]["truncated"] is False
+
+
+def test_parent_plan_is_truncated_with_marker(tmp_path):
+    db = _init(tmp_path)
+    _seed_plan(db, issue_id="i1", body="x" * 3000)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) "
+            "VALUES ('i2', 'g1', 'i1', 'Fase', 'in_progress', 'engineer', 'a1')"
+        )
+        conn.commit()
+
+    plan = build_wake_payload(db, issue_id="i2")["parent"]["plan"]
+
+    assert plan["truncated"] is True
+    assert len(plan["body"]) == 2501  # 2500 + marcador
+
+
+def test_own_plan_budget_holds_a_deep_contract_plan(tmp_path):
+    """El contrato exige 300+ palabras en nueve secciones (~3-4k chars): el
+    presupuesto del payload no debe truncar el plan que el sistema obliga a
+    escribir. 4000 lo cubre; el anterior (2000) lo cortaba."""
+    db = _init(tmp_path)
+    deep_body = ("Sección con decisiones, owners y evidencia verificable. " * 60).strip()
+    assert 2000 < len(deep_body) <= 4000
+    _seed_plan(db, issue_id="i1", body=deep_body)
+
+    plan = build_wake_payload(db, issue_id="i1")["plan_document"]
+
+    assert plan["truncated"] is False
+    assert plan["body"] == deep_body
+
+
+def test_inherited_plan_travels_with_execution_task(tmp_path):
+    """Una tarea creada desde un plan aceptado referencia su revisión con
+    source_plan_revision_id y recibe el plan como recibo, con provenance."""
+    db = _init(tmp_path)
+    _seed_plan(db, issue_id="i1", body="Plan B aceptado por quorum.", revision_id="rev:b")
+    _accept_seeded_plan(db, issue_id="i1", revision_id="rev:b")
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id, metadata_json) "
+            "VALUES ('i3', 'g1', 'Ejecutar plan aceptado', 'todo', 'lead', 'a1', ?)",
+            (json.dumps({"source_plan_revision_id": "rev:b"}),),
+        )
+        conn.commit()
+
+    payload = build_wake_payload(db, issue_id="i3")
+
+    assert payload["inherited_plan"]["revision_id"] == "rev:b"
+    assert payload["inherited_plan"]["source_issue_id"] == "i1"
+    assert payload["inherited_plan"]["quorum_session_id"] == "qs:accepted"
+    assert payload["inherited_plan"]["body"] == "Plan B aceptado por quorum."
+
+
+def test_inherited_plan_rejects_unaccepted_revision(tmp_path):
+    db = _init(tmp_path)
+    _seed_plan(db, issue_id="i1", body="Plan A todavía no aceptado.", revision_id="rev:draft")
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id, metadata_json) "
+            "VALUES ('i5', 'g1', 'Tarea', 'todo', 'lead', 'a1', ?)",
+            (json.dumps({"source_plan_revision_id": "rev:draft"}),),
+        )
+        conn.commit()
+
+    assert build_wake_payload(db, issue_id="i5")["inherited_plan"] is None
+
+
+def test_inherited_plan_ignores_dangling_revision(tmp_path):
+    db = _init(tmp_path)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id, metadata_json) "
+            "VALUES ('i4', 'g1', 'Tarea', 'todo', 'lead', 'a1', ?)",
+            (json.dumps({"source_plan_revision_id": "rev:missing"}),),
+        )
+        conn.commit()
+
+    assert build_wake_payload(db, issue_id="i4")["inherited_plan"] is None

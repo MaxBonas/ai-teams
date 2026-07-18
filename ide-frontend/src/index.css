@@ -2383,6 +2383,58 @@ dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 0.8rem; color:
   background: var(--bg); border-radius: var(--radius); padding: 9px; font-size: 0.68rem;
 }
 
+/* ── Orientación al quorum: el plan es la base ────────────────────────────── */
+.chip-reco {
+  display: inline-flex; align-items: center;
+  margin-left: 6px; padding: 0 6px;
+  border-radius: 999px; font-size: 0.58rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  background: var(--quorum-bg); color: var(--quorum-text);
+  border: 1px solid var(--quorum);
+}
+.chip-reco-mini { padding: 0 4px; margin-left: 4px; }
+
+.quorum-ready-note {
+  margin: 6px 0 0; padding: 7px 11px;
+  border: 1px dashed var(--quorum); border-radius: var(--radius);
+  background: var(--quorum-bg); color: var(--quorum-text);
+  font-size: 0.76rem; line-height: 1.45;
+}
+.quorum-ready-note.ok {
+  border-style: solid; border-color: var(--accent-dim);
+  background: var(--accent-bg); color: var(--accent-text);
+}
+
+.start-profile-picker { display: grid; gap: 6px; }
+
+.new-task-quorum-hint {
+  margin: 2px 0 0; font-size: 0.68rem; color: var(--text-dim); line-height: 1.4;
+}
+.new-task-quorum-hint strong { color: var(--quorum-text); font-weight: 600; }
+
+.attached-plan-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--radius);
+  background: var(--accent-bg); border: 1px solid var(--accent-dim);
+  color: var(--accent-text); font-size: 0.72rem; font-weight: 600;
+}
+.attached-plan-clear {
+  margin-left: auto; background: none; border: none; min-height: 0;
+  padding: 0 4px; color: var(--accent-text); cursor: pointer; font-size: 0.72rem;
+}
+.attached-plan-clear:hover { color: var(--text-bright); background: none; }
+
+.quorum-next-step {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 10px; padding: 9px 12px;
+  border: 1px solid var(--accent-dim); border-radius: var(--radius);
+  background: var(--accent-bg); font-size: 0.8rem; color: var(--accent-text);
+}
+.quorum-cta {
+  background: var(--accent-dim); color: #fff; border-radius: var(--radius);
+  padding: 5px 12px; font-size: 0.78rem; font-weight: 600; min-height: 0;
+}
+
 /* ── Accesibilidad ────────────────────────────────────────────────────────── */
 /* Foco visible por teclado en todos los controles (los inputs ya tienen el suyo) */
 button:focus-visible,

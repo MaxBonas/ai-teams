@@ -186,6 +186,61 @@ def test_issue_creation_defaults_to_team_and_honours_quorum_override(client):
     assert planning.json()["profile_selection"]["source"] == "explicit_override"
 
 
+def test_issue_creation_only_inherits_final_plan_from_accepted_quorum(client, tmp_path):
+    goal_id = client.post("/api/goals", json={"title": "G"}).json()["goal"]["id"]
+    source_issue_id = client.post(
+        "/api/issues", json={"title": "Planificar", "goal_id": goal_id, "run_profile": "lead_quorum"}
+    ).json()["issue"]["id"]
+    db_path = tmp_path / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO issue_documents "
+            "(id, issue_id, key, title, body, current_revision_id, revision_number) "
+            "VALUES ('doc:plan-source', ?, 'plan', 'Plan B', 'Plan aceptado', 'rev:accepted', 2)",
+            (source_issue_id,),
+        )
+        conn.execute(
+            "INSERT INTO issue_document_revisions "
+            "(id, document_id, issue_id, key, title, body, revision_number) "
+            "VALUES ('rev:accepted', 'doc:plan-source', ?, 'plan', 'Plan B', 'Plan aceptado', 2)",
+            (source_issue_id,),
+        )
+        conn.execute(
+            "INSERT INTO quorum_sessions "
+            "(id, issue_id, base_plan_revision_id, status, final_plan_revision_id) "
+            "VALUES ('qs:accepted', ?, 'rev:a', 'accepted', 'rev:accepted')",
+            (source_issue_id,),
+        )
+        conn.commit()
+
+    accepted = client.post(
+        "/api/issues",
+        json={
+            "title": "Ejecutar",
+            "goal_id": goal_id,
+            "run_profile": "full_team",
+            "metadata": {"source_plan_revision_id": "rev:accepted"},
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    metadata = json.loads(accepted.json()["issue"]["metadata_json"])
+    assert metadata["source_plan_issue_id"] == source_issue_id
+    assert metadata["source_quorum_session_id"] == "qs:accepted"
+    assert metadata["source_plan_status"] == "accepted"
+
+    rejected = client.post(
+        "/api/issues",
+        json={
+            "title": "Ejecutar borrador",
+            "goal_id": goal_id,
+            "run_profile": "full_team",
+            "metadata": {"source_plan_revision_id": "rev:a"},
+        },
+    )
+    assert rejected.status_code == 400
+    assert "accepted quorum" in rejected.json()["detail"]
+
+
 def test_issue_quorum_endpoint_is_read_only_and_returns_contract(client, tmp_path):
     goal_id = client.post("/api/goals", json={"title": "G"}).json()["goal"]["id"]
     issue_id = client.post(
