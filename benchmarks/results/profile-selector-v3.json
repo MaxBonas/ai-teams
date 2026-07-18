@@ -1,0 +1,322 @@
+{
+  "cases": 29,
+  "correct": 29,
+  "accuracy": 1.0,
+  "unsafe_solo": 0,
+  "overteam": 0,
+  "passes_safety_gate": true,
+  "by_family": {
+    "architecture": {
+      "cases": 4,
+      "correct": 4,
+      "unsafe_solo": 0,
+      "overteam": 0,
+      "accuracy": 1.0
+    },
+    "backend": {
+      "cases": 5,
+      "correct": 5,
+      "unsafe_solo": 0,
+      "overteam": 0,
+      "accuracy": 1.0
+    },
+    "data": {
+      "cases": 4,
+      "correct": 4,
+      "unsafe_solo": 0,
+      "overteam": 0,
+      "accuracy": 1.0
+    },
+    "frontend": {
+      "cases": 4,
+      "correct": 4,
+      "unsafe_solo": 0,
+      "overteam": 0,
+      "accuracy": 1.0
+    },
+    "incomplete": {
+      "cases": 4,
+      "correct": 4,
+      "unsafe_solo": 0,
+      "overteam": 0,
+      "accuracy": 1.0
+    },
+    "maintenance": {
+      "cases": 4,
+      "correct": 4,
+      "unsafe_solo": 0,
+      "overteam": 0,
+      "accuracy": 1.0
+    },
+    "security": {
+      "cases": 4,
+      "correct": 4,
+      "unsafe_solo": 0,
+      "overteam": 0,
+      "accuracy": 1.0
+    }
+  },
+  "results": [
+    {
+      "id": "small_config",
+      "family": "maintenance",
+      "difficulty": "small",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "docs_cleanup",
+      "family": "maintenance",
+      "difficulty": "small",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "rename_internal_symbol",
+      "family": "maintenance",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "dependency_pin_patch",
+      "family": "maintenance",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "bounded_cli",
+      "family": "backend",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "pagination_bug",
+      "family": "backend",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "pure_parser_extension",
+      "family": "backend",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "release_notes_indexer",
+      "family": "backend",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "sqlite_job_queue",
+      "family": "backend",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "independent_verification_requested",
+      "correct": true
+    },
+    {
+      "id": "copy_change",
+      "family": "frontend",
+      "difficulty": "small",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "single_form_validation",
+      "family": "frontend",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "parallel_front_back",
+      "family": "frontend",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "multiple_parallel_workstreams",
+      "correct": true
+    },
+    {
+      "id": "accessible_checkout_redesign",
+      "family": "frontend",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_ambiguity_requires_separate_planning_and_execution",
+      "correct": true
+    },
+    {
+      "id": "security_sensitive",
+      "family": "security",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "authz_cache_fix",
+      "family": "security",
+      "difficulty": "medium",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "secret_redaction",
+      "family": "security",
+      "difficulty": "medium",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "threat_model_architecture",
+      "family": "security",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "critical_migration",
+      "family": "data",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "irreversible_schema",
+      "family": "data",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "irreversible_change_uses_team_default",
+      "correct": true
+    },
+    {
+      "id": "reversible_index_addition",
+      "family": "data",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "backfill_with_rollback",
+      "family": "data",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "ambiguous_architecture",
+      "family": "architecture",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_ambiguity_requires_separate_planning_and_execution",
+      "correct": true
+    },
+    {
+      "id": "independent_acceptance",
+      "family": "architecture",
+      "difficulty": "medium",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "independent_verification_requested",
+      "correct": true
+    },
+    {
+      "id": "single_adapter_refactor",
+      "family": "architecture",
+      "difficulty": "medium",
+      "expected": "solo_lead",
+      "selected": "solo_lead",
+      "reason": "bounded_reversible_single_agent_work",
+      "correct": true
+    },
+    {
+      "id": "provider_failover_design",
+      "family": "architecture",
+      "difficulty": "complex",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "high_or_critical_risk_requires_team_controls",
+      "correct": true
+    },
+    {
+      "id": "missing_ambiguity",
+      "family": "incomplete",
+      "difficulty": "unknown",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "incomplete_signals_use_safe_team_default",
+      "correct": true
+    },
+    {
+      "id": "missing_risk_contract",
+      "family": "incomplete",
+      "difficulty": "unknown",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "incomplete_signals_use_safe_team_default",
+      "correct": true
+    },
+    {
+      "id": "missing_reversibility",
+      "family": "incomplete",
+      "difficulty": "unknown",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "incomplete_signals_use_safe_team_default",
+      "correct": true
+    },
+    {
+      "id": "missing_stream_count",
+      "family": "incomplete",
+      "difficulty": "unknown",
+      "expected": "full_team",
+      "selected": "full_team",
+      "reason": "incomplete_signals_use_safe_team_default",
+      "correct": true
+    }
+  ]
+}

@@ -102,6 +102,14 @@ seleccionarse explícitamente para producir un plan multicultural aceptado. Cada
 decisión del selector se guarda como `profile_selection` con fuente, razón y
 señales para evaluación posterior.
 
+La calibración debe medir calidad y convergencia, no solo la etiqueta. En la
+familia reversible `release_notes_indexer` los tres brazos pasan 7/7: `solo_lead`
+cierra en 215,4 s y 417.104 tokens de entrada, Codex directo en 243,9 s y
+697.158, mientras `full_team` alcanza la misma calidad pero agota 15 minutos
+todavía `in_progress`, tras 7 runs y 1.811.217 tokens. Esta semilla apoya
+`solo_lead` para trabajo acotado; no demuestra que `full_team` sea inútil en
+tareas complejas ni autoriza a relajar el default seguro.
+
 ## Cascadas y recovery
 
 Una cascada barata → cara necesita:

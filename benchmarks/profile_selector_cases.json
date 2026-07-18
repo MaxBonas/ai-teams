@@ -7,6 +7,7 @@
   {"id":"bounded_cli","family":"backend","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
   {"id":"pagination_bug","family":"backend","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
   {"id":"pure_parser_extension","family":"backend","difficulty":"medium","expected":"solo_lead","criticality":"low","ambiguity":"medium","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"release_notes_indexer","family":"backend","difficulty":"medium","expected":"solo_lead","criticality":"low","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
   {"id":"sqlite_job_queue","family":"backend","difficulty":"complex","expected":"full_team","criticality":"medium","ambiguity":"medium","independent_verification":true,"parallel_workstreams":2,"reversible":true},
 
   {"id":"copy_change","family":"frontend","difficulty":"small","expected":"solo_lead","criticality":"low","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},

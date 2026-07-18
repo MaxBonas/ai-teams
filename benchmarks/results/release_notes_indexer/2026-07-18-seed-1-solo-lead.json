@@ -1,0 +1,65 @@
+{
+  "case": "release_notes_indexer",
+  "seed": 1,
+  "started_at": "2026-07-18T22:08:53+0200",
+  "workdir": "runtime/bench/release-notes-seed-1-solo",
+  "config": {
+    "harness_version": 3,
+    "solo_model": "gpt-5.5",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "team_run_profile": "solo_lead",
+    "max_ticks": 8,
+    "max_minutes": 12.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 215.4,
+      "ticks": 1,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 1,
+      "tokens_in": 417104,
+      "tokens_out": 8266,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 7,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 7,
+        "deliverable_files": [
+          "release_notes_indexer.py",
+          "test_release_notes_indexer.py"
+        ]
+      }
+    },
+    "solo": {
+      "arm": "solo",
+      "final_status": "done",
+      "wall_seconds": 243.9,
+      "runs": 1,
+      "tokens_in": 697158,
+      "tokens_out": 8330,
+      "cost_cents": 0,
+      "model": "gpt-5.5",
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 7,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 7,
+        "deliverable_files": [
+          "release_notes_indexer.py",
+          "test_release_notes_indexer.py"
+        ]
+      }
+    }
+  }
+}

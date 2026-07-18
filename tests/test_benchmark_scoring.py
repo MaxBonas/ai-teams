@@ -56,7 +56,7 @@ def test_correct_implementation_scores_perfect(tmp_path: Path) -> None:
     assert score["hidden_exit"] == 0, "una implementación correcta de la spec debe pasar la suite oculta"
     assert score["hidden_failed"] == 0 and score["hidden_errors"] == 0
     assert score["hidden_passed"] >= 9
-    assert score["ruff_issues"] is not None
+    assert score["ruff_issues"] == 0
     assert "conversor.py" in score["deliverable_files"]
 
 
@@ -90,3 +90,11 @@ def test_candidate_pytest_module_cannot_shadow_hidden_runner(tmp_path: Path) -> 
     assert score["hidden_exit"] == 0
     assert score["hidden_passed"] >= 9
     assert score["hidden_passed"] != 999
+
+
+def test_ruff_metric_counts_diagnostics_not_summary_lines(tmp_path: Path) -> None:
+    (tmp_path / "bad.py").write_text("import os\n", encoding="utf-8")
+
+    score = score_workspace(tmp_path, HIDDEN)
+
+    assert score["ruff_issues"] == 1

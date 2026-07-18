@@ -46,10 +46,17 @@ def score_workspace(workspace: Path, hidden_dir: Path, *, python: str = VENV_PYT
 
     # Lint ANTES de copiar la suite oculta (no debe puntuar contra el candidato).
     ruff = _run([python, "-m", "ruff", "check", "--output-format=concise", "."], cwd=workspace)
-    result["ruff_issues"] = (
-        len([line for line in (ruff.stdout or "").splitlines() if line.strip()])
-        if ruff is not None and ruff.returncode in (0, 1) else None
-    )
+    if ruff is None or ruff.returncode not in (0, 1):
+        result["ruff_issues"] = None
+    elif ruff.returncode == 0:
+        result["ruff_issues"] = 0
+    else:
+        # La salida concise termina con un resumen (y el éxito imprime
+        # ``All checks passed!``). Solo las líneas con código de regla son
+        # diagnósticos; contar líneas sesgaba cada workspace limpio como 1.
+        result["ruff_issues"] = len(
+            re.findall(r"(?m)^.+:\d+:\d+: [A-Z]+\d+ ", ruff.stdout or "")
+        )
 
     dest = workspace / ".bench_hidden"
     if dest.exists():
