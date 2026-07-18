@@ -132,6 +132,12 @@ Una cascada barata → cara necesita:
 - cap de coste;
 - tasa de escalado y calidad posterior.
 
+Una cuota de suscripción agotada no es un fallo de formato ni un retry
+inmediato útil. Los CLIs deben clasificarla como `subscription_cli_usage_limit`;
+si impide alcanzar el mínimo de quorum, la sesión degrada con diagnóstico y
+wakeup al Lead en vez de repetir el mismo auditor o gastar otro proveedor en
+una sesión que ya no puede satisfacer su gate.
+
 FrugalGPT aporta evidencia primaria de que combinar selección, generación y cascadas puede reducir coste manteniendo calidad en sus datasets. No prescribe thresholds universales. Fuente: [PAPER-2](ORCHESTRATION_SOURCES.md#paper-2-frugalgpt).
 
 Vigilar `cascade pile-up`: degradación o rate limit del barato puede trasladar toda la carga al caro. En AI Teams lo mitigan `provider_governor`, recovery acotado y cap diario.

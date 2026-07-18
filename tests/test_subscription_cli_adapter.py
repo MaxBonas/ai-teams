@@ -551,6 +551,27 @@ class TestExecuteCodexPath:
         assert result.status == "failed"
         assert result.error_code == "subscription_cli_nonzero_exit"
 
+    def test_usage_limit_has_specific_error_code(self, tmp_path):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stdout = "You've hit your usage limit. Purchase more credits or try again later."
+        mock_proc.stderr = ""
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc):
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={
+                    "command": ["codex.cmd", "exec"],
+                    "read_output": lambda proc: proc.stdout,
+                },
+            ):
+                result = rt.execute({"issue_id": "issue-1"}, env)
+
+        assert result.status == "failed"
+        assert result.error_code == "subscription_cli_usage_limit"
+
     def test_add_comment_synthesised_as_op(self, tmp_path):
         output = json.dumps({"status": "completed", "summary": "ok", "add_comment": "check the tests"})
         mock_proc = MagicMock()

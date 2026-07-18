@@ -59,6 +59,7 @@ INFRA_ERROR_CODES = frozenset({
     "api_error",                     # 429 / timeout / 5xx del proveedor (http_retry agotado)
     "subscription_cli_not_found",    # binario del CLI ausente / config rota
     "subscription_cli_nonzero_exit", # el CLI salió !=0 (auth, modelo rechazado…)
+    "subscription_cli_usage_limit",  # cuota de suscripción agotada; reintento inmediato inútil
     "subscription_cli_timeout",      # el CLI no terminó en su ventana
     "subscription_cli_error",        # excepción lanzando el CLI
     "subscription_cli_parse_error",  # salida del CLI ilegible

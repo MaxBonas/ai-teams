@@ -150,12 +150,19 @@ class ClaudeSubscriptionCliRuntime:
 
         raw_output = raw_output[: self.max_output_chars]
         if proc.returncode != 0:
+            lowered_output = raw_output.lower()
+            error_code = (
+                "subscription_cli_usage_limit"
+                if "you've hit your usage limit" in lowered_output
+                or "purchase more credits" in lowered_output
+                else "subscription_cli_nonzero_exit"
+            )
             return ExecutionResult(
                 status="failed",
                 output=raw_output or None,
                 exit_code=proc.returncode,
                 error=f"exit code {proc.returncode}",
-                error_code="subscription_cli_nonzero_exit",
+                error_code=error_code,
             )
 
         try:

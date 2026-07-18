@@ -343,6 +343,44 @@ def test_missing_quorum_report_retries_once_then_degrades_with_lead_wakeup(tmp_p
     assert pending_retry == 0
 
 
+def test_quorum_usage_limit_degrades_without_futile_retry(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([]))
+    session = executor._initialize_quorum_session(
+        parent_issue_id="issue:root", proposal=_proposal(), created_issue_ids=["issue:q1", "issue:q2"]
+    )
+    assert session is not None
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO runs (id,agent_id,issue_id,status,error_code) "
+            "VALUES ('run:quota','role:q1','issue:q1','failed','subscription_cli_usage_limit')"
+        )
+        conn.commit()
+
+    executor._ensure_quorum_auditor_continuation(
+        issue_id="issue:q1",
+        agent_id="role:q1",
+        run_id="run:quota",
+        run_status="failed",
+        run_error_code="subscription_cli_usage_limit",
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        degraded = conn.execute(
+            "SELECT status,skipped_reason FROM quorum_sessions WHERE id=?", (session["id"],)
+        ).fetchone()
+        retries = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE reason='quorum_report_retry'"
+        ).fetchone()[0]
+        lead_wakes = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE reason='quorum_degraded'"
+        ).fetchone()[0]
+    assert degraded == ("degraded", "auditor_provider_usage_limit")
+    assert retries == 0
+    assert lead_wakes == 1
+
+
 def test_quorum_report_retry_bypasses_unchanged_review_evidence(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "aiteam.db"
     _init(db_path)

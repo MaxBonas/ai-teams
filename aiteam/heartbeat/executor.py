@@ -1157,6 +1157,7 @@ class RunExecutor:
             agent_id=agent_id,
             run_id=run_id,
             run_status=result.status,
+            run_error_code=str(result.error_code or ""),
         )
 
         # ── Step 2.5: Lead unblock audit + circuit breaker ───────────────────
@@ -4274,6 +4275,7 @@ class RunExecutor:
         agent_id: str,
         run_id: str,
         run_status: str,
+        run_error_code: str = "",
     ) -> None:
         """Retry or degrade when an auditor completes without a valid report.
 
@@ -4317,9 +4319,18 @@ class RunExecutor:
             target_id=issue_id,
             actor_agent_id=agent_id,
             run_id=run_id,
-            payload={"session_id": session_id, "attempt": prior + 1},
+            payload={
+                "session_id": session_id,
+                "attempt": prior + 1,
+                "error_code": run_error_code or None,
+            },
         )
-        if prior < 1:
+        non_retryable_reason = (
+            "auditor_provider_usage_limit"
+            if run_error_code == "subscription_cli_usage_limit"
+            else ""
+        )
+        if prior < 1 and not non_retryable_reason:
             update_issue(self.db_path, issue_id=issue_id, status="todo")
             create_comment(
                 self.db_path,
@@ -4345,10 +4356,11 @@ class RunExecutor:
             )
             return
 
+        skipped_reason = non_retryable_reason or "auditor_report_format_exhausted"
         degraded = degrade_quorum_session(
             self.db_path,
             session_id=session_id,
-            skipped_reason="auditor_report_format_exhausted",
+            skipped_reason=skipped_reason,
         )
         with contextlib.closing(_connect(self.db_path)) as conn:
             conn.execute(
@@ -4372,7 +4384,7 @@ class RunExecutor:
                 "child_issue_id": issue_id,
                 "quorum_session_id": session_id,
                 "wake_reason": "quorum_degraded",
-                "skipped_reason": "auditor_report_format_exhausted",
+                "skipped_reason": skipped_reason,
             },
             idempotency_key=f"quorum_degraded:{session_id}",
         )
