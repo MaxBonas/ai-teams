@@ -48,10 +48,6 @@ async def get_chat(request: Request, limit: int = 120):
     """Return a unified chat feed of Lead↔User messages and pending interactions."""
     _require_api_auth_request(request)
     db = _db(request)
-
-    frozen_reason = _quorum_message_block_reason(db, issue_id=body.issue_id)
-    if frozen_reason:
-        raise HTTPException(status_code=409, detail=frozen_reason)
     try:
         items = _load_chat(db, limit=limit)
     except sqlite3.OperationalError as exc:
@@ -74,6 +70,12 @@ async def post_chat_message(body: ChatMessageRequest, request: Request):
     if not body.body.strip():
         raise HTTPException(status_code=400, detail="Message body is required")
     db = _db(request)
+
+    # El objetivo de una planificación quorum se congela al crear la sesión:
+    # una directiva nueva va a una Nueva tarea, nunca a mutar este objetivo.
+    frozen_reason = _quorum_message_block_reason(db, issue_id=body.issue_id)
+    if frozen_reason:
+        raise HTTPException(status_code=409, detail=frozen_reason)
 
     # Auto-bootstrap: create issue:intake if it doesn't exist yet so the Lead
     # always has a rooted issue to attach comments and runs to.
