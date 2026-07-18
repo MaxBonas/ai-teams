@@ -1,0 +1,44 @@
+{
+  "case": "deployment_wave_planner",
+  "seed": 2,
+  "started_at": "2026-07-18T23:35:03+0200",
+  "workdir": "runtime/bench/deployment-wave-seed-2-full-team",
+  "config": {
+    "harness_version": 3,
+    "solo_model": "gpt-5.5",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "team_run_profile": "full_team",
+    "max_ticks": 12,
+    "max_minutes": 15.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 426.0,
+      "ticks": 10,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 10,
+      "tokens_in": 620966,
+      "tokens_out": 14584,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 16,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 16,
+        "deliverable_files": [
+          "deployment_planner.py",
+          "tests/test_acceptance_deployment_planner.py",
+          "tests/test_deployment_planner.py"
+        ]
+      }
+    }
+  }
+}

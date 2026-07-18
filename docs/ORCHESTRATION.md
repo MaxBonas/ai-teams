@@ -110,15 +110,16 @@ todavía `in_progress`, tras 7 runs y 1.811.217 tokens. Esta semilla apoya
 `solo_lead` para trabajo acotado; no demuestra que `full_team` sea inútil en
 tareas complejas ni autoriza a relajar el default seguro.
 
-La primera semilla compleja `deployment_wave_planner` refuerza la necesidad de
-separar riesgo de ceremonia: los tres brazos pasan 16/16, `solo_lead` cierra en
-130,4 s y 184.370 tokens, Codex directo en 317,8 s y 1.037.305, y `full_team`
-consume 821,9 s y 1.497.923 tokens en 12 runs sin cerrar la raíz. El equipo sí
-detectó y corrigió un defecto de manejo de salida CLI, pero no mejoró el juez
-oculto y terminó pendiente del recibo de Test Runner. Una solicitud de
-verificación independiente no debe asumirse valiosa por sí sola cuando el
-cambio es reversible, acotado y concentra la escritura en un único artefacto;
-se necesitan más semillas antes de modificar el selector.
+Dos semillas complejas de `deployment_wave_planner` refuerzan la necesidad de
+separar calidad, economía y accountability. `solo_lead` y `full_team` pasan
+16/16 siempre; solo cierra 2/2 en una run (130,4–154,0 s) y equipo 1/2 en 10–12
+runs (426,0–821,9 s), con 3,73× tokens y 4,39× tiempo medios. El equipo detectó
+y corrigió un defecto CLI en seed 1, pero dejó un F401 en seed 2 y no mejoró el
+juez oculto. Aun así, `independent_verification=true` expresa una garantía de
+accountability que un agente único no puede satisfacer: debe conservarse cuando
+el usuario o el contrato la exijan. Lo que estos datos desaconsejan es inferir
+esa necesidad solo por complejidad aparente cuando el cambio es reversible,
+acotado y concentra la escritura en un único artefacto.
 
 ## Cascadas y recovery
 
