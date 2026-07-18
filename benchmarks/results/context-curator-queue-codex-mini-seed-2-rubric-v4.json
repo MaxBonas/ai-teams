@@ -1,0 +1,122 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "queue_rollout_causal_v4",
+  "source_chars": 8610,
+  "summary_chars": 916,
+  "compression_ratio": 0.1064,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 9,
+  "required_total": 9,
+  "required_retention_rate": 1.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": true,
+  "accepted": true,
+  "criteria": [
+    {
+      "id": "idempotency_key",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "invoice_id.{0,30}attempt"
+      ]
+    },
+    {
+      "id": "cohort_shadow",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cohorte.{0,30}10 ?%|10 ?%.{0,30}cohorte",
+        "shadow.{0,30}48 ?(h|horas)|48 ?(h|horas).{0,30}shadow"
+      ]
+    },
+    {
+      "id": "retry_dlq",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "tres intentos.{0,60}(dead-letter|DLQ)|3 intentos.{0,60}(dead-letter|DLQ)|retries?.{0,30}3.{0,60}(dead-letter|DLQ)"
+      ]
+    },
+    {
+      "id": "replay_evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "10[., ]?000\\s+mensajes.{0,40}(0|cero).{0,30}duplicad"
+      ]
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,80}replay_dlq\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,160}(dry-run|100 mensajes)|(dry-run|100 mensajes).{0,160}Reviewer"
+      ]
+    },
+    {
+      "id": "late_webhook_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "webhooks?.{0,80}(20 ?min|20 minutos).{0,80}(tarde|fuera de orden)|webhooks?.{0,80}fuera de orden.{0,80}(20 ?min|20 minutos)"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0[,.]1 ?%.{0,60}(10 ?min|diez minutos).{0,100}(desactiva|apagar|rollback|consumidor (anterior|previo))"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de (scope|alcance).{0,80}(broker|esquema de pagos)"
+      ]
+    }
+  ],
+  "profile_id": "codex_subscription",
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "gpt-5.4-mini",
+    "channel": "subscription"
+  },
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:4b6c4d3f-8587-4813-8bbe-0406b3070eda",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "wall_seconds": 32.2,
+    "input_tokens": 23606,
+    "output_tokens": 858,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-queue-codex-mini-seed-2-retry\\.aiteam\\aiteam.db"
+  },
+  "summary": "## Objetivo\nDesplegar el nuevo consumidor de facturas sin duplicados y con rollback en menos de 10 minutos.\n\n## Decisiones\n- Clave de idempotencia: `invoice_id + attempt`.\n- Activación por feature flag solo para una cohorte inicial del 10%.\n- Consumidor antiguo en shadow durante 48 horas.\n- Retry limitado a 3 intentos; después, enviar a DLQ sin confirmar procesado.\n\n## Evidencia y estado\n- Platform ejecutó replay de 10.000 mensajes con 0 facturas duplicadas.\n- Siguiente owner: Engineer debe crear `scripts/replay_dlq.py`.\n- Reviewer solo acepta la transición tras dry-run de 100 mensajes en staging.\n\n## Riesgos y escalado\n- Webhooks fuera de orden pueden llegar hasta 20 minutos tarde y reabrir estados cerrados.\n- Si las facturas duplicadas superan 0,1% durante 10 minutos, SRE desactiva la flag, vuelve al consumidor anterior y escala al Lead.\n- Fuera de alcance: migrar broker y cambiar el esquema de pagos."
+}

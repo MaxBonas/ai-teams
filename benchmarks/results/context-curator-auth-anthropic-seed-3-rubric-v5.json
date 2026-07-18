@@ -1,0 +1,121 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "auth_migration_causal_v5",
+  "source_chars": 8501,
+  "summary_chars": 741,
+  "compression_ratio": 0.0872,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 9,
+  "required_total": 9,
+  "required_retention_rate": 1.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": true,
+  "accepted": true,
+  "criteria": [
+    {
+      "id": "jwt_rs256",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "JWT.{0,20}RS256"
+      ]
+    },
+    {
+      "id": "dual_validation_24h",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "doble validaci[oó]n.{0,40}24 ?(h|horas)|24[- ]hour.{0,40}dual(-key)? validation|dual(-key)? validation.{0,40}24[- ]hour"
+      ]
+    },
+    {
+      "id": "legacy_kid_gate",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "legacy_kid_hits.{0,80}(0|cero).{0,40}(2 ?h|dos horas|2 consecutive hours)"
+      ]
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "42 (tests )?passed"
+      ]
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,80}rollback_keys\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,40}dry-run|dry-run.{0,40}Reviewer"
+      ]
+    },
+    {
+      "id": "regional_cache_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cach[eé]s\\s+regionales.{0,50}15 ?(min|minutos)|regional JWKS caches.{0,60}15 ?(min|minutes)"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0[,.]5 ?%.{0,50}401.{0,50}(5 ?min|cinco minutos|5-minute)|401.{0,50}0[,.]5 ?%.{0,50}(5 ?min|cinco minutos|5-minute)"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de (scope|alcance).{0,70}(sesiones|proveedor de identidad)|scope exclusions.{0,70}(session migration|identity provider)"
+      ]
+    }
+  ],
+  "profile_id": "anthropic_api",
+  "adapter": {
+    "type": "anthropic_sonnet",
+    "model": "claude-haiku-4-5",
+    "channel": "api"
+  },
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:370fd04d-0c13-40dd-9cef-ed24d07ff6d8",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "wall_seconds": 8.2,
+    "input_tokens": 7961,
+    "output_tokens": 529,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-anthropic-seed-3\\.aiteam\\aiteam.db"
+  },
+  "summary": "## Migración de autenticación: rotación JWT RS256 reversible\n\n**Decisión principal:** Mantener JWT RS256, rotación mediante doble validación (24 horas). Clave legada requiere `legacy_kid_hits == 0` durante 2 horas antes de eliminación.\n\n**Entregables completados:**\n- Engineer: lector dual en `src/auth/keyring.py` con 42 pruebas pasadas (`pytest tests/auth -q: 42 passed`).\n- Reviewer: aprobó compatibilidad.\n\n**Trabajo pendiente:**\n- Engineer: crear `scripts/rollback_keys.py` (próximo owner).\n- Reviewer: aceptar dry-run del script de rollback.\n\n**Riesgo alto:** Cachés regionales JWKS (TTL 15 min). Escalada si >0.5% de 401 en 5 min → pausa rotación y escala al Lead.\n\n**Fuera de scope:** Migración de sesiones existentes, cambio de IdP."
+}

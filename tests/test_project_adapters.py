@@ -198,6 +198,16 @@ class TestProfileScore:
         assert result is not None
         assert result["adapter_type"] == "openai_api"
 
+    def test_codex_context_curator_uses_calibrated_premium_model(self):
+        profile = {
+            **_make_profile("subscription_cli", channel="subscription"),
+            "id": "codex_subscription",
+            "provider": "openai-codex",
+        }
+        result = choose_adapter_for_role("context_curator", "cheap", [profile])
+        assert result is not None
+        assert result["model"] == "gpt-5.5"
+
 
 # ── ensure_quorum_agents ──────────────────────────────────────────────────────
 

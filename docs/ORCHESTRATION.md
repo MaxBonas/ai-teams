@@ -262,12 +262,13 @@ user directives, dieta de payload y resumen causal incremental. El curador recib
 un rango exacto del hilo padre y solo él puede emitir `append_context_summary`; el
 executor verifica rango, issue y ratio antes de persistir y deniega el cierre sin
 artefacto. El canario real `scripts/benchmark_context_curator.py` muestra una
-frontera dependiente de la tarea: en `auth_migration`, Codex mini conserva 7-8/9
-anclas en tres semillas (0/3 accepted) y `gpt-5.5` conserva 9/9 en 2/2; en
-`queue_rollout`, mini, senior y Antigravity/Gemini 3.5 Flash conservan 9/9 en una
-semilla cada uno. Antigravity tardó 76,6 s frente a 28,1-30,5 s y no expone usage
-comparable. Esta muestra descarta una promoción global inmediata: hay que repetir
-colas, probar otro proveedor en auth y calibrar un escalado acotado tras fallo.
+frontera dependiente de modelo/proveedor: en `auth_migration`, Codex mini conserva
+7-8/9 anclas en tres semillas (0/3), `gpt-5.5` obtiene 2/2 y Anthropic Haiku 3/3;
+en `queue_rollout`, Codex mini obtiene 3/3 y senior/Antigravity 1/1 cada uno.
+El recovery estructural no detecta una síntesis comprimida pero semánticamente
+incompleta. Por ello, nuevas contrataciones de curador sobre
+`codex_subscription` usan `gpt-5.5`; otros perfiles conservan su selección propia
+y el usuario puede cambiarla. No se promueve globalmente todo proveedor barato.
 
 El recovery productivo está acotado a una sola corrección automática. Ante el
 primer artefacto ausente o inválido, la issue conserva `in_progress`, persiste

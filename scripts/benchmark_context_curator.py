@@ -1,6 +1,6 @@
 """Canario capa-2 de síntesis causal mediante un ``context_curator`` real.
 
-Ejecuta exactamente una run durable scheduler→executor, persiste el bloque en
+Ejecuta exactamente una run durable scheduler->executor, persiste el bloque en
 SQLite y lo evalúa después con una rúbrica oculta para el modelo.
 """
 from __future__ import annotations
@@ -158,6 +158,8 @@ def run_canary(
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--rubric", type=Path, required=True)

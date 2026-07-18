@@ -98,6 +98,25 @@ def test_curator_persists_verified_block_before_closing(tmp_path: Path) -> None:
         assert conn.execute("SELECT status FROM issues WHERE id=?", (child_id,)).fetchone()[0] == "done"
 
 
+def test_whole_comment_range_accepts_legacy_omitted_offsets(tmp_path: Path) -> None:
+    db, parent_id, child_id = _project(tmp_path)
+    target = build_wake_payload(db, issue_id=child_id)["context_curation_target"]
+    actions = ops_to_actions([
+        {
+            "type": "append_context_summary", "path": parent_id, "body": "Resumen causal.",
+            "start_comment_id": target["start_comment_id"],
+            "end_comment_id": target["end_comment_id"],
+            "char_count_original": target["char_count_original"],
+        },
+        {"type": "set_status", "status": "done"},
+    ])
+    RunExecutor(db, build_default_registry())._apply_result_actions(
+        run={"id": "run:curator", "issue_id": child_id}, agent_id="role:context_curator",
+        agent_role="context_curator", result=ExecutionResult(status="completed", actions=actions),
+    )
+    assert get_context_summary(db, issue_id=parent_id)["synthesized_through_comment_id"] == target["end_comment_id"]
+
+
 def test_oversized_comment_is_sliced_by_durable_offsets_without_false_advance(tmp_path: Path) -> None:
     db, parent_id, child_id = _project(tmp_path)
     with sqlite3.connect(db) as conn:

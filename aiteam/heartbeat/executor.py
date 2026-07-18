@@ -2605,24 +2605,35 @@ class RunExecutor:
                 _expected = build_context_curation_target(self.db_path, issue_id=_parent_id)
                 if not _expected:
                     raise ValueError("no unsynthesized parent context is available")
-                for _field in (
-                    "target_issue_id", "start_comment_id", "end_comment_id",
-                    "char_count_original", "start_char_offset", "end_char_offset",
-                ):
+                for _field in ("target_issue_id", "start_comment_id", "end_comment_id", "char_count_original"):
                     if str(_context_action.get(_field) or "") != str(_expected.get(_field) or ""):
                         raise ValueError(f"context summary {_field} does not match the durable source slice")
+                with contextlib.closing(_connect(self.db_path)) as _conn:
+                    _expected_end_row = _conn.execute(
+                        "SELECT LENGTH(body) AS body_chars FROM issue_comments WHERE id=? AND issue_id=?",
+                        (_expected["end_comment_id"], _parent_id),
+                    ).fetchone()
+                _whole_comment_range = bool(
+                    int(_expected["start_char_offset"]) == 0
+                    and _expected_end_row
+                    and int(_expected["end_char_offset"]) == int(_expected_end_row["body_chars"] or 0)
+                )
+                _offsets_omitted = (
+                    int(_context_action.get("start_char_offset") or 0) == 0
+                    and int(_context_action.get("end_char_offset") or 0) == 0
+                )
+                if not (_whole_comment_range and _offsets_omitted):
+                    for _field in ("start_char_offset", "end_char_offset"):
+                        if str(_context_action.get(_field) or "") != str(_expected.get(_field) or ""):
+                            raise ValueError(f"context summary {_field} does not match the durable source slice")
                 _summary_body = str(_context_action.get("summary_markdown") or "").strip()
                 if not _summary_body:
                     raise ValueError("context summary body is empty")
                 if len(_summary_body) / int(_expected["char_count_original"]) > 0.30:
                     raise ValueError("context summary exceeds the 30% compression budget")
-                with contextlib.closing(_connect(self.db_path)) as _conn:
-                    _end_row = _conn.execute(
-                        "SELECT LENGTH(body) AS body_chars FROM issue_comments WHERE id=? AND issue_id=?",
-                        (_expected["end_comment_id"], _parent_id),
-                    ).fetchone()
                 _end_is_complete = bool(
-                    _end_row and int(_expected["end_char_offset"]) >= int(_end_row["body_chars"] or 0)
+                    _expected_end_row
+                    and int(_expected["end_char_offset"]) >= int(_expected_end_row["body_chars"] or 0)
                 )
                 append_summary_block(
                     self.db_path,

@@ -341,6 +341,15 @@ def _choose_model(profile_id: str, *, role: str = "", needs_senior: bool) -> str
     that matches the role's capability needs).  Falls back to the original
     senior/cheap heuristic for unknown roles.
     """
+    # Calibración causal 2026-07-18: Codex mini obtuvo 0/3 en auth mientras
+    # gpt-5.5 logró 2/2 y también 1/1 en queue. Como el gate productivo no
+    # conoce las anclas semánticas ocultas, no puede escalar tras una pérdida
+    # silenciosa. Promovemos solo este perfil; Haiku mantuvo 3/3 en auth.
+    if role == "context_curator" and profile_id == "codex_subscription":
+        options = model_options().get(profile_id, [])
+        premium = next((item for item in options if item.get("tier") == "premium"), None)
+        if premium:
+            return str(premium["value"])
     if role:
         options = model_options_for_role(profile_id, role)
         if options:

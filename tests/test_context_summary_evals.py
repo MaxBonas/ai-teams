@@ -67,7 +67,7 @@ def test_auth_rubric_accepts_compact_units_and_reversed_acceptance_order() -> No
 @pytest.mark.parametrize(
     ("fixture", "expected_rubric_id"),
     [
-        ("auth_migration", "auth_migration_causal_v4"),
+        ("auth_migration", "auth_migration_causal_v5"),
         ("queue_rollout", "queue_rollout_causal_v4"),
     ],
 )
@@ -84,4 +84,18 @@ def test_reference_context_summaries_pass_current_rubrics(
     assert rubric["id"] == expected_rubric_id
     assert report["required_retained"] == report["required_total"] == 9
     assert report["within_budget"] is True
+    assert report["accepted"] is True
+
+
+def test_auth_rubric_accepts_equivalent_english_causal_anchors() -> None:
+    rubric = json.loads((CONTEXT_FIXTURES / "auth_migration_rubric.json").read_text(encoding="utf-8"))
+    summary = (
+        "JWT RS256 with a 24-hour dual-key validation. Retain legacy_kid_hits until metric = 0 "
+        "for 2 consecutive hours. 42 passed. Engineer owns rollback_keys.py; Reviewer accepts "
+        "the dry-run. Regional JWKS caches retain keys for 15 minutes. At 0.5% 401 responses "
+        "within a 5-minute window, pause and escalate. Scope exclusions: session migration and "
+        "identity provider swap."
+    )
+    report = evaluate_summary("x" * 4_000, summary, rubric)
+    assert report["required_retained"] == report["required_total"] == 9
     assert report["accepted"] is True

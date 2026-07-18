@@ -1,7 +1,7 @@
 {
   "benchmark": "context_summary_semantic_retention",
-  "rubric_id": "auth_migration_causal_v4",
-  "source_chars": 8501,
+  "rubric_id": "auth_migration_causal_v5",
+  "source_chars": 8503,
   "summary_chars": 1117,
   "compression_ratio": 0.1314,
   "max_compression_ratio": 0.3,
@@ -29,7 +29,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "doble validaci[oó]n.{0,40}24 ?(h|horas)"
+        "doble validaci[oó]n.{0,40}24 ?(h|horas)|24[- ]hour.{0,40}dual(-key)? validation|dual(-key)? validation.{0,40}24[- ]hour"
       ]
     },
     {
@@ -38,7 +38,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "legacy_kid_hits.{0,40}(0|cero).{0,30}(2 ?h|dos horas)"
+        "legacy_kid_hits.{0,80}(0|cero).{0,40}(2 ?h|dos horas|2 consecutive hours)"
       ]
     },
     {
@@ -74,7 +74,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "cach[eé]s\\s+regionales.{0,50}15 ?(min|minutos)"
+        "cach[eé]s\\s+regionales.{0,50}15 ?(min|minutos)|regional JWKS caches.{0,60}15 ?(min|minutes)"
       ]
     },
     {
@@ -83,7 +83,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "0[,.]5 ?%.{0,50}401.{0,50}(5 ?min|cinco minutos)|401.{0,50}0[,.]5 ?%.{0,50}(5 ?min|cinco minutos)"
+        "0[,.]5 ?%.{0,50}401.{0,50}(5 ?min|cinco minutos|5-minute)|401.{0,50}0[,.]5 ?%.{0,50}(5 ?min|cinco minutos|5-minute)"
       ]
     },
     {
@@ -92,7 +92,7 @@
       "required": true,
       "retained": true,
       "matched": [
-        "fuera de (scope|alcance).{0,70}(sesiones|proveedor de identidad)"
+        "fuera de (scope|alcance).{0,70}(sesiones|proveedor de identidad)|scope exclusions.{0,70}(session migration|identity provider)"
       ]
     }
   ],

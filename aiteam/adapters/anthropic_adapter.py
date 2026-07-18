@@ -207,6 +207,16 @@ def _build_user(wake_payload_raw: str, run: dict[str, Any]) -> str:
                     "QUORUM AUDITOR del system prompt y llama submit_work al terminar.\n\n"
                     + json.dumps({"quorum_review": quorum_review}, ensure_ascii=False)
                 )
+            context_target = payload.get("context_curation_target")
+            if isinstance(context_target, dict):
+                return (
+                    "## Curación causal obligatoria\n"
+                    "Sintetiza exclusivamente el rango durable siguiente. Conserva decisiones, "
+                    "restricciones, riesgos, evidencia, owners y escalados. Llama submit_work con "
+                    "append_context_summary copiando IDs, char_count_original y offsets exactamente, "
+                    "seguido de set_status done.\n\n"
+                    + json.dumps({"context_curation_target": context_target}, ensure_ascii=False)
+                )
             issue = payload.get("issue") or {}
             title = issue.get("title") or run.get("issue_id") or "Unknown task"
             description = issue.get("description") or ""
@@ -242,4 +252,3 @@ def _build_user(wake_payload_raw: str, run: dict[str, Any]) -> str:
 
     parts.append("\nCall submit_work when done.")
     return "\n".join(parts)
-
