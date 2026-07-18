@@ -49,6 +49,7 @@ def test_lead_quorum_blueprint_uses_senior_auditors_without_worker_hiring() -> N
         "role:quorum_auditor_2",
     ]
     assert all(agent.seniority in {"lead", "senior"} for agent in blueprint.agents)
+    assert [agent.role for agent in blueprint.agents[1:]] == ["quorum_auditor", "quorum_auditor"]
     assert blueprint.cost_policy["delegation_allowed"] is False
     assert profile_config(LEAD_QUORUM).uses_quorum is True
     assert profile_config(LEAD_QUORUM).phase == "planning"
@@ -70,6 +71,7 @@ def test_lead_quorum_assigns_distinct_providers_when_available() -> None:
     assert [member["adapter_profile_id"] for member in proposal["proposed_team"]] == [
         "codex_subscription", "antigravity_subscription",
     ]
+    assert proposal["proposed_team"][1]["model"] == "Gemini 3.1 Pro (High)"
     assert len(proposal["suggested_issues"]) == 2
 
 

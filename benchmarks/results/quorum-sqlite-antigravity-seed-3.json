@@ -1,0 +1,373 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "sqlite_online_migration_v1",
+  "base": {
+    "score": 21.0,
+    "max_score": 23.0,
+    "score_pct": 91.3,
+    "hard_failures": [],
+    "passes_hard_gate": true,
+    "word_count": 1926,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "objetiv"
+        ],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "criteri.{0,20}(cierre|aceptaci)"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "siguiente run|continuaci|wakeup|heartbeat|reanud"
+        ],
+        "required": false
+      },
+      {
+        "id": "backup_restore",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backup|copia de seguridad",
+          "restore|restaur"
+        ],
+        "required": true
+      },
+      {
+        "id": "schema_version",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "schema.{0,20}version|user_version|versi[oó]n.{0,20}esquema"
+        ],
+        "required": true
+      },
+      {
+        "id": "transaction",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "transacci|BEGIN IMMEDIATE|atomic"
+        ],
+        "required": true
+      },
+      {
+        "id": "compatibility_window",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "compatib|dual.read|dual.write|ventana.{0,20}migraci"
+        ],
+        "required": false
+      },
+      {
+        "id": "lock_contention",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "lock|bloqueo|busy_timeout|WAL"
+        ],
+        "required": false
+      },
+      {
+        "id": "data_validation",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "integrity_check|foreign_key_check|conteo|checksum|validaci[oó]n.{0,20}datos"
+        ],
+        "required": true
+      },
+      {
+        "id": "rollout",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "canary|lote|gradual|rollout"
+        ],
+        "required": false
+      },
+      {
+        "id": "rollback_trigger",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "destructive_without_backup",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "final": {
+    "score": 19.0,
+    "max_score": 23.0,
+    "score_pct": 82.61,
+    "hard_failures": [],
+    "passes_hard_gate": true,
+    "word_count": 1118,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "done|completad"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      },
+      {
+        "id": "backup_restore",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backup|copia de seguridad",
+          "restore|restaur"
+        ],
+        "required": true
+      },
+      {
+        "id": "schema_version",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "schema.{0,20}version|user_version|versi[oó]n.{0,20}esquema"
+        ],
+        "required": true
+      },
+      {
+        "id": "transaction",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "transacci|BEGIN IMMEDIATE|atomic"
+        ],
+        "required": true
+      },
+      {
+        "id": "compatibility_window",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "compatib|dual.read|dual.write|ventana.{0,20}migraci"
+        ],
+        "required": false
+      },
+      {
+        "id": "lock_contention",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "lock|bloqueo|busy_timeout|WAL"
+        ],
+        "required": false
+      },
+      {
+        "id": "data_validation",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "integrity_check|foreign_key_check|conteo|checksum|validaci[oó]n.{0,20}datos"
+        ],
+        "required": true
+      },
+      {
+        "id": "rollout",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "canary|lote|gradual|rollout"
+        ],
+        "required": false
+      },
+      {
+        "id": "rollback_trigger",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "destructive_without_backup",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "delta_score_pct": -8.69,
+  "improved": false,
+  "regressed": true,
+  "hard_gate_improved": false,
+  "provenance": {
+    "session": {
+      "id": "9e39c6e5-e9b7-45a5-91a5-8843da89f249",
+      "issue_id": "issue:intake",
+      "status": "accepted",
+      "base_plan_revision_id": "76f40051-f57b-4e15-8653-4fb65dff0937",
+      "final_plan_revision_id": "e9b61fb0-cbca-42b6-a249-cb36e799f472",
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": null
+    },
+    "contributions": [
+      {
+        "ordinal": 1,
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:eb468d43-1739-400f-a2fc-a4cd552cf753",
+        "input_tokens": 24305,
+        "output_tokens": 1954,
+        "cost_cents": 0
+      },
+      {
+        "ordinal": 2,
+        "provider": "google-antigravity",
+        "model": "Gemini 3.5 Flash (High)",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:18bad9fa-b0cd-4b51-ac6f-05c0c9a79d0b",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_cents": 0
+      }
+    ],
+    "runtime": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 367.0,
+      "ticks": 5,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 5,
+      "tokens_in": 79251,
+      "tokens_out": 7439,
+      "cost_cents": 0
+    }
+  }
+}

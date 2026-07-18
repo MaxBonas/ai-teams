@@ -311,5 +311,6 @@ operativos y varias semillas.
 - Toda feature de adapter debe responder qué registra en `cost_events`.
 - API y suscripción son canales distintos aunque compartan proveedor/modelo.
 - Verificar usage de `antigravity_subscription` antes de usarlo en comparaciones economicas: `agy --print` no expone todavia telemetria comparable a Codex.
+- En Antigravity, los payloads largos se entregan mediante archivo temporal efímero con `--add-dir`; `--mode plan` y `--sandbox` siguen activos. El auditor debe conservar el rol `quorum_auditor` para seleccionar tier premium y usar exclusivamente resultados `approved`, `changes_requested` o `blocked` en su `AGENT-REPORT`.
 - No reintroducir router legacy, rondas, JSONL primario ni `[WORKFLOW_PLAN]`.
 - No convertir hallazgos externos en thresholds sin calibración local.

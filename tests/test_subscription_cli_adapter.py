@@ -14,6 +14,9 @@ from aiteam.adapters.subscription_cli_adapter import (
     CODEX_OUTPUT_SCHEMA,
     ClaudeSubscriptionCliRuntime,
     _build_codex_prompt,
+    _build_system_prompt,
+    _command_context,
+    _parse_antigravity_output,
     _parse_codex_output,
     _resolve_cli_cmd,
 )
@@ -102,7 +105,33 @@ def test_antigravity_command_uses_headless_plan_contract(tmp_path, monkeypatch):
     assert command[1:4] == ["--new-project", "--print", "SYSTEM\n\nUSER\n\nReturn ONLY the submit_work JSON object required by the contract. Do not wrap it in Markdown."]
     assert ["--mode", "plan"] == command[4:6]
     assert "--sandbox" in command
+    assert "--dangerously-skip-permissions" in command
     assert command[-2:] == ["--model", "Gemini 3.1 Pro (High)"]
+
+
+def test_antigravity_context_relays_large_prompt_through_ephemeral_file(tmp_path):
+    runtime = ClaudeSubscriptionCliRuntime(
+        AdapterDescriptor(adapter_type="subscription_cli", channel="subscription", provider="google-antigravity"),
+        command=[str(tmp_path / "agy.exe")],
+        cli_kind="antigravity",
+    )
+    env = {
+        "AITEAM_AGENT_ROLE": "quorum_auditor",
+        "AITEAM_AGENT_SKILL": "S" * 40_000,
+        "AITEAM_WAKE_PAYLOAD_JSON": json.dumps({"plan": "P" * 40_000}),
+    }
+
+    with _command_context(runtime, env, {"issue_id": "issue:q"}, effective_cwd=str(tmp_path)) as spec:
+        command = spec["command"]
+        relay = command[command.index("--print") + 1]
+        prompt_path = Path(relay.split("from ", 1)[1].split(" and follow", 1)[0])
+        assert len(" ".join(command)) < 2_000
+        assert prompt_path.is_file()
+        assert len(prompt_path.read_text(encoding="utf-8")) > 80_000
+        assert command[-2] == "--add-dir"
+        assert Path(command[-1]) == prompt_path.parent
+
+    assert not prompt_path.exists()
 
 
 def test_submit_work_parser_skips_non_json_braces_before_valid_object():
@@ -118,6 +147,43 @@ def test_submit_work_parser_skips_non_json_braces_before_valid_object():
 def test_submit_work_parser_invalid_braces_fail_without_recursion():
     with pytest.raises(ValueError, match="submit_work JSON object not found"):
         parse_submit_work("prefix {not valid} suffix")
+
+
+def test_antigravity_parser_fills_transport_fields_without_changing_ops():
+    ops = [{"type": "add_comment", "body": "---AGENT-REPORT---\nresult: passed"}]
+
+    parsed = _parse_antigravity_output(json.dumps({"ops": ops}))
+
+    assert parsed["status"] == "completed"
+    assert parsed["ops"] == ops
+
+
+def test_antigravity_parser_normalizes_observed_submit_work_body():
+    body = "---AGENT-REPORT---\nresult: passed_with_findings"
+
+    parsed = _parse_antigravity_output(json.dumps({"type": "submit_work", "body": body}))
+
+    assert parsed == {
+        "status": "completed",
+        "summary": "Antigravity submit_work completed",
+        "ops": [{"type": "add_comment", "body": body}],
+    }
+
+
+def test_antigravity_parser_rejects_unstructured_free_text():
+    with pytest.raises(ValueError, match="submit_work JSON object not found"):
+        _parse_antigravity_output("plain response without contract")
+
+
+def test_quorum_auditor_system_prompt_enforces_gate_vocabulary_and_authority():
+    prompt = _build_system_prompt({
+        "AITEAM_AGENT_ROLE": "quorum_auditor",
+        "AITEAM_AGENT_SKILL": "Revisa el plan.",
+    })
+
+    assert "result: approved|changes_requested|blocked" in prompt
+    assert "NO uses accept_quorum_synthesis" in prompt
+    assert "result: pass, passed o passed_with_findings NO son válidos" in prompt
 
 # ---------------------------------------------------------------------------
 # _parse_codex_output

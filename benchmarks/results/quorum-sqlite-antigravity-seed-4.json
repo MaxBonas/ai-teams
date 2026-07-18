@@ -1,0 +1,241 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "sqlite_online_migration_v1",
+  "completed": false,
+  "failure": "quorum session b69d5c36-5d30-45a9-b37c-e5513c6c4539 has no accepted final plan",
+  "diagnostics": {
+    "session": {
+      "id": "b69d5c36-5d30-45a9-b37c-e5513c6c4539",
+      "issue_id": "issue:intake",
+      "status": "degraded",
+      "base_plan_revision_id": "7a82dc46-3178-4488-9df8-0b37c6087212",
+      "final_plan_revision_id": null,
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": "auditor_report_format_exhausted"
+    },
+    "base": {
+      "score": 21.0,
+      "max_score": 23.0,
+      "score_pct": 91.3,
+      "hard_failures": [],
+      "passes_hard_gate": true,
+      "word_count": 2046,
+      "criteria": [
+        {
+          "id": "objective",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "objetiv"
+          ],
+          "required": false
+        },
+        {
+          "id": "closure",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "criteri.{0,20}(cierre|aceptaci)",
+            "done|completad"
+          ],
+          "required": false
+        },
+        {
+          "id": "decomposition",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "sub-?issue|tarea|fase|paso"
+          ],
+          "required": false
+        },
+        {
+          "id": "ownership",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "owner|responsable|reporta|asignad"
+          ],
+          "required": false
+        },
+        {
+          "id": "evidence",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "evidencia|recibo|artefacto|diff|test"
+          ],
+          "required": false
+        },
+        {
+          "id": "risk",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "riesgo|fallo|rotura|rollback"
+          ],
+          "required": false
+        },
+        {
+          "id": "escalation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "escal|bloque|intervenci.{0,10}human|usuario"
+          ],
+          "required": false
+        },
+        {
+          "id": "continuation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "siguiente run|continuaci|wakeup|heartbeat|reanud"
+          ],
+          "required": false
+        },
+        {
+          "id": "backup_restore",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "backup|copia de seguridad",
+            "restore|restaur"
+          ],
+          "required": true
+        },
+        {
+          "id": "schema_version",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "schema.{0,20}version|user_version|versi[oó]n.{0,20}esquema"
+          ],
+          "required": true
+        },
+        {
+          "id": "transaction",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "transacci|BEGIN IMMEDIATE|atomic"
+          ],
+          "required": true
+        },
+        {
+          "id": "compatibility_window",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "compatib|dual.read|dual.write|ventana.{0,20}migraci"
+          ],
+          "required": false
+        },
+        {
+          "id": "lock_contention",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "lock|bloqueo|busy_timeout|WAL"
+          ],
+          "required": false
+        },
+        {
+          "id": "data_validation",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "integrity_check|foreign_key_check|conteo|checksum|validaci[oó]n.{0,20}datos"
+          ],
+          "required": true
+        },
+        {
+          "id": "rollout",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "canary|lote|gradual|rollout"
+          ],
+          "required": false
+        },
+        {
+          "id": "rollback_trigger",
+          "weight": 2.0,
+          "passed": false,
+          "matched": [],
+          "required": false
+        }
+      ],
+      "penalties": [
+        {
+          "id": "destructive_without_backup",
+          "applied": 0.0,
+          "matched": []
+        }
+      ]
+    },
+    "contributions": [],
+    "auditor_runs": [
+      {
+        "id": "run:6a1164ba-a8ea-4d4d-bc28-cd1feb74160d",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "failed",
+        "provider": "google-antigravity",
+        "model": "Gemini 3.1 Pro (High)",
+        "channel": "subscription",
+        "error_code": "subscription_cli_parse_error",
+        "error": "submit_work JSON object not found",
+        "usage_json": "{}"
+      },
+      {
+        "id": "run:d3eebd81-6e71-4057-a6a7-db6b6aa9a03f",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 12672, \"input_tokens\": 22085, \"output_tokens\": 1699, \"reasoning_output_tokens\": 30}"
+      },
+      {
+        "id": "run:b9e2678e-4401-4912-a35f-81a2cf3be5dd",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "failed",
+        "provider": "google-antigravity",
+        "model": "Gemini 3.1 Pro (High)",
+        "channel": "subscription",
+        "error_code": "subscription_cli_parse_error",
+        "error": "submit_work JSON object not found",
+        "usage_json": "{}"
+      },
+      {
+        "id": "run:696b122f-4872-4517-a539-4866cc9741e1",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 12672, \"input_tokens\": 22687, \"output_tokens\": 2439, \"reasoning_output_tokens\": 32}"
+      }
+    ]
+  },
+  "provenance": {
+    "runtime": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 237.9,
+      "ticks": 6,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": true,
+      "limit_reached": false,
+      "runs": 6,
+      "tokens_in": 71541,
+      "tokens_out": 7814,
+      "cost_cents": 0
+    }
+  }
+}

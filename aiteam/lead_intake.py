@@ -210,7 +210,10 @@ def _suggested_issues_for_profile(
                 "id": child_id(f"quorum_{i+1}"),
                 "title": f"Revisión de quorum {i+1}",
                 "description": "Auditor senior revisa el plan del Lead de forma independiente antes de ejecutar.",
-                "role": m["role"],
+                # The durable agent keeps the semantic quorum_auditor role for
+                # premium model routing; the work item remains a reviewer task
+                # so existing review gates and UI phase semantics stay stable.
+                "role": "reviewer",
                 "assignee_agent_id": m["id"],
                 "complexity": "medium",
                 "priority": 90 - i * 5,

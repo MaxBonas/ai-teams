@@ -296,7 +296,11 @@ def _agent_blueprint(agent_id: str) -> AgentBlueprint:
     if role_key.startswith("quorum_auditor"):
         return AgentBlueprint(
             agent_id=agent_id,
-            role="reviewer",
+            # Keep the semantic role through hiring. Mapping quorum auditors
+            # to the generic reviewer role made model routing select Tier 2
+            # (Flash) even though this blueprint explicitly requires a senior
+            # planning auditor.
+            role="quorum_auditor",
             name=role_key.replace("_", " ").title(),
             seniority="senior",
             capabilities=("planning_review", "architecture_review", "risk_assessment"),

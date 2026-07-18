@@ -160,6 +160,8 @@ class ClaudeSubscriptionCliRuntime:
         try:
             if self.cli_kind == "codex":
                 work = _parse_codex_output(raw_output)
+            elif self.cli_kind == "antigravity":
+                work = _parse_antigravity_output(raw_output)
             else:
                 work = parse_submit_work(raw_output)
         except ValueError as exc:
@@ -210,7 +212,14 @@ class ClaudeSubscriptionCliRuntime:
                 "Return ONLY the submit_work JSON object required by the contract. "
                 "Do not wrap it in Markdown."
             )
-            command.extend(["--new-project", "--print", prompt, "--mode", "plan", "--sandbox"])
+            command.extend([
+                "--new-project", "--print", prompt, "--mode", "plan", "--sandbox",
+                # Headless mode cannot ask the user for permission to read the
+                # ephemeral prompt file. Plan mode plus sandbox remain active,
+                # so this approves the read tool without granting an execution
+                # profile or an unrestricted terminal.
+                "--dangerously-skip-permissions",
+            ])
             command.extend(["--print-timeout", f"{self.timeout_sec}s"])
             if self.model:
                 command.extend(["--model", self.model])
@@ -297,7 +306,18 @@ def _build_system_prompt(env: dict[str, str]) -> str:
     role = env.get("AITEAM_AGENT_ROLE", "").strip() or "agent"
     skill = env.get("AITEAM_AGENT_SKILL", "").strip()
     base = skill or f"Eres un agente de AI Teams con rol {role}. Completa la delegacion recibida."
-    return base + build_execution_contract()
+    contract = base + build_execution_contract()
+    if role.lower() == "quorum_auditor":
+        contract += (
+            "\n\nQUORUM AUDITOR — CONTRATO ESTRICTO:\n"
+            "- Eres un auditor independiente. NO sintetices el plan y NO uses accept_quorum_synthesis.\n"
+            "- Devuelve únicamente ops add_comment y set_status done.\n"
+            "- El add_comment debe terminar con exactamente un bloque ---AGENT-REPORT---.\n"
+            "- En ese bloque usa role: quorum_auditor, result: approved|changes_requested|blocked, "
+            "issue_status: done, next_owner: lead, blocker y evidence no vacía.\n"
+            "- result: pass, passed o passed_with_findings NO son válidos para el gate de quorum."
+        )
+    return contract
 
 
 # Roles that orchestrate rather than implement: they must delegate via ops
@@ -450,6 +470,38 @@ def _extract_usage(raw_output: str) -> dict[str, Any] | None:
     if isinstance(result, dict) and isinstance(result.get("usage"), dict):
         return result["usage"]
     return None
+
+
+def _parse_antigravity_output(raw_output: str) -> dict[str, Any]:
+    """Normalize the two headless envelopes emitted by ``agy`` in real runs.
+
+    Antigravity sometimes omits the transport fields ``status``/``summary``
+    while preserving the exact ops, or returns a single submit_work body. This
+    adapter-level normalization keeps the work evidence verbatim and never
+    manufactures an auditor report from free text.
+    """
+    try:
+        parsed = json.loads(raw_output.strip())
+    except (TypeError, ValueError):
+        return parse_submit_work(raw_output)
+    if not isinstance(parsed, dict):
+        return parse_submit_work(parsed)
+    ops = parsed.get("ops")
+    if isinstance(ops, list):
+        return {
+            **parsed,
+            "status": str(parsed.get("status") or "completed"),
+            "summary": str(parsed.get("summary") or "Antigravity submit_work completed"),
+        }
+    if parsed.get("type") == "submit_work" and isinstance(parsed.get("body"), str):
+        body = str(parsed["body"]).strip()
+        if body:
+            return {
+                "status": "completed",
+                "summary": "Antigravity submit_work completed",
+                "ops": [{"type": "add_comment", "body": body}],
+            }
+    return parse_submit_work(parsed)
 
 
 def _inject_python_toolchain(env: dict[str, str], workspace: str | None) -> dict[str, str]:
@@ -619,6 +671,26 @@ class _command_context:
         if self.runtime.cli_kind != "codex":
             system_prompt = _build_system_prompt(self.env)
             user_prompt = _build_user_prompt(self.env, self.run)
+            if self.runtime.cli_kind == "antigravity":
+                # Windows cannot launch a process when the full quorum payload
+                # exceeds CreateProcess' command-line limit. Unlike Codex,
+                # ``agy --print`` does not consume the prompt from stdin. Keep
+                # argv short and expose an ephemeral prompt file explicitly to
+                # Antigravity; __exit__ removes it after the subprocess ends.
+                self._tmpdir = tempfile.TemporaryDirectory(prefix="aiteam-antigravity-")
+                prompt_dir = Path(self._tmpdir.name)
+                prompt_path = prompt_dir / "prompt.txt"
+                prompt_path.write_text(f"{system_prompt}\n\n{user_prompt}", encoding="utf-8")
+                relay_prompt = (
+                    f"Read the complete instructions from {prompt_path} and follow them exactly. "
+                    "Return only the requested submit_work JSON object."
+                )
+                command = self.runtime._build_claude_command("", relay_prompt)
+                command.extend(["--add-dir", str(prompt_dir)])
+                return {
+                    "command": command,
+                    "read_output": lambda proc: ((proc.stdout or "") + (proc.stderr or "")),
+                }
             command = self.runtime._build_claude_command(system_prompt, user_prompt)
             return {
                 "command": command,

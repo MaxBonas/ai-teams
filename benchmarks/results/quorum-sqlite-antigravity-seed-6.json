@@ -1,0 +1,238 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "sqlite_online_migration_v1",
+  "completed": false,
+  "failure": "quorum session b21c615a-0b73-418d-8757-e7f9809ab1a1 has no accepted final plan",
+  "diagnostics": {
+    "session": {
+      "id": "b21c615a-0b73-418d-8757-e7f9809ab1a1",
+      "issue_id": "issue:intake",
+      "status": "degraded",
+      "base_plan_revision_id": "ea33ea65-e7e8-4400-bb2e-c35a3f614dbe",
+      "final_plan_revision_id": null,
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": "auditor_report_format_exhausted"
+    },
+    "base": {
+      "score": 19.0,
+      "max_score": 23.0,
+      "score_pct": 82.61,
+      "hard_failures": [
+        "schema_version"
+      ],
+      "passes_hard_gate": false,
+      "word_count": 2526,
+      "criteria": [
+        {
+          "id": "objective",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "objetiv"
+          ],
+          "required": false
+        },
+        {
+          "id": "closure",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "done|completad"
+          ],
+          "required": false
+        },
+        {
+          "id": "decomposition",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "sub-?issue|tarea|fase|paso"
+          ],
+          "required": false
+        },
+        {
+          "id": "ownership",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "owner|responsable|reporta|asignad"
+          ],
+          "required": false
+        },
+        {
+          "id": "evidence",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "evidencia|recibo|artefacto|diff|test"
+          ],
+          "required": false
+        },
+        {
+          "id": "risk",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "riesgo|fallo|rotura|rollback"
+          ],
+          "required": false
+        },
+        {
+          "id": "escalation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "escal|bloque|intervenci.{0,10}human|usuario"
+          ],
+          "required": false
+        },
+        {
+          "id": "continuation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "siguiente run|continuaci|wakeup|heartbeat|reanud"
+          ],
+          "required": false
+        },
+        {
+          "id": "backup_restore",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "backup|copia de seguridad",
+            "restore|restaur"
+          ],
+          "required": true
+        },
+        {
+          "id": "schema_version",
+          "weight": 2.0,
+          "passed": false,
+          "matched": [],
+          "required": true
+        },
+        {
+          "id": "transaction",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "transacci|BEGIN IMMEDIATE|atomic"
+          ],
+          "required": true
+        },
+        {
+          "id": "compatibility_window",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "compatib|dual.read|dual.write|ventana.{0,20}migraci"
+          ],
+          "required": false
+        },
+        {
+          "id": "lock_contention",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "lock|bloqueo|busy_timeout|WAL"
+          ],
+          "required": false
+        },
+        {
+          "id": "data_validation",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "integrity_check|foreign_key_check|conteo|checksum|validaci[oó]n.{0,20}datos"
+          ],
+          "required": true
+        },
+        {
+          "id": "rollout",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "canary|lote|gradual|rollout"
+          ],
+          "required": false
+        },
+        {
+          "id": "rollback_trigger",
+          "weight": 2.0,
+          "passed": false,
+          "matched": [],
+          "required": false
+        }
+      ],
+      "penalties": [
+        {
+          "id": "destructive_without_backup",
+          "applied": 0.0,
+          "matched": []
+        }
+      ]
+    },
+    "contributions": [
+      {
+        "ordinal": 2,
+        "provider": "google-antigravity",
+        "model": "Gemini 3.1 Pro (High)",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:90f7a9c5-63f5-4ee6-b97a-46d001b4ff28"
+      }
+    ],
+    "auditor_runs": [
+      {
+        "id": "run:90f7a9c5-63f5-4ee6-b97a-46d001b4ff28",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "completed",
+        "provider": "google-antigravity",
+        "model": "Gemini 3.1 Pro (High)",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{}"
+      },
+      {
+        "id": "run:41c860a1-f8d5-4733-a886-4719fe5e7839",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 12672, \"input_tokens\": 22845, \"output_tokens\": 1133, \"reasoning_output_tokens\": 31}"
+      },
+      {
+        "id": "run:f6e84d1e-e4a9-4d40-a83f-af3a504d1f54",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 23429, \"output_tokens\": 1663, \"reasoning_output_tokens\": 33}"
+      }
+    ]
+  },
+  "provenance": {
+    "runtime": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 212.0,
+      "ticks": 5,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": true,
+      "limit_reached": false,
+      "runs": 5,
+      "tokens_in": 73045,
+      "tokens_out": 7149,
+      "cost_cents": 0
+    }
+  }
+}
