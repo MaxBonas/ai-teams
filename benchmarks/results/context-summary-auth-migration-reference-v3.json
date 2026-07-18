@@ -1,0 +1,99 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "auth_migration_causal_v3",
+  "source_chars": 1208,
+  "summary_chars": 321,
+  "compression_ratio": 0.2657,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 9,
+  "required_total": 9,
+  "required_retention_rate": 1.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": true,
+  "accepted": true,
+  "criteria": [
+    {
+      "id": "jwt_rs256",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "JWT.{0,20}RS256"
+      ]
+    },
+    {
+      "id": "dual_validation_24h",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "doble validaci[oó]n.{0,40}24 ?(h|horas)"
+      ]
+    },
+    {
+      "id": "legacy_kid_gate",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "legacy_kid_hits.{0,40}(0|cero).{0,30}(2 ?h|dos horas)"
+      ]
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "42 (tests )?passed"
+      ]
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,50}rollback_keys\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,40}dry-run|dry-run.{0,40}Reviewer"
+      ]
+    },
+    {
+      "id": "regional_cache_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cach[eé]s\\s+regionales.{0,50}15 ?(min|minutos)"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0[,.]5 ?%.{0,50}401.{0,50}(5 ?min|cinco minutos)|401.{0,50}0[,.]5 ?%.{0,50}(5 ?min|cinco minutos)"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de (scope|alcance).{0,70}(sesiones|proveedor de identidad)"
+      ]
+    }
+  ]
+}

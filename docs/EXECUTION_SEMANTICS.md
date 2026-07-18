@@ -327,6 +327,13 @@ El Lead auto-lanza un context_curator hijo cuando el contenido **no sintetizado*
 
 ### Bloque de síntesis
 
-El curator publica un bloque vía `POST /api/issues/{id}/context-summary/blocks`. El servidor valida `len(summary_markdown) / char_count_original ≤ 0.30` (rechaza 422 si se excede).
+La wake del curator incluye `context_curation_target`: un rango cronológico exacto
+de comentarios del padre, acotado a 24.000 caracteres, con IDs inicial/final y
+`char_count_original`. El agente publica mediante la op exclusiva
+`append_context_summary`; el executor recalcula el rango durable, impide escribir
+sobre otra issue y valida `len(summary_markdown) / char_count_original ≤ 0.30`.
+Un curador que intenta cerrar sin artefacto válido queda `blocked` y despierta al
+Lead. El endpoint `POST /api/issues/{id}/context-summary/blocks` permanece como
+contrato HTTP para clientes autorizados, no como herramienta implícita del LLM.
 
 El campo `synthesized_through_comment_id` avanza en cada bloque. El wake payload filtra los comentarios anteriores a ese punto e incluye los bloques ya sintetizados como `context_summary.blocks`.

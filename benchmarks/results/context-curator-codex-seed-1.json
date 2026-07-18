@@ -1,0 +1,103 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "auth_migration_causal_v1",
+  "source_chars": 8503,
+  "summary_chars": 0,
+  "compression_ratio": 0.0,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 0,
+  "required_total": 9,
+  "required_retention_rate": 0.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": false,
+  "accepted": false,
+  "criteria": [
+    {
+      "id": "jwt_rs256",
+      "kind": "decision",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "dual_validation_24h",
+      "kind": "decision",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "legacy_kid_gate",
+      "kind": "constraint",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "regional_cache_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": false,
+      "matched": []
+    }
+  ],
+  "profile_id": "codex_subscription",
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "gpt-5.4-mini",
+    "channel": "subscription"
+  },
+  "runtime": {
+    "issue_status": "blocked",
+    "run": {
+      "id": "run:bc23690d-2b4c-4947-8dd5-b71a51a91143",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "wall_seconds": 43.9,
+    "input_tokens": 23410,
+    "output_tokens": 1069,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-codex-seed-1\\.aiteam\\aiteam.db"
+  },
+  "summary": ""
+}

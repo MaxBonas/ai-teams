@@ -243,16 +243,19 @@ OPS_FORBIDDEN_FOR_TIER2 = frozenset({
     "accept_quorum_synthesis",
 })
 
+_CONTEXT_CURATOR_EXCLUSIVE_OPS = frozenset({"append_context_summary"})
+
 
 def forbidden_ops_for_role(role: str) -> frozenset[str]:
     role_key = str(role or "").strip().lower()
+    exclusive = frozenset() if role_key == "context_curator" else _CONTEXT_CURATOR_EXCLUSIVE_OPS
     if role_key in {"quorum_auditor", "quorum_senior"}:
-        return OPS_FORBIDDEN_FOR_TIER3
+        return OPS_FORBIDDEN_FOR_TIER3 | exclusive
     if role_key in TIER3_ROLES:
-        return OPS_FORBIDDEN_FOR_TIER3
+        return OPS_FORBIDDEN_FOR_TIER3 | exclusive
     if role_key in TIER2_ROLES:
-        return OPS_FORBIDDEN_FOR_TIER2
-    return frozenset()
+        return OPS_FORBIDDEN_FOR_TIER2 | exclusive
+    return exclusive
 
 
 # ── Máquina de estados de issue por rol ──────────────────────────────────────

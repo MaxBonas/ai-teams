@@ -420,6 +420,18 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
             quorum_audit_contract_instruction(),
             "Finaliza con add_comment y set_status done; nunca uses accept_quorum_synthesis.",
         ]
+    elif role.lower() == "context_curator":
+        parts += [
+            "Eres un CONTEXT CURATOR de solo lectura. No edites archivos ni delegues.",
+            "Lee exclusivamente payload.context_curation_target y conserva decisiones, restricciones, riesgos, evidencia, owners y escalados.",
+            "Checklist antes de responder: cada owner debe quedar unido explícitamente a su próximo entregable; "
+            "cada reviewer/aceptador a su criterio o evidencia pendiente; cada umbral debe conservar métrica, valor, ventana y acción. "
+            "No sustituyas esas relaciones por estados vagos como 'pendiente de revisión'.",
+            "Tu artefacto obligatorio NO es add_comment: emite un op append_context_summary con path=target_issue_id, "
+            "body=<síntesis causal>, start_comment_id, end_comment_id y char_count_original copiados exactamente del payload.",
+            "Mantén body <= 30% de char_count_original. Después emite set_status done en la misma respuesta.",
+            "Puedes usar add_comment solo como recibo breve adicional; nunca pongas la síntesis únicamente allí.",
+        ]
     elif is_read_only:
         parts += [
             "Eres un SCOUT de solo lectura. Inspecciona y reporta; NO edites archivos.",

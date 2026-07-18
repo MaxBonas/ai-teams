@@ -10,6 +10,67 @@ from typing import Any
 from aiteam.db.agent_reports import latest_agent_report
 
 
+_CONTEXT_CURATION_SLICE_MAX_CHARS = 24_000
+
+
+def build_context_curation_target(
+    db_path: Path, *, issue_id: str, max_chars: int = _CONTEXT_CURATION_SLICE_MAX_CHARS
+) -> dict[str, Any] | None:
+    """Build an exact, bounded unsynthesized parent-thread slice for a curator."""
+    with contextlib.closing(_connect(db_path)) as conn:
+        marker: str | None = None
+        row = conn.execute(
+            "SELECT body FROM issue_documents WHERE issue_id=? AND key='context_summary'",
+            (issue_id,),
+        ).fetchone()
+        if row:
+            try:
+                marker = str(json.loads(str(row["body"] or "{}")).get("synthesized_through_comment_id") or "") or None
+            except (TypeError, ValueError):
+                marker = None
+        marker_rowid = 0
+        if marker:
+            marker_row = conn.execute(
+                "SELECT rowid FROM issue_comments WHERE issue_id=? AND id=?",
+                (issue_id, marker),
+            ).fetchone()
+            marker_rowid = int(marker_row["rowid"]) if marker_row else 0
+        rows = conn.execute(
+            """
+            SELECT id, body, author_agent_id, author_user_id, created_at
+            FROM issue_comments
+            WHERE issue_id=? AND rowid>?
+            ORDER BY rowid ASC
+            """,
+            (issue_id, marker_rowid),
+        ).fetchall()
+
+    selected: list[dict[str, Any]] = []
+    char_count = 0
+    for row in rows:
+        body = str(row["body"] or "")
+        if selected and char_count + len(body) > max_chars:
+            break
+        selected.append({
+            "id": row["id"],
+            "author": row["author_user_id"] or row["author_agent_id"] or "system",
+            "created_at": row["created_at"],
+            "body": body,
+        })
+        char_count += len(body)
+    if not selected or char_count <= 0:
+        return None
+    return {
+        "target_issue_id": issue_id,
+        "start_comment_id": selected[0]["id"],
+        "end_comment_id": selected[-1]["id"],
+        "char_count_original": char_count,
+        "max_compression_ratio": 0.30,
+        "has_more_unsynthesized": len(selected) < len(rows),
+        "comments": selected,
+    }
+
+
 def _parse_agent_report(body: str) -> dict[str, str] | None:
     """Extract the ---AGENT-REPORT--- structured block from a comment body.
 
@@ -321,6 +382,10 @@ def build_wake_payload(
         "trigger_comment_id": comment_id,
         "children": children_summary,
     }
+    if str(issue.get("role") or "").strip().lower() == "context_curator" and issue.get("parent_id"):
+        payload["context_curation_target"] = build_context_curation_target(
+            db_path, issue_id=str(issue["parent_id"])
+        )
 
     # Review sobre diffs: al reviewer/QA se le entregan los commits (recibos
     # git) de las issues hermanas para que el veredicto ancle en hunks

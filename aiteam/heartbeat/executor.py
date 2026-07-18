@@ -20,7 +20,8 @@ from aiteam.db.agents import create_agent
 from aiteam.db.activity_log import log_activity
 from aiteam.db.comments import create_comment
 from aiteam.db.dependencies import resolve_blocker_wakeups, sync_default_child_dependencies
-from aiteam.db.documents import DocumentConflict, get_document, get_context_summary, put_document
+from aiteam.db.documents import DocumentConflict, append_summary_block, get_document, get_context_summary, put_document
+from aiteam.db.wake_payload import build_context_curation_target
 from aiteam.db.issues import create_issue
 from aiteam.db.finops import BudgetStatus, check_budget, current_period, record_cost
 from aiteam.db.interactions import create_interaction, get_interaction, list_interactions
@@ -2557,6 +2558,7 @@ class RunExecutor:
             "append_file": "file_ops",
             "delete_file": "file_ops",
             "accept_quorum_synthesis": "accept_quorum_synthesis",
+            "append_context_summary": "append_context_summary",
         }
         from aiteam.adapters.work_contract import forbidden_ops_for_role
         _forbidden_action_keys = {
@@ -2585,6 +2587,72 @@ class RunExecutor:
                 except Exception:
                     pass
                 actions = {k: v for k, v in actions.items() if k != _forbidden_key}
+
+        # El curador solo puede cerrar tras persistir exactamente el rango que
+        # recibió. Recalculamos source/rango/ratio: el modelo no decide estos
+        # invariantes ni puede escribir sobre otra issue.
+        _context_summary_persisted = False
+        _context_action = actions.get("append_context_summary")
+        if isinstance(_context_action, dict) and str(agent_role or "").strip().lower() == "context_curator":
+            try:
+                with contextlib.closing(_connect(self.db_path)) as _conn:
+                    _parent_row = _conn.execute(
+                        "SELECT parent_id FROM issues WHERE id=?", (issue_id,)
+                    ).fetchone()
+                _parent_id = str(_parent_row["parent_id"] or "") if _parent_row else ""
+                _expected = build_context_curation_target(self.db_path, issue_id=_parent_id)
+                if not _expected:
+                    raise ValueError("no unsynthesized parent context is available")
+                for _field in ("target_issue_id", "start_comment_id", "end_comment_id", "char_count_original"):
+                    if str(_context_action.get(_field) or "") != str(_expected.get(_field) or ""):
+                        raise ValueError(f"context summary {_field} does not match the durable source slice")
+                _summary_body = str(_context_action.get("summary_markdown") or "").strip()
+                if not _summary_body:
+                    raise ValueError("context summary body is empty")
+                if len(_summary_body) / int(_expected["char_count_original"]) > 0.30:
+                    raise ValueError("context summary exceeds the 30% compression budget")
+                append_summary_block(
+                    self.db_path,
+                    issue_id=_parent_id,
+                    block={
+                        "summary_markdown": _summary_body,
+                        "start_comment_id": _expected["start_comment_id"],
+                        "end_comment_id": _expected["end_comment_id"],
+                        "char_count_original": _expected["char_count_original"],
+                    },
+                    synthesized_through_comment_id=str(_expected["end_comment_id"]),
+                    run_id=str(run.get("id") or "") or None,
+                )
+                _context_summary_persisted = True
+                log_activity(
+                    self.db_path,
+                    action="context_summary.appended",
+                    target_type="issue",
+                    target_id=_parent_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id") or ""),
+                    payload={
+                        "start_comment_id": _expected["start_comment_id"],
+                        "end_comment_id": _expected["end_comment_id"],
+                        "char_count_original": _expected["char_count_original"],
+                        "char_count_summary": len(_summary_body),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("append_context_summary rejected for issue %s: %s", issue_id, exc)
+
+        if (
+            str(agent_role or "").strip().lower() == "context_curator"
+            and actions.get("issue_status") == "done"
+            and not _context_summary_persisted
+        ):
+            actions = dict(actions)
+            actions["issue_status"] = "blocked"
+            actions["notify_supervisor"] = True
+            actions.setdefault("add_comments", []).append(
+                "⚙ Sistema: cierre denegado; el curador no persistió un bloque "
+                "append_context_summary válido y verificable."
+            )
 
         # ── Interaction gate: max 1 pending interaction per issue at a time ─────
         # Presenting multiple confirmation popups simultaneously confuses users:
@@ -6354,9 +6422,9 @@ class RunExecutor:
                         f"Synthesize from: {from_label}\n\n"
                         "El hilo de la issue padre ha acumulado suficiente contenido sin sintetizar. "
                         "Sigue tu protocolo de context_curator:\n"
-                        "1. Lee los comentarios del Target issue desde el marcador 'Synthesize from'.\n"
-                        "2. Produce un bloque de síntesis y llámalo mediante "
-                        "POST /api/issues/{target_id}/context-summary/blocks.\n"
+                        "1. Lee exclusivamente payload.context_curation_target.\n"
+                        "2. Produce el bloque causal y persístelo con la op estructurada "
+                        "append_context_summary, copiando sus IDs y char_count_original exactos.\n"
                         "3. Usa set_status: done cuando hayas terminado.\n\n"
                         "No crees sub-issues ni interacciones."
                     ),

@@ -36,3 +36,24 @@ def test_rejects_complete_summary_that_exceeds_context_budget() -> None:
     assert result["semantic_gate_passed"] is True
     assert result["within_budget"] is False
     assert result["accepted"] is False
+
+
+def test_auth_rubric_accepts_compact_units_and_reversed_acceptance_order() -> None:
+    import json
+    from pathlib import Path
+
+    rubric = json.loads(
+        (Path(__file__).resolve().parents[1] / "benchmarks" / "context_quality" / "auth_migration_rubric.json")
+        .read_text(encoding="utf-8")
+    )
+    summary = (
+        "JWT RS256; doble validación durante 24h. `legacy_kid_hits` debe ser 0 durante 2h. "
+        "42 tests passed. Engineer creará rollback_keys.py; dry-run por Reviewer. "
+        "Cachés regionales retienen JWKS 15 min. Si 401 supera 0.5% durante 5 min, escalar. "
+        "Fuera de alcance: sesiones y proveedor de identidad."
+    )
+
+    report = evaluate_summary("x" * 2_000, summary, rubric)
+
+    assert report["required_retained"] == 9
+    assert report["semantic_gate_passed"] is True

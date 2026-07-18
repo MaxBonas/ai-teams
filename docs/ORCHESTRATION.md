@@ -258,8 +258,13 @@ determinista vive en `scripts/context_summary_evals.py`; una síntesis corta que
 pierde una decisión y una síntesis completa que excede presupuesto fallan.
 
 El contrato está implementado mediante delegation metadata, focus paths, RBAC,
-user directives, dieta de payload y resumen causal incremental. La deuda concreta
-es calibrar la retención semántica con varias síntesis reales.
+user directives, dieta de payload y resumen causal incremental. El curador recibe
+un rango exacto del hilo padre y solo él puede emitir `append_context_summary`; el
+executor verifica rango, issue y ratio antes de persistir y deniega el cierre sin
+artefacto. El canario real `scripts/benchmark_context_curator.py` reveló que el
+modelo budget de Codex conserva 7-8/9 anclas en tres semillas (ninguna aceptada),
+mientras una primera semilla senior conserva 9/9. Falta repetir senior y ampliar
+proveedores/casos antes de cambiar el routing productivo.
 
 ## Paralelismo
 

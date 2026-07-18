@@ -22,6 +22,7 @@ OP_SCHEMA: dict[str, Any] = {
                 "append_file",
                 "delete_file",
                 "accept_quorum_synthesis",
+                "append_context_summary",
             ],
         },
         "body": {"type": "string"},
@@ -56,6 +57,9 @@ OP_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
             },
         },
+        "start_comment_id": {"type": "string"},
+        "end_comment_id": {"type": "string"},
+        "char_count_original": {"type": "integer", "minimum": 1},
     },
     "required": ["type"],
     "additionalProperties": False,
@@ -121,6 +125,9 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                         "type": ["array", "null"],
                         "items": OP_SCHEMA["properties"]["dispositions"]["items"],
                     },
+                    "start_comment_id": {"type": ["string", "null"]},
+                    "end_comment_id": {"type": ["string", "null"]},
+                    "char_count_original": {"type": ["integer", "null"], "minimum": 1},
                 },
                 "required": [
                     "type",
@@ -138,6 +145,9 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "status",
                     "payload",
                     "dispositions",
+                    "start_comment_id",
+                    "end_comment_id",
+                    "char_count_original",
                 ],
                 "additionalProperties": False,
             },
@@ -263,10 +273,16 @@ def build_execution_contract() -> str:
         "either start creating the required files (Engineer) or report that no files were available (Reviewer/QA).\n"
         "- NEVER fabricate test results, pass/fail verdicts, or code quality assessments without actual file evidence.\n"
         "\n## Tier 3 scout roles (file_scout, web_scout, context_curator, test_runner)\n"
-        "- Your only job is to read inputs (or execute commands) and write one summary comment.\n"
-        "- Use add_comment for your findings, then set_status: done. Close in the same run.\n"
+        "- Your only job is to read inputs (or execute commands) and produce the role artifact.\n"
+        "- file_scout, web_scout and test_runner use add_comment, then set_status: done.\n"
         "- Do NOT create sub-issues, interactions, update_plan, or write files.\n"
-        "- Append the ---AGENT-REPORT--- block as the last part of your comment before setting status.\n"
+        "- Append the ---AGENT-REPORT--- block as the last part of any report comment before setting status.\n"
+        "- context_curator ONLY: payload.context_curation_target contains the exact parent-thread slice. "
+        "Persist its causal summary with append_context_summary using path=target_issue_id, body=<summary>, "
+        "start_comment_id, end_comment_id and char_count_original copied exactly from that payload. "
+        "The summary must retain decisions, constraints, risks, evidence, owners and escalations and stay at or below 30%. "
+        "Keep every owner explicitly linked to its deliverable, every reviewer to its acceptance evidence, "
+        "and every threshold to metric, value, window and action.\n"
         "\n## Workspace listing (fallback — rarely seen)\n"
         "- 'workspace_listing' is a legacy fallback included only when 'workspace_files' is absent.\n"
         "- Each entry has 'path' and 'size_bytes' only (no content).\n"
@@ -318,6 +334,7 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
     add_comments: list[str] = []
     file_ops: list[dict[str, Any]] = []
     quorum_synthesis: dict[str, Any] | None = None
+    context_summary: dict[str, Any] | None = None
 
     for op in ops:
         op_type = str(op.get("type") or "")
@@ -400,6 +417,14 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
                 "session_id": str(op.get("path") or "").strip(),
                 "dispositions": op.get("dispositions") if isinstance(op.get("dispositions"), list) else [],
             }
+        elif op_type == "append_context_summary":
+            context_summary = {
+                "target_issue_id": str(op.get("path") or "").strip(),
+                "summary_markdown": str(op.get("body") or "").strip(),
+                "start_comment_id": str(op.get("start_comment_id") or "").strip(),
+                "end_comment_id": str(op.get("end_comment_id") or "").strip(),
+                "char_count_original": int(op.get("char_count_original") or 0),
+            }
 
     if interactions:
         actions["interactions"] = interactions
@@ -415,6 +440,8 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
         actions["file_ops"] = file_ops
     if quorum_synthesis is not None:
         actions["accept_quorum_synthesis"] = quorum_synthesis
+    if context_summary is not None:
+        actions["append_context_summary"] = context_summary
     return actions
 
 
