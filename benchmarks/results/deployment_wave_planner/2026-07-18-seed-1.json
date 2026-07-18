@@ -1,0 +1,66 @@
+{
+  "case": "deployment_wave_planner",
+  "seed": 1,
+  "started_at": "2026-07-18T23:01:48+0200",
+  "workdir": "runtime/bench/deployment-wave-seed-1",
+  "config": {
+    "harness_version": 3,
+    "solo_model": "gpt-5.5",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "team_run_profile": "full_team",
+    "max_ticks": 12,
+    "max_minutes": 15.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 821.9,
+      "ticks": 12,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": true,
+      "runs": 12,
+      "tokens_in": 1497923,
+      "tokens_out": 26085,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 16,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 16,
+        "deliverable_files": [
+          "deployment_planner.py",
+          "test_deployment_planner.py",
+          "tests/test_acceptance_deployment_planner.py"
+        ]
+      }
+    },
+    "solo": {
+      "arm": "solo",
+      "final_status": "done",
+      "wall_seconds": 317.8,
+      "runs": 1,
+      "tokens_in": 1037305,
+      "tokens_out": 11900,
+      "cost_cents": 0,
+      "model": "gpt-5.5",
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 16,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 16,
+        "deliverable_files": [
+          "deployment_planner.py",
+          "test_deployment_planner.py"
+        ]
+      }
+    }
+  }
+}

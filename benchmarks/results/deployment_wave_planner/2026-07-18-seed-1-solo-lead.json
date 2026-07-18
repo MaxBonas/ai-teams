@@ -1,0 +1,43 @@
+{
+  "case": "deployment_wave_planner",
+  "seed": 1,
+  "started_at": "2026-07-18T23:21:34+0200",
+  "workdir": "runtime/bench/deployment-wave-seed-1-solo-lead",
+  "config": {
+    "harness_version": 3,
+    "solo_model": "gpt-5.5",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "team_run_profile": "solo_lead",
+    "max_ticks": 8,
+    "max_minutes": 12.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 130.4,
+      "ticks": 1,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 1,
+      "tokens_in": 184370,
+      "tokens_out": 4976,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 16,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 16,
+        "deliverable_files": [
+          "deployment_planner.py",
+          "test_deployment_planner.py"
+        ]
+      }
+    }
+  }
+}
