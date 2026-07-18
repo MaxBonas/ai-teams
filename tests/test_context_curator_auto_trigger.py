@@ -174,6 +174,15 @@ def _add_curator_child(db_path: Path, status: str) -> None:
         conn.commit()
 
 
+def _set_lead_context_budget(db_path: Path, config: dict[str, Any]) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE agents SET adapter_config_json=? WHERE id='role:lead'",
+            (json.dumps(config),),
+        )
+        conn.commit()
+
+
 def _dispatch_and_run(db_path: Path) -> None:
     enqueue_wakeup(
         db_path,
@@ -221,6 +230,45 @@ class TestCharThreshold:
         _add_content(db_path, _CHAR_THRESHOLD)
         _dispatch_and_run(db_path)
         assert _curator_status(db_path) == "todo"
+
+
+class TestModelComfortBudget:
+
+    def test_declared_large_window_delays_legacy_threshold(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "aiteam.db"
+        _init_db(db_path)
+        _set_lead_context_budget(db_path, {
+            "context_window_tokens": 100_000,
+            "comfortable_context_ratio": 0.70,
+            "reserved_output_tokens": 8_000,
+            "reserved_tool_tokens": 8_000,
+        })
+        _add_content(db_path, _CHAR_THRESHOLD)
+        _dispatch_and_run(db_path)
+        assert _count_curator_children(db_path) == 0
+
+    def test_declared_small_comfort_budget_triggers_and_persists_decision(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "aiteam.db"
+        _init_db(db_path)
+        _set_lead_context_budget(db_path, {
+            "context_window_tokens": 8_000,
+            "comfortable_context_ratio": 0.50,
+            "reserved_output_tokens": 1_000,
+            "reserved_tool_tokens": 1_000,
+        })
+        _add_content(db_path, _CHAR_THRESHOLD)
+        _dispatch_and_run(db_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            metadata = json.loads(conn.execute(
+                "SELECT metadata_json FROM issues WHERE parent_id='issue:intake' "
+                "AND role='context_curator'"
+            ).fetchone()[0])
+            event = conn.execute(
+                "SELECT payload_json FROM activity_log WHERE action='context_compaction.triggered'"
+            ).fetchone()
+        assert metadata["context_budget"]["policy"] == "model_comfort_budget"
+        assert metadata["context_budget"]["comfortable_input_tokens"] == 2_000
+        assert event is not None
 
 
 # ── C2: plan document blocks spawn ───────────────────────────────────────────

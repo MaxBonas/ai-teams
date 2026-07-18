@@ -58,6 +58,27 @@ def test_resolve_adapter_config_merges_profile(tmp_path: Path, monkeypatch) -> N
     assert cfg["model"] == "qwen3:32b"
 
 
+def test_codex_profile_reads_context_capacity_from_local_catalog(tmp_path: Path, monkeypatch) -> None:
+    codex_root = tmp_path / "codex"
+    codex_root.mkdir()
+    (codex_root / "models_cache.json").write_text(json.dumps({
+        "models": [{
+            "slug": "test-model",
+            "context_window": 100_000,
+            "effective_context_window_percent": 80,
+        }]
+    }), encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(codex_root))
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+
+    cfg = resolve_adapter_config(
+        "subscription_cli", {"profile_id": "codex_subscription", "model": "test-model"}
+    )
+
+    assert cfg["context_window_tokens"] == 80_000
+    assert cfg["context_window_source"] == "codex_models_cache"
+
+
 def test_user_adapters_api_rejects_inline_secret(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
     monkeypatch.setenv("AITEAM_API_KEY", "test-key")

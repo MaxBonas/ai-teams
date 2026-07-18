@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from aiteam.adapters.registry import AdapterRegistry, ExecutionResult
 from aiteam.adapters.work_contract import filter_forbidden_ops_for_role
+from aiteam.context_budget import LEGACY_UNSYNTHESIZED_CHAR_THRESHOLD, evaluate_context_budget
 from aiteam.db.agents import create_agent
 from aiteam.db.activity_log import log_activity
 from aiteam.db.comments import create_comment
@@ -3644,6 +3645,9 @@ class RunExecutor:
                 if isinstance(item, str) and str(item).strip()
             ]
             _issue_metadata: dict[str, Any] = {"source": metadata_source, "parent_issue_id": issue_id}
+            _spec_metadata = spec.get("metadata")
+            if isinstance(_spec_metadata, dict) and isinstance(_spec_metadata.get("context_budget"), dict):
+                _issue_metadata["context_budget"] = _spec_metadata["context_budget"]
             if _criteria:
                 _issue_metadata["acceptance_criteria"] = _criteria[:12]
             new_issue = create_issue(
@@ -6379,7 +6383,7 @@ class RunExecutor:
     # unsynthesized portion of the parent issue thread exceeds this many characters
     # (≈ 2 000 tokens) and no plan document exists, the Lead silently creates a
     # context_curator to synthesise the next block before the next delegation round.
-    _CONTEXT_CURATOR_CHAR_THRESHOLD: int = 8_000
+    _CONTEXT_CURATOR_CHAR_THRESHOLD: int = LEGACY_UNSYNTHESIZED_CHAR_THRESHOLD
 
     def _maybe_spawn_context_curator(
         self, issue_id: str, agent_id: str, run: dict[str, Any]
@@ -6455,8 +6459,31 @@ class RunExecutor:
                         ).fetchone()
                         from_comment_id = next_row[0] if next_row else None
 
-            # ── 3. Check threshold ────────────────────────────────────────────────
-            if unsynthesized_chars < self._CONTEXT_CURATOR_CHAR_THRESHOLD:
+            # ── 3. Evaluate the effective model comfort budget ───────────────────
+            parent_payload = build_wake_payload(self.db_path, issue_id=issue_id)
+            shown_comment_chars = sum(
+                len(str(comment.get("body") or ""))
+                for comment in (parent_payload.get("comments") or [])
+                if isinstance(comment, dict)
+            )
+            base_payload_chars = max(
+                0,
+                len(json.dumps(parent_payload, ensure_ascii=False, default=str)) - shown_comment_chars,
+            )
+            with contextlib.closing(_connect(self.db_path)) as conn:
+                agent_row = conn.execute(
+                    "SELECT adapter_type, adapter_config_json FROM agents WHERE id=?", (agent_id,)
+                ).fetchone()
+            adapter_config = resolve_adapter_config(
+                str(agent_row["adapter_type"] or "") if agent_row else "",
+                _decode_json(agent_row["adapter_config_json"] if agent_row else "{}"),
+            )
+            budget = evaluate_context_budget(
+                unsynthesized_chars=unsynthesized_chars,
+                base_payload_chars=base_payload_chars,
+                adapter_config=adapter_config,
+            )
+            if not budget.should_compact:
                 return
 
             # ── 4. Plan doc check (curator most useful before a plan exists) ──────
@@ -6481,8 +6508,9 @@ class RunExecutor:
             from_label = f"comment:{from_comment_id}" if from_comment_id else "all"
             logger.info(
                 "Spawning context_curator for issue %s"
-                " (unsynthesized_chars=%d, threshold=%d, from=%s)",
-                issue_id, unsynthesized_chars, self._CONTEXT_CURATOR_CHAR_THRESHOLD, from_label,
+                " (unsynthesized_chars=%d, policy=%s, estimated_tokens=%d, comfort_tokens=%s, from=%s)",
+                issue_id, unsynthesized_chars, budget.policy, budget.estimated_input_tokens,
+                budget.comfortable_input_tokens, from_label,
             )
             self._create_delegated_issue(
                 issue_id=issue_id,
@@ -6503,9 +6531,19 @@ class RunExecutor:
                     ),
                     "role": "context_curator",
                     "complexity": "low",
+                    "metadata": {"context_budget": budget.as_dict()},
                 },
                 metadata_source="context_curator_auto_trigger",
                 activity_source="context_curator_auto_trigger",
+            )
+            log_activity(
+                self.db_path,
+                action="context_compaction.triggered",
+                target_type="issue",
+                target_id=issue_id,
+                actor_agent_id=agent_id,
+                run_id=str(run.get("id") or ""),
+                payload=budget.as_dict(),
             )
         except Exception:
             logger.warning(

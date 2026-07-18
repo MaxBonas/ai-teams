@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 import subprocess
+import tomllib
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
@@ -401,7 +402,38 @@ def resolve_adapter_config(adapter_type: str, adapter_config: dict[str, Any]) ->
             if isinstance(profile_config, dict):
                 merged.update(profile_config)
     merged.update(adapter_config)
+    if str(merged.get("cli_kind") or "").strip().lower() == "codex":
+        _inject_codex_context_capacity(merged)
     return merged
+
+
+def _inject_codex_context_capacity(config: dict[str, Any]) -> None:
+    """Enrich Codex config from its locally refreshed catalog, never vendor constants."""
+    try:
+        if int(config.get("context_window_tokens") or 0) > 0:
+            return
+    except (TypeError, ValueError):
+        pass
+    codex_root = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
+    model = str(config.get("model") or "").strip()
+    if not model:
+        try:
+            model = str(tomllib.loads((codex_root / "config.toml").read_text(encoding="utf-8")).get("model") or "")
+        except Exception:
+            return
+    try:
+        catalog = json.loads((codex_root / "models_cache.json").read_text(encoding="utf-8"))
+        entry = next(
+            item for item in (catalog.get("models") or [])
+            if isinstance(item, dict) and str(item.get("slug") or "") == model
+        )
+        context_window = int(entry.get("context_window") or 0)
+        effective_percent = int(entry.get("effective_context_window_percent") or 100)
+    except Exception:
+        return
+    if context_window > 0:
+        config["context_window_tokens"] = max(1, context_window * effective_percent // 100)
+        config["context_window_source"] = "codex_models_cache"
 
 
 def inject_adapter_secrets(env: dict[str, str], adapter_type: str, adapter_config: dict[str, Any]) -> dict[str, str]:

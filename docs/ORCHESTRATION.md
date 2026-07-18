@@ -284,6 +284,18 @@ el documento conserva `partial_comment_id` y `partial_char_offset` y no avanza
 comentario y limpia el estado parcial. Así el límite de payload no falsea la
 provenance ni oculta texto que el curador nunca vio.
 
+La activación del curador usa el presupuesto efectivo del agente que continuará
+el trabajo cuando el perfil lo declara. Estima tokens de `payload base + hilo no
+sintetizado` con `chars_per_token`, aplica `comfortable_context_ratio` y resta
+reservas explícitas de salida y herramientas. Solo compacta si además existen al
+menos 8.000 caracteres recuperables. Codex subscription obtiene
+`context_window_tokens` del `models_cache.json` local y respeta su porcentaje
+efectivo; no se congelan ventanas comerciales en el código. Otros adapters pueden
+declarar `context_window_tokens`, `comfortable_context_ratio`,
+`reserved_output_tokens`, `reserved_tool_tokens` y `chars_per_token`. Si falta
+capacidad normalizada se conserva el fallback de 8.000 caracteres. Cada trigger
+persiste política, estimación, reservas y umbral cómodo en metadata y activity.
+
 ## Paralelismo
 
 Paralelizar por independencia informativa, no por disponibilidad de roles:
