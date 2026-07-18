@@ -63,7 +63,7 @@ Completado en este bloque: fotografia y limpieza documental, canario deny → co
 Siguiente orden:
 
 1. Ejecutar nuevas semillas reales del selector en casos medios reversibles y tareas complejas de otra naturaleza. Las 28 fronteras deterministas protegen la política, pero no sustituyen varianza de LLM.
-2. Repetir las familias restantes del benchmark quorum. `provider_failover` cerró tres semillas Codex + Anthropic (+4,35, −8,70 y +8,70). `sqlite_online_migration` añadió una aceptada Codex + Antigravity Flash (−8,69) y una contribución Pro válida en sesión degradada por formato del auditor Codex. La evidencia confirma operatividad, no mejora consistente.
+2. Repetir las familias del benchmark quorum con más semillas. `provider_failover` cerró tres semillas Codex + Anthropic (+4,35, −8,70 y +8,70); `sqlite_online_migration` añadió una aceptada Codex + Antigravity Flash (−8,69). La primera semilla `multitenant_authorization` degradó y reveló que Anthropic API truncaba el payload de quorum y Codex agotaba salida con auditorías sin límite. Tras exponer el contrato completo y acotar el informe, la segunda terminó accepted, mejoró 91,30→100 (+8,70), produjo dos aportes válidos en primer intento y costó 31 céntimos API. La evidencia confirma operatividad y una mejora de seguridad, todavía no consistencia estadística.
 3. Mantener Anthropic API como segundo proveedor operativo: usage, coste y provenance ya estan verificados. Para Google, `gemini_api` y `antigravity_subscription` son canales distintos; el Gemini CLI legacy fue desinstalado y retirado del producto activo.
 4. Ejecutar varias síntesis reales contra `scripts/context_summary_evals.py`. El harness oculto ya mide retención causal y compresión; la activación durable por 8.000 caracteres, bloques incrementales y sustitución en wake payload también están implementados.
 5. Consumir en frontend, cuando aporte valor, el nuevo campo aditivo `orchestrator_evals` de `GET /api/loop-health`; backend ya comparte economía, contexto, quorum y liveness con el harness SQL offline.
@@ -73,6 +73,7 @@ Siguiente orden:
 
 - `RunExecutor` concentra muchas políticas; el orden de preflights y gates requiere tests dirigidos.
 - El gate profundo valida cobertura y presupuesto, no verdad ni calidad semántica. Debe seguir calibrándose con `benchmark_quorum_plans.py`; no elevar más thresholds basándose en una sola familia.
+- Anthropic API debe recibir `quorum_review` completo: su builder genérico resumía el payload a 800 caracteres y ocultaba el contrato. Las auditorías quedan acotadas a 1-3 findings para preservar profundidad sin agotar el cierre JSON/AGENT-REPORT; la semilla multitenant posterior verificó ambos proveedores al primer intento.
 - Un quorum de un senior es una degradación de redundancia aceptada por disponibilidad, no equivalente empíricamente a dos proveedores. Exponerlo claramente en UI/telemetría si se usa con frecuencia.
 - El bloque principal quedó consolidado en `codex/orchestration-hardening`; `.claude/skills/aiteams-frontend/` permanece sin seguimiento y fuera de los commits por origen no atribuido.
 - La telemetria de usage de `antigravity_subscription` debe verificarse antes de comparar costes: `agy --print` autentica y responde, pero no entrega usage comparable en su salida normal.
@@ -97,11 +98,11 @@ Siguiente orden:
 
 ## Verificación
 
-Suite completa verificada el `2026-07-17`:
+Suite completa verificada el `2026-07-18`:
 
 ```powershell
 .\scripts\pytest_local.bat tests -q --tb=short
-# 910 passed in 313.44s
+# 959 passed in 112.62s
 ```
 
 Canario e2e:

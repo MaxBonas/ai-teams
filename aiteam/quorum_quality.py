@@ -56,7 +56,9 @@ def quorum_audit_contract_instruction() -> str:
     return (
         "Entrega una auditoría senior profunda dirigida al Lead real del proyecto. Reconoce qué debe "
         "preservarse, cuestiona supuestos y argumenta cada cambio con consecuencias y trade-offs. Antes del "
-        "AGENT-REPORT incluye exactamente este bloque JSON:\n"
+        "AGENT-REPORT incluye exactamente este bloque JSON. Mantén la salida acotada: 1-3 findings "
+        "priorizados, máximo 4 strengths y 4 assumptions_challenged; no repitas el Plan A ni escribas "
+        "prosa fuera de los dos bloques estructurados:\n"
         f"{QUORUM_AUDIT_MARKER}\n"
         '{"executive_assessment":"evaluación razonada",'
         '"strengths":["decisión correcta que debe preservarse"],'
@@ -65,6 +67,8 @@ def quorum_audit_contract_instruction() -> str:
         '"summary":"hallazgo concreto","reasoning":"cadena causal y consecuencias",'
         '"justification":"evidencia o principio aplicable","recommendation":"cambio accionable",'
         '"tradeoffs":"costes y alternativas"}]}\n'
+        "Después añade ---AGENT-REPORT--- con role: quorum_auditor, result: "
+        "approved|changes_requested|blocked, issue_status: done, next_owner: lead y evidence no vacía. "
         "No dialogues con otros auditores ni sintetices el plan: entregas tu informe al Lead."
     )
 

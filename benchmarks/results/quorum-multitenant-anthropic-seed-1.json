@@ -1,0 +1,241 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "multitenant_authorization_v1",
+  "completed": false,
+  "failure": "quorum session 8ba38c6a-d4a0-40f3-8dfd-ecf4f49ea0a0 has no accepted final plan",
+  "diagnostics": {
+    "session": {
+      "id": "8ba38c6a-d4a0-40f3-8dfd-ecf4f49ea0a0",
+      "issue_id": "issue:intake",
+      "status": "degraded",
+      "base_plan_revision_id": "5522692a-3395-4b17-a7ea-22c60df0b3bb",
+      "final_plan_revision_id": null,
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": "auditor_report_format_exhausted"
+    },
+    "base": {
+      "score": 19.0,
+      "max_score": 23.0,
+      "score_pct": 82.61,
+      "hard_failures": [
+        "tenant_boundary",
+        "deny_default"
+      ],
+      "passes_hard_gate": false,
+      "word_count": 1463,
+      "criteria": [
+        {
+          "id": "objective",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "objetiv"
+          ],
+          "required": false
+        },
+        {
+          "id": "closure",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "criteri.{0,20}(cierre|aceptaci)",
+            "done|completad"
+          ],
+          "required": false
+        },
+        {
+          "id": "decomposition",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "sub-?issue|tarea|fase|paso"
+          ],
+          "required": false
+        },
+        {
+          "id": "ownership",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "owner|responsable|reporta|asignad"
+          ],
+          "required": false
+        },
+        {
+          "id": "evidence",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "evidencia|recibo|artefacto|diff|test"
+          ],
+          "required": false
+        },
+        {
+          "id": "risk",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "riesgo|fallo|rotura|rollback"
+          ],
+          "required": false
+        },
+        {
+          "id": "escalation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "escal|bloque|intervenci.{0,10}human|usuario"
+          ],
+          "required": false
+        },
+        {
+          "id": "continuation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "siguiente run|continuaci|wakeup|heartbeat|reanud"
+          ],
+          "required": false
+        },
+        {
+          "id": "tenant_boundary",
+          "weight": 2.0,
+          "passed": false,
+          "matched": [],
+          "required": true
+        },
+        {
+          "id": "deny_default",
+          "weight": 2.0,
+          "passed": false,
+          "matched": [],
+          "required": true
+        },
+        {
+          "id": "object_level_authz",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "object.level|recurso.{0,30}autoriz|autorizaci[oó]n.{0,30}objeto"
+          ],
+          "required": true
+        },
+        {
+          "id": "cache_scope",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "cache.{0,30}tenant|clave.{0,30}tenant|invalidaci[oó]n.{0,20}cache"
+          ],
+          "required": false
+        },
+        {
+          "id": "negative_tests",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "test.{0,30}(negativ|cross.tenant)|acceso cruzado|IDOR"
+          ],
+          "required": true
+        },
+        {
+          "id": "audit",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "audit|trazabilidad|activity.log"
+          ],
+          "required": false
+        },
+        {
+          "id": "migration",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "backfill|migraci[oó]n|compatibilidad"
+          ],
+          "required": false
+        },
+        {
+          "id": "incident_rollback",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "rollback|feature.flag|kill.switch|revers"
+          ],
+          "required": false
+        }
+      ],
+      "penalties": [
+        {
+          "id": "client_side_authz",
+          "applied": 0.0,
+          "matched": []
+        }
+      ]
+    },
+    "contributions": [],
+    "auditor_runs": [
+      {
+        "id": "run:f17bc6c1-0bca-4b94-8a60-26eee7ae01c5",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "completed",
+        "provider": "anthropic",
+        "model": "claude-opus-4-5",
+        "channel": "api",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"input_tokens\": 3913, \"output_tokens\": 959}"
+      },
+      {
+        "id": "run:0a005877-e930-4a35-a9a5-298f876b71b7",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 21940, \"output_tokens\": 6390, \"reasoning_output_tokens\": 18}"
+      },
+      {
+        "id": "run:69be152e-1783-4d9c-8d96-f8d8536370ef",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "completed",
+        "provider": "anthropic",
+        "model": "claude-opus-4-5",
+        "channel": "api",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"input_tokens\": 4133, \"output_tokens\": 682}"
+      },
+      {
+        "id": "run:c811df48-e8e6-4c45-ac9c-9049dd4c958d",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 22536, \"output_tokens\": 3344, \"reasoning_output_tokens\": 24}"
+      }
+    ]
+  },
+  "provenance": {
+    "runtime": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 323.4,
+      "ticks": 6,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": true,
+      "limit_reached": false,
+      "runs": 6,
+      "tokens_in": 79363,
+      "tokens_out": 13728,
+      "cost_cents": 24
+    }
+  }
+}

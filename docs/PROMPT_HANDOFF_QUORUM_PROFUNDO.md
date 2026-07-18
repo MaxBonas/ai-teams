@@ -74,9 +74,10 @@ El flujo esperado es:
 1. Validar el flujo nuevo con un canario capa 2 completo y cross-provider:
    Lead configurable + uno o dos seniors (incluido Codex si procede), Plan A,
    informes profundos, wakeup, Plan B y sesión accepted.
-2. Repetir benchmarks en `sqlite_online_migration`,
-   `multitenant_authorization` y `provider_failover`. Comparar Plan A/Plan B,
-   hard gates, latencia, tokens, coste y regresiones.
+2. Repetir más semillas en `sqlite_online_migration`,
+   `multitenant_authorization` y `provider_failover`. Multitenant ya tiene una
+   degradada diagnóstica y una accepted 91,30→100 (+8,70); comparar distribución,
+   hard gates, latencia, tokens, coste y regresiones, no una sola victoria.
 3. Mejorar telemetría de Antigravity cuando el CLI exponga usage. Hasta entonces,
    registrar `usage=None` y no inventar costes.
 

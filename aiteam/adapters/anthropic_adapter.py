@@ -39,6 +39,7 @@ from aiteam.adapters.work_contract import (
     build_execution_contract,
     ops_to_actions,
 )
+from aiteam.quorum_quality import quorum_audit_contract_instruction
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +184,13 @@ def _build_system(skill: str, role: str) -> str:
             "then call submit_work with the operations needed."
         )
     parts.append(build_execution_contract())
+    if role.strip().lower() == "quorum_auditor":
+        parts.append(
+            "QUORUM AUDITOR — CONTRATO ESTRICTO:\n"
+            "Solo puedes emitir ops add_comment y set_status done. No implementes, no edites, "
+            "no delegues y no sintetices el plan.\n"
+            + quorum_audit_contract_instruction()
+        )
     return "\n".join(parts)
 
 
@@ -191,6 +199,14 @@ def _build_user(wake_payload_raw: str, run: dict[str, Any]) -> str:
     if wake_payload_raw:
         try:
             payload = json.loads(wake_payload_raw)
+            quorum_review = payload.get("quorum_review")
+            if isinstance(quorum_review, dict):
+                return (
+                    "## Auditoría quorum obligatoria\n"
+                    "Audita el objetivo congelado y Plan A siguientes. Cumple literalmente el contrato "
+                    "QUORUM AUDITOR del system prompt y llama submit_work al terminar.\n\n"
+                    + json.dumps({"quorum_review": quorum_review}, ensure_ascii=False)
+                )
             issue = payload.get("issue") or {}
             title = issue.get("title") or run.get("issue_id") or "Unknown task"
             description = issue.get("description") or ""
@@ -226,5 +242,4 @@ def _build_user(wake_payload_raw: str, run: dict[str, Any]) -> str:
 
     parts.append("\nCall submit_work when done.")
     return "\n".join(parts)
-
 
