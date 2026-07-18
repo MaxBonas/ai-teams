@@ -311,6 +311,8 @@ export function ThreadView({ issueId, preloadedComments }: ThreadViewProps) {
       .then((json) => {
         if (cancelled) return;
         setCompact(json as CompactThreadData);
+        // Un fallo anterior (p.ej. de otra issue) no debe dejar el error pegado.
+        setError(null);
         setLoading(false);
       })
       .catch((err: unknown) => {
