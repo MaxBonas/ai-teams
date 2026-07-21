@@ -74,6 +74,24 @@ llamada, 25.633 tokens y excerpts/resultados aunque el gate durable falle.
 > de liveness siguen siendo válidas: un rol de implementación que no produce
 > cambios no puede cerrar solo con texto. OpenCode Zen sí continúa read-only.
 
+### RUN-016 · RESUELTO — Endpoint experimental omitía tools MCP conectadas
+
+**Detectado:** 2026-07-22
+**Run ID(s):** `opencode-server-faults-v1-deepseek.json`
+**Proyecto:** canario de health MCP OpenCode server
+**Síntomas:** `/mcp` devolvía `connected`, el proceso fixture estaba vivo y la
+configuración contenía la allowlist exacta, pero `/experimental/tool/ids` y
+`/experimental/tool` solo enumeraban built-ins. El primer juez marcó health MCP
+como fallido al esperar `canary_health_read` en esos endpoints.
+**Causa raíz:** supuesto incorrecto del harness sobre la proyección de tools en
+OpenCode 1.18.4. Esos endpoints no demostraron el inventario MCP observado y no
+pueden usarse como health de la integración.
+**Fix aplicado:** el fixture durable registra el intercambio stdio real. El
+gate exige `initialize`, `tools/list`, ambos nombres declarados, `/mcp=connected`,
+wildcard deny, allow exacto y ausencia de allow para la tool no aprobada.
+**Verificación:** el canario final pasa todos los gates y confirma reap del
+proceso MCP y de `opencode.exe serve`; no quedan procesos residuales.
+
 ### RUN-014 · RESUELTO — Teardown de OpenCode server terminaba el shim, no el hijo
 
 **Detectado:** 2026-07-21

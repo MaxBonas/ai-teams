@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "benchmark": "opencode_server_faults",
+  "cli_version": "1.18.4",
+  "model": "opencode/deepseek-v4-flash-free",
+  "contract": "suspended_server_same_session_restart_and_mcp_health_v1",
+  "hang_recovery": {
+    "session_id": "ses_0793df51effe56VDXAtS89Sk6J",
+    "same_port": 58737,
+    "timings_ms": {
+      "hung_health_timeout_ms": 532,
+      "recovery_prompt_ms": 6172
+    },
+    "gates": {
+      "session_created_before_hang": true,
+      "native_server_suspended": true,
+      "port_open_while_hung": true,
+      "health_times_out_while_hung": true,
+      "faulted_server_stopped": true,
+      "same_port_restarted": true,
+      "health_after_restart": true,
+      "same_session_recovered": true,
+      "session_idle_after_restart": true,
+      "recovery_marker_exact": true,
+      "session_deleted": true,
+      "server_teardown_guaranteed": true
+    },
+    "ok": true
+  },
+  "mcp_health": {
+    "fixture_pid": 53528,
+    "opencode_tool_ids_endpoint": [
+      "invalid",
+      "question",
+      "bash",
+      "read",
+      "glob",
+      "grep",
+      "edit",
+      "write",
+      "task",
+      "webfetch",
+      "todowrite",
+      "websearch",
+      "skill",
+      "apply_patch"
+    ],
+    "mcp_trace": [
+      {
+        "method": "initialize"
+      },
+      {
+        "method": "tools/list"
+      },
+      {
+        "listed_tools": [
+          "health_read",
+          "forbidden_write"
+        ]
+      }
+    ],
+    "gates": {
+      "mcp_process_started": true,
+      "mcp_connected": true,
+      "mcp_initialize_observed": true,
+      "mcp_tools_list_observed": true,
+      "approved_tool_listed_by_mcp": true,
+      "unapproved_tool_listed_by_mcp": true,
+      "namespace_denied_by_default": true,
+      "approved_tool_allowed_exactly": true,
+      "unapproved_tool_not_allowed": true,
+      "mcp_process_reaped": true,
+      "server_teardown_guaranteed": true
+    },
+    "ok": true
+  },
+  "gates": {
+    "server_process_hang_injected": true,
+    "hung_health_detected": true,
+    "same_session_restart_recovered": true,
+    "mcp_health_tested": true,
+    "mcp_allowlist_observed": true,
+    "all_processes_reaped": true
+  },
+  "production_activation_allowed": false,
+  "decision": "retain_ephemeral_cli",
+  "reason": "Hang/restart y health MCP quedan probados en una semilla, pero JSON Schema sigue fallando y faltan varias semillas de contaminación/override."
+}

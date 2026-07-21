@@ -53,9 +53,12 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   confirma aborto de servidor en 260 ms, retorno a `idle`, health, recuperación
   posterior, borrado de sesión y teardown. El SDK oficial 1.18.4 queda probado
   en una semilla; JSON Schema devuelve `StructuredOutputError` pese a texto JSON
-  correcto. Producción sigue efímera hasta resolver ese contrato y validar hang
-  con fault injection, health MCP y varias semillas de contaminación/recovery.
-  Verificación del bloque: `1166 passed` el 2026-07-22.
+  correcto. El fault injector suspende el proceso nativo, detecta health colgado
+  en 532 ms y recupera mismo puerto, ID y sesión `idle`; el marcador posterior
+  completa en 6,172 s. El fixture MCP confirma `initialize`, `tools/list`, deny
+  por namespace, allow exacto y reap de ambos procesos. Producción sigue efímera
+  hasta resolver JSON Schema, repetir contaminación/override y disponer un
+  supervisor productivo. Verificación final: `1169 passed` el 2026-07-22.
 - Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
   de calibración y documentación se separaron en `1b3650e`, `66304c8` y
   `c695661`; junto con los commits locales previos se publicaron 16 commits en

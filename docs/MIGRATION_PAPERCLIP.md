@@ -375,9 +375,12 @@ tokens/caché/sesión para presión de cuota aunque el coste marginal sea cero. 
 CLI efímero es la ruta estable. El A/B `serve`/attached ya pasa 3×2 y un canario
 del SDK 1.18.4 confirma cancelación durable `busy`→abort→`idle`, health,
 recuperación en la misma sesión, borrado y teardown. Sigue sin promoción: JSON
-Schema produce `StructuredOutputError` aunque el texto sea válido, y faltan
-fault injection de hangs, health MCP y varias semillas de contaminación. Esta
-vía nunca sustituye el sandbox necesario para roles con escritura.
+Schema produce `StructuredOutputError` aunque el texto sea válido. Un segundo
+canario suspende el proceso nativo, detecta health colgado, reinicia en el mismo
+puerto y recupera el mismo ID; un MCP local supera `initialize`/`tools/list` con
+allowlist exacta y teardown de ambos procesos. Aún faltan varias semillas de
+contaminación/override y un supervisor productivo. Esta vía nunca sustituye el
+sandbox necesario para roles con escritura.
 
 La alternativa BYOK gratuita funciona en paralelo, no como reemplazo: perfiles
 separados `gemini_api_free` y `groq_api_free`, secretos del owner en vault local,

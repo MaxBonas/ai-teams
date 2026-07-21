@@ -1,6 +1,6 @@
 # Orquestación multi-modelo en AI Teams
 
-Actualizado: `2026-07-21`
+Actualizado: `2026-07-22`
 
 Fuente canónica para diseñar, revisar y evaluar routing, delegación, adapters, cascadas, quorum, verificación, contexto, liveness y economía multi-LLM. Las skills de Claude y Codex deben apuntar aquí, no copiar este contenido.
 
@@ -701,9 +701,17 @@ health, completa otra inferencia en la misma sesión, la elimina y garantiza el
 teardown. No se confunde cancelar la petición cliente con abortar la sesión.
 El gate JSON Schema falla: DeepSeek devuelve el objeto textual exacto, pero el
 servidor lo marca `StructuredOutputError` y no expone structured output. Por
-ello producción conserva CLI efímero hasta resolver el contrato, inyectar un
-hang real, validar health MCP y repetir contaminación/recovery. `serve` tampoco
-aporta el sandbox de sistema operativo necesario para habilitar Engineer.
+separado, el canario de fallos suspende el proceso nativo: el puerto permanece
+abierto pero health expira; después termina ese PID, reinicia en el mismo puerto,
+recupera el mismo ID como `idle` y completa otra inferencia. El health MCP local
+prueba proceso vivo, `initialize`, `tools/list`, inventario de una tool aprobada
+y otra no aprobada, deny del namespace y allow exacto; servidor e hijo terminan.
+Los endpoints experimentales de tools 1.18.4 solo devolvieron built-ins pese a
+`/mcp=connected`, por lo que no se usan como evidencia del inventario MCP.
+Producción conserva CLI efímero hasta resolver JSON Schema, repetir varias
+semillas de contaminación/override y diseñar un supervisor real. El canario
+demuestra recoverability manual, no autorecovery productivo ni salud de MCPs
+externos. `serve` tampoco aporta el sandbox necesario para habilitar Engineer.
 Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
 y [FREE-3](ORCHESTRATION_SOURCES.md#free-3-cli-mcp-sesiones-y-telemetría).
 

@@ -156,9 +156,15 @@ protegida por un test explícito.
   observa `busy`, aborta en 260 ms, vuelve a `idle`, conserva health, completa
   una inferencia posterior en la misma sesión, la borra y cierra el servidor.
   JSON Schema falla con `StructuredOutputError` aunque el texto sea JSON válido.
-  Se conserva CLI efímero porque aún faltan fault injection de un hang real,
-  health MCP y resolver el contrato estructurado; cancelación y SDK ya tienen
-  evidencia positiva de una semilla, no suficiente para activar producción.
+  `benchmark_opencode_server_faults.py` suspende el proceso nativo: el puerto
+  queda abierto pero health expira en 532 ms; tras terminarlo, reinicia en el
+  mismo puerto, recupera el mismo ID `idle` y completa el marcador en 6,172 s.
+  El fixture MCP local completa `initialize` y `tools/list`, conserva dos tools
+  en inventario, permite exactamente la aprobada, deniega la otra y no deja
+  procesos. Se conserva CLI efímero: aún hay que resolver JSON Schema, repetir
+  varias semillas de memoria/override/contaminación y diseñar el supervisor
+  productivo; SDK, cancelación, hang/restart y health MCP local tienen una
+  semilla positiva, insuficiente para activar un daemon compartido.
   El primer harness terminaba solo el shim `.cmd` y dejó dos procesos hijo;
   quedó corregido usando el binario nativo y gate de puerto cerrado.
 - [x] **Comparar Zen con APIs gratuitas BYOK**. La decisión es híbrida, no una
