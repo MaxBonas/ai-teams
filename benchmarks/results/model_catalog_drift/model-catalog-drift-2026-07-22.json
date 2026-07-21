@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "benchmark": "model_catalog_drift_audit",
-  "observed_at": "2026-07-22T00:58:10.982949+02:00",
+  "observed_at": "2026-07-22T01:22:59.143951+02:00",
   "policy": {
     "owner": "AI Teams maintainer",
     "cadence": "monthly_and_on_cli_or_provider_change",
@@ -59,6 +59,7 @@
       "status": "current",
       "declared": [
         "opencode/deepseek-v4-flash-free",
+        "opencode/laguna-s-2.1-free",
         "opencode/mimo-v2.5-free",
         "opencode/nemotron-3-ultra-free",
         "opencode/north-mini-code-free"
@@ -75,10 +76,6 @@
         "opencode/big-pickle": {
           "disposition": "rejected",
           "reason": "identidad opaca; excluido por provenance"
-        },
-        "opencode/laguna-s-2.1-free": {
-          "disposition": "pending_calibration",
-          "reason": "submit observado; falta calibración durable por rol"
         }
       },
       "missing_declared": [],
@@ -97,9 +94,9 @@
   "model_flow_matrix": {
     "ok": true,
     "profile_count": 12,
-    "model_count": 46,
-    "positive_cell_count": 334,
-    "negative_cell_count": 402,
+    "model_count": 47,
+    "positive_cell_count": 337,
+    "negative_cell_count": 415,
     "failures": []
   },
   "gates": {

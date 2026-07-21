@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-22`): **1176 passed en 128,34 s**.
+Última suite completa registrada (`2026-07-22`): **1179 passed en 131,76 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -121,7 +121,7 @@ protegida por un test explícito.
   sesión del CLI, descubre IDs con `opencode models opencode` y nunca embebe ni
   copia credenciales. La integración es read-only y solo admite roles de
   planificación, auditoría, review/QA y scouts; Engineer queda excluido.
-- [ ] **Calibrar OpenCode Zen Free en ejecución real antes de promoverlo a
+- [x] **Calibrar OpenCode Zen Free en ejecución real antes de promoverlo a
   política automática**. OpenCode `1.18.4` está instalado y la sesión OAuth
   local enumera cinco IDs vivos, incluido el nuevo `laguna-s-2.1-free`. El
   screening público de una semilla ya valida transporte, contrato y usage para
@@ -129,13 +129,14 @@ protegida por un test explícito.
   cero ops y todavía no supera el cierre durable. El canario durable v1 de
   reviewer descarta la promoción: Nemotron falla el parseo en seed 1, MiMo no
   produce rechazo durable, North queda correctamente denegado por rol y
-  DeepSeek pasa seed 1 pero no aprueba la corrección en seed 2. Ningún modelo
-  alcanza 3/3, por lo que no se ejecutan más semillas ni cambia el default.
-  Exigir tres semillas por
-  modelo/contrato frente al baseline del rol,
-  registrar duración/runs y confirmar que la oferta sigue activa. Solo usar
-  datos no confidenciales: los endpoints son temporales y sus términos
-  permiten retención o mejora de producto/modelo.
+  DeepSeek pasa seed 1 pero no aprueba la corrección en seeds 2–3. La matriz
+  final añade Laguna: 0/3 ciclos completos, un rechazo correcto, dos fallos de
+  parseo y un timeout de aprobación; mediana 236,094 s frente a 61,375 s de
+  DeepSeek. Ningún modelo alcanza 3/3. Laguna queda visible manual-only y
+  probe-gated, sin routing automático; el agregado
+  `opencode-durable-review-v1-laguna-vs-deepseek-aggregate.json` conserva
+  `default_change_allowed=false`. Repetir solo tras cambio de catálogo/modelo,
+  CLI o contrato. Los datos siguen siendo públicos/no confidenciales.
 - [x] **Integrar OpenCode en los afinamientos de gobierno existentes**. El
   runtime ya falla cerrado sin `--auto`, traduce grants MCP a una allowlist
   positiva por tool, bloquea MCP ajenos y conserva roles read-only. El JSONL
@@ -267,8 +268,9 @@ protegida por un test explícito.
   mensual + evento, compara IDs exactos de Antigravity/OpenCode, conserva
   exclusiones con disposición explícita y ejecuta la matriz hermética. El
   recibo `model-catalog-drift-2026-07-22.json` pasa 3/3 gates: 11 IDs
-  Antigravity, cuatro Zen productivos, Laguna `pending_calibration`, Big Pickle
-  `rejected` y Codex `cli_update_required` como atención separada.
+  Antigravity, cinco Zen declarados —Laguna manual/probe-gated tras fallar 0/3
+  review durable—, Big Pickle `rejected` y Codex `cli_update_required` como
+  atención separada.
 - [x] **Implementar presión y forecast de cuota por perfil de suscripción**.
   `run_adapter_profiles` congela el perfil real por run y
   `subscription_quota_snapshot` agrega runs, duración, usage disponible y

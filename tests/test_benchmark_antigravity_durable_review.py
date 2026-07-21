@@ -1,4 +1,8 @@
-from scripts.benchmark_antigravity_durable_review import _sum_usage, aggregate_reports
+from scripts.benchmark_antigravity_durable_review import (
+    OPENCODE_MODELS,
+    _sum_usage,
+    aggregate_reports,
+)
 
 
 def _report(model: str, seed: int, seconds: float) -> dict:
@@ -50,6 +54,31 @@ def test_aggregate_supports_multiple_opencode_challengers() -> None:
     assert aggregate["conclusion"]["challengers"] == [
         "opencode/nemotron-3-ultra-free",
         "opencode/mimo-v2.5-free",
+    ]
+
+
+def test_opencode_matrix_includes_laguna() -> None:
+    assert "opencode/laguna-s-2.1-free" in OPENCODE_MODELS
+
+
+def test_aggregate_requires_unique_seeds_and_only_surfaces_stable_challenger() -> None:
+    duplicate_seed_baseline = [
+        _report("opencode/deepseek-v4-flash-free", seed, 10 + seed)
+        for seed in (1, 1, 2)
+    ]
+    for row in duplicate_seed_baseline:
+        row["ok"] = False
+    challenger = [
+        _report("opencode/laguna-s-2.1-free", seed, 20 + seed)
+        for seed in (1, 2, 3)
+    ]
+
+    aggregate = aggregate_reports([*duplicate_seed_baseline, *challenger])
+
+    assert aggregate["matrix_balanced"] is False
+    assert aggregate["arms"][0]["seed_matrix_complete"] is False
+    assert aggregate["conclusion"]["manual_catalog_candidates"] == [
+        "opencode/laguna-s-2.1-free"
     ]
 
 

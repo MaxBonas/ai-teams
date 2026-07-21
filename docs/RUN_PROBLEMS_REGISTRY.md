@@ -49,19 +49,22 @@ seis sesiones únicas. Repetir solo tras cambio de versión o contrato proveedor
 **Run ID(s):** recibos `opencode-durable-review-v1-*.json`
 **Proyecto:** canario aislado de calibración P0.2
 **Síntomas:** DeepSeek completa reject→fix→approve en seed 1 pero no aprueba la
-corrección en seed 2; Nemotron produce `subscription_cli_parse_error`; MiMo no
+corrección en seeds 2–3; Nemotron produce `subscription_cli_parse_error`; MiMo no
 materializa un rechazo durable. North fue denegado correctamente antes de
-inferencia porque reviewer no pertenece a sus roles autorizados.
+inferencia porque reviewer no pertenece a sus roles autorizados. Laguna termina
+0/3: dos parse errors y un timeout al aprobar después de un rechazo correcto.
 **Causa raíz:** variabilidad de contrato/calidad por modelo gratuito. No existe
 evidencia de un fallo común del scheduler: las runs y wakeups terminan sin
 claims residuales, y el mismo transporte pasa el screening corto.
-**Mitigación vigente:** ningún modelo se promociona ni amplía roles; se detienen
-semillas posteriores cuando un candidato ya no puede alcanzar 3/3. DeepSeek,
-Nemotron y MiMo siguen manual-only para reviewer.
+**Mitigación vigente:** ningún modelo se promociona ni amplía routing automático.
+Laguna queda visible/manual y `requires_probe`; DeepSeek, Nemotron y MiMo siguen
+manual-only para reviewer.
 **Verificación pendiente:** repetir solo después de un cambio de modelo,
 versión del CLI o transporte server/SDK; comparar de nuevo contra Flash High.
 La sonda diagnóstica Nemotron seed 101 confirma el nuevo recibo: conserva una
 llamada, 25.633 tokens y excerpts/resultados aunque el gate durable falle.
+La matriz Laguna vs DeepSeek completa seis muestras y conserva
+`default_change_allowed=false`.
 
 ---
 
@@ -75,6 +78,22 @@ llamada, 25.633 tokens y excerpts/resultados aunque el gate durable falle.
 > `RunExecutor` los materializa antes de medir el delta, bajo RBAC. Sus lecciones
 > de liveness siguen siendo válidas: un rol de implementación que no produce
 > cambios no puede cerrar solo con texto. OpenCode Zen sí continúa read-only.
+
+### RUN-017 · RESUELTO — El canario no podía probar un modelo nuevo fuera del catálogo declarado
+
+**Detectado:** 2026-07-22
+**Run ID(s):** primeros intentos Laguna seeds 1–3
+**Proyecto:** calibración durable OpenCode Zen
+**Síntomas:** `record_model_health(..., available=True)` no evitaba
+`model_not_catalogued`; las tres runs fallaban antes de inferencia.
+**Causa raíz:** el health solo verifica opciones ya declaradas. El preflight
+fail-closed actuaba correctamente, pero Laguna aún vivía solo en discovery/docs.
+**Fix aplicado:** declarar Laguna visible con `automatic=false` y
+`requires_probe=true`, roles provisionales de review/QA y datos no
+confidenciales. No se cambió el default ni se amplió hiring automático.
+**Verificación:** el test exige `catalogued/selectable=false` antes del probe y
+`verified/selectable=true` después; las tres repeticiones reales alcanzan el
+provider y producen recibos de calidad/liveness, no fallos de preflight.
 
 ### RUN-016 · RESUELTO — Endpoint experimental omitía tools MCP conectadas
 

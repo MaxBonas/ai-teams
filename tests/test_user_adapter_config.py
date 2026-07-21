@@ -94,6 +94,27 @@ def test_opencode_read_only_profile_is_never_assigned_to_engineer(tmp_path: Path
     )["model"] == "opencode/nemotron-3-ultra-free"
 
 
+def test_opencode_laguna_requires_exact_probe_before_selection(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    import aiteam.user_config as config_mod
+
+    model = "opencode/laguna-s-2.1-free"
+    monkeypatch.setattr(config_mod, "_opencode_model_names", lambda _config: [model])
+
+    options, _catalog = executable_model_options("opencode_zen_free")
+    selected = next(item for item in options if item["value"] == model)
+    assert selected["availability"] == "catalogued"
+    assert selected["selectable"] is False
+
+    record_model_health(
+        "opencode_zen_free", model, available=True, reason="run_completed"
+    )
+    options, _catalog = executable_model_options("opencode_zen_free")
+    selected = next(item for item in options if item["value"] == model)
+    assert selected["availability"] == "verified"
+    assert selected["selectable"] is True
+
+
 def test_codex_models_are_visible_but_disabled_when_cli_cannot_read_catalog(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
     import aiteam.user_config as config_mod

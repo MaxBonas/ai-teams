@@ -172,9 +172,10 @@ siendo el gate.
 El drift tiene owner `AI Teams maintainer` y cadencia mensual más evento de
 versión/catálogo. `scripts/audit_model_catalog_drift.py` compara inventarios
 autenticados con IDs declarados y ejecuta la matriz hermética. El recibo del
-2026-07-22 pasa los tres gates; conserva Laguna como `pending_calibration`, Big
-Pickle como `rejected` y la incompatibilidad de versión Codex como atención, no
-como fallo de calidad ni permiso para promover defaults.
+2026-07-22 pasa los tres gates; declara cinco modelos Zen, conserva Laguna
+manual/probe-gated tras fallar 0/3 review durable, Big Pickle como `rejected` y
+la incompatibilidad de versión Codex como atención. Nada de ello promueve
+defaults.
 
 El follow-up durable v4 ejercita el runtime productivo sobre el mismo defecto y
 la misma corrección. Flash High y 3.6 Medium completan 3/3 ciclos
@@ -729,8 +730,8 @@ MCPs externos. `serve` tampoco aporta el sandbox necesario para Engineer.
 Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
 y [FREE-3](ORCHESTRATION_SOURCES.md#free-3-cli-mcp-sesiones-y-telemetría).
 
-La vía gratuita es híbrida. `opencode_zen_free` conserva cuatro modelos
-productivos; Laguna sigue `pending_calibration` y Big Pickle `rejected`.
+La vía gratuita es híbrida. `opencode_zen_free` declara cinco modelos; Laguna
+permanece manual/probe-gated tras fallar 0/3 y Big Pickle sigue `rejected`.
 `gemini_api_free` reutiliza una key Google del owner y
 `groq_api_free` usa un runtime OpenAI-compatible con key Groq propia. Son
 perfiles distintos de sus equivalentes pagados aunque compartan proveedor:

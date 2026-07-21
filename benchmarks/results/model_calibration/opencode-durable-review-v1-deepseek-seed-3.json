@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "benchmark": "durable_review",
+  "seed": 3,
+  "profile_id": "opencode_zen_free",
+  "provider": "opencode-zen",
+  "channel": "free_gateway",
+  "cli_version": "1.18.4",
+  "model": "opencode/deepseek-v4-flash-free",
+  "contract": "same_broken_diff_then_same_fix_v1",
+  "reject": {
+    "ok": true,
+    "seconds": 23.188,
+    "report": {
+      "id": "e88958fc-25e4-4b1a-ad29-10bfad957074",
+      "issue_id": "issue:review",
+      "agent_id": "role:reviewer",
+      "run_id": "run:312e3b44-40bd-47a1-8999-5eb06fc146c0",
+      "agent_role": "reviewer",
+      "result": "changes_requested",
+      "issue_status": "done",
+      "next_owner": "engineer",
+      "tech_match": "yes",
+      "blocker": "none",
+      "evidence": "close_issue.py:1-9",
+      "valid": 1,
+      "is_assignee": 1,
+      "raw_json": "{\"blocker\": \"none\", \"evidence\": \"close_issue.py:1-9\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"reviewer\", \"tech_match\": \"yes\"}",
+      "created_at": "2026-07-21 23:00:50"
+    }
+  },
+  "approve": {
+    "ok": false,
+    "seconds": 40.703,
+    "report": {
+      "id": "e88958fc-25e4-4b1a-ad29-10bfad957074",
+      "issue_id": "issue:review",
+      "agent_id": "role:reviewer",
+      "run_id": "run:312e3b44-40bd-47a1-8999-5eb06fc146c0",
+      "agent_role": "reviewer",
+      "result": "changes_requested",
+      "issue_status": "done",
+      "next_owner": "engineer",
+      "tech_match": "yes",
+      "blocker": "none",
+      "evidence": "close_issue.py:1-9",
+      "valid": 1,
+      "is_assignee": 1,
+      "raw_json": "{\"blocker\": \"none\", \"evidence\": \"close_issue.py:1-9\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"reviewer\", \"tech_match\": \"yes\"}",
+      "created_at": "2026-07-21 23:00:50"
+    }
+  },
+  "runs": [
+    {
+      "id": "run:312e3b44-40bd-47a1-8999-5eb06fc146c0",
+      "status": "completed",
+      "adapter_type": "subscription_cli",
+      "provider": "opencode-zen",
+      "model": "opencode/deepseek-v4-flash-free",
+      "channel": "subscription",
+      "error": null,
+      "error_code": null,
+      "usage_json": "{\"cache_write_tokens\": 0, \"cached_input_tokens\": 11776, \"input_tokens\": 11964, \"output_tokens\": 1039, \"provider_session_id\": \"ses_079173f66ffeP4ru2oOf0diofQ\", \"reasoning_output_tokens\": 618, \"total_tokens\": 25397}",
+      "result_json": "{\"output_preview\": \"close_issue.py incumple los 4 criterios: no hay check de tenant/assignee, la persistencia no es atómica, traga excepciones con except Exception: pass, y encola sin validar parent nulo ni idempotencia.\"}",
+      "stdout_excerpt": null,
+      "stderr_excerpt": null,
+      "started_at": "2026-07-21T23:00:27.657947+00:00",
+      "finished_at": "2026-07-21T23:00:50.709315+00:00"
+    },
+    {
+      "id": "run:293ea787-38c8-4236-9fa9-1d247183dc0b",
+      "status": "completed",
+      "adapter_type": "lead_builtin",
+      "provider": "aiteams",
+      "model": "structured-lead-intake",
+      "channel": "local",
+      "error": null,
+      "error_code": null,
+      "usage_json": "{}",
+      "result_json": "{\"output_preview\": \"Lead — Ciclo de corrección #1 iniciado automáticamente\\n\\nEl Reviewer reportó `changes_requested`. Se ha iniciado un ciclo de corrección:\\n\\n1. El Reviewer ha sido restablecido a `todo` — se volverá a ejecutar automáticamente cuando las correcciones estén list\"}",
+      "stdout_excerpt": null,
+      "stderr_excerpt": null,
+      "started_at": "2026-07-21T23:00:50.742875+00:00",
+      "finished_at": "2026-07-21T23:00:50.792902+00:00"
+    },
+    {
+      "id": "run:85a43a57-6c4a-44ef-b305-52114c09e76b",
+      "status": "failed",
+      "adapter_type": "subscription_cli",
+      "provider": "opencode-zen",
+      "model": "opencode/deepseek-v4-flash-free",
+      "channel": "subscription",
+      "error": "OpenCode event stream did not contain a submit_work object",
+      "error_code": "subscription_cli_parse_error",
+      "usage_json": "{}",
+      "result_json": "{\"output_preview\": \"{\\\"type\\\":\\\"step_start\\\",\\\"timestamp\\\":1784674856426,\\\"sessionID\\\":\\\"ses_07916e430fferzxZgLI3zr6cJr\\\",\\\"part\\\":{\\\"id\\\":\\\"prt_f86e92de7001Rzc6csPUcRAlAN\\\",\\\"messageID\\\":\\\"msg_f86e91ce1001RX3377kJHak61R\\\",\\\"sessionID\\\":\\\"ses_07916e430fferzxZgLI3zr6cJr\\\",\\\"type\\\":\\\"step-start\\\"}}\\n{\\\"type\"}",
+      "stdout_excerpt": null,
+      "stderr_excerpt": null,
+      "started_at": "2026-07-21T23:00:50.978805+00:00",
+      "finished_at": "2026-07-21T23:01:31.492157+00:00"
+    }
+  ],
+  "quota_observation": {
+    "provider_calls": 2,
+    "product_runs": 3,
+    "wall_seconds": 63.891,
+    "tokens": {
+      "input_tokens": 11964,
+      "output_tokens": 1039,
+      "reasoning_output_tokens": 618,
+      "cached_input_tokens": 11776,
+      "cache_write_tokens": 0,
+      "total_tokens": 25397
+    },
+    "marginal_cost_cents": 0
+  },
+  "liveness": {
+    "live_runs": 0,
+    "claimed_wakeups": 0
+  },
+  "ok": false
+}

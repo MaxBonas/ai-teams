@@ -367,9 +367,10 @@ disponibilidad se deriva del inventario real `opencode models opencode` y el CLI
 mantiene su propia sesión. El runtime está limitado a lectura del workspace y
 no puede asignarse a Engineer: su propósito inicial es Lead/quorum, review/QA y
 scouts con datos no confidenciales. Nemotron 3 Ultra se clasifica Tier 1 por
-capacidad; DeepSeek V4 Flash y MiMo V2.5, Tier 2; North Mini Code, Tier 3. La
-clasificación sigue siendo screening documental hasta completar canarios locales
-multi-semilla. Contrato, puntuación, privacidad y descartes viven en
+capacidad; DeepSeek V4 Flash, MiMo V2.5 y Laguna S 2.1, Tier 2; North Mini Code,
+Tier 3. Laguna se declara solo manual/probe-gated: el canario durable termina
+0/3 frente a 1/3 de DeepSeek y no autoriza routing automático. Contrato,
+puntuación, privacidad y descartes viven en
 `MODELOS_GRATUITOS_OPENCODE.md` y el trabajo restante en `../task.md`.
 
 El adapter aplica la misma gobernanza neutral que el resto: permisos headless

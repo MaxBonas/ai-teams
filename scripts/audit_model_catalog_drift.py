@@ -43,10 +43,6 @@ CATALOG_COMMANDS: dict[str, dict[str, Any]] = {
                 "disposition": "rejected",
                 "reason": "identidad opaca; excluido por provenance",
             },
-            "opencode/laguna-s-2.1-free": {
-                "disposition": "pending_calibration",
-                "reason": "submit observado; falta calibración durable por rol",
-            },
         },
     },
 }

@@ -62,7 +62,7 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   modelos Zen gratuitos (`StructuredOutputError`, sin `info.structured`). No se
   construye supervisor para un transporte que incumple el contrato de cierre.
   Recibo final: `opencode-session-isolation-v1.json`. Verificación final:
-  `1176 passed` el 2026-07-22.
+  `1179 passed` en 131,76 s el 2026-07-22.
 - Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
   de calibración y documentación se separaron en `1b3650e`, `66304c8` y
   `c695661`; junto con los commits locales previos se publicaron 16 commits en
@@ -222,14 +222,16 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 - OpenCode Zen Free queda integrado como perfil built-in read-only con catálogo
   descubierto por el CLI: Nemotron 3 Ultra (Tier 1), DeepSeek V4 Flash y MiMo
   V2.5 (Tier 2), North Mini Code (Tier 3). OpenCode `1.18.4` está instalado,
-  reutiliza una sesión OAuth local y enumera además Laguna S 2.1 Free, aún fuera
-  del catálogo aprobado. El screening público de una semilla pasa transporte,
+  reutiliza una sesión OAuth local y enumera además Laguna S 2.1 Free, visible
+  como manual/probe-gated. El screening público de una semilla pasa transporte,
   contrato y usage con Nemotron, DeepSeek, MiMo y Laguna; North responde sin
   ops y no supera todavía el cierre durable. El canario durable v1 confirma que
   no hay promoción: Nemotron falla parseo, MiMo no crea el rechazo durable,
-  North queda denegado por rol y DeepSeek pasa seed 1 pero falla la aprobación
-  en seed 2. Ninguno alcanza 3/3; se conservan cinco recibos diagnósticos y el
-  baseline no cambia. No presentar “integrado”
+  North queda denegado por rol y DeepSeek completa solo 1/3. La matriz final
+  Laguna vs DeepSeek es exacta 2×3: Laguna completa 0/3, con dos parse errors y
+  un approve timeout; no hay candidato manual ni cambio de default. El primer
+  preflight Laguna falló `model_not_catalogued`; quedó corregido declarando la
+  opción `requires_probe` sin hacerla automática. No presentar “integrado”
   como gateway anónimo: Zen exige login/API key y su oferta gratuita es temporal
   y solo apta para datos no confidenciales. Ver
   `docs/MODELOS_GRATUITOS_OPENCODE.md`.

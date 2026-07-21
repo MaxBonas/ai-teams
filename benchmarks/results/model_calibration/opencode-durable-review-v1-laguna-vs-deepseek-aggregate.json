@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_durable_review_aggregate",
+  "providers": [
+    "opencode-zen"
+  ],
+  "channels": [
+    "free_gateway"
+  ],
+  "contract": "same_broken_diff_then_same_fix_v1",
+  "source_reports": 6,
+  "arms": [
+    {
+      "model": "opencode/deepseek-v4-flash-free",
+      "samples": 3,
+      "seeds": [
+        1,
+        2,
+        3
+      ],
+      "seed_matrix_complete": true,
+      "passed": 1,
+      "reject_passed": 3,
+      "approve_passed": 1,
+      "wall_seconds_median": 61.375,
+      "wall_seconds_range": [
+        48.328,
+        63.891
+      ],
+      "provider_calls": 6,
+      "product_runs": 11
+    },
+    {
+      "model": "opencode/laguna-s-2.1-free",
+      "samples": 3,
+      "seeds": [
+        1,
+        2,
+        3
+      ],
+      "seed_matrix_complete": true,
+      "passed": 0,
+      "reject_passed": 1,
+      "approve_passed": 0,
+      "wall_seconds_median": 236.094,
+      "wall_seconds_range": [
+        37.062,
+        471.704
+      ],
+      "provider_calls": 4,
+      "product_runs": 5
+    }
+  ],
+  "matrix_balanced": true,
+  "conclusion": {
+    "behavioral_contract_tied": false,
+    "default_change_allowed": false,
+    "decision": "retain_baseline",
+    "baseline": "opencode/deepseek-v4-flash-free",
+    "challengers": [
+      "opencode/laguna-s-2.1-free"
+    ],
+    "manual_catalog_candidates": [],
+    "median_wall_seconds_delta": {
+      "opencode/laguna-s-2.1-free": 174.719
+    },
+    "reason": "sin challenger estable 3/3 que justifique promoción",
+    "tokens_available": false,
+    "marginal_cost_cents": 0,
+    "goodhart_risk": "residual: una familia de defecto y juez contractual determinista"
+  }
+}

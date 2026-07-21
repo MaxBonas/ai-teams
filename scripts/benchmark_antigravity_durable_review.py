@@ -35,6 +35,7 @@ OPENCODE_MODELS = (
     "opencode/nemotron-3-ultra-free",
     "opencode/deepseek-v4-flash-free",
     "opencode/mimo-v2.5-free",
+    "opencode/laguna-s-2.1-free",
 )
 MODELS = (*ANTIGRAVITY_MODELS, *OPENCODE_MODELS)
 
@@ -248,9 +249,12 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
     for model in models:
         rows = [row for row in reports if row.get("model") == model]
         seconds = [float(row["quota_observation"]["wall_seconds"]) for row in rows]
+        seeds = sorted(int(row.get("seed") or 0) for row in rows)
         arms.append({
             "model": model,
             "samples": len(rows),
+            "seeds": seeds,
+            "seed_matrix_complete": seeds == [1, 2, 3],
             "passed": sum(bool(row.get("ok")) for row in rows),
             "reject_passed": sum(bool(row.get("reject", {}).get("ok")) for row in rows),
             "approve_passed": sum(bool(row.get("approve", {}).get("ok")) for row in rows),
@@ -266,8 +270,18 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         })
     baseline = arms[0]
     challengers = arms[1:]
-    balanced = all(arm["samples"] == 3 for arm in arms)
+    balanced = all(arm["seed_matrix_complete"] for arm in arms)
     all_passed = all(arm["passed"] == arm["samples"] for arm in arms)
+    manual_catalog_candidates = [
+        arm["model"]
+        for arm in challengers
+        if arm["passed"] == 3 and baseline["passed"] < baseline["samples"]
+    ]
+    reason = (
+        "challenger estable 3/3 frente a baseline inestable; solo candidato manual"
+        if manual_catalog_candidates
+        else "sin challenger estable 3/3 que justifique promoción"
+    )
     return {
         "schema_version": 1,
         "benchmark": "antigravity_durable_review_aggregate",
@@ -283,13 +297,14 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
             "decision": "retain_baseline",
             "baseline": baseline["model"],
             "challengers": [arm["model"] for arm in challengers],
+            "manual_catalog_candidates": manual_catalog_candidates,
             "median_wall_seconds_delta": {
                 arm["model"]: round(
                     float(arm["wall_seconds_median"] or 0)
                     - float(baseline["wall_seconds_median"] or 0), 3
                 ) for arm in challengers
             },
-            "reason": "empate conductual 3/3; la latencia aislada no demuestra ventaja económica",
+            "reason": reason,
             "tokens_available": False,
             "marginal_cost_cents": 0,
             "goodhart_risk": "residual: una familia de defecto y juez contractual determinista",

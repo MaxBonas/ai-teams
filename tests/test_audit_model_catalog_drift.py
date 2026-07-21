@@ -64,7 +64,7 @@ def test_report_separates_codex_blocker_from_completed_drift_audit() -> None:
         flow_report={
             "ok": True,
             "profile_count": 12,
-            "model_count": 46,
+            "model_count": 47,
             "positive_cell_count": 334,
             "negative_cell_count": 402,
             "failures": [],

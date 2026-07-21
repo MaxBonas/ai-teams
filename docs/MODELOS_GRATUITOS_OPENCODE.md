@@ -13,18 +13,17 @@ de credenciales de OpenCode y no promete disponibilidad permanente.
 
 El inventario vivo de OpenCode `1.18.4` del `2026-07-21` añadió además
 `opencode/laguna-s-2.1-free`. Su primer submit público cumple el contrato y
-reporta usage, pero permanece fuera del catálogo aprobado hasta completar la
-misma calibración durable por rol que los cuatro modelos originales.
-El auditor mensual+evento lo conserva con disposición `pending_calibration`;
-`opencode/big-pickle` queda `rejected` por identidad opaca. Ninguno cuenta como
-drift desconocido ni como opción productiva.
+reporta usage. Ahora queda declarado y visible, pero manual/probe-gated: la
+calibración durable de reviewer completa 0/3 frente a 1/3 de DeepSeek. Dos seeds
+fallan parseo; la restante rechaza el defecto y expira al aprobar el fix.
+`opencode/big-pickle` continúa `rejected` por identidad opaca.
 
-El canario durable v1 de reviewer conserva cinco recibos diagnósticos en
+El canario durable v1 de reviewer conserva diez muestras y un agregado en
 `benchmarks/results/model_calibration/opencode-durable-review-v1-*.json`.
 DeepSeek completa reject→fix→approve en seed 1, pero falla la aprobación en
-seed 2; Nemotron falla el contrato estructurado, MiMo no materializa el rechazo
+seeds 2–3; Nemotron falla el contrato estructurado, MiMo no materializa el rechazo
 durable y North es denegado correctamente porque su catálogo no admite reviewer.
-Ningún brazo alcanza 3/3 y no se autoriza promoción ni cambio de roles.
+Ningún brazo alcanza 3/3 y no se autoriza promoción ni routing automático.
 
 El runtime integrado es deliberadamente read-only: permite leer, buscar y usar
 LSP dentro del workspace, pero deniega shell, edición, subagentes, preguntas,

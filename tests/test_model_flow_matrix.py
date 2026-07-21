@@ -13,7 +13,7 @@ def test_every_builtin_model_has_hermetic_positive_and_negative_coverage() -> No
 
     assert report["ok"] is True, report["failures"]
     assert report["profile_count"] == 12
-    assert report["model_count"] == 46
+    assert report["model_count"] == 47
     assert report["positive_cell_count"] > report["model_count"]
     assert report["negative_cell_count"] > report["model_count"]
 
