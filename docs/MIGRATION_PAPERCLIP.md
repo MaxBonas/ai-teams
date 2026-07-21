@@ -236,7 +236,7 @@ Objetivo: reducir el router algoritmico a un runtime contract auditable sin perd
 - La seleccion principal vive en el agente/equipo; el fallback vive en config ordenada, no en scoring opaco.
 - Tests: un mismo rol puede correr por subscription o API segun config, y la run registra el canal usado.
 
-Estado actual (`2026-07-21`): la política de modelos se renovó por adapter y
+Estado actual (`2026-07-22`): la política de modelos se renovó por adapter y
 tier. OpenAI usa Sol/Terra/Luna; Anthropic usa Opus 4.8/Sonnet 5/Haiku 4.5;
 Gemini usa Pro 3.1 Preview/Flash 3.5/Flash-Lite 3.1. Antigravity conserva los
 nombres que su propio CLI enumera y los modelos locales conservan el pin del
@@ -257,7 +257,7 @@ conductual posterior promociona Sonnet 4.6 para Engineer tras tres semillas
 9/9, mejor convergencia, Ruff y latencia que Flash High; review conserva Flash
 High. El backlog de review y calibración del resto de adapters vive en `task.md`.
 
-Estado de integración (`2026-07-21`): la disponibilidad de catálogo y la
+Estado de integración (`2026-07-22`): la disponibilidad de catálogo y la
 compatibilidad modelo×rol ya son invariantes separadas. La decisión pura se
 resuelve sobre el perfil/modelo efectivos y se aplica en bootstrap del Lead,
 hiring, create/update, propuestas editadas, reconcile, lifecycle y dispatch.
@@ -290,7 +290,10 @@ Gobierno continuo: los catálogos de modelos son inventario mutable, no
 configuración terminada. Cada cambio de CLI/provider y una cadencia periódica
 deben repetir discovery, compatibilidad y canarios antes de ampliar roles o
 defaults. La matriz declara quién puede ejecutar; no demuestra por sí sola
-calidad, estabilidad ni economía.
+calidad, estabilidad ni economía. El owner es `AI Teams maintainer`; la
+cadencia mínima es mensual más evento y
+`scripts/audit_model_catalog_drift.py` deja un recibo durable con inventarios
+autenticados, exclusiones explícitas y matriz hermética.
 
 ### Fase 6 — Planificacion estructurada
 

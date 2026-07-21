@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-22`): **1173 passed en 127,72 s**.
+Última suite completa registrada (`2026-07-22`): **1176 passed en 128,34 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -199,8 +199,9 @@ protegida por un test explícito.
 - [x] **Reinvestigar los catálogos actuales con fuentes oficiales y probes
   locales**. OpenAI queda en Sol/Terra/Luna; Anthropic en Opus 4.8/Sonnet
   5/Haiku 4.5 con Fable 5 como escalado; Gemini en 3.1 Pro Preview/3.5
-  Flash/3.1 Flash-Lite. `agy 1.1.5 models` confirma ocho IDs ejecutables para
-  Gemini, Claude 4.6 y GPT-OSS 120B; Equipo conserva etiquetas legibles aparte.
+  Flash/3.1 Flash-Lite. `agy 1.1.5 models` confirma 11 IDs catalogados: los
+  ocho anteriores de Gemini/Claude 4.6/GPT-OSS y tres Gemini 3.6 sujetos a
+  probe exacto; Equipo conserva etiquetas legibles aparte.
 - [x] **Actualizar selección, defaults y FinOps por adapter**. Los tiers se
   resuelven por rol dentro del canal configurado; API conserva precio marginal
   y tramos de contexto, suscripción/local registran 0 céntimos marginales. Los
@@ -214,7 +215,8 @@ protegida por un test explícito.
   si el CLI/runtime no la enumera, el perfil está bloqueado o una run devolvió
   `model_unavailable`. Las runs completadas verifican el par perfil+modelo; el
   hiring automático y el guardado de Equipo usan esa misma evidencia. `agy
-  models` aporta las ocho opciones actuales, incluida `Gemini 3.1 Pro (Low)`;
+  models` aporta 11 opciones actuales; las tres Gemini 3.6 permanecen
+  manual-only/probe-gated y las otras ocho incluyen `Gemini 3.1 Pro (Low)`.
   Ollama/LM Studio solo habilitan modelos instalados.
 - [ ] **Calibrar los modelos nuevos por contrato de rol**, no con benchmarks de
   vendor: Sol/Terra/Luna, Opus/Sonnet/Haiku y Pro/Flash/Flash-Lite deben
@@ -256,11 +258,17 @@ protegida por un test explícito.
   `benchmarks/results/context-curator-auth-codex-luna-seed-1.json`. Hasta
   actualizar el CLI y superar auth+queue, Codex curator conserva `gpt-5.5`
   aunque sea un rol Tier 3.
-- [ ] **Asignar cadencia y owner al drift de catálogos/modelos**. Ejecutar
+- [x] **Asignar cadencia y owner al drift de catálogos/modelos**. Ejecutar
   inventario autenticado y matriz hermética al cambiar versión de CLI/provider
   y, como mínimo, en una revisión mensual mientras existan modelos preview o
   gratuitos temporales. Un alta, retirada o cambio de ID debe abrir calibración
   por par perfil+modelo+rol; discovery nunca autoriza defaults por sí solo.
+  Owner: `AI Teams maintainer`. `audit_model_catalog_drift.py` fija la cadencia
+  mensual + evento, compara IDs exactos de Antigravity/OpenCode, conserva
+  exclusiones con disposición explícita y ejecuta la matriz hermética. El
+  recibo `model-catalog-drift-2026-07-22.json` pasa 3/3 gates: 11 IDs
+  Antigravity, cuatro Zen productivos, Laguna `pending_calibration`, Big Pickle
+  `rejected` y Codex `cli_update_required` como atención separada.
 - [x] **Implementar presión y forecast de cuota por perfil de suscripción**.
   `run_adapter_profiles` congela el perfil real por run y
   `subscription_quota_snapshot` agrega runs, duración, usage disponible y

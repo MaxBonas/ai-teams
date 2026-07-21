@@ -157,9 +157,9 @@ selección manual y no sustituye automáticamente a Pro High o Flash.
 El CLI 1.1.5 cambió la salida de `agy models` a IDs slug. Las etiquetas antiguas
 como `Gemini 3.1 Pro (High)` no son ya la identidad ejecutable del catálogo:
 AI Teams las conserva solo como texto de interfaz y normaliza configuraciones
-guardadas al slug antes de construir `--model`. Las ocho opciones enumeradas por
-el runtime coinciden ahora exactamente con las ocho opciones habilitadas en
-Equipo, incluida `gemini-3.5-flash-medium`.
+guardadas al slug antes de construir `--model`. Las 11 opciones enumeradas por
+el runtime coinciden con Equipo: ocho opciones originales y tres Gemini 3.6
+manual-only/probe-gated, incluida `gemini-3.6-flash-medium`.
 
 El inventario vivo del `2026-07-21` añadió `gemini-3.6-flash-high`, `medium` y
 `low`. Equipo los muestra manual-only y no seleccionables hasta disponer de evidencia exacta de
@@ -168,6 +168,13 @@ Medium completó review 3/3. Medium empató 100 % con 3.5 High y fue 0,407 s má
 lento en mediana (9,172 frente a 8,765 s), por lo que 3.5 High conserva el
 default. Discovery no equivale a ejecutabilidad; el probe por modelo sigue
 siendo el gate.
+
+El drift tiene owner `AI Teams maintainer` y cadencia mensual más evento de
+versión/catálogo. `scripts/audit_model_catalog_drift.py` compara inventarios
+autenticados con IDs declarados y ejecuta la matriz hermética. El recibo del
+2026-07-22 pasa los tres gates; conserva Laguna como `pending_calibration`, Big
+Pickle como `rejected` y la incompatibilidad de versión Codex como atención, no
+como fallo de calidad ni permiso para promover defaults.
 
 El follow-up durable v4 ejercita el runtime productivo sobre el mismo defecto y
 la misma corrección. Flash High y 3.6 Medium completan 3/3 ciclos
@@ -722,8 +729,9 @@ MCPs externos. `serve` tampoco aporta el sandbox necesario para Engineer.
 Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
 y [FREE-3](ORCHESTRATION_SOURCES.md#free-3-cli-mcp-sesiones-y-telemetría).
 
-La vía gratuita es híbrida. `opencode_zen_free` conserva los cinco endpoints
-Zen; `gemini_api_free` reutiliza una key Google del owner y
+La vía gratuita es híbrida. `opencode_zen_free` conserva cuatro modelos
+productivos; Laguna sigue `pending_calibration` y Big Pickle `rejected`.
+`gemini_api_free` reutiliza una key Google del owner y
 `groq_api_free` usa un runtime OpenAI-compatible con key Groq propia. Son
 perfiles distintos de sus equivalentes pagados aunque compartan proveedor:
 health, modelo, privacy label, usage, cuota, 429 y provenance nunca se mezclan.

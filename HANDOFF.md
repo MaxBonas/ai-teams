@@ -62,7 +62,7 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   modelos Zen gratuitos (`StructuredOutputError`, sin `info.structured`). No se
   construye supervisor para un transporte que incumple el contrato de cierre.
   Recibo final: `opencode-session-isolation-v1.json`. Verificación final:
-  `1173 passed` el 2026-07-22.
+  `1176 passed` el 2026-07-22.
 - Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
   de calibración y documentación se separaron en `1b3650e`, `66304c8` y
   `c695661`; junto con los commits locales previos se publicaron 16 commits en
@@ -101,9 +101,10 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   sigue stateless; IDs implícitos `--last`/`--continue` permanecen prohibidos y
   Claude no está instalado.
 - Corregido el catálogo de Equipo para Antigravity 1.1.5: `agy models` devuelve
-  ocho slugs, no las antiguas etiquetas humanas. Las ocho opciones coinciden
-  ahora exactamente y están habilitadas; configuraciones guardadas con etiquetas
-  se normalizan antes de ejecutar sin perder el nombre legible en UI.
+  11 slugs, no las antiguas etiquetas humanas. Las ocho opciones originales y
+  tres Gemini 3.6 coinciden con Equipo; estas últimas siguen manual-only y
+  probe-gated. Las etiquetas guardadas se normalizan antes de ejecutar sin
+  perder el nombre legible en UI.
 - Instrumento de benchmark endurecido antes de nuevas calibraciones:
   `scripts/benchmark_integrity.py` audita balance brazo×semilla, duplicados,
   contratos de evaluación, evidencia independiente, muestra, diversidad de
@@ -248,8 +249,9 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   pago y Cohere/NVIDIA no aportan capacidad gratuita estable demostrada.
 
 Objetivo, pendientes, orden de ejecución y criterios de cierre viven únicamente en
-`task.md`. El bloque activo es continuar P0.2 solo con credenciales verificables
-y, mientras falten, avanzar calibraciones que no dependan de ellas. No
+`task.md`. El drift de catálogos ya tiene owner, cadencia mensual+evento, auditor
+determinista y recibo 3/3; el bloque activo vuelve a las calibraciones que no
+dependan de credenciales ausentes. No
 mantener una segunda lista de tareas en este handoff.
 
 ## Riesgos conocidos

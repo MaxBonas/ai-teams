@@ -396,19 +396,19 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "value": "gemini-3.6-flash-high", "label": "Gemini 3.6 Flash (High)",
             "tier": "standard", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": [], "automatic": False, "requires_probe": True,
-            "price_note": "Antigravity · catálogo vivo; submit no verificado en 1.1.5",
+            "price_note": "Antigravity · catálogo vivo; submit rechazado en 1.1.5",
         },
         {
             "value": "gemini-3.6-flash-medium", "label": "Gemini 3.6 Flash (Medium)",
             "tier": "standard", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": [], "automatic": False, "requires_probe": True,
-            "price_note": "Antigravity · review estructural 3/3; pendiente canario durable",
+            "price_note": "Antigravity · review durable 3/3; baseline 3.5 High conservado",
         },
         {
             "value": "gemini-3.6-flash-low", "label": "Gemini 3.6 Flash (Low)",
             "tier": "budget", "caps": ["synthesis", "coding", "long_ctx"],
             "best_for": [], "automatic": False, "requires_probe": True,
-            "price_note": "Antigravity · catálogo vivo; submit no verificado en 1.1.5",
+            "price_note": "Antigravity · catálogo vivo; submit rechazado en 1.1.5",
         },
         {
             "value": "gemini-3.1-pro-high", "label": "Gemini 3.1 Pro (High)",

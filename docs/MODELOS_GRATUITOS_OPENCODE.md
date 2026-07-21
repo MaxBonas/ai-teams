@@ -1,6 +1,6 @@
 # Modelos gratuitos de OpenCode Zen
 
-Revisión: `2026-07-21`. Esta evaluación clasifica capacidad e integración para
+Revisión: `2026-07-22`. Esta evaluación clasifica capacidad e integración para
 AI Teams; no convierte benchmarks del fabricante en calibración local.
 
 ## Conclusión
@@ -15,6 +15,9 @@ El inventario vivo de OpenCode `1.18.4` del `2026-07-21` añadió además
 `opencode/laguna-s-2.1-free`. Su primer submit público cumple el contrato y
 reporta usage, pero permanece fuera del catálogo aprobado hasta completar la
 misma calibración durable por rol que los cuatro modelos originales.
+El auditor mensual+evento lo conserva con disposición `pending_calibration`;
+`opencode/big-pickle` queda `rejected` por identidad opaca. Ninguno cuenta como
+drift desconocido ni como opción productiva.
 
 El canario durable v1 de reviewer conserva cinco recibos diagnósticos en
 `benchmarks/results/model_calibration/opencode-durable-review-v1-*.json`.

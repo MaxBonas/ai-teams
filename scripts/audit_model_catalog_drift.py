@@ -1,0 +1,284 @@
+"""Audita drift entre catálogos CLI vivos y modelos declarados por AI Teams.
+
+No consume inferencias. Ejecuta únicamente inventarios autenticados, compara
+IDs exactos y añade la matriz hermética perfil+modelo+rol al recibo.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from aiteam.model_flow_matrix import audit_builtin_model_flows  # noqa: E402
+from aiteam.user_config import (  # noqa: E402
+    executable_model_options,
+    model_options,
+)
+
+
+CATALOG_COMMANDS: dict[str, dict[str, Any]] = {
+    "antigravity_subscription": {
+        "executables": ("agy", "agy.exe"),
+        "args": ("models",),
+        "source": "agy models",
+        "excluded": {},
+    },
+    "opencode_zen_free": {
+        "executables": ("opencode.cmd", "opencode"),
+        "args": ("models", "opencode"),
+        "source": "opencode models opencode",
+        "excluded": {
+            "opencode/big-pickle": {
+                "disposition": "rejected",
+                "reason": "identidad opaca; excluido por provenance",
+            },
+            "opencode/laguna-s-2.1-free": {
+                "disposition": "pending_calibration",
+                "reason": "submit observado; falta calibración durable por rol",
+            },
+        },
+    },
+}
+
+
+def compare_catalog(
+    *,
+    profile_id: str,
+    source: str,
+    cli_version: str,
+    declared: list[str],
+    discovered: list[str],
+    excluded: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    excluded = excluded or {}
+    declared_set = {item for item in declared if item}
+    discovered_set = {item for item in discovered if item}
+    excluded_present = {
+        model: disposition
+        for model, disposition in excluded.items()
+        if model in discovered_set
+    }
+    missing = sorted(declared_set - discovered_set)
+    unexpected = sorted(discovered_set - declared_set - set(excluded))
+    duplicates = sorted({item for item in discovered if discovered.count(item) > 1})
+    return {
+        "profile_id": profile_id,
+        "source": source,
+        "cli_version": cli_version,
+        "status": "current",
+        "declared": sorted(declared_set),
+        "discovered": sorted(discovered_set),
+        "excluded_discovered": excluded_present,
+        "missing_declared": missing,
+        "unexpected_discovered": unexpected,
+        "duplicate_discovered": duplicates,
+        "coverage_ok": not missing and not unexpected and not duplicates,
+    }
+
+
+def build_report(
+    *,
+    catalog_rows: list[dict[str, Any]],
+    flow_report: dict[str, Any],
+    codex_catalog: dict[str, Any],
+    observed_at: datetime,
+) -> dict[str, Any]:
+    inventory_complete = bool(catalog_rows) and all(
+        row.get("status") == "current" and bool(row.get("cli_version"))
+        for row in catalog_rows
+    )
+    coverage_ok = inventory_complete and all(
+        row.get("coverage_ok") is True for row in catalog_rows
+    )
+    flow_ok = flow_report.get("ok") is True
+    attention: list[dict[str, Any]] = []
+    for row in catalog_rows:
+        if row.get("status") != "current" or row.get("coverage_ok") is not True:
+            attention.append(
+                {
+                    "profile_id": row.get("profile_id"),
+                    "reason": "catalog_inventory_failed"
+                    if row.get("status") != "current"
+                    else "catalog_drift",
+                }
+            )
+    if codex_catalog.get("status") != "current":
+        attention.append(
+            {
+                "profile_id": "codex_subscription",
+                "reason": codex_catalog.get("reason") or codex_catalog.get("status"),
+            }
+        )
+    return {
+        "schema_version": 1,
+        "benchmark": "model_catalog_drift_audit",
+        "observed_at": observed_at.isoformat(),
+        "policy": {
+            "owner": "AI Teams maintainer",
+            "cadence": "monthly_and_on_cli_or_provider_change",
+            "next_review_due": (observed_at + timedelta(days=30)).date().isoformat(),
+            "triggers": [
+                "cli_version_changed",
+                "provider_catalog_changed",
+                "model_id_added_or_removed",
+                "preview_or_free_offer_changed",
+            ],
+            "promotion_rule": "discovery_never_authorizes_defaults",
+        },
+        "catalogs": catalog_rows,
+        "codex_catalog": codex_catalog,
+        "model_flow_matrix": {
+            key: flow_report.get(key)
+            for key in (
+                "ok",
+                "profile_count",
+                "model_count",
+                "positive_cell_count",
+                "negative_cell_count",
+                "failures",
+            )
+        },
+        "gates": {
+            "authenticated_inventories_complete": inventory_complete,
+            "declared_catalog_coverage": coverage_ok,
+            "hermetic_model_flow_matrix": flow_ok,
+        },
+        "attention_required": attention,
+        "promotion_allowed": False,
+        "ok": inventory_complete and coverage_ok and flow_ok,
+    }
+
+
+def _resolve_executable(candidates: tuple[str, ...]) -> str | None:
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return None
+
+
+def _collect_catalog(profile_id: str, spec: dict[str, Any]) -> dict[str, Any]:
+    executable = _resolve_executable(tuple(spec["executables"]))
+    if not executable:
+        return {
+            "profile_id": profile_id,
+            "source": spec["source"],
+            "status": "unavailable",
+            "coverage_ok": False,
+            "reason": "cli_not_installed",
+        }
+    try:
+        proc = subprocess.run(
+            [executable, *spec["args"]],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "profile_id": profile_id,
+            "source": spec["source"],
+            "status": "timeout",
+            "coverage_ok": False,
+        }
+    if proc.returncode != 0:
+        return {
+            "profile_id": profile_id,
+            "source": spec["source"],
+            "status": "command_failed",
+            "coverage_ok": False,
+            "exit_code": proc.returncode,
+            "stderr": (proc.stderr or "")[:1000],
+        }
+    try:
+        version_proc = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "profile_id": profile_id,
+            "source": spec["source"],
+            "status": "version_timeout",
+            "coverage_ok": False,
+        }
+    cli_version = (
+        (version_proc.stdout or version_proc.stderr or "").strip().splitlines()[:1]
+    )
+    if version_proc.returncode != 0 or not cli_version:
+        return {
+            "profile_id": profile_id,
+            "source": spec["source"],
+            "status": "version_unavailable",
+            "coverage_ok": False,
+        }
+    discovered = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    declared = [
+        str(item.get("value") or "")
+        for item in model_options().get(profile_id, [])
+        if isinstance(item, dict)
+    ]
+    return compare_catalog(
+        profile_id=profile_id,
+        source=str(spec["source"]),
+        cli_version=cli_version[0],
+        declared=declared,
+        discovered=discovered,
+        excluded=dict(spec.get("excluded") or {}),
+    )
+
+
+def run_audit(*, observed_at: datetime | None = None) -> dict[str, Any]:
+    timestamp = observed_at or datetime.now().astimezone()
+    catalog_rows = [
+        _collect_catalog(profile_id, spec)
+        for profile_id, spec in CATALOG_COMMANDS.items()
+    ]
+    _, codex_catalog = executable_model_options("codex_subscription")
+    return build_report(
+        catalog_rows=catalog_rows,
+        flow_report=audit_builtin_model_flows(),
+        codex_catalog=codex_catalog,
+        observed_at=timestamp,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    report = run_audit()
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(
+        json.dumps(
+            {"gates": report["gates"], "attention": report["attention_required"]}
+        )
+    )
+    return 0 if report["ok"] else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

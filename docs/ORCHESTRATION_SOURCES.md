@@ -113,12 +113,12 @@ Registro canónico de fuentes usadas por [ORCHESTRATION.md](ORCHESTRATION.md). V
   - https://ai.google.dev/api/models
   - https://ai.google.dev/gemini-api/docs/pricing
 - Calidad: A.
-- Revisión: `2026-07-21`.
+- Revisión: `2026-07-22`.
 - Cubre: `gemini-3.1-pro-preview`, `gemini-3.5-flash` estable y
   `gemini-3.1-flash-lite` estable, además de precios y tramos por longitud.
-- Evidencia de canal local: `agy 1.1.5 models` confirmó ocho IDs slug para Gemini 3.1 Pro,
-  Gemini 3.5 Flash, Claude Opus/Sonnet 4.6 y GPT-OSS 120B con los nombres que
-  acepta ese CLI; no confirmó usage comparable por run.
+- Evidencia de canal local: `agy 1.1.5 models` confirmó 11 IDs slug: los ocho
+  anteriores de Gemini 3.1/3.5, Claude Opus/Sonnet 4.6 y GPT-OSS 120B, más tres
+  Gemini 3.6 sujetos a probe exacto. No confirmó usage comparable por run.
 
 ### LOCAL-1 Qwen y Gemma
 
