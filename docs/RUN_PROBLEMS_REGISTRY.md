@@ -30,16 +30,18 @@ Registro de problemas detectados en runs reales del proyecto. Cada entrada docum
 `{"status":"completed","marker":"OPENCODE_SDK_RECOVERY_OK"}`, pero la respuesta
 del servidor incluye `StructuredOutputError: Model did not produce structured
 output`, `retries=0` y no expone un resultado estructurado aceptado.
-**Causa raíz:** no determinada. El transporte y el JSON textual funcionan; el
-fallo queda acotado al contrato estructurado entre el modelo Zen, OpenCode
-1.18.4 y su SDK 1.18.4. No se atribuye al parser de AI Teams.
+**Causa raíz:** no determinada, pero ya no queda acotada a DeepSeek. El mismo
+schema falla en DeepSeek, Laguna, MiMo, Nemotron y North bajo OpenCode/SDK
+1.18.4. Algunos modelos producen el objeto textual válido de forma no estable;
+ninguno rellena `info.structured`. La frontera común es Zen/OpenCode, no el
+parser de AI Teams.
 **Mitigación vigente:** mantener `serve`/SDK fuera de producción y no convertir
 el texto válido en éxito cuando el proveedor declara error estructurado. El CLI
 efímero continúa como transporte estable.
-**Verificación:** el mismo canario observa `busy`, recibe aborto `true` en 260
-ms, vuelve a `idle`, mantiene health, completa el marcador posterior, elimina
-la sesión, cierra el puerto y no deja procesos `serve`. Pendiente comparar otro
-modelo con soporte estructurado y revisar el contrato OpenAPI/provider.
+**Verificación:** el canario inicial observa `busy`, aborto, recovery y cleanup.
+`opencode-session-isolation-v1.json` compara los cinco modelos y confirma 0/5
+schemas aceptados; en paralelo pasa 3/3 semillas de override/aislamiento con
+seis sesiones únicas. Repetir solo tras cambio de versión o contrato proveedor.
 
 ### RUN-012 · ABIERTO — OpenCode Zen Free no alcanza estabilidad durable de reviewer
 

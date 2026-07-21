@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-21`): **1164 passed en 133,58 s**.
+Última suite completa registrada (`2026-07-22`): **1173 passed en 127,51 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -143,7 +143,7 @@ protegida por un test explícito.
   registra tokens/runs/duración/429 bajo el perfil exacto sin convertir cero
   coste marginal en consumo ilimitado. Engineer continúa excluido: tool
   permissions no equivalen a un sandbox de sistema operativo.
-- [ ] **Evaluar el transporte OpenCode server/SDK frente al CLI efímero**.
+- [x] **Evaluar el transporte OpenCode server/SDK frente al CLI efímero**.
   Medir salida JSON Schema, cancelación, hangs, health MCP, continuidad por ID y
   aislamiento entre issues. No activar reanudación ni daemon compartido hasta
   superar varias semillas de memoria/override/contaminación y recovery; no
@@ -161,10 +161,13 @@ protegida por un test explícito.
   mismo puerto, recupera el mismo ID `idle` y completa el marcador en 6,172 s.
   El fixture MCP local completa `initialize` y `tools/list`, conserva dos tools
   en inventario, permite exactamente la aprobada, deniega la otra y no deja
-  procesos. Se conserva CLI efímero: aún hay que resolver JSON Schema, repetir
-  varias semillas de memoria/override/contaminación y diseñar el supervisor
-  productivo; SDK, cancelación, hang/restart y health MCP local tienen una
-  semilla positiva, insuficiente para activar un daemon compartido.
+  procesos. La matriz final añade tres semillas de memoria/override y sesión
+  fresca: pasa 3/3 con seis IDs únicos, historial aislado, revocación correcta y
+  borrado. El mismo schema falla en DeepSeek, Laguna, MiMo, Nemotron y North:
+  todos devuelven `StructuredOutputError`, ninguno rellena `info.structured`.
+  Se conserva CLI efímero y no se diseña supervisor productivo: el transporte
+  queda evaluado con decisión negativa, no pendiente de más runs idénticas.
+  Recibo final: `opencode-session-isolation-v1.json`.
   El primer harness terminaba solo el shim `.cmd` y dejó dos procesos hijo;
   quedó corregido usando el binario nativo y gate de puerto cerrado.
 - [x] **Comparar Zen con APIs gratuitas BYOK**. La decisión es híbrida, no una

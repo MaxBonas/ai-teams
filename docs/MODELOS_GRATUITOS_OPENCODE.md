@@ -97,12 +97,12 @@ catálogo.
 
 | Superficie | Estado | Qué garantiza hoy |
 |---|---|---|
-| Catálogo, auth y lifecycle | Fuerte, pendiente de canario local | Discovery del ID exacto, health por perfil, bloqueo ante `model_unavailable` y fallback solo con aprobación |
+| Catálogo, auth y lifecycle | Fuerte con canario local | Discovery del ID exacto, health por perfil, bloqueo ante `model_unavailable` y fallback solo con aprobación |
 | Roles y herramientas nativas | Fuerte para lectura | `read`, `glob`, `grep` y LSP permitidos; shell, edición, subagentes, preguntas, directorios externos y share denegados |
 | MCP | Fuerte para grants aprobados | Configuración efímera por run, servidor denegado por wildcard y allowlist positiva `servidor_tool`; secretos solo como referencias de entorno |
 | Cuota y contexto consumido | Fuerte en telemetría, parcial en forecast | JSONL agrega tokens de entrada/salida, razonamiento, caché, duración, errores 429/cuota e ID de sesión; no inventa un límite que Zen no publique |
-| Salida estructurada | Media | Se recupera `submit_work` del stream JSONL; el adapter server/SDK con JSON Schema aún debe validarse |
-| Continuidad de sesión | Experimental | El ID queda observado, pero no se reanuda hasta superar A/B de memoria, override, aislamiento, tokens y duración |
+| Salida estructurada | Insuficiente en server/SDK 1.18.4 | DeepSeek, Laguna, MiMo, Nemotron y North devuelven `StructuredOutputError` y no rellenan `info.structured`; el CLI conserva el parser fail-closed de `submit_work` |
+| Continuidad de sesión | Transporte validado, producción desactivada | Tres semillas pasan memoria/override/aislamiento con seis IDs únicos, pero no compensa activar reanudación mientras falle el cierre estructurado |
 | Escritura segura | Insuficiente | Los permisos de OpenCode no son una frontera de sandbox del sistema operativo; Engineer continúa prohibido |
 
 La mejora inmediata de CLI ya aplicada elimina `--auto`: en headless las
@@ -112,12 +112,12 @@ run y traduce únicamente los grants decididos por AI Teams. El coste marginal
 permanece en cero, pero el consumo no: tokens, runs, duración y límites
 observados alimentan presión de cuota por el perfil exacto.
 
-La siguiente mejora razonable es un adapter opcional sobre `opencode serve` y
-su SDK/OpenAPI. Aportaría sesiones explícitas, eventos SSE, estado MCP y salida
-con JSON Schema sin depender de reconstruir texto. No debe sustituir todavía al
-CLI efímero: primero necesita canarios de cierre, cancelación, permisos,
-aislamiento entre issues y recuperación tras hang. Tampoco arregla por sí solo
-la ausencia de sandbox de escritura.
+La evaluación del adapter opcional `opencode serve`/SDK queda cerrada en 1.18.4.
+Sesiones explícitas, cancelación, hang/restart, health MCP local y aislamiento
+3×2 funcionan; JSON Schema falla en los cinco modelos gratuitos. Por ello no
+sustituye al CLI efímero ni justifica construir un supervisor. Una reevaluación
+solo tiene sentido tras cambiar versión o contrato del proveedor. Tampoco
+arregla la ausencia de sandbox de escritura.
 
 ## Zen frente a API keys gratuitas del usuario
 
@@ -170,15 +170,15 @@ con la key real. No se añaden opciones decorativas ni el router aleatorio.
 - Pesos locales: son una vía válida y privada, pero requieren descarga y
   hardware; pertenecen a perfiles locales y no a “online sin configurar”.
 
-## Gates pendientes
+## Gates pendientes y condiciones de reevaluación
 
-1. Instalar/conectar OpenCode en un entorno de prueba y verificar
-   `opencode models opencode`, auth y un submit contract real por modelo.
+1. Repetir discovery/auth/submit cuando cambie el catálogo o la versión; la
+   instalación 1.18.4 y los cinco IDs actuales ya tienen probe local.
 2. Ejecutar al menos tres semillas comparables por contrato de rol frente al
    baseline vigente; registrar cierre, calidad oculta, runs y duración.
-3. Comparar CLI efímero con server/SDK en cierre estructurado, cancelación,
-   sesión explícita y ausencia de contaminación entre issues. Reanudar solo por
-   ID exacto y scope completo si el A/B resulta beneficioso.
+3. Repetir server/SDK solo tras un cambio de versión/contrato: el A/B, cancelación,
+   hang/restart, MCP local y aislamiento ya están medidos; JSON Schema bloquea
+   la promoción en OpenCode 1.18.4.
 4. Mantener el perfil fuera de proyectos confidenciales; si se desea
    clasificación automática de sensibilidad, diseñarla y auditarla antes.
 5. No habilitar roles con escritura hasta disponer de una frontera de sandbox

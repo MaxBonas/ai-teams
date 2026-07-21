@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "benchmark": "opencode_session_isolation",
+  "cli_version": "1.18.4",
+  "model": "opencode/deepseek-v4-flash-free",
+  "contract": "schema_cross_model_and_session_override_isolation_3seed_v1",
+  "schema_screen": [
+    {
+      "model": "opencode/deepseek-v4-flash-free",
+      "session_id": "ses_0792c905cffe2xsVsJxYzZqLQc",
+      "seconds": 6.969,
+      "finish": "stop",
+      "text": "{\"status\":\"completed\",\"marker\":\"OPENCODE_SCHEMA_SCREEN_OK\"}",
+      "structured": null,
+      "provider_error": {
+        "name": "StructuredOutputError",
+        "message": "Model did not produce structured output",
+        "retries": 0
+      },
+      "transport_error": null,
+      "gates": {
+        "session_created": true,
+        "request_completed": true,
+        "text_or_structured_exact": true,
+        "structured_field_exact": false,
+        "provider_accepted_schema": false,
+        "session_deleted": true
+      },
+      "ok": true
+    },
+    {
+      "model": "opencode/laguna-s-2.1-free",
+      "session_id": "ses_0792c75f0ffed0yOyKjQizkrvh",
+      "seconds": 4.407,
+      "finish": "stop",
+      "text": "status: completed\nmarker: OPENCODE_SCHEMA_SCREEN_OK",
+      "structured": null,
+      "provider_error": {
+        "name": "StructuredOutputError",
+        "message": "Model did not produce structured output",
+        "retries": 0
+      },
+      "transport_error": null,
+      "gates": {
+        "session_created": true,
+        "request_completed": true,
+        "text_or_structured_exact": false,
+        "structured_field_exact": false,
+        "provider_accepted_schema": false,
+        "session_deleted": true
+      },
+      "ok": true
+    },
+    {
+      "model": "opencode/mimo-v2.5-free",
+      "session_id": "ses_0792c64a4ffefrN5HcV2rjcVoZ",
+      "seconds": 4.766,
+      "finish": "stop",
+      "text": "<tool_call>\n<tool_name>StructuredOutput</tool_name>\n<parameters>{\"status\": \"completed\", \"marker\": \"OPENCODE_SCHEMA_SCREEN_OK\"}</parameters>\n</tool_call>",
+      "structured": null,
+      "provider_error": {
+        "name": "StructuredOutputError",
+        "message": "Model did not produce structured output",
+        "retries": 0
+      },
+      "transport_error": null,
+      "gates": {
+        "session_created": true,
+        "request_completed": true,
+        "text_or_structured_exact": false,
+        "structured_field_exact": false,
+        "provider_accepted_schema": false,
+        "session_deleted": true
+      },
+      "ok": true
+    },
+    {
+      "model": "opencode/nemotron-3-ultra-free",
+      "session_id": "ses_0792c51feffe7ksBazRK2p6ejc",
+      "seconds": 2.75,
+      "finish": "stop",
+      "text": "{\"tool\": \"StructuredOutput\", \"args\": {\"status\": \"completed\", \"marker\": \"OPENCODE_SCHEMA_SCREEN_OK\"}}",
+      "structured": null,
+      "provider_error": {
+        "name": "StructuredOutputError",
+        "message": "Model did not produce structured output",
+        "retries": 0
+      },
+      "transport_error": null,
+      "gates": {
+        "session_created": true,
+        "request_completed": true,
+        "text_or_structured_exact": false,
+        "structured_field_exact": false,
+        "provider_accepted_schema": false,
+        "session_deleted": true
+      },
+      "ok": true
+    },
+    {
+      "model": "opencode/north-mini-code-free",
+      "session_id": "ses_0792c4730ffeO085idqV5Be9go",
+      "seconds": 12.922,
+      "finish": "stop",
+      "text": "```json\n{\"status\": \"completed\", \"marker\": \"OPENCODE_SCHEMA_SCREEN_OK\"}\n```",
+      "structured": null,
+      "provider_error": {
+        "name": "StructuredOutputError",
+        "message": "Model did not produce structured output",
+        "retries": 0
+      },
+      "transport_error": null,
+      "gates": {
+        "session_created": true,
+        "request_completed": true,
+        "text_or_structured_exact": false,
+        "structured_field_exact": false,
+        "provider_accepted_schema": false,
+        "session_deleted": true
+      },
+      "ok": true
+    }
+  ],
+  "isolation_samples": [
+    {
+      "seed": 1,
+      "markers": {
+        "old": "PUBLIC_OLD_S1",
+        "new": "PUBLIC_NEW_S1",
+        "fresh": "PUBLIC_FRESH_S1"
+      },
+      "session_a": "ses_0792c1489ffezrIMT38GbS2GXk",
+      "session_b": "ses_0792c1486ffefYQJUdcoxrMJSM",
+      "seconds": 6.375,
+      "initial_text": "ACK_PUBLIC_OLD_S1",
+      "override_text": "{\"status\": \"completed\", \"active\": \"PUBLIC_NEW_S1\", \"revoked\": \"PUBLIC_OLD_S1\"}",
+      "fresh_text": "{\"status\":\"completed\",\"active\":\"PUBLIC_FRESH_S1\"}",
+      "error": null,
+      "gates": {
+        "two_distinct_sessions": true,
+        "initial_memory_ack_exact": true,
+        "override_json_exact": true,
+        "override_activates_new": true,
+        "override_marks_old_revoked": true,
+        "continuity_history_contains_old_and_new": true,
+        "continuity_history_has_no_other_seed_markers": true,
+        "fresh_session_json_exact": true,
+        "fresh_response_has_no_foreign_markers": true,
+        "fresh_history_has_no_foreign_markers": true,
+        "sessions_deleted": true
+      },
+      "ok": true
+    },
+    {
+      "seed": 2,
+      "markers": {
+        "old": "PUBLIC_OLD_S2",
+        "new": "PUBLIC_NEW_S2",
+        "fresh": "PUBLIC_FRESH_S2"
+      },
+      "session_a": "ses_0792bfba0ffeztVqwZAoM235fd",
+      "session_b": "ses_0792bfb9effe9L16Sg8Mp4c2yh",
+      "seconds": 7.687,
+      "initial_text": "ACK_PUBLIC_OLD_S2",
+      "override_text": "{\n  \"status\": \"completed\",\n  \"active\": \"PUBLIC_NEW_S2\",\n  \"revoked\": \"PUBLIC_OLD_S2\"\n}",
+      "fresh_text": "{\"status\":\"completed\",\"active\":\"PUBLIC_FRESH_S2\"}",
+      "error": null,
+      "gates": {
+        "two_distinct_sessions": true,
+        "initial_memory_ack_exact": true,
+        "override_json_exact": true,
+        "override_activates_new": true,
+        "override_marks_old_revoked": true,
+        "continuity_history_contains_old_and_new": true,
+        "continuity_history_has_no_other_seed_markers": true,
+        "fresh_session_json_exact": true,
+        "fresh_response_has_no_foreign_markers": true,
+        "fresh_history_has_no_foreign_markers": true,
+        "sessions_deleted": true
+      },
+      "ok": true
+    },
+    {
+      "seed": 3,
+      "markers": {
+        "old": "PUBLIC_OLD_S3",
+        "new": "PUBLIC_NEW_S3",
+        "fresh": "PUBLIC_FRESH_S3"
+      },
+      "session_a": "ses_0792bdd89ffeVlPHrRw2GFNcYR",
+      "session_b": "ses_0792bdd86ffecbeQX9wkltvkI1",
+      "seconds": 5.891,
+      "initial_text": "ACK_PUBLIC_OLD_S3",
+      "override_text": "{\n  \"status\": \"completed\",\n  \"active\": \"PUBLIC_NEW_S3\",\n  \"revoked\": \"PUBLIC_OLD_S3\"\n}",
+      "fresh_text": "{\"status\":\"completed\",\"active\":\"PUBLIC_FRESH_S3\"}",
+      "error": null,
+      "gates": {
+        "two_distinct_sessions": true,
+        "initial_memory_ack_exact": true,
+        "override_json_exact": true,
+        "override_activates_new": true,
+        "override_marks_old_revoked": true,
+        "continuity_history_contains_old_and_new": true,
+        "continuity_history_has_no_other_seed_markers": true,
+        "fresh_session_json_exact": true,
+        "fresh_response_has_no_foreign_markers": true,
+        "fresh_history_has_no_foreign_markers": true,
+        "sessions_deleted": true
+      },
+      "ok": true
+    }
+  ],
+  "json_schema_supported_models": [],
+  "gates": {
+    "schema_screen_complete": true,
+    "at_least_one_model_accepts_json_schema": false,
+    "isolation_matrix_3seed": true,
+    "six_distinct_sessions": true,
+    "server_teardown_guaranteed": true
+  },
+  "production_activation_allowed": false,
+  "decision": "retain_ephemeral_cli",
+  "reason": "La evaluación separa soporte JSON Schema de aislamiento. Incluso con tres semillas limpias, serve requiere contrato estructurado y supervisor productivo."
+}

@@ -378,9 +378,11 @@ recuperación en la misma sesión, borrado y teardown. Sigue sin promoción: JSO
 Schema produce `StructuredOutputError` aunque el texto sea válido. Un segundo
 canario suspende el proceso nativo, detecta health colgado, reinicia en el mismo
 puerto y recupera el mismo ID; un MCP local supera `initialize`/`tools/list` con
-allowlist exacta y teardown de ambos procesos. Aún faltan varias semillas de
-contaminación/override y un supervisor productivo. Esta vía nunca sustituye el
-sandbox necesario para roles con escritura.
+allowlist exacta y teardown de ambos procesos. La matriz final completa tres
+semillas y seis sesiones sin contaminación, pero los cinco modelos gratuitos
+fallan JSON Schema con `StructuredOutputError` y `structured=null`. La evaluación
+queda cerrada con decisión negativa: no se implementa el supervisor mientras
+ese contrato falle. Esta vía nunca sustituye el sandbox para roles con escritura.
 
 La alternativa BYOK gratuita funciona en paralelo, no como reemplazo: perfiles
 separados `gemini_api_free` y `groq_api_free`, secretos del owner en vault local,

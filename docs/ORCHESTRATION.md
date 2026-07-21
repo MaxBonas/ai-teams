@@ -699,8 +699,9 @@ tokens equivalentes. Un canario adicional con el SDK oficial 1.18.4 observa la
 sesión `busy`, confirma `POST /session/:id/abort`, vuelve a `idle`, mantiene
 health, completa otra inferencia en la misma sesión, la elimina y garantiza el
 teardown. No se confunde cancelar la petición cliente con abortar la sesión.
-El gate JSON Schema falla: DeepSeek devuelve el objeto textual exacto, pero el
-servidor lo marca `StructuredOutputError` y no expone structured output. Por
+El gate JSON Schema falla: algún modelo puede devolver el objeto textual exacto,
+pero el servidor lo marca `StructuredOutputError` y no expone structured
+output. Por
 separado, el canario de fallos suspende el proceso nativo: el puerto permanece
 abierto pero health expira; después termina ese PID, reinicia en el mismo puerto,
 recupera el mismo ID como `idle` y completa otra inferencia. El health MCP local
@@ -708,14 +709,20 @@ prueba proceso vivo, `initialize`, `tools/list`, inventario de una tool aprobada
 y otra no aprobada, deny del namespace y allow exacto; servidor e hijo terminan.
 Los endpoints experimentales de tools 1.18.4 solo devolvieron built-ins pese a
 `/mcp=connected`, por lo que no se usan como evidencia del inventario MCP.
-Producción conserva CLI efímero hasta resolver JSON Schema, repetir varias
-semillas de contaminación/override y diseñar un supervisor real. El canario
-demuestra recoverability manual, no autorecovery productivo ni salud de MCPs
-externos. `serve` tampoco aporta el sandbox necesario para habilitar Engineer.
+Producción conserva CLI efímero. La matriz final completa la repetición exigida:
+tres semillas, seis sesiones distintas, override y revocación exactos,
+historiales frescos sin marcadores ajenos y cleanup total.
+Sin embargo, DeepSeek, Laguna, MiMo, Nemotron y North fallan el mismo JSON Schema
+con `StructuredOutputError` y `structured=null`; que algunos produzcan JSON
+textual válido de forma no estable no satisface el contrato del proveedor. La
+evaluación termina con decisión negativa: no se construye autorecovery
+productivo sobre esta versión.
+El canario solo demuestra recoverability manual y health de un MCP local, no de
+MCPs externos. `serve` tampoco aporta el sandbox necesario para Engineer.
 Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
 y [FREE-3](ORCHESTRATION_SOURCES.md#free-3-cli-mcp-sesiones-y-telemetría).
 
-La vía gratuita es híbrida. `opencode_zen_free` conserva los cuatro endpoints
+La vía gratuita es híbrida. `opencode_zen_free` conserva los cinco endpoints
 Zen; `gemini_api_free` reutiliza una key Google del owner y
 `groq_api_free` usa un runtime OpenAI-compatible con key Groq propia. Son
 perfiles distintos de sus equivalentes pagados aunque compartan proveedor:

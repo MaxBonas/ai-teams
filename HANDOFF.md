@@ -57,8 +57,12 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   en 532 ms y recupera mismo puerto, ID y sesión `idle`; el marcador posterior
   completa en 6,172 s. El fixture MCP confirma `initialize`, `tools/list`, deny
   por namespace, allow exacto y reap de ambos procesos. Producción sigue efímera
-  hasta resolver JSON Schema, repetir contaminación/override y disponer un
-  supervisor productivo. Verificación final: `1169 passed` el 2026-07-22.
+  tras cerrar la evaluación: memoria/override/contaminación pasa 3/3 con seis
+  IDs únicos e historiales limpios, pero el mismo JSON Schema falla en los cinco
+  modelos Zen gratuitos (`StructuredOutputError`, sin `info.structured`). No se
+  construye supervisor para un transporte que incumple el contrato de cierre.
+  Recibo final: `opencode-session-isolation-v1.json`. Verificación final:
+  `1173 passed` el 2026-07-22.
 - Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
   de calibración y documentación se separaron en `1b3650e`, `66304c8` y
   `c695661`; junto con los commits locales previos se publicaron 16 commits en
