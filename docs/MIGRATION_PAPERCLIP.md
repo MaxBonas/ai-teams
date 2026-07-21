@@ -372,9 +372,12 @@ multi-semilla. Contrato, puntuación, privacidad y descartes viven en
 El adapter aplica la misma gobernanza neutral que el resto: permisos headless
 fail-closed, MCP efímero con allowlist positiva por tool y telemetría de
 tokens/caché/sesión para presión de cuota aunque el coste marginal sea cero. El
-CLI efímero es la ruta estable; `serve`/SDK se evaluará como mejora de
-transporte para JSON Schema y continuidad explícita, nunca como sustituto del
-sandbox necesario para roles con escritura.
+CLI efímero es la ruta estable. El A/B `serve`/attached ya pasa 3×2 y un canario
+del SDK 1.18.4 confirma cancelación durable `busy`→abort→`idle`, health,
+recuperación en la misma sesión, borrado y teardown. Sigue sin promoción: JSON
+Schema produce `StructuredOutputError` aunque el texto sea válido, y faltan
+fault injection de hangs, health MCP y varias semillas de contaminación. Esta
+vía nunca sustituye el sandbox necesario para roles con escritura.
 
 La alternativa BYOK gratuita funciona en paralelo, no como reemplazo: perfiles
 separados `gemini_api_free` y `groq_api_free`, secretos del owner en vault local,

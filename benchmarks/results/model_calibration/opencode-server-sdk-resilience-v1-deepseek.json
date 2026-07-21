@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "benchmark": "opencode_server_sdk_resilience",
+  "cli_version": "1.18.4",
+  "sdk_version": "1.18.4",
+  "model": "opencode/deepseek-v4-flash-free",
+  "contract": "busy_abort_idle_recover_json_schema_v1",
+  "sdk_result": {
+    "sdk_version": "1.18.4",
+    "model": "opencode/deepseek-v4-flash-free",
+    "session_id": "ses_0794a03c9ffet75ldeykOalgyT",
+    "timings_ms": {
+      "abort": 260,
+      "recovery_prompt": 17174
+    },
+    "observed_before_abort": [
+      "idle",
+      "idle",
+      "busy"
+    ],
+    "gates": {
+      "sdk_health_before": true,
+      "sdk_session_created": true,
+      "busy_observed_before_abort": true,
+      "server_abort_acknowledged": true,
+      "idle_after_abort": true,
+      "sdk_health_after": true,
+      "recovery_prompt_completed": true,
+      "recovery_marker_exact": true,
+      "json_schema_accepted": false,
+      "session_deleted": true
+    },
+    "structured_output_error": {
+      "name": "StructuredOutputError",
+      "data": {
+        "message": "Model did not produce structured output",
+        "retries": 0
+      }
+    }
+  },
+  "gates": {
+    "official_sdk_exercised": true,
+    "loopback_authenticated": true,
+    "cancellation_tested": true,
+    "busy_abort_recovery_tested": true,
+    "json_schema_tested": true,
+    "json_schema_accepted": false,
+    "session_deleted": true,
+    "server_teardown_guaranteed": true,
+    "true_hang_fault_injection_tested": false,
+    "mcp_health_tested": false
+  },
+  "production_activation_allowed": false,
+  "decision": "retain_ephemeral_cli",
+  "reason": "El SDK cancela una sesión busy y recupera health/inferencia, pero el contrato JSON Schema falla y aún faltan fault injection de hangs y health MCP."
+}

@@ -1,6 +1,6 @@
 # Plan y trabajo vigente
 
-Fecha: `2026-07-21`
+Fecha: `2026-07-22`
 
 Este es el único documento de objetivos, backlog y orden de ejecución. El plan
 rector arquitectónico está en `docs/MIGRATION_PAPERCLIP.md`; las decisiones ya
@@ -151,8 +151,14 @@ protegida por un test explícito.
   `benchmark_opencode_transport.py` completa un A/B 3×2 con DeepSeek y datos
   públicos: ambos brazos pasan 3/3, seis sesiones son distintas y attached baja
   la mediana de 7,50 s a 2,92 s con tokens equivalentes (~4,84k). El servidor
-  loopback usa Basic Auth, policy sin tools y teardown verificado. Se conserva
-  CLI efímero porque aún faltan cancelación, hangs/recovery, health MCP y SDK.
+  loopback usa Basic Auth, policy sin tools y teardown verificado.
+  `benchmark_opencode_server_resilience.py` valida además el SDK oficial 1.18.4:
+  observa `busy`, aborta en 260 ms, vuelve a `idle`, conserva health, completa
+  una inferencia posterior en la misma sesión, la borra y cierra el servidor.
+  JSON Schema falla con `StructuredOutputError` aunque el texto sea JSON válido.
+  Se conserva CLI efímero porque aún faltan fault injection de un hang real,
+  health MCP y resolver el contrato estructurado; cancelación y SDK ya tienen
+  evidencia positiva de una semilla, no suficiente para activar producción.
   El primer harness terminaba solo el shim `.cmd` y dejó dos procesos hijo;
   quedó corregido usando el binario nativo y gate de puerto cerrado.
 - [x] **Comparar Zen con APIs gratuitas BYOK**. La decisión es híbrida, no una

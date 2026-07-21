@@ -692,14 +692,19 @@ capacidad estable, no se calcula porcentaje ni ETA salvo que el owner configure
 un límite demostrado. El ID de sesión se conserva como telemetría, no autoriza
 reanudar: continuidad exige el mismo scope durable y un A/B favorable.
 
-La superficie `serve`/SDK de OpenCode permite salida estructurada, eventos y
-sesiones explícitas. El A/B vivo v1 de `serve` + `run --attach` frente a CLI
-directo pasa 3/3 por brazo con seis sesiones aisladas; attached reduce la
-mediana 7,50→2,92 s y mantiene tokens equivalentes. El servidor se limita a
-loopback con Basic Auth, policy sin tools y teardown del binario nativo
-verificado. Producción conserva CLI efímero: cancelación, hangs/recovery, health
-MCP y SDK siguen sin evidencia, y `serve` no aporta el sandbox de sistema
-operativo necesario para habilitar Engineer. Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
+La superficie `serve`/SDK de OpenCode permite eventos y sesiones explícitas. El
+A/B vivo v1 de `serve` + `run --attach` frente a CLI directo pasa 3/3 por brazo
+con seis sesiones aisladas; attached reduce la mediana 7,50→2,92 s y mantiene
+tokens equivalentes. Un canario adicional con el SDK oficial 1.18.4 observa la
+sesión `busy`, confirma `POST /session/:id/abort`, vuelve a `idle`, mantiene
+health, completa otra inferencia en la misma sesión, la elimina y garantiza el
+teardown. No se confunde cancelar la petición cliente con abortar la sesión.
+El gate JSON Schema falla: DeepSeek devuelve el objeto textual exacto, pero el
+servidor lo marca `StructuredOutputError` y no expone structured output. Por
+ello producción conserva CLI efímero hasta resolver el contrato, inyectar un
+hang real, validar health MCP y repetir contaminación/recovery. `serve` tampoco
+aporta el sandbox de sistema operativo necesario para habilitar Engineer.
+Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
 y [FREE-3](ORCHESTRATION_SOURCES.md#free-3-cli-mcp-sesiones-y-telemetría).
 
 La vía gratuita es híbrida. `opencode_zen_free` conserva los cuatro endpoints

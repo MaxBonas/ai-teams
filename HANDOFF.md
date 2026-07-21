@@ -2,7 +2,7 @@
 
 # Handoff actual
 
-Fecha: `2026-07-21`
+Fecha: `2026-07-22`
 
 AI Teams ya no está en reconstrucción inicial. Es un control plane multiagente Paperclip-like funcional, centrado en SQLite, y se encuentra en fase de endurecimiento operativo, validación con proveedores reales y medición frente a un agente único.
 
@@ -49,8 +49,13 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 - OpenCode server permanece experimental. El A/B de transporte v1 con DeepSeek
   pasa 3/3 direct y 3/3 attached, conserva seis sesiones aisladas y reduce la
   mediana 7,50→2,92 s con tokens equivalentes. El servidor está autenticado en
-  loopback y termina sin procesos residuales. Producción sigue efímera porque
-  cancelación, hangs/recovery, health MCP y SDK no están validados.
+  loopback y termina sin procesos residuales. El canario SDK v1 observa `busy`,
+  confirma aborto de servidor en 260 ms, retorno a `idle`, health, recuperación
+  posterior, borrado de sesión y teardown. El SDK oficial 1.18.4 queda probado
+  en una semilla; JSON Schema devuelve `StructuredOutputError` pese a texto JSON
+  correcto. Producción sigue efímera hasta resolver ese contrato y validar hang
+  con fault injection, health MCP y varias semillas de contaminación/recovery.
+  Verificación del bloque: `1166 passed` el 2026-07-22.
 - Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
   de calibración y documentación se separaron en `1b3650e`, `66304c8` y
   `c695661`; junto con los commits locales previos se publicaron 16 commits en

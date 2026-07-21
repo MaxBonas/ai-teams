@@ -21,6 +21,26 @@ Registro de problemas detectados en runs reales del proyecto. Cada entrada docum
 
 ## Problemas abiertos
 
+### RUN-015 · ABIERTO — OpenCode SDK rechaza JSON Schema con texto válido
+
+**Detectado:** 2026-07-22
+**Run ID(s):** `opencode-server-sdk-resilience-v1-deepseek.json`
+**Proyecto:** canario de resiliencia OpenCode server/SDK
+**Síntomas:** tras un aborto real y recuperación correcta, DeepSeek devuelve
+`{"status":"completed","marker":"OPENCODE_SDK_RECOVERY_OK"}`, pero la respuesta
+del servidor incluye `StructuredOutputError: Model did not produce structured
+output`, `retries=0` y no expone un resultado estructurado aceptado.
+**Causa raíz:** no determinada. El transporte y el JSON textual funcionan; el
+fallo queda acotado al contrato estructurado entre el modelo Zen, OpenCode
+1.18.4 y su SDK 1.18.4. No se atribuye al parser de AI Teams.
+**Mitigación vigente:** mantener `serve`/SDK fuera de producción y no convertir
+el texto válido en éxito cuando el proveedor declara error estructurado. El CLI
+efímero continúa como transporte estable.
+**Verificación:** el mismo canario observa `busy`, recibe aborto `true` en 260
+ms, vuelve a `idle`, mantiene health, completa el marcador posterior, elimina
+la sesión, cierra el puerto y no deja procesos `serve`. Pendiente comparar otro
+modelo con soporte estructurado y revisar el contrato OpenAPI/provider.
+
 ### RUN-012 · ABIERTO — OpenCode Zen Free no alcanza estabilidad durable de reviewer
 
 **Detectado:** 2026-07-21
