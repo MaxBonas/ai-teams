@@ -46,6 +46,11 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 
 ## Trabajo reciente
 
+- Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
+  de calibración y documentación se separaron en `1b3650e`, `66304c8` y
+  `c695661`; junto con los commits locales previos se publicaron 16 commits en
+  `origin/master`. El barrido no encontró secretos ni artefactos runtime y la
+  suite previa al cierre terminó con `1161 passed`.
 - Cerrada la cimentación de P0.3: `aiteam.policies` normaliza aliases, tier y
   estado de roles sin reescribir proyectos; `worker` es Tier 3, QA es un gate
   condicional y `test_runner` continúa determinista. La identidad de routing

@@ -587,11 +587,12 @@ sí sola el privilegio de un rol.
   `os.kill(pid, 0)`, workspace y user config comparten un ID de sesión por PID,
   los locks stale solo generan warning y dos suites concurrentes terminan 9/9 y
   5/5 sin eliminarse entre sí. Ambos wrappers conservan el exit code.
-- [ ] **Consolidar Git al cerrar cada bloque material**. El árbol actual está
-  13 commits por delante del upstream y contiene 129 entradas sin consolidar;
-  revisar alcance, separar cambios deliberadamente, ejecutar gates, commit y
-  push sin incluir secretos/runtime. Git sigue siendo la fuente de verdad; la
-  documentación reconciliada no sustituye una revisión reproducible remota.
+- [x] **Consolidar Git al cerrar cada bloque material**. Cerrado el 2026-07-21
+  tras barrido de secretos/tamaños/runtime, `1161 passed` y tres commits
+  temáticos: `1b3650e` runtime/control plane, `66304c8` benchmarks/recibos y
+  `c695661` documentación/retirada legacy. Los 16 commits locales acumulados se
+  publicaron en `origin/master`; el árbol quedó limpio. Repetir esta disciplina
+  al terminar cada bloque para que Git siga siendo la fuente de verdad.
 
 - [ ] Eliminar temporales retenidos por Windows después de reinicio o liberación
   de handles, verificando primero rutas exactas. `.pytest-workspace-tmp` y
