@@ -1318,6 +1318,18 @@ button.status-pill { min-height: 26px; }
 .profile-chip:hover { background: var(--surface-hover); color: var(--text); }
 .profile-chip.active { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent-dim); }
 .profile-desc { font-size: 0.65rem; color: var(--text-dim); margin: 1px 0 0; }
+.profile-guidance {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+.profile-guidance strong { color: var(--text); font-weight: 600; }
 .hiring-badge { display: inline-block; font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent-text); background: var(--accent-bg); border-radius: 3px; padding: 1px 5px; margin-bottom: 3px; }
 .hiring-direct { font-size: 0.73rem; color: var(--text-dim); margin: 3px 0 0; font-style: italic; }
 .hiring-issue { display: grid; grid-template-columns: 85px 1fr auto; align-items: baseline; gap: 3px; font-size: 0.7rem; padding: 2px 0; border-top: 1px solid var(--border); }

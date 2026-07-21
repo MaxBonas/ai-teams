@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-22`): **1179 passed en 131,76 s**.
+Última suite completa registrada (`2026-07-22`): **1179 passed en 129,28 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -611,6 +611,13 @@ sí sola el privilegio de un rol.
   de `solo_lead`/`lead_quorum`/`full_team`, lectura del coste/riesgo y CTA desde
   plan aceptado a nueva tarea. No inferir adopción o claridad por la mera
   presencia de componentes; registrar abandono, errores y pasos innecesarios.
+  Progreso: `orientation-flow.spec.ts` añade un contrato Playwright reproducible
+  con API simulada. Chromium pasa Bandeja en 1 acción, cada perfil en 1 acción y
+  plan aceptado → tarea adjunta en 2 acciones, con 0 errores y 0 abandonos
+  sintéticos. La UI expone guía cualitativa de coste operativo y riesgo sin
+  inventar precios. El recibo `orientation-flow-v1.json` declara explícitamente
+  que adopción y claridad reales siguen sin medirse; mantener este task abierto
+  hasta disponer de sesiones observadas o analítica consentida.
 
 ### Mantenimiento no bloqueante
 
@@ -705,6 +712,8 @@ sí sola el privilegio de un rol.
 .\scripts\python_local.bat scripts\e2e_canary.py
 .\scripts\python_local.bat scripts\e2e_quorum_canary.py
 .\scripts\python_local.bat scripts\e2e_solo_lead_canary.py
+Set-Location ide-frontend
+npm run test:e2e:orientation
 ```
 
 Ejecutar únicamente la verificación proporcional al cambio durante iteración;

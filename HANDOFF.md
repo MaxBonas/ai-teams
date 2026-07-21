@@ -62,7 +62,7 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   modelos Zen gratuitos (`StructuredOutputError`, sin `info.structured`). No se
   construye supervisor para un transporte que incumple el contrato de cierre.
   Recibo final: `opencode-session-isolation-v1.json`. Verificación final:
-  `1179 passed` en 131,76 s el 2026-07-22.
+  `1179 passed` en 129,28 s el 2026-07-22.
 - Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
   de calibración y documentación se separaron en `1b3650e`, `66304c8` y
   `c695661`; junto con los commits locales previos se publicaron 16 commits en
@@ -147,6 +147,11 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 - Nueva familia frontend `accessible_checkout_form`: dos semillas 10/10 para
   `solo_lead` y `full_team`; solo cerró 2/2 en una run, equipo 1/2 en 10–12 runs
   y promedió 5,38× tiempo/6,61× entrada. La run abierta conserva continuación.
+- El baseline de orientación frontend ya tiene un E2E Playwright hermético:
+  Bandeja requiere 1 acción, cada perfil 1 y plan aceptado → tarea adjunta 2;
+  Chromium termina sin errores ni abandonos sintéticos. La guía visible compara
+  coste operativo y riesgo de los tres perfiles. No tratar este contrato como
+  evidencia de adopción o claridad real; ese task permanece abierto.
 - `orchestrator_evals` recorre descendientes al decidir si una raíz está
   stranded; un wakeup o interacción viva en un hijo mantiene viva la raíz.
 - Health de perfiles locales basado en runtime y modelo, no en autenticación de Codex.

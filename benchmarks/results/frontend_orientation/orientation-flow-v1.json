@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "benchmark": "frontend_orientation_flow",
+  "observed_at": "2026-07-22",
+  "measurement": "deterministic_ui_contract",
+  "command": "npm run test:e2e:orientation",
+  "browser": "chromium",
+  "result": "passed",
+  "flows": {
+    "inbox": {
+      "actions": 1,
+      "completed": true
+    },
+    "profile_selection": {
+      "actions_per_profile": 1,
+      "completed_profiles": [
+        "solo_lead",
+        "lead_quorum",
+        "full_team"
+      ],
+      "cost_and_risk_guidance_visible": true
+    },
+    "accepted_plan_to_task": {
+      "actions": 2,
+      "completed": true,
+      "plan_reference_attached": true,
+      "execution_profile": "full_team"
+    }
+  },
+  "browser_errors": [],
+  "synthetic_abandoned_flows": [],
+  "limits": {
+    "real_user_adoption_measured": false,
+    "real_user_clarity_measured": false,
+    "note": "Este recibo verifica fricción funcional y regresiones; no sustituye sesiones observadas ni analítica consentida."
+  },
+  "decision": "technical_gate_passed_keep_product_measurement_open"
+}

@@ -487,6 +487,21 @@ const PROFILE_OPTIONS = [
   { value: 'solo_lead', label: 'Solo Lead', desc: 'Lead ejecuta directamente sin contratar' },
 ];
 
+const PROFILE_GUIDANCE: Record<string, { cost: string; risk: string }> = {
+  full_team: {
+    cost: 'Más runs: ejecución y revisión separadas.',
+    risk: 'Reduce errores de implementación con accountability y revisión.',
+  },
+  lead_quorum: {
+    cost: 'Más trabajo antes de ejecutar: varios seniors auditan el plan.',
+    risk: 'Reduce ambigüedad y riesgo arquitectónico antes de cambiar código.',
+  },
+  solo_lead: {
+    cost: 'Menos runs: un único Lead ejecuta de principio a fin.',
+    risk: 'Sin revisión independiente; úsalo solo en trabajo acotado y reversible.',
+  },
+};
+
 // Perfil de ejecución de una issue, leído de metadata_json (persistido por el backend).
 const PROFILE_BADGES: Record<string, { label: string; cls: string }> = {
   full_team: { label: 'Equipo completo', cls: 'team' },
@@ -621,7 +636,7 @@ function QuorumStepper({
       {session.status === 'accepted' && session.final_plan_revision_id && onCreateExecutionTask && (
         <div className="quorum-next-step">
           <span>Plan aceptado — la planificación terminó. El siguiente paso es ejecutarlo:</span>
-          <button className="quorum-cta" onClick={onCreateExecutionTask}>
+          <button className="quorum-cta" data-testid="accepted-plan-cta" onClick={onCreateExecutionTask}>
             Crear tarea de ejecución con este plan
           </button>
         </div>
@@ -2943,7 +2958,7 @@ export default function App() {
   }
 
   return (
-    <main className="shell app-shell">
+    <main className="shell app-shell" data-testid="project-cockpit">
       {projectInitializing && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
@@ -3313,12 +3328,13 @@ export default function App() {
             </div>
             <textarea
               className="task-input"
+              data-testid="new-task-draft"
               placeholder="Describe la tarea para el Lead..."
               value={newTaskDraft}
               onChange={(event) => setNewTaskDraft(event.target.value)}
             />
             {pendingPlanRef && (
-              <div className="attached-plan-chip" title={`Revisión ${pendingPlanRef.revisionId} de ${pendingPlanRef.sourceIssueId}`}>
+              <div className="attached-plan-chip" data-testid="attached-plan" title={`Revisión ${pendingPlanRef.revisionId} de ${pendingPlanRef.sourceIssueId}`}>
                 📋 Plan aceptado adjunto
                 <button
                   className="attached-plan-clear"
@@ -3333,6 +3349,9 @@ export default function App() {
               {PROFILE_OPTIONS.map((p) => (
                 <button
                   key={p.value}
+                  type="button"
+                  data-testid={`task-profile-${p.value}`}
+                  aria-pressed={newTaskProfile === p.value}
                   className={`profile-chip${newTaskProfile === p.value ? ' active' : ''}`}
                   onClick={() => setNewTaskProfile(p.value)}
                   title={p.value === 'lead_quorum' ? `${p.desc}. Úsalo para objetivos ambiguos o críticos que justifiquen auditoría senior.` : p.desc}
@@ -3341,6 +3360,10 @@ export default function App() {
                   {p.value === 'lead_quorum' && <span className="chip-reco chip-reco-mini">★</span>}
                 </button>
               ))}
+            </div>
+            <div className="profile-guidance" data-testid="profile-guidance" aria-live="polite">
+              <span><strong>Coste operativo:</strong> {PROFILE_GUIDANCE[newTaskProfile]?.cost}</span>
+              <span><strong>Riesgo:</strong> {PROFILE_GUIDANCE[newTaskProfile]?.risk}</span>
             </div>
             {newTaskProfile !== 'lead_quorum' && !pendingPlanRef && (
               <p className="new-task-quorum-hint">
@@ -3367,6 +3390,7 @@ export default function App() {
               Chat
             </button>
             <button
+              data-testid="inbox-tab"
               className={viewMode === 'inbox' ? 'tab active tab-chat' : `tab tab-chat${hasPending ? ' tab-chat-pending' : ''}`}
               onClick={() => setViewMode('inbox')}
             >
@@ -3412,7 +3436,7 @@ export default function App() {
               <MessageSquare size={16} />
               Detalle
             </button>
-            <button className={viewMode === 'plan' ? 'tab active' : 'tab'} onClick={() => setViewMode('plan')}>
+            <button data-testid="plan-tab" className={viewMode === 'plan' ? 'tab active' : 'tab'} onClick={() => setViewMode('plan')}>
               <FileText size={16} />
               Plan
               {planDocument ? <span className="tab-badge">v{planDocument.revision_number}</span> : null}
