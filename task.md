@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-22`): **1173 passed en 127,51 s**.
+Última suite completa registrada (`2026-07-22`): **1173 passed en 127,72 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -190,7 +190,12 @@ protegida por un test explícito.
   descubrir modelos con la key real, verificar salida estructurada y persistir
   límites observados. Añadir rate-limit headers de API a la telemetría cuando el
   helper HTTP pueda conservarlos sin exponer secretos. Calibrar Gemini/Groq por
-  rol antes de ampliar `supported_roles` o hacerlos defaults.
+  rol antes de ampliar `supported_roles` o hacerlos defaults. Auditoría local
+  del 2026-07-22: no existen keys de esos cuatro perfiles; los tokens de `gh`
+  carecen de `models:read`. No se crean perfiles decorativos. El helper ya
+  conserva los headers oficiales RPD/TPM de Groq y normaliza los hosts futuros
+  de GitHub Models/OpenRouter para governor y telemetría; catálogo, schema y
+  límites propios siguen bloqueados hasta disponer de credenciales válidas.
 - [x] **Reinvestigar los catálogos actuales con fuentes oficiales y probes
   locales**. OpenAI queda en Sol/Terra/Luna; Anthropic en Opus 4.8/Sonnet
   5/Haiku 4.5 con Fable 5 como escalado; Gemini en 3.1 Pro Preview/3.5

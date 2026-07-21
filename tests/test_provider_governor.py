@@ -101,6 +101,8 @@ def test_provider_for_url() -> None:
     assert provider_for_url("https://generativelanguage.googleapis.com/v1beta/models/x:generateContent") == "google"
     assert provider_for_url("https://api.anthropic.com/v1/messages") == "anthropic"
     assert provider_for_url("https://api.groq.com/openai/v1/chat/completions") == "groq"
+    assert provider_for_url("https://models.github.ai/inference/chat/completions") == "github-models"
+    assert provider_for_url("https://openrouter.ai/api/v1/chat/completions") == "openrouter"
 
 
 def test_http_retry_reports_rate_limits_to_governor(monkeypatch) -> None:

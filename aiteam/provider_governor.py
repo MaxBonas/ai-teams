@@ -189,6 +189,10 @@ def _tpm_limit(provider: str) -> int:
 def provider_for_url(url: str) -> str:
     """Best-effort provider key from an API endpoint URL."""
     host = str(url or "").split("//", 1)[-1].split("/", 1)[0].lower()
+    if host == "models.github.ai":
+        return "github-models"
+    if host == "openrouter.ai" or host.endswith(".openrouter.ai"):
+        return "openrouter"
     if "openai" in host:
         return "openai"
     if "googleapis" in host or "google" in host:

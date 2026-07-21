@@ -153,7 +153,12 @@ conectados o que una run pagada se contabilice como gratuita por inferencia.
 
 GitHub Models y OpenRouter exacto permanecen como expansión posterior: antes de
 mostrarlos en Equipo deben descubrir un ID ejecutable y su contrato estructurado
-con la key real. No se añaden opciones decorativas ni el router aleatorio.
+con la key real. La auditoría local del 2026-07-22 no encuentra keys para
+GitHub Models, OpenRouter, Gemini Free ni Groq; los tokens de `gh` disponibles
+carecen además de `models:read`. No se añaden opciones decorativas ni el router
+aleatorio. El runtime ya separa los hosts de GitHub Models y OpenRouter en el
+governor y conserva RPD/TPM de Groq; los límites de los otros proveedores solo
+se persistirán después de observar respuestas autenticadas.
 
 ## Modelos o canales descartados
 

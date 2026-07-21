@@ -266,13 +266,17 @@ de descarga ni una política de actualización automática.
   - https://console.groq.com/docs/api-reference
   - https://console.groq.com/docs/structured-outputs
   - https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models
+  - https://docs.github.com/en/rest/models/catalog
+  - https://docs.github.com/en/rest/models/inference
   - https://openrouter.ai/docs/faq
+  - https://openrouter.ai/docs/guides/overview/models
+  - https://openrouter.ai/docs/api/reference/errors-and-debugging
   - https://docs.cohere.com/v2/docs/rate-limits
   - https://huggingface.co/docs/inference-providers/en/pricing
   - https://api-docs.deepseek.com/quick_start/pricing/
   - https://mimo.mi.com/docs/en-US/price/pay-as-you-go
 - Calidad: A, documentación oficial de cada servicio.
-- Revisión: `2026-07-21`.
+- Revisión: `2026-07-22`.
 - Cubre: existencia y alcance de free tiers, unidades/headers de cuota,
   requisitos de key, límites de prototipo y precios directos vigentes. La
   ausencia de una cuota NVIDIA pública verificable se trata como desconocida,

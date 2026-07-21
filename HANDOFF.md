@@ -235,18 +235,21 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   El transporte ya falla cerrado sin `--auto`, impone allowlist MCP positiva y
   registra tokens/caché/razonamiento/sesión para presión de cuota con coste
   marginal cero. Sigue limitado a lectura: permisos de tools no son un sandbox.
-  El siguiente experimento específico es CLI efímero frente a server/SDK, no
-  una promoción automática a Engineer.
+  La evaluación server/SDK ya está cerrada con decisión negativa; no promociona
+  OpenCode ni habilita Engineer.
   La ruta complementaria BYOK ya incluye perfiles separados para Gemini Free y
   Groq Free, vault local, health, modelos, usage y cuota. GPT-OSS usa schema
   estricto; Qwen JSON Object Mode validado. GitHub Models/OpenRouter exacto
-  quedan como siguiente expansión, nunca como router aleatorio. No
-  reemplazar Zen, porque DeepSeek/MiMo directos son de pago y Cohere/NVIDIA no
-  aportan una capacidad productiva gratuita estable demostrada.
+  quedan como siguiente expansión, nunca como router aleatorio. La auditoría
+  local del 2026-07-22 no encuentra keys y los tokens de `gh` no incluyen
+  `models:read`; no se crean perfiles hasta ejecutar catálogo y schema reales.
+  El governor ya normaliza `models.github.ai` y `openrouter.ai`; Groq conserva
+  RPD/TPM desde headers. No reemplazar Zen, porque DeepSeek/MiMo directos son de
+  pago y Cohere/NVIDIA no aportan capacidad gratuita estable demostrada.
 
 Objetivo, pendientes, orden de ejecución y criterios de cierre viven únicamente en
-`task.md`. El bloque activo es completar matriz E2E y contrato JSON Object de
-P0.3, antes de ampliar defaults. No
+`task.md`. El bloque activo es continuar P0.2 solo con credenciales verificables
+y, mientras falten, avanzar calibraciones que no dependan de ellas. No
 mantener una segunda lista de tareas en este handoff.
 
 ## Riesgos conocidos
