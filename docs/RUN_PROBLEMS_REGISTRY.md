@@ -54,6 +54,24 @@ llamada, 25.633 tokens y excerpts/resultados aunque el gate durable falle.
 > de liveness siguen siendo válidas: un rol de implementación que no produce
 > cambios no puede cerrar solo con texto. OpenCode Zen sí continúa read-only.
 
+### RUN-014 · RESUELTO — Teardown de OpenCode server terminaba el shim, no el hijo
+
+**Detectado:** 2026-07-21
+**Run ID(s):** `opencode-transport-ab-v1-deepseek.json`
+**Proyecto:** canario de transporte OpenCode
+**Síntomas:** el harness declaraba teardown correcto, pero quedaban dos
+`opencode.exe serve` escuchando en loopback después de terminar sus procesos
+`.cmd` padres.
+**Causa raíz:** `Popen(opencode.cmd)` controlaba el shim de Windows; terminarlo
+no terminaba el binario nativo hijo.
+**Fix aplicado:** resolver y lanzar directamente
+`node_modules/opencode-ai/bin/opencode.exe`, terminar ese PID en `finally` y
+verificar que el puerto quede cerrado antes de aceptar el gate. Los dos procesos
+residuales creados por los canarios fueron identificados por ruta+command line y
+terminados; OpenCode Desktop no se tocó.
+**Verificación:** A/B repetido 3×2, `server_teardown_guaranteed=true` y cero
+procesos npm `opencode.exe serve` tras finalizar.
+
 ### RUN-013 · RESUELTO — El probe de PID de pytest podía terminar suites vivas en Windows
 
 **Detectado:** 2026-07-21

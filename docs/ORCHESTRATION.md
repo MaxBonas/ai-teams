@@ -692,9 +692,13 @@ capacidad estable, no se calcula porcentaje ni ETA salvo que el owner configure
 un límite demostrado. El ID de sesión se conserva como telemetría, no autoriza
 reanudar: continuidad exige el mismo scope durable y un A/B favorable.
 
-La superficie `serve`/SDK de OpenCode permitiría más adelante salida JSON Schema,
-eventos y sesiones explícitas. Es una optimización de transporte pendiente de
-canario; no sustituye los gates del control plane ni aporta el sandbox de sistema
+La superficie `serve`/SDK de OpenCode permite salida estructurada, eventos y
+sesiones explícitas. El A/B vivo v1 de `serve` + `run --attach` frente a CLI
+directo pasa 3/3 por brazo con seis sesiones aisladas; attached reduce la
+mediana 7,50→2,92 s y mantiene tokens equivalentes. El servidor se limita a
+loopback con Basic Auth, policy sin tools y teardown del binario nativo
+verificado. Producción conserva CLI efímero: cancelación, hangs/recovery, health
+MCP y SDK siguen sin evidencia, y `serve` no aporta el sandbox de sistema
 operativo necesario para habilitar Engineer. Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
 y [FREE-3](ORCHESTRATION_SOURCES.md#free-3-cli-mcp-sesiones-y-telemetría).
 

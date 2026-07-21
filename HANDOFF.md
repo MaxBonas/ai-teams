@@ -46,6 +46,11 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 
 ## Trabajo reciente
 
+- OpenCode server permanece experimental. El A/B de transporte v1 con DeepSeek
+  pasa 3/3 direct y 3/3 attached, conserva seis sesiones aisladas y reduce la
+  mediana 7,50→2,92 s con tokens equivalentes. El servidor está autenticado en
+  loopback y termina sin procesos residuales. Producción sigue efímera porque
+  cancelación, hangs/recovery, health MCP y SDK no están validados.
 - Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
   de calibración y documentación se separaron en `1b3650e`, `66304c8` y
   `c695661`; junto con los commits locales previos se publicaron 16 commits en
@@ -58,7 +63,7 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   capacidad. Quorum y review crítico ya no cuentan Codex+OpenAI/GPT como dos
   perspectivas, aunque sus cuotas puedan seguir separadas. Los perfiles custom
   conservan metadata de roles, datos, workspace, MCP y salida estructurada.
-  Verificación del estado completo: `1161 passed` el 2026-07-21.
+  Verificación del estado completo: `1164 passed` el 2026-07-21.
 - Sonnet 4.6 es ahora el modelo automático de Engineer dentro de Antigravity;
   Flash High conserva review/QA. En tres semillas de `cli_conversor`, ambos
   pasan 9/9 ocultos, pero Sonnet cierra 3/3, queda Ruff limpio 3/3 y tarda
@@ -320,7 +325,7 @@ Suite completa verificada el `2026-07-21`:
 
 ```powershell
 .\scripts\pytest_local.bat tests -q --tb=short
-# 1161 passed in 137.21s
+# 1164 passed in 133.58s
 ```
 
 Canario e2e:

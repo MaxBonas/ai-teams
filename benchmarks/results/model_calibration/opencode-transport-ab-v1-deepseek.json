@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "benchmark": "opencode_transport_ab",
+  "model": "opencode/deepseek-v4-flash-free",
+  "cli_version": "1.18.4",
+  "contract": "fresh_session_exact_marker_no_tools_v1",
+  "samples": [
+    {
+      "arm": "direct",
+      "seed": 1,
+      "marker": "OPENCODE_TRANSPORT_1_DIRECT",
+      "seconds": 7.5,
+      "status": "completed",
+      "summary": "OPENCODE_TRANSPORT_1_DIRECT",
+      "ops_count": 0,
+      "session_id": "ses_079591bf0ffer5heCDGjYijCd9",
+      "usage": {
+        "input_tokens": 4791,
+        "output_tokens": 23,
+        "reasoning_output_tokens": 20,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "total_tokens": 4834,
+        "provider_session_id": "ses_079591bf0ffer5heCDGjYijCd9"
+      },
+      "parse_error": null,
+      "gates": {
+        "valid_submit_work": true,
+        "completed": true,
+        "marker_exact": true,
+        "no_ops": true,
+        "explicit_session_id": true
+      },
+      "ok": true,
+      "exit_code": 0
+    },
+    {
+      "arm": "attached",
+      "seed": 1,
+      "marker": "OPENCODE_TRANSPORT_1_ATTACHED",
+      "seconds": 7.563,
+      "status": "completed",
+      "summary": "OPENCODE_TRANSPORT_1_ATTACHED",
+      "ops_count": 0,
+      "session_id": "ses_07958ff00ffei0IrD7lcRw4VBr",
+      "usage": {
+        "input_tokens": 2922,
+        "output_tokens": 25,
+        "reasoning_output_tokens": 0,
+        "cached_input_tokens": 1792,
+        "cache_write_tokens": 0,
+        "total_tokens": 4739,
+        "provider_session_id": "ses_07958ff00ffei0IrD7lcRw4VBr"
+      },
+      "parse_error": null,
+      "gates": {
+        "valid_submit_work": true,
+        "completed": true,
+        "marker_exact": true,
+        "no_ops": true,
+        "explicit_session_id": true
+      },
+      "ok": true,
+      "exit_code": 0
+    },
+    {
+      "arm": "direct",
+      "seed": 2,
+      "marker": "OPENCODE_TRANSPORT_2_DIRECT",
+      "seconds": 7.562,
+      "status": "completed",
+      "summary": "OPENCODE_TRANSPORT_2_DIRECT",
+      "ops_count": 0,
+      "session_id": "ses_07958e12effeeV2xOdN6EH03F9",
+      "usage": {
+        "input_tokens": 4791,
+        "output_tokens": 23,
+        "reasoning_output_tokens": 33,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "total_tokens": 4847,
+        "provider_session_id": "ses_07958e12effeeV2xOdN6EH03F9"
+      },
+      "parse_error": null,
+      "gates": {
+        "valid_submit_work": true,
+        "completed": true,
+        "marker_exact": true,
+        "no_ops": true,
+        "explicit_session_id": true
+      },
+      "ok": true,
+      "exit_code": 0
+    },
+    {
+      "arm": "attached",
+      "seed": 2,
+      "marker": "OPENCODE_TRANSPORT_2_ATTACHED",
+      "seconds": 2.61,
+      "status": "completed",
+      "summary": "OPENCODE_TRANSPORT_2_ATTACHED",
+      "ops_count": 0,
+      "session_id": "ses_07958c4e5ffewVLDnnmZnebWGy",
+      "usage": {
+        "input_tokens": 4793,
+        "output_tokens": 25,
+        "reasoning_output_tokens": 24,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "total_tokens": 4842,
+        "provider_session_id": "ses_07958c4e5ffewVLDnnmZnebWGy"
+      },
+      "parse_error": null,
+      "gates": {
+        "valid_submit_work": true,
+        "completed": true,
+        "marker_exact": true,
+        "no_ops": true,
+        "explicit_session_id": true
+      },
+      "ok": true,
+      "exit_code": 0
+    },
+    {
+      "arm": "direct",
+      "seed": 3,
+      "marker": "OPENCODE_TRANSPORT_3_DIRECT",
+      "seconds": 6.125,
+      "status": "completed",
+      "summary": "OPENCODE_TRANSPORT_3_DIRECT",
+      "ops_count": 0,
+      "session_id": "ses_07958b95dffe10tMDCIUlHss6c",
+      "usage": {
+        "input_tokens": 104,
+        "output_tokens": 23,
+        "reasoning_output_tokens": 0,
+        "cached_input_tokens": 4608,
+        "cache_write_tokens": 0,
+        "total_tokens": 4735,
+        "provider_session_id": "ses_07958b95dffe10tMDCIUlHss6c"
+      },
+      "parse_error": null,
+      "gates": {
+        "valid_submit_work": true,
+        "completed": true,
+        "marker_exact": true,
+        "no_ops": true,
+        "explicit_session_id": true
+      },
+      "ok": true,
+      "exit_code": 0
+    },
+    {
+      "arm": "attached",
+      "seed": 3,
+      "marker": "OPENCODE_TRANSPORT_3_ATTACHED",
+      "seconds": 2.921,
+      "status": "completed",
+      "summary": "OPENCODE_TRANSPORT_3_ATTACHED",
+      "ops_count": 0,
+      "session_id": "ses_07958a2d8ffe8iN3OiAiYd0U2W",
+      "usage": {
+        "input_tokens": 4793,
+        "output_tokens": 25,
+        "reasoning_output_tokens": 66,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "total_tokens": 4884,
+        "provider_session_id": "ses_07958a2d8ffe8iN3OiAiYd0U2W"
+      },
+      "parse_error": null,
+      "gates": {
+        "valid_submit_work": true,
+        "completed": true,
+        "marker_exact": true,
+        "no_ops": true,
+        "explicit_session_id": true
+      },
+      "ok": true,
+      "exit_code": 0
+    }
+  ],
+  "arms": [
+    {
+      "arm": "direct",
+      "samples": 3,
+      "passed": 3,
+      "seconds_median": 7.5,
+      "total_tokens_median": 4834
+    },
+    {
+      "arm": "attached",
+      "samples": 3,
+      "passed": 3,
+      "seconds_median": 2.921,
+      "total_tokens_median": 4842
+    }
+  ],
+  "gates": {
+    "matrix_3x2": true,
+    "all_contracts_passed": true,
+    "fresh_sessions_isolated": true,
+    "loopback_authenticated": true,
+    "server_teardown_guaranteed": true,
+    "cancellation_tested": false,
+    "hang_recovery_tested": false
+  },
+  "production_activation_allowed": false,
+  "decision": "retain_ephemeral_cli",
+  "reason": "El A/B solo compara transporte y aislamiento; cancelación, hangs y recovery HTTP/SDK siguen sin evidencia suficiente."
+}

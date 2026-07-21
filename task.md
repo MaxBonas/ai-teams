@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-21`): **1161 passed en 137,21 s**.
+Última suite completa registrada (`2026-07-21`): **1164 passed en 133,58 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -147,7 +147,14 @@ protegida por un test explícito.
   Medir salida JSON Schema, cancelación, hangs, health MCP, continuidad por ID y
   aislamiento entre issues. No activar reanudación ni daemon compartido hasta
   superar varias semillas de memoria/override/contaminación y recovery; no
-  considerar esta mejora una solución al sandbox de escritura.
+  considerar esta mejora una solución al sandbox de escritura. Progreso:
+  `benchmark_opencode_transport.py` completa un A/B 3×2 con DeepSeek y datos
+  públicos: ambos brazos pasan 3/3, seis sesiones son distintas y attached baja
+  la mediana de 7,50 s a 2,92 s con tokens equivalentes (~4,84k). El servidor
+  loopback usa Basic Auth, policy sin tools y teardown verificado. Se conserva
+  CLI efímero porque aún faltan cancelación, hangs/recovery, health MCP y SDK.
+  El primer harness terminaba solo el shim `.cmd` y dejó dos procesos hijo;
+  quedó corregido usando el binario nativo y gate de puerto cerrado.
 - [x] **Comparar Zen con APIs gratuitas BYOK**. La decisión es híbrida, no una
   migración total: una API directa ofrece mejor provenance, usage, cuota y
   control de tools, pero DeepSeek V4 y MiMo V2.5 directos son de pago, Cohere es
