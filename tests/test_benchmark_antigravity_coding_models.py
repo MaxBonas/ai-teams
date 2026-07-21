@@ -3,6 +3,7 @@ from scripts.benchmark_antigravity_coding_models import (
     CHALLENGER_MODEL,
     aggregate_reports,
 )
+from scripts.benchmark_integrity import code_evaluation_contract
 
 
 def _arm(*, passed: int, seconds: float, ruff: int = 0, status: str = "done") -> dict:
@@ -24,7 +25,7 @@ def _arm(*, passed: int, seconds: float, ruff: int = 0, status: str = "done") ->
 
 def test_aggregate_requires_balanced_three_seed_matrix() -> None:
     reports = [
-        {"seed": seed, "case": "x", "arms": {BASELINE_MODEL: _arm(passed=8, seconds=8), CHALLENGER_MODEL: _arm(passed=9, seconds=20)}}
+        {"seed": seed, "case": "x", "evaluation_contract": code_evaluation_contract(), "arms": {BASELINE_MODEL: _arm(passed=8, seconds=8), CHALLENGER_MODEL: _arm(passed=9, seconds=20)}}
         for seed in (1, 2)
     ]
     aggregate = aggregate_reports(reports)
@@ -34,7 +35,7 @@ def test_aggregate_requires_balanced_three_seed_matrix() -> None:
 
 def test_challenger_must_improve_behavior_without_regression() -> None:
     reports = [
-        {"seed": seed, "case": "x", "arms": {BASELINE_MODEL: _arm(passed=8, seconds=8), CHALLENGER_MODEL: _arm(passed=9, seconds=20)}}
+        {"seed": seed, "case": "x", "evaluation_contract": code_evaluation_contract(), "arms": {BASELINE_MODEL: _arm(passed=8, seconds=8), CHALLENGER_MODEL: _arm(passed=9, seconds=20)}}
         for seed in (1, 2, 3)
     ]
     aggregate = aggregate_reports(reports)
@@ -44,7 +45,7 @@ def test_challenger_must_improve_behavior_without_regression() -> None:
 
 def test_equal_quality_retains_faster_baseline_without_token_claims() -> None:
     reports = [
-        {"seed": seed, "case": "x", "arms": {BASELINE_MODEL: _arm(passed=9, seconds=8), CHALLENGER_MODEL: _arm(passed=9, seconds=20)}}
+        {"seed": seed, "case": "x", "evaluation_contract": code_evaluation_contract(), "arms": {BASELINE_MODEL: _arm(passed=9, seconds=8), CHALLENGER_MODEL: _arm(passed=9, seconds=20)}}
         for seed in (1, 2, 3)
     ]
     aggregate = aggregate_reports(reports)
@@ -57,6 +58,7 @@ def test_equal_hidden_quality_can_promote_on_cleaner_durable_convergence() -> No
         {
             "seed": seed,
             "case": "x",
+            "evaluation_contract": code_evaluation_contract(),
             "arms": {
                 BASELINE_MODEL: _arm(
                     passed=9, seconds=100, ruff=1 if seed > 1 else 0,
@@ -70,3 +72,24 @@ def test_equal_hidden_quality_can_promote_on_cleaner_durable_convergence() -> No
     aggregate = aggregate_reports(reports)
     assert aggregate["conclusion"]["disposition"] == "promote_challenger"
     assert aggregate["conclusion"]["default_change_allowed"] is True
+
+
+def test_legacy_behavioral_report_cannot_promote_without_explicit_limits() -> None:
+    reports = [
+        {
+            "seed": seed,
+            "case": "x",
+            "arms": {
+                BASELINE_MODEL: _arm(passed=8, seconds=8),
+                CHALLENGER_MODEL: _arm(passed=9, seconds=20),
+            },
+        }
+        for seed in (1, 2, 3)
+    ]
+
+    aggregate = aggregate_reports(reports)
+
+    assert aggregate["integrity"]["conclusion_allowed"] is True
+    assert aggregate["integrity"]["promotion_allowed"] is False
+    assert aggregate["conclusion"]["disposition"] == "insufficient_promotion_contract"
+    assert aggregate["conclusion"]["default_change_allowed"] is False

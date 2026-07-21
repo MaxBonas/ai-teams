@@ -3,6 +3,7 @@ from __future__ import annotations
 from scripts.benchmark_integrity import (
     audit_ab_series,
     audit_quorum_series,
+    audit_evaluation_contract,
     code_evaluation_contract,
     quorum_evaluation_contract,
 )
@@ -45,6 +46,35 @@ def test_ab_series_requires_balanced_arm_seed_matrix() -> None:
     assert audit["matched_seed_count"] == 2
     assert audit["missing_cells"] == []
     assert audit["goodhart_risk"] == "residual"
+    assert audit["promotion_allowed"] is True
+
+
+def test_evaluation_contract_rejects_lexical_only_claim_and_missing_limits() -> None:
+    audit = audit_evaluation_contract({
+        "evaluators": [{"id": "keywords", "class": "lexical_coverage"}],
+        "independent_semantic_or_structural": True,
+        "goodhart_risk": "material",
+    })
+
+    assert audit["promotion_ready"] is False
+    assert "independent_evidence_flag_inconsistent" in audit["issues"]
+    assert "constructs_not_measured_missing" in audit["issues"]
+
+
+def test_legacy_hidden_suite_keeps_directional_conclusion_but_not_promotion() -> None:
+    reports = [
+        {key: value for key, value in _ab_report(seed, arm).items() if key != "evaluation_contract"}
+        for seed in (1, 2)
+        for arm in ("solo_lead", "full_team")
+    ]
+
+    audit = audit_ab_series(
+        reports, required_arms=("solo_lead", "full_team"), min_seeds=2
+    )
+
+    assert audit["conclusion_allowed"] is True
+    assert audit["promotion_allowed"] is False
+    assert audit["goodhart_risk"] == "material"
 
 
 def test_ab_series_refuses_missing_arm_and_unseeded_evidence() -> None:
@@ -101,13 +131,18 @@ def test_quorum_series_enforces_sample_provenance_range_and_structure() -> None:
     assert audit["excluded_incomplete_sessions"] == 1
     assert audit["delta_median"] == 4.0
     assert audit["delta_range"] == [2.0, 6.0]
+    assert audit["promotion_allowed"] is True
 
 
 def test_quorum_series_refuses_unstable_or_lexical_only_sample() -> None:
+    lexical_only = _quorum_report(3.0, "openai")
+    lexical_only["evaluation_contract"]["evaluators"] = [
+        {"id": "keywords", "class": "lexical_coverage", "blind": True}
+    ]
     reports = [
         _quorum_report(-2.0, "openai"),
         _quorum_report(1.0, "anthropic"),
-        _quorum_report(3.0, "openai", structural=False),
+        lexical_only,
     ]
 
     audit = audit_quorum_series(reports, min_sessions=3, min_providers=2)

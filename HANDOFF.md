@@ -62,7 +62,7 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   modelos Zen gratuitos (`StructuredOutputError`, sin `info.structured`). No se
   construye supervisor para un transporte que incumple el contrato de cierre.
   Recibo final: `opencode-session-isolation-v1.json`. Verificación final:
-  `1179 passed` en 129,28 s el 2026-07-22.
+  `1182 passed` en 128,71 s el 2026-07-22.
 - Consolidación Git completada el 2026-07-21: runtime/control plane, evidencia
   de calibración y documentación se separaron en `1b3650e`, `66304c8` y
   `c695661`; junto con los commits locales previos se publicaron 16 commits en
@@ -152,6 +152,11 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   Chromium termina sin errores ni abandonos sintéticos. La guía visible compara
   coste operativo y riesgo de los tres perfiles. No tratar este contrato como
   evidencia de adopción o claridad real; ese task permanece abierto.
+- El auditor de benchmarks separa conclusión de promoción. Ya no acepta un
+  booleano de independencia si las clases de evaluador son solo léxicas, y una
+  promoción nueva exige `constructs_not_measured` más riesgo de Goodhart. Los
+  recibos legacy conservan valor direccional; el A/B conductual de Sonnet fue
+  anotado con sus límites y mantiene `promotion_allowed=true` sin alterar scores.
 - `orchestrator_evals` recorre descendientes al decidir si una raíz está
   stranded; un wakeup o interacción viva en un hijo mantiene viva la raíz.
 - Health de perfiles locales basado en runtime y modelo, no en autenticación de Codex.

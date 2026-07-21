@@ -13,6 +13,16 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+INDEPENDENT_EVALUATOR_CLASSES = frozenset({
+    "deterministic_behavioral",
+    "static_analysis",
+    "structural_contract",
+    "state_invariant",
+    "causal_judge",
+    "sampled_human_review",
+})
+
+
 def code_evaluation_contract() -> dict[str, Any]:
     return {
         "version": 1,
@@ -22,6 +32,11 @@ def code_evaluation_contract() -> dict[str, Any]:
         ],
         "independent_semantic_or_structural": True,
         "goodhart_risk": "residual_hidden_suite_overfit",
+        "constructs_not_measured": [
+            "behavior outside the hidden suite",
+            "long-term maintainability",
+            "real-user acceptance",
+        ],
     }
 
 
@@ -36,8 +51,54 @@ def quorum_evaluation_contract(
         ],
         "independent_semantic_or_structural": True,
         "goodhart_risk": "material_no_independent_factual_judge",
+        "constructs_not_measured": [
+            "factual correctness outside the case fixture",
+            "production feasibility of the proposed plan",
+            "real-user preference",
+        ],
         "base_structural": base_structural,
         "final_structural": final_structural,
+    }
+
+
+def audit_evaluation_contract(contract: dict[str, Any]) -> dict[str, Any]:
+    evaluators = contract.get("evaluators") if isinstance(contract.get("evaluators"), list) else []
+    evaluator_classes = sorted({
+        str(item.get("class") or "").strip()
+        for item in evaluators
+        if isinstance(item, dict) and str(item.get("class") or "").strip()
+    })
+    independent_classes = sorted(set(evaluator_classes) & INDEPENDENT_EVALUATOR_CLASSES)
+    limitations = [
+        str(item).strip()
+        for item in contract.get("constructs_not_measured", [])
+        if str(item).strip()
+    ] if isinstance(contract.get("constructs_not_measured"), list) else []
+    declared_independent = contract.get("independent_semantic_or_structural") is True
+    goodhart_declared = bool(str(contract.get("goodhart_risk") or "").strip())
+    issues: list[str] = []
+    if not evaluator_classes:
+        issues.append("evaluators_missing")
+    if not independent_classes:
+        issues.append("independent_evaluator_missing")
+    if not declared_independent:
+        issues.append("independent_evidence_declaration_missing")
+    if declared_independent and not independent_classes:
+        issues.append("independent_evidence_flag_inconsistent")
+    if not limitations:
+        issues.append("constructs_not_measured_missing")
+    if not goodhart_declared:
+        issues.append("goodhart_risk_missing")
+    return {
+        "evaluator_classes": evaluator_classes,
+        "independent_evidence_classes": independent_classes,
+        "constructs_not_measured": limitations,
+        "goodhart_risk_declared": goodhart_declared,
+        "issues": issues,
+        "independent_evidence_present": bool(independent_classes),
+        "promotion_ready": bool(
+            declared_independent and independent_classes and limitations and goodhart_declared
+        ),
     }
 
 
@@ -103,12 +164,15 @@ def audit_ab_series(
         row["score"].get("ruff_issues") is not None for row in selected
     )
     contract_complete = bool(selected) and all(
-        row["contract"].get("independent_semantic_or_structural") is True
+        audit_evaluation_contract(row["contract"])["independent_evidence_present"]
         # Legacy code reports predate the explicit contract, but a non-empty
         # blind hidden suite is already independent behavioral/structural
         # evidence. Do not erase valid historical evidence for missing metadata.
         or int(row["score"].get("hidden_total") or 0) > 0
         for row in selected
+    )
+    promotion_contract_complete = bool(selected) and all(
+        audit_evaluation_contract(row["contract"])["promotion_ready"] for row in selected
     )
     balance_ok = bool(seeds) and not missing and not duplicates
     same_case = len(cases) == 1
@@ -118,6 +182,7 @@ def audit_ab_series(
         bool(required), same_case, balance_ok, sufficient_seeds,
         behavioral_complete, static_complete, contract_complete, same_hidden_contract,
     ))
+    promotion_allowed = conclusion_allowed and promotion_contract_complete
     issues: list[str] = []
     if not required:
         issues.append("required_arms_empty")
@@ -137,6 +202,8 @@ def audit_ab_series(
         issues.append("static_analysis_missing")
     if not contract_complete:
         issues.append("independent_evaluation_contract_missing")
+    if not promotion_contract_complete:
+        issues.append("promotion_evaluation_contract_incomplete")
     if not same_hidden_contract:
         issues.append("hidden_suite_totals_differ")
     return {
@@ -156,9 +223,11 @@ def audit_ab_series(
                 ("independent_semantic_or_structural", contract_complete),
             ) if present
         ],
-        "goodhart_risk": "residual" if conclusion_allowed else "high",
+        "promotion_contract_complete": promotion_contract_complete,
+        "goodhart_risk": "residual" if promotion_allowed else "material" if conclusion_allowed else "high",
         "issues": issues,
         "conclusion_allowed": conclusion_allowed,
+        "promotion_allowed": promotion_allowed,
     }
 
 
@@ -198,9 +267,14 @@ def audit_quorum_series(
                 provenance_complete = False
     structural_complete = bool(completed) and all(
         isinstance(item.get("evaluation_contract"), dict)
-        and item["evaluation_contract"].get("independent_semantic_or_structural") is True
+        and audit_evaluation_contract(item["evaluation_contract"])["independent_evidence_present"]
         and isinstance(item["evaluation_contract"].get("final_structural"), dict)
         and item["evaluation_contract"]["final_structural"].get("valid") is True
+        for item in completed
+    )
+    promotion_contract_complete = bool(completed) and all(
+        isinstance(item.get("evaluation_contract"), dict)
+        and audit_evaluation_contract(item["evaluation_contract"])["promotion_ready"]
         for item in completed
     )
     hard_gates_consistent = bool(completed) and all(
@@ -213,6 +287,7 @@ def audit_quorum_series(
         enough_sessions, enough_providers, provenance_complete,
         structural_complete, hard_gates_consistent, sign_stable,
     ))
+    promotion_allowed = conclusion_allowed and promotion_contract_complete
     issues: list[str] = []
     if incomplete:
         issues.append("incomplete_sessions_excluded_from_delta")
@@ -224,6 +299,8 @@ def audit_quorum_series(
         issues.append("provenance_incomplete")
     if not structural_complete:
         issues.append("independent_structural_evidence_missing")
+    if not promotion_contract_complete:
+        issues.append("promotion_evaluation_contract_incomplete")
     if not hard_gates_consistent:
         issues.append("final_hard_gate_not_consistent")
     if not sign_stable:
@@ -239,9 +316,11 @@ def audit_quorum_series(
         "delta_range": [round(min(deltas), 2), round(max(deltas), 2)] if deltas else None,
         "hard_gates_consistent": hard_gates_consistent,
         "sign_stable": sign_stable,
-        "goodhart_risk": "material" if conclusion_allowed else "high",
+        "promotion_contract_complete": promotion_contract_complete,
+        "goodhart_risk": "material" if promotion_allowed else "high",
         "issues": issues,
         "conclusion_allowed": conclusion_allowed,
+        "promotion_allowed": promotion_allowed,
     }
 
 

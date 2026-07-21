@@ -883,6 +883,15 @@ signo estable; produce mediana y rango. Todo reporte declara además riesgo de
 Goodhart. Un resultado puede conservar valor de liveness o diagnóstico y, a la
 vez, obtener `conclusion_allowed=false`.
 
+La auditoría no confía en el booleano autorreportado de independencia. Deriva
+la evidencia de clases admitidas —tests conductuales deterministas, análisis
+estático, contrato estructural, invariantes de estado, juez causal o revisión
+humana muestreada— y rechaza contratos únicamente léxicos aunque afirmen lo
+contrario. `conclusion_allowed` conserva evidencia histórica comparable;
+`promotion_allowed` es más estricto y exige además riesgo de Goodhart y una
+lista no vacía de constructos no medidos. Los harnesses que cambian defaults
+deben consumir este segundo gate.
+
 El harness de código v4 explicita como evaluadores la suite oculta conductual y
 Ruff; esa evidencia histórica sigue siendo válida aunque los JSON anteriores no
 incluyeran el bloque de metadatos. El scorer de quorum continúa midiendo la misma

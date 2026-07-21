@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-22`): **1179 passed en 129,28 s**.
+Última suite completa registrada (`2026-07-22`): **1182 passed en 128,71 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -601,11 +601,18 @@ sí sola el privilegio de un rol.
   `provider_failover`: cuatro sesiones aceptadas y dos incompletas, mediana
   `+6,52`, rango `-8,70..+8,70`, signo inestable y resultados legacy sin
   contrato estructural. La evidencia previa sigue siendo direccional.
-- [ ] **Reducir dependencia de rúbricas léxicas en familias nuevas**. Conservar
+- [x] **Reducir dependencia de rúbricas léxicas en familias nuevas**. Conservar
   los scores históricos solo para comparabilidad; cada promoción nueva debe
   añadir al menos una evidencia independiente ejecutable o causal —hidden
   tests, invariantes de estado, análisis estático, juez determinista o revisión
   humana muestreada— y declarar explícitamente los constructos que no mide.
+  Cerrado: `audit_evaluation_contract` deriva la independencia de una allowlist
+  de clases de evaluador y ya no confía en un booleano autorreportado. El auditor
+  separa `conclusion_allowed` de `promotion_allowed`: evidencia legacy con suite
+  oculta conserva valor direccional, pero no puede cambiar defaults sin contrato
+  explícito, riesgo de Goodhart y `constructs_not_measured`. Los tres recibos
+  conductuales de Sonnet ya declaran esos límites; el agregado canónico conserva
+  su promoción acotada con ambos gates en `true`.
 - [ ] **Medir los flujos de orientación del usuario antes de ampliar frontend**.
   Definir una prueba E2E y una métrica mínima para Bandeja, selección consciente
   de `solo_lead`/`lead_quorum`/`full_team`, lectura del coste/riesgo y CTA desde

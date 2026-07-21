@@ -183,6 +183,7 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
     baseline = summaries.get(BASELINE_MODEL)
     challenger = summaries.get(CHALLENGER_MODEL)
     conclusion_allowed = bool(integrity["conclusion_allowed"] and baseline and challenger)
+    promotion_allowed = bool(integrity["promotion_allowed"] and baseline and challenger)
     disposition = "insufficient_evidence"
     if conclusion_allowed:
         deltas = [
@@ -210,6 +211,8 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
             disposition = "promote_challenger"
         else:
             disposition = "retain_baseline"
+        if disposition == "promote_challenger" and not promotion_allowed:
+            disposition = "insufficient_promotion_contract"
     return {
         "schema_version": 1,
         "benchmark": "antigravity_coding_behavioral_calibration",
@@ -219,8 +222,9 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "integrity": integrity,
         "conclusion": {
             "allowed": conclusion_allowed,
+            "promotion_allowed": promotion_allowed,
             "disposition": disposition,
-            "default_change_allowed": conclusion_allowed and disposition == "promote_challenger",
+            "default_change_allowed": promotion_allowed and disposition == "promote_challenger",
             "economic_comparison_available": bool(
                 baseline and challenger and baseline["usage_available"] and challenger["usage_available"]
             ),

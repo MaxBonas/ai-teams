@@ -77,12 +77,15 @@
       "static_analysis",
       "independent_semantic_or_structural"
     ],
+    "promotion_contract_complete": true,
     "goodhart_risk": "residual",
     "issues": [],
-    "conclusion_allowed": true
+    "conclusion_allowed": true,
+    "promotion_allowed": true
   },
   "conclusion": {
     "allowed": true,
+    "promotion_allowed": true,
     "disposition": "promote_challenger",
     "default_change_allowed": true,
     "economic_comparison_available": false,
