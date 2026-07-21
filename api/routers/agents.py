@@ -6,14 +6,15 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.utils import PROJECT_ROOT, _require_api_auth_request, _workspace_from_request, get_current_workspace, resolve_runtime_dir
 from aiteam.db.activity_log import log_activity
 from aiteam.db.agents import create_agent, get_agent, list_agents, update_agent
 from aiteam.db.finops import check_budget
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
-from aiteam.user_config import assert_no_inline_secret
+from aiteam.user_config import assert_no_inline_secret, validate_model_selection
+from aiteam.compatibility_service import ModelCompatibilityError, require_compatible_assignment
 
 router = APIRouter()
 
@@ -23,12 +24,16 @@ class CreateAgentRequest(BaseModel):
     name: str
     seniority: str = "standard"
     adapter_type: str | None = None
-    adapter_config: dict[str, Any] = {}
-    capabilities: list[str] = []
+    adapter_config: dict[str, Any] = Field(default_factory=dict)
+    capabilities: list[str] = Field(default_factory=list)
     budget_monthly_cents: int = 0
     heartbeat_interval_sec: int = 0
     supervisor_agent_id: str | None = None
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    run_profile: str = ""
+    criticality: str = "medium"
+    data_class: str = ""
+    required_capabilities: list[str] = Field(default_factory=list)
 
 
 class UpdateAgentRequest(BaseModel):
@@ -41,6 +46,10 @@ class UpdateAgentRequest(BaseModel):
     capabilities: list[str] | None = None
     budget_monthly_cents: int | None = None
     supervisor_agent_id: str | None = None
+    run_profile: str = ""
+    criticality: str = "medium"
+    data_class: str = ""
+    required_capabilities: list[str] = Field(default_factory=list)
 
 
 @router.post("/api/agents")
@@ -49,6 +58,16 @@ async def post_agent(body: CreateAgentRequest, request: Request):
     db = _db(request)
     try:
         assert_no_inline_secret(body.adapter_config)
+        validate_model_selection(body.adapter_config)
+        require_compatible_assignment(
+            adapter_type=body.adapter_type or "manual",
+            adapter_config=body.adapter_config,
+            role=body.role,
+            run_profile=body.run_profile,
+            criticality=body.criticality,
+            data_class=body.data_class,
+            required_capabilities=body.required_capabilities,
+        )
         row = create_agent(
             db, role=body.role, name=body.name, seniority=body.seniority,
             adapter_type=body.adapter_type, adapter_config=body.adapter_config,
@@ -56,6 +75,8 @@ async def post_agent(body: CreateAgentRequest, request: Request):
             heartbeat_interval_sec=body.heartbeat_interval_sec,
             supervisor_agent_id=body.supervisor_agent_id, metadata=body.metadata,
         )
+    except ModelCompatibilityError as exc:
+        raise HTTPException(status_code=422, detail=exc.decision)
     except (ValueError, sqlite3.IntegrityError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except sqlite3.OperationalError as exc:
@@ -132,8 +153,31 @@ async def patch_agent(agent_id: str, body: UpdateAgentRequest, request: Request)
     _require_api_auth_request(request)
     db = _db(request)
     try:
+        existing = get_agent(db, agent_id=agent_id)
+        existing_decoded = _decode(existing) if existing else {}
         if body.adapter_config is not None:
             assert_no_inline_secret(body.adapter_config)
+            existing_config = existing_decoded.get("adapter_config") if existing else {}
+            old_model = str((existing_config or {}).get("model") or "")
+            new_model = str(body.adapter_config.get("model") or "")
+            old_profile = str((existing_config or {}).get("profile_id") or "")
+            new_profile = str(body.adapter_config.get("profile_id") or "")
+            if (new_profile, new_model) != (old_profile, old_model):
+                validate_model_selection(body.adapter_config)
+        if existing and (
+            body.adapter_type is not None
+            or body.adapter_config is not None
+            or body.capabilities is not None
+        ):
+            require_compatible_assignment(
+                adapter_type=body.adapter_type or str(existing_decoded.get("adapter_type") or "manual"),
+                adapter_config=body.adapter_config if body.adapter_config is not None else existing_decoded.get("adapter_config") or {},
+                role=str(existing_decoded.get("role") or ""),
+                run_profile=body.run_profile,
+                criticality=body.criticality,
+                data_class=body.data_class,
+                required_capabilities=body.required_capabilities,
+            )
         row = update_agent(
             db, agent_id=agent_id,
             status=body.status,
@@ -146,6 +190,8 @@ async def patch_agent(agent_id: str, body: UpdateAgentRequest, request: Request)
             budget_monthly_cents=body.budget_monthly_cents,
             supervisor_agent_id=body.supervisor_agent_id,
         )
+    except ModelCompatibilityError as exc:
+        raise HTTPException(status_code=422, detail=exc.decision)
     except (ValueError, sqlite3.IntegrityError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except sqlite3.OperationalError as exc:
@@ -172,9 +218,9 @@ async def patch_agent(agent_id: str, body: UpdateAgentRequest, request: Request)
 async def reconcile_agents(request: Request):
     """Re-run reconcile_project_agent_policy and return repaired agent IDs.
 
-    Safe to call any time — idempotent. Repairs placeholder adapters, upgrades
-    API-only junior agents to CLI when a CLI profile is available, and ensures
-    Tier 3 scout agents exist.
+    Safe to call any time — idempotent. Repairs placeholder or missing governed
+    profiles without changing channel implicitly, and ensures Tier 3 scout
+    agents exist.
     """
     _require_api_auth_request(request)
     db = _db(request)

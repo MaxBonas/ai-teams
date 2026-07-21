@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import urllib.parse
+from dataclasses import replace
 from typing import Any
 
 from aiteam.adapters.http_retry import post_json as _post_json
 from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
 from aiteam.pricing import estimate_cost_from_usage
-from aiteam.adapters.work_contract import SUBMIT_WORK_SCHEMA, build_execution_contract, ops_to_actions, parse_submit_work
+from aiteam.adapters.work_contract import SUBMIT_WORK_SCHEMA, build_execution_contract, ops_to_actions, validate_submit_work
 
 
 def _to_gemini_schema(node: Any) -> Any:
@@ -33,10 +34,26 @@ def _to_gemini_schema(node: Any) -> Any:
 class GeminiApiRuntime:
     """Google Gemini API runtime using JSON response mode."""
 
-    def __init__(self, descriptor: AdapterDescriptor, *, model: str = "gemini-2.5-flash", timeout: float = 120.0) -> None:
+    def __init__(
+        self,
+        descriptor: AdapterDescriptor,
+        *,
+        model: str = "gemini-3.5-flash",
+        timeout: float = 120.0,
+        free_tier: bool = False,
+    ) -> None:
         self.descriptor = descriptor
         self._model = model
         self._timeout = timeout
+        self._free_tier = free_tier
+
+    def with_config(self, config: dict[str, Any]) -> "GeminiApiRuntime":
+        return GeminiApiRuntime(
+            replace(self.descriptor, provider=str(config.get("provider") or self.descriptor.provider)),
+            model=str(config.get("model") or self._model),
+            timeout=float(config.get("timeout_sec") or self._timeout),
+            free_tier=bool(config.get("free_tier", self._free_tier)),
+        )
 
     def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
         return StaticAdapterRuntime(self.descriptor).build_env(run_id=run_id, wake_context=wake_context)
@@ -67,7 +84,7 @@ class GeminiApiRuntime:
 
         raw_text = _gemini_output_text(data)
         try:
-            work = parse_submit_work(raw_text)
+            work = validate_submit_work(raw_text)
         except ValueError as exc:
             return ExecutionResult(status="failed", output=raw_text[:2048] or None, error=str(exc), error_code="tool_parse_error")
         ops = work.get("ops") if isinstance(work.get("ops"), list) else []
@@ -77,7 +94,7 @@ class GeminiApiRuntime:
             status=status if status in {"completed", "failed", "skipped"} else "completed",
             output=str(work.get("summary") or "") or None,
             usage=usage,
-            actual_cost_cents=estimate_cost_from_usage("google", model, usage),
+            actual_cost_cents=(0 if self._free_tier else estimate_cost_from_usage("google", model, usage)),
             actions=ops_to_actions([op for op in ops if isinstance(op, dict)]),
         )
 

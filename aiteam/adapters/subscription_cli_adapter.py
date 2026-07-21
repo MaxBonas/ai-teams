@@ -109,8 +109,8 @@ class ClaudeSubscriptionCliRuntime:
             with _command_context(self, env, run, effective_cwd=effective_cwd) as spec:
                 stdin_input = spec.get("stdin_input")
                 run_kwargs: dict[str, Any] = dict(
-                    env=merged_env,
-                    cwd=effective_cwd,
+                    env={**merged_env, **spec.get("env_updates", {})},
+                    cwd=spec.get("cwd", effective_cwd),
                     capture_output=True,
                     # Force UTF-8 for stdin/stdout: the prompt carries non-ASCII
                     # (Spanish accents) and codex reads/writes UTF-8. Without this
@@ -151,12 +151,25 @@ class ClaudeSubscriptionCliRuntime:
         raw_output = raw_output[: self.max_output_chars]
         if proc.returncode != 0:
             lowered_output = raw_output.lower()
-            error_code = (
-                "subscription_cli_usage_limit"
-                if "you've hit your usage limit" in lowered_output
-                or "purchase more credits" in lowered_output
-                else "subscription_cli_nonzero_exit"
-            )
+            if any(marker in lowered_output for marker in (
+                "you've hit your usage limit",
+                "purchase more credits",
+                "rate limit",
+                "rate_limit",
+                "too many requests",
+                "quota exceeded",
+                "http 429",
+            )):
+                error_code = "subscription_cli_usage_limit"
+            elif (
+                "model requires a newer version" in lowered_output
+                or "requires a newer version of codex" in lowered_output
+                or "unknown model" in lowered_output
+                or "model not found" in lowered_output
+            ):
+                error_code = "model_unavailable"
+            else:
+                error_code = "subscription_cli_nonzero_exit"
             return ExecutionResult(
                 status="failed",
                 output=raw_output or None,
@@ -170,6 +183,8 @@ class ClaudeSubscriptionCliRuntime:
                 work = _parse_codex_output(raw_output)
             elif self.cli_kind == "antigravity":
                 work = _parse_antigravity_output(raw_output)
+            elif self.cli_kind == "opencode":
+                work = _parse_opencode_output(raw_output)
             else:
                 work = parse_submit_work(raw_output)
         except ValueError as exc:
@@ -199,6 +214,11 @@ class ClaudeSubscriptionCliRuntime:
                 proc.stdout if isinstance(proc.stdout, str) else "",
                 proc.stderr if isinstance(proc.stderr, str) else "",
             )
+        elif usage is None and self.cli_kind == "opencode":
+            # OpenCode emits usage per step-finish event, not in the final
+            # submit_work payload. Keep the gateway at zero marginal cost but
+            # retain tokens and its explicit session ID for pressure analysis.
+            usage = _extract_opencode_usage(raw_output)
 
         return ExecutionResult(
             status=status if status in {"completed", "failed", "skipped"} else "completed",
@@ -209,7 +229,14 @@ class ClaudeSubscriptionCliRuntime:
             actions=ops_to_actions([op for op in ops if isinstance(op, dict)]),
         )
 
-    def _build_claude_command(self, system_prompt: str, user_prompt: str) -> list[str]:
+    def _build_claude_command(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        mcp_config_path: str | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
+    ) -> list[str]:
         """Build command for Claude Code CLI (non-interactive -p mode)."""
         command = list(self.command or ["claude"])
         if len(command) == 1:
@@ -235,14 +262,36 @@ class ClaudeSubscriptionCliRuntime:
         if self.cli_kind == "generic":
             command.append(user_prompt)
             return command
+        if self.cli_kind == "opencode":
+            # `opencode run` is non-interactive and rejects unresolved asks.
+            # Never pass --auto: an omitted deny rule would otherwise become an
+            # implicit approval in a headless process.
+            command.extend(["run", "--format", "json"])
+            if self.model:
+                model = self.model if "/" in self.model else f"opencode/{self.model}"
+                command.extend(["--model", model])
+            command.append(user_prompt)
+            return command
         command.extend(["-p", "--output-format", "json", "--no-session-persistence"])
+        if mcp_config_path:
+            # Ignore user/project MCP configuration: this run may see only the
+            # grants selected by AI Teams for its role and capability set.
+            command.extend(["--strict-mcp-config", "--mcp-config", mcp_config_path])
+            denied = [
+                f"mcp__{server.get('name')}__{tool}"
+                for server in mcp_servers or []
+                for tool in server.get("denied_tools") or []
+            ]
+            if denied:
+                command.extend(["--disallowedTools", *denied])
         command.extend(["--json-schema", json.dumps(SUBMIT_WORK_SCHEMA, ensure_ascii=False)])
         command.extend(["--append-system-prompt", system_prompt])
         if self.model:
             command.extend(["--model", self.model])
         if self.permission_mode:
             command.extend(["--permission-mode", self.permission_mode])
-        command.append(user_prompt)
+        if user_prompt:
+            command.append(user_prompt)
         return command
 
     def _build_codex_command(
@@ -252,6 +301,7 @@ class ClaudeSubscriptionCliRuntime:
         schema_path: str,
         output_path: str,
         effective_cwd: str | None,
+        mcp_servers: list[dict[str, Any]] | None = None,
     ) -> list[str]:
         """Build command for Codex CLI (exec mode with structured output schema).
 
@@ -278,6 +328,28 @@ class ClaudeSubscriptionCliRuntime:
         # must not trigger ~/.codex/config.toml's `notify` hook, which spawns a
         # computer-use helper that kills the run's process tree mid-flight.
         command.extend(["-c", "notify=[]"])
+        # Project MCP grants are injected only for this ephemeral process. The
+        # config contains executable paths/args but never secret values.
+        for server in mcp_servers or []:
+            name = str(server.get("name") or "").strip()
+            executable = str(server.get("command") or "").strip()
+            args = server.get("args") or []
+            if not name or not executable or not isinstance(args, list):
+                continue
+            command.extend(["-c", f"mcp_servers.{name}.command={json.dumps(executable)}"])
+            command.extend(["-c", f"mcp_servers.{name}.args={json.dumps(args)}"])
+            env_required = server.get("env_required") or []
+            if isinstance(env_required, list) and env_required:
+                command.extend([
+                    "-c",
+                    f"mcp_servers.{name}.env_vars={json.dumps(env_required)}",
+                ])
+            enabled_tools = server.get("enabled_tools") or []
+            if isinstance(enabled_tools, list):
+                command.extend([
+                    "-c",
+                    f"mcp_servers.{name}.enabled_tools={json.dumps(enabled_tools)}",
+                ])
         # --json emite eventos JSONL por stdout (turn.completed trae el usage
         # con desglose input/output/cached/reasoning). Sin esto el canal de
         # suscripción no registraba NI UN token: usage_json quedaba {} y
@@ -410,9 +482,11 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
             "  - Para proponer una herramienta MCP (solo tú, el Lead — nunca un worker) → "
             '{"type":"create_interaction","kind":"request_confirmation","title":"Proponer MCP: <nombre>",'
             '"summary":"<qué, por qué, riesgos>","payload":{"reason":"extension_install_requested",'
-            '"name":"<slug>","source":"<comando con versión pineada>","justification":"<evidencia concreta>",'
-            '"applies_to_roles":["engineer","reviewer"]}}'
-            " — instalar código de terceros SIEMPRE espera al owner, nunca se auto-acepta. "
+            '"catalog_id":"github-readonly|playwright-browser|filesystem-workspace",'
+            '"justification":"<evidencia concreta>"}}'
+            " — usa catalog_id cuando encaje; el sistema rellena el contrato revisado sin instalar nada. "
+            "Para un descriptor ad-hoc envía name, source ejecutable local, version exacta y roles. "
+            "Ejecutar código de terceros SIEMPRE espera al owner, nunca se auto-acepta. "
             "Antes de proponer, revisa si ya existe una propuesta/investigación igual (no dupliques research).",
             "  - Para dirigir a un hijo bloqueado → update_child_issue. Para cerrar la issue → "
             '{"type":"set_status","status":"done"}.',
@@ -436,7 +510,11 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
             "No sustituyas esas relaciones por estados vagos como 'pendiente de revisión'.",
             "Tu artefacto obligatorio NO es add_comment: emite un op append_context_summary con path=target_issue_id, "
             "body=<síntesis causal>, start_comment_id, end_comment_id, char_count_original, start_char_offset y end_char_offset copiados exactamente del payload.",
-            "Mantén body <= 30% de char_count_original. Después emite set_status done en la misma respuesta.",
+            "Incluye causal_units compactas con id, kind, statement, source_comment_ids y links relation:value. "
+            "Usa owner/deliverable/accepted_by para accountability; metric/threshold/window/action para escalados; "
+            "reason para opciones descartadas. No inventes una unidad si el slice no contiene esa clase de información.",
+            "Usa en source_comment_ids el conjunto mínimo de comentarios que demuestra cada unidad; no repitas todos los IDs del slice.",
+            "Mantén body <= 30% de char_count_original y causal_units <= 4096 caracteres serializados. Después emite set_status done en la misma respuesta.",
             "Puedes usar add_comment solo como recibo breve adicional; nunca pongas la síntesis únicamente allí.",
         ]
     elif is_read_only:
@@ -514,6 +592,19 @@ def _parse_antigravity_output(raw_output: str) -> dict[str, Any]:
     try:
         parsed = json.loads(raw_output.strip())
     except (TypeError, ValueError):
+        # stdout can contain a valid agy envelope followed by transport logs on
+        # stderr. Extract JSON objects one by one, but route each recovered
+        # object back through this adapter-specific normalizer so top-level ops
+        # without status/summary receive the same treatment as clean stdout.
+        text = str(raw_output).strip()
+        decoder = json.JSONDecoder()
+        start = text.find("{")
+        while start >= 0:
+            try:
+                recovered, _ = decoder.raw_decode(text[start:])
+                return _parse_antigravity_output(json.dumps(recovered, ensure_ascii=False))
+            except (json.JSONDecodeError, ValueError):
+                start = text.find("{", start + 1)
         return parse_submit_work(raw_output)
     if not isinstance(parsed, dict):
         return parse_submit_work(parsed)
@@ -532,6 +623,12 @@ def _parse_antigravity_output(raw_output: str) -> dict[str, Any]:
                 "summary": "Antigravity submit_work completed",
                 "ops": [{"type": "add_comment", "body": body}],
             }
+    # Observed with Claude Sonnet 4.6 through agy 1.1.5: the CLI may wrap the
+    # complete assistant response in {"text": "..."}. This is a fallback only:
+    # some envelopes contain both text and valid top-level ops, and the ops are
+    # the authoritative structured work.
+    if isinstance(parsed.get("text"), str):
+        return _parse_antigravity_output(str(parsed["text"]))
     return parse_submit_work(parsed)
 
 
@@ -610,6 +707,79 @@ def _extract_codex_usage(stdout: str, stderr: str) -> dict[str, Any] | None:
     return None
 
 
+def _extract_opencode_usage(jsonl: str) -> dict[str, Any] | None:
+    """Aggregate OpenCode ``step_finish`` JSONL events.
+
+    Cache and reasoning counters are dimensions of input/output rather than
+    extra billable tokens, so they are reported separately and never added to
+    the fallback total. When OpenCode provides ``tokens.total`` it remains the
+    authoritative total for that step.
+    """
+
+    totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "total_tokens": 0,
+    }
+    saw_step = False
+    saw_explicit_total = False
+    session_id: str | None = None
+    reported_cost = 0.0
+    for raw_line in str(jsonl or "").splitlines():
+        try:
+            event = json.loads(raw_line.strip())
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(event, dict) or event.get("type") != "step_finish":
+            continue
+        part = event.get("part")
+        if not isinstance(part, dict) or part.get("type") != "step-finish":
+            continue
+        tokens = part.get("tokens")
+        if not isinstance(tokens, dict):
+            continue
+        saw_step = True
+        candidate_session = str(event.get("sessionID") or part.get("sessionID") or "").strip()
+        if candidate_session:
+            session_id = candidate_session
+        totals["input_tokens"] += _nonnegative_int(tokens.get("input"))
+        totals["output_tokens"] += _nonnegative_int(tokens.get("output"))
+        totals["reasoning_output_tokens"] += _nonnegative_int(tokens.get("reasoning"))
+        cache = tokens.get("cache")
+        if isinstance(cache, dict):
+            totals["cached_input_tokens"] += _nonnegative_int(cache.get("read"))
+            totals["cache_write_tokens"] += _nonnegative_int(cache.get("write"))
+        if tokens.get("total") is not None:
+            saw_explicit_total = True
+            totals["total_tokens"] += _nonnegative_int(tokens.get("total"))
+        try:
+            reported_cost += max(0.0, float(part.get("cost") or 0))
+        except (TypeError, ValueError):
+            pass
+    if not saw_step:
+        return None
+    if not saw_explicit_total:
+        totals["total_tokens"] = totals["input_tokens"] + totals["output_tokens"]
+    usage: dict[str, Any] = totals
+    if session_id:
+        usage["provider_session_id"] = session_id
+    if reported_cost:
+        # Diagnostic only. ExecutionResult.actual_cost_cents stays zero for a
+        # free gateway; this field lets us detect a provider contract change.
+        usage["provider_reported_cost"] = reported_cost
+    return usage
+
+
+def _nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _coerce_output(value: str | bytes | None) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
@@ -677,6 +847,37 @@ def _parse_codex_output(value: Any) -> dict[str, Any]:
     raise ValueError(f"codex output not parseable: {str(value)[:200]!r}")
 
 
+def _parse_opencode_output(raw_output: str) -> dict[str, Any]:
+    """Recover the final submit_work object from OpenCode's JSON event stream."""
+    candidates: list[str] = []
+    for line in str(raw_output or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            candidates.append(line)
+            continue
+        stack: list[Any] = [event]
+        while stack:
+            value = stack.pop()
+            if isinstance(value, dict):
+                if "status" in value and ("summary" in value or "ops" in value):
+                    return value
+                stack.extend(value.values())
+            elif isinstance(value, list):
+                stack.extend(value)
+            elif isinstance(value, str) and "{" in value:
+                candidates.append(value)
+    for candidate in reversed(candidates):
+        try:
+            return _parse_codex_output(candidate)
+        except ValueError:
+            continue
+    raise ValueError("OpenCode event stream did not contain a submit_work object")
+
+
 # ---------------------------------------------------------------------------
 # Command context manager
 # ---------------------------------------------------------------------------
@@ -720,11 +921,60 @@ class _command_context:
                 command.extend(["--add-dir", str(prompt_dir)])
                 return {
                     "command": command,
+                    # Antigravity's --sandbox is not a read-only workspace
+                    # guarantee. Non-editing roles receive the relevant files
+                    # in AITEAM_WAKE_PAYLOAD_JSON and execute from the
+                    # ephemeral prompt directory so direct writes cannot touch
+                    # the project. Structured file ops remain subject to RBAC.
+                    "cwd": str(prompt_dir) if self.runtime.sandbox == "read-only" else self.effective_cwd,
                     "read_output": lambda proc: ((proc.stdout or "") + (proc.stderr or "")),
                 }
-            command = self.runtime._build_claude_command(system_prompt, user_prompt)
+            if self.runtime.cli_kind == "opencode":
+                # Keep the large AI Teams contract out of argv on Windows. The
+                # attachment is read by the CLI before tool permissions apply;
+                # the inline policy then limits the model to repository reads.
+                self._tmpdir = tempfile.TemporaryDirectory(prefix="aiteam-opencode-")
+                prompt_path = Path(self._tmpdir.name) / "prompt.txt"
+                prompt_path.write_text(f"{system_prompt}\n\n{user_prompt}", encoding="utf-8")
+                command = self.runtime._build_claude_command(
+                    "",
+                    "Follow the attached AI Teams contract. Return one JSON object with exactly "
+                    "the top-level keys status, summary, and ops; return no Markdown or other text.",
+                )
+                # ``--file`` accepts multiple values. If it precedes the
+                # positional message, OpenCode consumes that message as a
+                # second path and fails before inference. Keep the message
+                # first and append the attachment afterwards.
+                command.extend(["--file", str(prompt_path)])
+                policy = _opencode_inline_config(_mcp_servers_from_env(self.env))
+                return {
+                    "command": command,
+                    "env_updates": {"OPENCODE_CONFIG_CONTENT": json.dumps(policy)},
+                    "read_output": lambda proc: ((proc.stdout or "") + (proc.stderr or "")),
+                }
+            mcp_servers = _mcp_servers_from_env(self.env)
+            mcp_config_path: str | None = None
+            if self.runtime.cli_kind == "claude" and mcp_servers:
+                self._tmpdir = tempfile.TemporaryDirectory(prefix="aiteam-claude-cli-")
+                config_path = Path(self._tmpdir.name) / "mcp.json"
+                config_path.write_text(
+                    json.dumps(_claude_mcp_config(mcp_servers), ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                mcp_config_path = str(config_path)
+            # Claude ``-p`` accepts the task prompt from stdin. Keeping the
+            # changing wake payload out of argv avoids Windows CreateProcess
+            # failures as the structured contract grows.
+            prompt_via_stdin = self.runtime.cli_kind == "claude"
+            command = self.runtime._build_claude_command(
+                system_prompt,
+                "" if prompt_via_stdin else user_prompt,
+                mcp_config_path=mcp_config_path,
+                mcp_servers=mcp_servers,
+            )
             return {
                 "command": command,
+                "stdin_input": user_prompt if prompt_via_stdin else None,
                 "read_output": lambda proc: ((proc.stdout or "") + (proc.stderr or "")),
             }
 
@@ -743,6 +993,7 @@ class _command_context:
             schema_path=str(schema_path),
             output_path=str(output_path),
             effective_cwd=self.effective_cwd,
+            mcp_servers=_mcp_servers_from_env(self.env),
         )
 
         def read_output(proc: subprocess.CompletedProcess[str]) -> str:
@@ -759,3 +1010,76 @@ class _command_context:
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         if self._tmpdir is not None:
             self._tmpdir.cleanup()
+
+
+def _mcp_servers_from_env(env: dict[str, str]) -> list[dict[str, Any]]:
+    try:
+        parsed = json.loads(env.get("AITEAM_MCP_SERVERS_JSON", "") or "[]")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def _opencode_inline_config(servers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Translate AI Teams' per-tool MCP grant to an isolated OpenCode config."""
+    permission: dict[str, Any] = {
+        "*": "deny",
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "lsp": "allow",
+        "external_directory": "deny",
+        "question": "deny",
+        "task": "deny",
+        "edit": "deny",
+        "bash": "deny",
+    }
+    mcp: dict[str, Any] = {}
+    for server in servers:
+        name = str(server.get("name") or "").strip()
+        command = str(server.get("command") or "").strip()
+        args = server.get("args") or []
+        enabled_tools = server.get("enabled_tools") or []
+        if not name or not command or not isinstance(args, list) or not isinstance(enabled_tools, list):
+            continue
+        # Deny the entire namespace first; exact owner-approved tools override
+        # it afterwards because OpenCode applies the last matching rule.
+        permission[f"{name}_*"] = "deny"
+        for tool in enabled_tools:
+            tool_name = str(tool or "").strip()
+            if tool_name:
+                permission[f"{name}_{tool_name}"] = "allow"
+        required = [str(key) for key in server.get("env_required") or [] if str(key).strip()]
+        mcp[name] = {
+            "type": "local",
+            "command": [command, *[str(arg) for arg in args]],
+            "enabled": True,
+            "timeout": 5000,
+            "environment": {key: "{env:" + key + "}" for key in required},
+        }
+    config: dict[str, Any] = {"share": "disabled", "permission": permission}
+    if mcp:
+        config["mcp"] = mcp
+    return config
+
+
+def _claude_mcp_config(servers: list[dict[str, Any]]) -> dict[str, Any]:
+    configured: dict[str, Any] = {}
+    for server in servers:
+        name = str(server.get("name") or "").strip()
+        command = str(server.get("command") or "").strip()
+        args = server.get("args") or []
+        if not name or not command or not isinstance(args, list):
+            continue
+        required = [str(key) for key in server.get("env_required") or []]
+        configured[name] = {
+            "type": "stdio",
+            "command": command,
+            "args": args,
+            # Claude expands ${VAR} from the parent process. Values never enter
+            # extensions.json, the prompt or this ephemeral file.
+            "env": {key: "${" + key + "}" for key in required},
+        }
+    return {"mcpServers": configured}

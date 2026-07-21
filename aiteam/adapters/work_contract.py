@@ -5,6 +5,80 @@ import re
 from typing import Any
 
 
+PLAN_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "owner_role": {"type": "string"},
+        "reports_to": {"type": "string"},
+        "deliverable": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "accepted_by": {"type": "string"},
+        "dependencies": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["id", "title", "owner_role", "reports_to", "deliverable", "evidence", "accepted_by", "dependencies"],
+    "additionalProperties": False,
+}
+
+PLAN_CONTRACT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "integer", "enum": [1]},
+        "objective": {"type": "string"},
+        "scope": {"type": "array", "items": {"type": "string"}},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "architecture": {"type": "string"},
+        "work_items": {"type": "array", "items": PLAN_ITEM_SCHEMA},
+        "risks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"risk": {"type": "string"}, "mitigation": {"type": "string"}, "rollback": {"type": "string"}},
+                "required": ["risk", "mitigation", "rollback"],
+                "additionalProperties": False,
+            },
+        },
+        "verification": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"criterion": {"type": "string"}, "evidence": {"type": "string"}, "owner_role": {"type": "string"}},
+                "required": ["criterion", "evidence", "owner_role"],
+                "additionalProperties": False,
+            },
+        },
+        "escalation_conditions": {"type": "array", "items": {"type": "string"}},
+        "next_run_risks": {"type": "array", "items": {"type": "string"}},
+        "narrative_markdown": {"type": "string"},
+    },
+    "required": [
+        "schema_version", "objective", "scope", "assumptions", "architecture", "work_items",
+        "risks", "verification", "escalation_conditions", "next_run_risks", "narrative_markdown",
+    ],
+    "additionalProperties": False,
+}
+
+CAUSAL_UNIT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "kind": {
+            "type": "string",
+            "enum": [
+                "objective", "decision", "constraint", "evidence", "accountability",
+                "risk", "escalation", "open_item", "scope", "rejected_option",
+            ],
+        },
+        "statement": {"type": "string"},
+        "links": {"type": "array", "items": {"type": "string"}},
+        "source_comment_ids": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["id", "kind", "statement", "links", "source_comment_ids"],
+    "additionalProperties": False,
+}
+
+
 OP_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -23,9 +97,11 @@ OP_SCHEMA: dict[str, Any] = {
                 "delete_file",
                 "accept_quorum_synthesis",
                 "append_context_summary",
+                "propose_skill",
             ],
         },
         "body": {"type": "string"},
+        "plan": PLAN_CONTRACT_SCHEMA,
         "path": {"type": "string"},
         "title": {"type": "string"},
         "description": {"type": "string"},
@@ -39,6 +115,9 @@ OP_SCHEMA: dict[str, Any] = {
         "kind": {"type": "string", "enum": ["suggest_tasks", "request_confirmation"]},
         "summary": {"type": "string"},
         "idempotency_key": {"type": "string"},
+        "applies_to_roles": {"type": "array", "items": {"type": "string"}},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "causal_units": {"type": "array", "items": CAUSAL_UNIT_SCHEMA},
         "status": {"type": "string", "enum": ["done", "in_progress", "todo", "cancelled", "blocked"]},
         # payload is used exclusively with create_interaction.
         # Must include a 'reason' field so the executor can route the response correctly.
@@ -89,6 +168,7 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "type": OP_SCHEMA["properties"]["type"],
                     "body": {"type": ["string", "null"]},
+                    "plan": {**PLAN_CONTRACT_SCHEMA, "type": ["object", "null"]},
                     "path": {"type": ["string", "null"]},
                     "title": {"type": ["string", "null"]},
                     "description": {"type": ["string", "null"]},
@@ -108,6 +188,14 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "kind": {"type": ["string", "null"], "enum": ["suggest_tasks", "request_confirmation", None]},
                     "summary": {"type": ["string", "null"]},
                     "idempotency_key": {"type": ["string", "null"]},
+                    "applies_to_roles": {
+                        "type": ["array", "null"], "items": {"type": "string"}
+                    },
+                    "evidence": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "causal_units": {
+                        "type": ["array", "null"],
+                        "items": CAUSAL_UNIT_SCHEMA,
+                    },
                     "status": {
                         "type": ["string", "null"],
                         "enum": ["done", "in_progress", "todo", "cancelled", "blocked", None],
@@ -119,8 +207,19 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                         "properties": {
                             "reason": {"type": ["string", "null"]},
                             "parent_issue_id": {"type": ["string", "null"]},
+                            "catalog_id": {"type": ["string", "null"]},
+                            "name": {"type": ["string", "null"]},
+                            "source": {"type": ["string", "null"]},
+                            "version": {"type": ["string", "null"]},
+                            "justification": {"type": ["string", "null"]},
+                            "args": {"type": ["array", "null"], "items": {"type": "string"}},
+                            "env_required": {"type": ["array", "null"], "items": {"type": "string"}},
+                            "applies_to_roles": {"type": ["array", "null"], "items": {"type": "string"}},
                         },
-                        "required": ["reason", "parent_issue_id"],
+                        "required": [
+                            "reason", "parent_issue_id", "catalog_id", "name", "source", "version",
+                            "justification", "args", "env_required", "applies_to_roles",
+                        ],
                         "additionalProperties": False,
                     },
                     "dispositions": {
@@ -130,10 +229,13 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "start_comment_id": {"type": ["string", "null"]},
                     "end_comment_id": {"type": ["string", "null"]},
                     "char_count_original": {"type": ["integer", "null"], "minimum": 1},
+                    "start_char_offset": {"type": ["integer", "null"], "minimum": 0},
+                    "end_char_offset": {"type": ["integer", "null"], "minimum": 1},
                 },
                 "required": [
                     "type",
                     "body",
+                    "plan",
                     "path",
                     "title",
                     "description",
@@ -144,12 +246,17 @@ OPENAI_SUBMIT_WORK_SCHEMA: dict[str, Any] = {
                     "kind",
                     "summary",
                     "idempotency_key",
+                    "applies_to_roles",
+                    "evidence",
+                    "causal_units",
                     "status",
                     "payload",
                     "dispositions",
                     "start_comment_id",
                     "end_comment_id",
                     "char_count_original",
+                    "start_char_offset",
+                    "end_char_offset",
                 ],
                 "additionalProperties": False,
             },
@@ -177,8 +284,10 @@ def build_execution_contract() -> str:
         "- Read AITEAM_WAKE_PAYLOAD_JSON for issue context.\n"
         "- Return exactly one JSON object matching the submit_work schema.\n"
         "- Keep ops minimal and targeted; prefer add_comment to report progress.\n"
-        "- If you are the Lead and you create, revise, or mention a project plan, use update_plan; "
-        "the UI Plan tab reads the durable plan document, not plan-shaped comments.\n"
+        "- If you are the Lead and you create or revise a project plan, use update_plan with the structured "
+        "plan object; body may contain a Markdown narrative but comments never create or revise the plan.\n"
+        "- The plan must declare objective, scope, assumptions, architecture, accountable work_items, risks, "
+        "verification evidence, escalation conditions and risks that could break the next run.\n"
         "- Use update_plan only when the plan has materially changed.\n"
         "- If you are the Lead on a normal full-team software build, default to Engineer + Reviewer; "
         "Reviewer absorbs static QA. Use role='test_runner' (Tier 3) only when runtime command execution is needed. "
@@ -187,6 +296,9 @@ def build_execution_contract() -> str:
         "- After delegating child issues, wait for concrete child reports before waking/polling the Lead again.\n"
         "- Use create_issue to delegate sub-work; use set_status: done when complete.\n"
         "- Use notify_supervisor after setting status to done when reporting up the chain.\n"
+        "- Lead only: use propose_skill to record reusable project knowledge ONLY after observing concrete "
+        "evidence. Set title=<stable name>, body=<concise markdown>, applies_to_roles=[...], evidence=[...]. "
+        "It remains proposed and cannot affect a run until the owner activates it. User directives always win.\n"
         "- Use update_child_issue to unblock or requeue a child issue: "
         "{\"type\": \"update_child_issue\", \"path\": \"<child_issue_id>\", "
         "\"body\": \"<directive for the child agent>\", \"status\": \"todo\"}. "
@@ -204,7 +316,7 @@ def build_execution_contract() -> str:
         "\"title\": \"...\", \"summary\": \"...\", \"payload\": {\"reason\": \"lead_wants_file_read\"}, "
         "\"idempotency_key\": \"lead:file-read-request:<issue_id>\"}\n"
         "\n## extension_install_requested — proposing an MCP server (Lead-tier ONLY)\n"
-        "- Installing an MCP server runs third-party code. This is ALWAYS the owner's decision — never "
+        "- Activating an MCP server runs third-party code. This is ALWAYS the owner's decision — never "
         "auto-accepted, regardless of project autonomy mode.\n"
         "- Only lead/team_lead/lead_executor may emit this reason. If a Tier 2 worker (engineer/reviewer) "
         "identifies a capability gap (e.g. cannot verify Unity Play Mode from static review), it reports "
@@ -214,17 +326,26 @@ def build_execution_contract() -> str:
         "of the same capability — do not re-propose something the owner already declined, and do not duplicate "
         "research: if a sibling issue already produced a sourced recommendation, reuse it instead of re-delegating "
         "the same investigation (a duplicate MCP-research task once burned 95 failed runs before anyone noticed).\n"
-        "- payload MUST include: 'reason': 'extension_install_requested', 'name' (short slug-friendly identifier), "
-        "'source' (the exact install command, e.g. \"npx -y unity-mcp@1.2.0\" — pin a version, never 'latest'), "
+        "- A wake with `wake_reason: mcp_need_suggested` is evidence to investigate, NOT permission to propose. "
+        "Read its durable report evidence, first try existing tools/adapters, and only formalize a proposal when "
+        "the capability gap remains concrete and the exact pre-installed executable can be named.\n"
+        "- Prefer a reviewed catalog descriptor when it fits: set 'catalog_id' to github-readonly, "
+        "playwright-browser or filesystem-workspace. The control plane fills and locks its runtime contract; "
+        "the owner still receives the normal approval card and the executable must already exist locally.\n"
+        "- Otherwise payload MUST include: 'reason': 'extension_install_requested', 'name' (short slug-friendly identifier), "
+        "'source' (one exact executable already installed on the machine; shell commands, pipes and "
+        "auto-install such as 'npx -y' are forbidden), 'version' (exact serverInfo pin, never 'latest'), "
         "'justification' (concrete evidence: what blocker this solves, with issue/run references). "
         "Optional: 'args' (list), 'env_required' (list of env var names the server needs), "
         "'applies_to_roles' (which roles get it — omit/empty is treated as 'no roles' here, always specify).\n"
-        "- Missing name/source/justification → the proposal is rejected automatically with a system comment; "
+        "- A catalog proposal needs catalog_id + justification; an ad-hoc proposal needs name/source/version/justification. "
+        "Missing or modified fields are rejected automatically with a system comment; "
         "nothing is installed and nothing is asked of the user for an incomplete proposal.\n"
         "- Example: {\"type\": \"create_interaction\", \"kind\": \"request_confirmation\", "
         "\"title\": \"Proponer MCP: unity\", \"summary\": \"<qué, por qué, riesgos>\", "
         "\"payload\": {\"reason\": \"extension_install_requested\", \"name\": \"unity\", "
-        "\"source\": \"npx -y unity-mcp@1.2.0\", \"applies_to_roles\": [\"engineer\", \"reviewer\"], "
+        "\"source\": \"C:/Tools/unity-mcp.exe\", \"version\": \"1.2.0\", "
+        "\"applies_to_roles\": [\"engineer\", \"reviewer\"], "
         "\"justification\": \"Reviewer cannot verify Play Mode from static YAML — issue X blocked N rounds.\"}, "
         "\"idempotency_key\": \"lead:propose-mcp-unity\"}\n"
         "\n## project_open_issues (Lead only — GLOBAL truth for open work)\n"
@@ -282,7 +403,10 @@ def build_execution_contract() -> str:
         "- context_curator ONLY: payload.context_curation_target contains the exact parent-thread slice. "
         "Persist its causal summary with append_context_summary using path=target_issue_id, body=<summary>, "
         "start_comment_id, end_comment_id, char_count_original, start_char_offset and end_char_offset copied exactly from that payload. "
-        "The summary must retain decisions, constraints, risks, evidence, owners and escalations and stay at or below 30%. "
+        "Also emit causal_units with id, kind, statement, links as relation:value and source_comment_ids. "
+        "Accountability requires owner/deliverable/accepted_by links; escalation requires metric/threshold/window/action; "
+        "rejected_option requires reason. Markdown stays at or below 30%; compact causal_units have a separate 4096-char cap. "
+        "The summary must retain decisions, constraints, risks, evidence, owners and escalations. "
         "Keep every owner explicitly linked to its deliverable, every reviewer to its acceptance evidence, "
         "and every threshold to metric, value, window and action.\n"
         "\n## Workspace listing (fallback — rarely seen)\n"
@@ -337,6 +461,7 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
     file_ops: list[dict[str, Any]] = []
     quorum_synthesis: dict[str, Any] | None = None
     context_summary: dict[str, Any] | None = None
+    skill_proposals: list[dict[str, Any]] = []
 
     for op in ops:
         op_type = str(op.get("type") or "")
@@ -352,6 +477,7 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
             update_plan = {
                 "title": str(op.get("title") or "Plan"),
                 "body": str(op.get("body") or ""),
+                "plan": op.get("plan") if isinstance(op.get("plan"), dict) else None,
             }
         elif op_type == "create_issue":
             issue_spec: dict[str, Any] = {
@@ -428,7 +554,21 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
                 "char_count_original": int(op.get("char_count_original") or 0),
                 "start_char_offset": int(op.get("start_char_offset") or 0),
                 "end_char_offset": int(op.get("end_char_offset") or 0),
+                "causal_units": op.get("causal_units") if isinstance(op.get("causal_units"), list) else None,
             }
+        elif op_type == "propose_skill":
+            skill_proposals.append({
+                "name": str(op.get("title") or "").strip(),
+                "body": str(op.get("body") or "").strip(),
+                "applies_to_roles": [
+                    str(item).strip() for item in (op.get("applies_to_roles") or [])
+                    if str(item).strip()
+                ],
+                "evidence": [
+                    str(item).strip() for item in (op.get("evidence") or [])
+                    if str(item).strip()
+                ],
+            })
 
     if interactions:
         actions["interactions"] = interactions
@@ -446,6 +586,8 @@ def ops_to_actions(ops: list[dict[str, Any]]) -> dict[str, Any]:
         actions["accept_quorum_synthesis"] = quorum_synthesis
     if context_summary is not None:
         actions["append_context_summary"] = context_summary
+    if skill_proposals:
+        actions["skill_proposals"] = skill_proposals
     return actions
 
 
@@ -483,6 +625,65 @@ def parse_submit_work(value: Any) -> dict[str, Any]:
             except (json.JSONDecodeError, ValueError):
                 start = text.find("{", start + 1)
     raise ValueError("submit_work JSON object not found")
+
+
+def validate_submit_work(value: Any) -> dict[str, Any]:
+    """Parse and validate the complete neutral work contract.
+
+    ``parse_submit_work`` intentionally recovers JSON from provider envelopes.
+    Recovery is not proof of contract compliance, so API adapters must call
+    this stricter boundary before materialising any operation.
+    """
+    parsed = parse_submit_work(value)
+    _validate_schema_value(parsed, SUBMIT_WORK_SCHEMA, path="submit_work")
+    return parsed
+
+
+def _validate_schema_value(value: Any, schema: dict[str, Any], *, path: str) -> None:
+    expected = schema.get("type")
+    if expected is not None and not _matches_schema_type(value, expected):
+        raise ValueError(f"{path}: expected {expected}, got {type(value).__name__}")
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError(f"{path}: value is outside the allowed enum")
+    if isinstance(value, int) and not isinstance(value, bool) and "minimum" in schema:
+        if value < int(schema["minimum"]):
+            raise ValueError(f"{path}: value is below minimum {schema['minimum']}")
+    if isinstance(value, dict):
+        properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        for name in schema.get("required") or []:
+            if name not in value:
+                raise ValueError(f"{path}: missing required property {name}")
+        if schema.get("additionalProperties") is False:
+            extras = sorted(set(value) - set(properties))
+            if extras:
+                raise ValueError(f"{path}: unexpected properties {', '.join(extras)}")
+        for name, item in value.items():
+            child_schema = properties.get(name)
+            if isinstance(child_schema, dict):
+                _validate_schema_value(item, child_schema, path=f"{path}.{name}")
+    elif isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            _validate_schema_value(item, schema["items"], path=f"{path}[{index}]")
+
+
+def _matches_schema_type(value: Any, expected: Any) -> bool:
+    names = expected if isinstance(expected, list) else [expected]
+    for name in names:
+        if name == "null" and value is None:
+            return True
+        if name == "object" and isinstance(value, dict):
+            return True
+        if name == "array" and isinstance(value, list):
+            return True
+        if name == "string" and isinstance(value, str):
+            return True
+        if name == "integer" and isinstance(value, int) and not isinstance(value, bool):
+            return True
+        if name == "number" and isinstance(value, (int, float)) and not isinstance(value, bool):
+            return True
+        if name == "boolean" and isinstance(value, bool):
+            return True
+    return False
 
 
 def _is_work_object(value: dict[str, Any]) -> bool:

@@ -6,6 +6,7 @@ from aiteam.quorum_quality import (
     QUORUM_AUDIT_MARKER,
     evaluate_plan_depth,
     parse_quorum_audit,
+    plan_contract_instruction,
     validate_quorum_audit,
 )
 
@@ -42,6 +43,12 @@ def test_deep_plan_contract_requires_all_dimensions_and_budget() -> None:
     shallow = evaluate_plan_depth("Objetivo, fases y riesgos")
     assert shallow["valid"] is False
     assert "current_state" in shallow["missing_dimensions"]
+
+
+def test_final_plan_instruction_names_the_field_enforced_by_depth_gate() -> None:
+    instruction = plan_contract_instruction(final=True)
+    assert "plan.narrative_markdown" in instruction
+    assert "al menos 300 palabras" in instruction
 
 
 def test_quorum_audit_roundtrip_preserves_structured_findings() -> None:

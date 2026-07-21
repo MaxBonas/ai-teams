@@ -100,6 +100,7 @@ def test_provider_for_url() -> None:
     assert provider_for_url("https://api.openai.com/v1/responses") == "openai"
     assert provider_for_url("https://generativelanguage.googleapis.com/v1beta/models/x:generateContent") == "google"
     assert provider_for_url("https://api.anthropic.com/v1/messages") == "anthropic"
+    assert provider_for_url("https://api.groq.com/openai/v1/chat/completions") == "groq"
 
 
 def test_http_retry_reports_rate_limits_to_governor(monkeypatch) -> None:
@@ -141,8 +142,9 @@ def test_http_retry_reports_rate_limits_to_governor(monkeypatch) -> None:
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict) -> None:
+    def __init__(self, payload: dict, headers=None) -> None:
         self._payload = payload
+        self.headers = headers
 
     def read(self) -> bytes:
         import json
@@ -154,3 +156,41 @@ class _FakeResponse:
 
     def __exit__(self, *exc_info) -> None:
         return None
+
+
+def test_groq_response_headers_are_captured_as_rpd_and_tpm(monkeypatch) -> None:
+    from email.message import Message
+
+    from aiteam.adapters import http_retry
+
+    headers = Message()
+    headers["x-ratelimit-limit-requests"] = "1000"
+    headers["x-ratelimit-remaining-requests"] = "998"
+    headers["x-ratelimit-reset-requests"] = "23h"
+    headers["x-ratelimit-limit-tokens"] = "8000"
+    headers["x-ratelimit-remaining-tokens"] = "7500"
+    headers["x-ratelimit-reset-tokens"] = "4s"
+    monkeypatch.setattr(
+        http_retry.urllib.request,
+        "urlopen",
+        lambda _req, timeout: _FakeResponse({"usage": {"total_tokens": 500}}, headers),
+    )
+
+    result = http_retry.post_json(
+        "https://api.groq.com/openai/v1/chat/completions", {}, headers={}, timeout=5
+    )
+
+    assert result["_aiteam_rate_limits"] == {
+        "source": "provider_response_headers",
+        "scope": "organization",
+        "dimensions": [
+            {
+                "dimension": "rpd", "unit": "requests", "window": "day",
+                "limit": 1000, "remaining": 998, "reset": "23h",
+            },
+            {
+                "dimension": "tpm", "unit": "tokens", "window": "minute",
+                "limit": 8000, "remaining": 7500, "reset": "4s",
+            },
+        ],
+    }

@@ -16,16 +16,82 @@ import os
 
 # ── Tiers y roles ─────────────────────────────────────────────────────────────
 
+# Aliases de compatibilidad. La identidad persistida no se reescribe: esta
+# normalización solo permite que RBAC, hiring y el gate modelo↔rol compartan la
+# misma semántica mientras sobreviven proyectos antiguos.
+ROLE_ALIASES = {
+    "software_engineer": "engineer",
+    "code_reviewer": "reviewer",
+    "qa_engineer": "qa",
+}
+
+# Estado del catálogo de roles. ``qa`` sigue activo únicamente como guardrail
+# adversarial proporcional al riesgo; no forma parte del full_team por defecto.
+# ``researcher`` se conserva como legacy para leer proyectos existentes, pero
+# las nuevas contrataciones deben usar scouts/curator especializados.
+ROLE_STATUS = {
+    "lead": "active",
+    "team_lead": "active",
+    "lead_executor": "active",
+    "engineer": "active",
+    "reviewer": "active",
+    "qa": "conditional",
+    "test_designer": "active",
+    "worker": "active",
+    "file_scout": "active",
+    "web_scout": "active",
+    "context_curator": "active",
+    "test_runner": "deterministic",
+    "quorum_auditor": "active",
+    "quorum_senior": "legacy",
+    "architect": "active",
+    "mcp_operator": "active",
+    "researcher": "legacy",
+}
+
 LEAD_TIER_ROLES = frozenset({"lead", "team_lead", "lead_executor"})
+TIER1_ROLES = LEAD_TIER_ROLES | frozenset({"architect", "quorum_auditor", "quorum_senior"})
 
-TIER2_ROLES = frozenset({"engineer", "software_engineer", "reviewer", "code_reviewer", "qa", "worker", "test_designer"})
+TIER2_ROLES = frozenset({
+    "engineer", "software_engineer", "reviewer", "code_reviewer", "qa",
+    "qa_engineer", "test_designer", "mcp_operator",
+})
 
-TIER3_ROLES = frozenset({"file_scout", "web_scout", "context_curator", "test_runner"})
+# Worker es ejecución económica simple y acotada, por tanto Tier 3. El tier
+# expresa autoridad/razonamiento y aplica su RBAC de worker subordinado.
+TIER3_ROLES = frozenset({
+    "worker", "file_scout", "web_scout", "context_curator", "test_runner",
+    "researcher",
+})
 
 # Hiring policy tiers (model selection): strong models for seniors,
 # cheap/local for juniors.
 SENIOR_ROLES = frozenset({"lead", "team_lead", "reviewer", "quorum_senior", "quorum_auditor", "architect"})
 JUNIOR_ROLES = frozenset({"engineer", "test_runner", "worker", "file_scout", "web_scout", "context_curator", "test_designer"})
+
+
+def canonical_role(role: str) -> str:
+    """Devuelve la identidad semántica sin mutar el valor persistido."""
+    role_key = str(role or "").strip().lower()
+    return ROLE_ALIASES.get(role_key, role_key)
+
+
+def role_tier(role: str) -> int | None:
+    """Tier de autoridad canónico; ``None`` para roles desconocidos."""
+    role_key = str(role or "").strip().lower()
+    if role_key in TIER1_ROLES:
+        return 1
+    if role_key in TIER2_ROLES:
+        return 2
+    if role_key in TIER3_ROLES:
+        return 3
+    return None
+
+
+def role_status(role: str) -> str:
+    """Estado estable para API/UI: active, conditional, deterministic, legacy o unknown."""
+    role_key = canonical_role(role)
+    return ROLE_STATUS.get(role_key, "unknown")
 
 # Roles that must never edit workspace files: they delegate (Lead) or report
 # (scouts/curator). Enforced via CLI read-only sandbox, the preventive
@@ -47,7 +113,10 @@ QUORUM_MAX_CONTRIBUTIONS = 4
 QUORUM_MAX_SYNTHESIS_ATTEMPTS = 2
 
 # Adapter types that call a remote LLM in-process (as opposed to CLI/builtin).
-LLM_ADAPTER_TYPES = frozenset({"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"})
+LLM_ADAPTER_TYPES = frozenset({
+    "anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api",
+    "openai_compatible_api",
+})
 
 # ── Fallos de infraestructura (no de producto) ─────────────────────────────────
 # Un run con uno de estos error_code falló en el transporte del proveedor o en
@@ -57,6 +126,7 @@ LLM_ADAPTER_TYPES = frozenset({"anthropic_api", "anthropic_sonnet", "openai_api"
 # estos por proveedor significa "el proveedor está fallando", no "el equipo es malo".
 INFRA_ERROR_CODES = frozenset({
     "api_error",                     # 429 / timeout / 5xx del proveedor (http_retry agotado)
+    "api_usage_limit",               # free/API tier agotado; no reintentar en cascada
     "subscription_cli_not_found",    # binario del CLI ausente / config rota
     "subscription_cli_nonzero_exit", # el CLI salió !=0 (auth, modelo rechazado…)
     "subscription_cli_usage_limit",  # cuota de suscripción agotada; reintento inmediato inútil
@@ -235,6 +305,7 @@ OPS_FORBIDDEN_FOR_TIER3 = frozenset({
     "append_file",
     "delete_file",
     "accept_quorum_synthesis",
+    "propose_skill",
 })
 
 OPS_FORBIDDEN_FOR_TIER2 = frozenset({
@@ -242,6 +313,7 @@ OPS_FORBIDDEN_FOR_TIER2 = frozenset({
     "update_plan",
     "update_child_issue",
     "accept_quorum_synthesis",
+    "propose_skill",
 })
 
 _CONTEXT_CURATOR_EXCLUSIVE_OPS = frozenset({"append_context_summary"})
@@ -345,9 +417,9 @@ OPERATIONAL_INTERACTION_DEFAULTS: dict[str, str] = {
 
 # Installing an MCP server runs third-party code — this reason is
 # DELIBERATELY absent from OPERATIONAL_INTERACTION_DEFAULTS above: autonomy
-# must never auto-accept it, regardless of project autonomy mode. See
-# DESIGN_SELF_EXTENSION.md §1: "instalar herramientas = ejecutar código de
-# terceros" — always a product decision for the human owner.
+# must never auto-accept it, regardless of project autonomy mode. Installing
+# third-party tooling executes code and therefore remains a product decision
+# for the human owner (see ``task.md``, P2).
 EXTENSION_PROPOSAL_REASON = "extension_install_requested"
 
 

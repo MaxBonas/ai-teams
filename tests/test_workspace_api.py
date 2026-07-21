@@ -6,12 +6,24 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 import api.main as main_mod
 import api.routers.workspace as workspace_mod
 from api.routers.workspace import router
 from api.routers.agents import router as agents_router
 from api.utils import get_current_workspace, set_current_workspace
+from aiteam.user_config import model_options, record_model_health
+
+
+@pytest.fixture(autouse=True)
+def _verified_api_models(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    for profile_id in ("openai_api", "anthropic_api"):
+        for option in model_options().get(profile_id, []):
+            record_model_health(
+                profile_id, str(option["value"]), available=True, reason="workspace fixture"
+            )
 
 
 def _client() -> TestClient:
@@ -245,6 +257,11 @@ def test_create_solo_lead_project_bootstraps_only_the_lead(tmp_path: Path, monke
 def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypatch) -> None:
     source_root = tmp_path / "Ai_Teams"
     source_root.mkdir()
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    record_model_health(
+        "codex_subscription", "gpt-5.6-sol",
+        available=True, reason="test runtime inventory",
+    )
     monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
     monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
     previous = get_current_workspace()

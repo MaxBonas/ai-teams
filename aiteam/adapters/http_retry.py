@@ -23,6 +23,12 @@ MAX_TOTAL_SLEEP_SECONDS = 90.0
 _RETRY_HINT_RE = re.compile(r"try again in ([0-9.]+)s", re.IGNORECASE)
 
 
+class ApiHttpError(RuntimeError):
+    def __init__(self, message: str, *, rate_limits: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.rate_limits = rate_limits or {}
+
+
 def post_json(url: str, body: dict[str, Any], *, headers: dict[str, str], timeout: float) -> dict[str, Any]:
     """POST *body* as JSON and return the parsed dict response.
 
@@ -45,12 +51,18 @@ def post_json(url: str, body: dict[str, Any], *, headers: dict[str, str], timeou
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 parsed = json.loads(response.read().decode("utf-8"))
                 data = parsed if isinstance(parsed, dict) else {}
+                rate_limits = _extract_rate_limit_headers(provider, getattr(response, "headers", None))
+                if rate_limits:
+                    data["_aiteam_rate_limits"] = rate_limits
                 GOVERNOR.record_success(provider)
                 GOVERNOR.record_usage(provider, _extract_total_tokens(data))
                 return data
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:1000]
-            error = RuntimeError(f"HTTP {exc.code}: {detail}")
+            error = ApiHttpError(
+                f"HTTP {exc.code}: {detail}",
+                rate_limits=_extract_rate_limit_headers(provider, exc.headers),
+            )
             if exc.code not in RETRYABLE_STATUS:
                 raise error from exc
             last_error = error
@@ -100,3 +112,40 @@ def _extract_total_tokens(data: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             return 0
     return 0
+
+
+def _extract_rate_limit_headers(provider: str, headers: Any) -> dict[str, Any]:
+    """Capture only provider-documented dimensions; never infer capacity."""
+    if provider != "groq" or headers is None:
+        return {}
+    dimensions: list[dict[str, Any]] = []
+    for dimension, suffix, window in (
+        ("rpd", "requests", "day"),
+        ("tpm", "tokens", "minute"),
+    ):
+        limit = _header_int(headers, f"x-ratelimit-limit-{suffix}")
+        remaining = _header_int(headers, f"x-ratelimit-remaining-{suffix}")
+        reset = str(headers.get(f"x-ratelimit-reset-{suffix}") or "").strip()
+        if limit is None and remaining is None and not reset:
+            continue
+        dimensions.append({
+            "dimension": dimension,
+            "unit": "requests" if suffix == "requests" else "tokens",
+            "window": window,
+            "limit": limit,
+            "remaining": remaining,
+            "reset": reset or None,
+        })
+    return {
+        "source": "provider_response_headers",
+        "scope": "organization",
+        "dimensions": dimensions,
+    } if dimensions else {}
+
+
+def _header_int(headers: Any, name: str) -> int | None:
+    try:
+        value = int(str(headers.get(name) or "").strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None

@@ -71,7 +71,7 @@ def test_lead_quorum_assigns_distinct_providers_when_available() -> None:
     assert [member["adapter_profile_id"] for member in proposal["proposed_team"]] == [
         "codex_subscription", "antigravity_subscription",
     ]
-    assert proposal["proposed_team"][1]["model"] == "Gemini 3.1 Pro (High)"
+    assert proposal["proposed_team"][1]["model"] == "gemini-3.1-pro-high"
     assert len(proposal["suggested_issues"]) == 2
 
 

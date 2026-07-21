@@ -33,14 +33,17 @@ def _init(db_path: Path) -> None:
         conn.commit()
 
 
-def _contribute(db_path: Path, session_id: str, agent: str, ordinal: int, provider: str) -> None:
+def _contribute(
+    db_path: Path, session_id: str, agent: str, ordinal: int, provider: str,
+    *, model: str | None = None,
+) -> None:
     record_quorum_contribution(
         db_path,
         session_id=session_id,
         agent_id=agent,
         ordinal=ordinal,
         provider=provider,
-        model=f"{provider}-model",
+        model=model or f"{provider}-model",
         channel="api",
         result="approved",
         evidence="Revisión del plan base rev-a con riesgos enumerados.",
@@ -76,6 +79,7 @@ def test_quorum_requires_two_valid_provider_diverse_contributions(tmp_path: Path
         "valid_contributions": 2,
         "total_contributions": 2,
         "distinct_providers": 2,
+        "distinct_perspectives": 2,
         "missing_valid": 0,
         "diversity_satisfied": True,
     }
@@ -97,6 +101,27 @@ def test_reduced_quorum_accepts_one_available_senior(tmp_path: Path) -> None:
     assert gate["ready"] is True
     assert gate["diversity_satisfied"] is True
     assert gate["reduced_quorum"] is True
+
+
+def test_quorum_does_not_count_two_openai_transports_as_diverse(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init(db_path)
+    session = create_quorum_session(
+        db_path, issue_id="issue:q", base_plan_revision_id="rev:same-vendor"
+    )
+
+    _contribute(
+        db_path, session["id"], "role:q1", 1, "openai-codex", model="gpt-5.6-sol"
+    )
+    _contribute(
+        db_path, session["id"], "role:q2", 2, "openai", model="gpt-5.6-terra"
+    )
+
+    gate = evaluate_quorum_session(db_path, session_id=session["id"])
+    assert gate["distinct_providers"] == 2
+    assert gate["distinct_perspectives"] == 1
+    assert gate["diversity_satisfied"] is False
+    assert gate["ready"] is False
 
 
 def test_quorum_rejects_narration_without_structured_findings(tmp_path: Path) -> None:
@@ -221,6 +246,7 @@ def test_accepted_synthesis_finishes_planning_without_starting_execution(tmp_pat
         "valid_contributions": 2,
         "total_contributions": 2,
         "distinct_providers": 2,
+        "distinct_perspectives": 2,
         "missing_valid": 0,
         "diversity_satisfied": True,
     }
@@ -260,12 +286,17 @@ def test_synthesis_requires_disposition_for_every_finding(tmp_path: Path) -> Non
         )
 
 
-def test_persistence_rejects_synthesis_not_owned_by_configured_lead(tmp_path: Path) -> None:
+def test_persistence_rejects_second_team_lead_not_assigned_to_issue(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
-            "INSERT INTO runs (id, agent_id, issue_id, status) VALUES ('run:q1:synthesis', 'role:q1', 'issue:q', 'completed')"
+            "INSERT INTO agents (id, role, name) VALUES "
+            "('role:other-lead', 'team_lead', 'Other Lead')"
+        )
+        conn.execute(
+            "INSERT INTO runs (id, agent_id, issue_id, status) VALUES "
+            "('run:other-lead:synthesis', 'role:other-lead', 'issue:q', 'completed')"
         )
         conn.execute(
             "INSERT INTO issue_documents (id, issue_id, key, title, body, current_revision_id) "
@@ -274,7 +305,7 @@ def test_persistence_rejects_synthesis_not_owned_by_configured_lead(tmp_path: Pa
         conn.execute(
             "INSERT INTO issue_document_revisions "
             "(id, document_id, issue_id, key, title, body, revision_number, created_by_run_id) "
-            "VALUES ('rev:foreign', 'doc:foreign', 'issue:q', 'plan', 'Plan', 'B', 1, 'run:q1:synthesis')"
+            "VALUES ('rev:foreign', 'doc:foreign', 'issue:q', 'plan', 'Plan', 'B', 1, 'run:other-lead:synthesis')"
         )
         conn.commit()
     session = create_quorum_session(db_path, issue_id="issue:q", base_plan_revision_id="rev:a")
@@ -285,7 +316,7 @@ def test_persistence_rejects_synthesis_not_owned_by_configured_lead(tmp_path: Pa
         accept_quorum_synthesis(
             db_path,
             session_id=session["id"],
-            synthesis_run_id="run:q1:synthesis",
+            synthesis_run_id="run:other-lead:synthesis",
             final_plan_revision_id="rev:foreign",
             dispositions=[
                 {"finding_id": "finding-1", "decision": "accept", "rationale": "Se acepta con una justificación causal suficiente."},

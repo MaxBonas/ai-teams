@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from aiteam.adapters.work_contract import filter_forbidden_ops_for_role
+from aiteam.adapters.work_contract import filter_forbidden_ops_for_role, ops_to_actions
 from aiteam.adapters.registry import build_default_registry
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.db.wakeups import enqueue_wakeup
@@ -102,6 +102,28 @@ class TestFilterForbiddenOps:
             allowed, dropped = filter_forbidden_ops_for_role(ops, role=role)
             assert dropped == [], f"role={role} should pass all ops through"
             assert len(allowed) == 4
+
+    def test_only_lead_tier_can_propose_learned_skill(self) -> None:
+        op = {
+            "type": "propose_skill",
+            "title": "local-test-command",
+            "body": "Usa scripts/pytest_local.bat.",
+            "applies_to_roles": ["engineer"],
+            "evidence": ["runs r1 y r2"],
+        }
+        for role in ("engineer", "reviewer", "file_scout", "quorum_senior"):
+            allowed, dropped = filter_forbidden_ops_for_role([op], role=role)
+            assert allowed == []
+            assert dropped == [op]
+        allowed, dropped = filter_forbidden_ops_for_role([op], role="lead")
+        assert allowed == [op]
+        assert dropped == []
+        assert ops_to_actions(allowed)["skill_proposals"] == [{
+            "name": "local-test-command",
+            "body": "Usa scripts/pytest_local.bat.",
+            "applies_to_roles": ["engineer"],
+            "evidence": ["runs r1 y r2"],
+        }]
 
     def test_filter_forbidden_ops_drops_create_interaction_for_web_scout(self) -> None:
         ops = [

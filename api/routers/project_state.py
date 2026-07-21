@@ -22,6 +22,7 @@ from aiteam.db.agents import list_agents
 from aiteam.db.documents import get_document
 from aiteam.db.issues import list_issues
 from aiteam.project_adapters import project_autonomy, set_project_autonomy
+from aiteam.plan_contract import present_plan_document
 
 router = APIRouter()
 
@@ -80,7 +81,7 @@ async def get_project_state(
         "comments": comments,
         "interactions": interactions,
         "selected_issue_id": selected_id,
-        "plan_document": plan_document,
+        "plan_document": present_plan_document(plan_document),
     }
 
 

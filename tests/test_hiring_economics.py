@@ -11,7 +11,7 @@ from aiteam.db.migration import SCHEMA_PATH
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
 from aiteam.project_adapters import write_project_adapter_policy
-from aiteam.user_config import store_secret
+from aiteam.user_config import record_model_health, store_secret
 
 
 def _init_db(db_path: Path, *, agent_adapter: str, adapter_config: dict | None = None) -> None:
@@ -43,8 +43,8 @@ def test_premium_agent_estimates_cost_and_zero_savings(tmp_path: Path, isolated_
 
     cost, savings = hiring_economics.estimate_run_economics(db, "agent-1")
 
-    # default typical tokens: 8000 in * 200 + 1000 out * 800 per 1M → 2 cents
-    assert cost == 2
+    # default typical tokens on Terra: 8000 in * 250 + 1000 out * 1500 → 3 cents
+    assert cost == 3
     assert savings == 0  # the premium alternative IS the chosen adapter
 
 
@@ -52,6 +52,9 @@ def test_local_agent_estimates_savings_vs_premium(tmp_path: Path, isolated_user_
     db = tmp_path / "aiteam.db"
     _init_db(db, agent_adapter="subscription_cli", adapter_config={"profile_id": "local_qwen_ollama"})
     store_secret(provider="openai", name="default", secret="sk-test")
+    record_model_health(
+        "openai_api", "gpt-5.6-sol", available=True, reason="economics fixture"
+    )
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "local_qwen_ollama"])
 
     cost, savings = hiring_economics.estimate_run_economics(db, "agent-1")
@@ -73,7 +76,7 @@ def test_dispatch_fills_run_economics(tmp_path: Path, isolated_user_config: Path
     dispatch = HeartbeatScheduler(db).dispatch_next(agent_id="agent-1")
 
     assert dispatch is not None
-    assert dispatch.run["estimated_cost_cents"] == 2
+    assert dispatch.run["estimated_cost_cents"] == 3
     assert dispatch.run["estimated_savings_cents"] == 0
 
 

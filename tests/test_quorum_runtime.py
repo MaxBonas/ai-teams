@@ -7,7 +7,7 @@ from pathlib import Path
 from aiteam.adapters.registry import AdapterDescriptor, AdapterRegistry, ExecutionResult
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.db.wakeups import enqueue_wakeup
-from aiteam.heartbeat.executor import RunExecutor, _looks_like_plan
+from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
 from aiteam.adapters.work_contract import ops_to_actions
 
@@ -103,12 +103,6 @@ def _report() -> dict:
         "result": "changes_requested",
         "evidence": "Riesgo concreto sobre la revisión A.",
     }
-
-
-def test_markdown_plan_is_materializable_without_plan_prefix() -> None:
-    assert _looks_like_plan(
-        "**Objective** migrar\n\n**Sub-issues** fases\n\n**Risk model** bloqueo"
-    ) is True
 
 
 def test_explicit_quorum_auto_starts_from_durable_plan_without_hiring_interaction(tmp_path: Path) -> None:

@@ -22,11 +22,15 @@ def test_default_adapter_registry_is_static_and_auditable() -> None:
     assert "anthropic_sonnet" in types
     assert "openai_api" in types
     assert "gemini_api" in types
+    assert "openai_compatible_api" in types
     assert "subscription_cli" in types
     assert registry.require("lead_builtin").descriptor.channel == "local"
     assert registry.require("role_builtin").descriptor.channel == "local"
     assert registry.require("anthropic_api").descriptor.provider == "anthropic"
-    assert registry.require("anthropic_sonnet").descriptor.model == "claude-sonnet-4-5"
+    assert registry.require("anthropic_api").descriptor.model == "claude-opus-4-8"
+    assert registry.require("anthropic_sonnet").descriptor.model == "claude-sonnet-5"
+    assert registry.require("openai_api").descriptor.model == "gpt-5.6-terra"
+    assert registry.require("gemini_api").descriptor.model == "gemini-3.5-flash"
     assert registry.require("openai_api").descriptor.channel == "api"
     assert isinstance(registry.require("openai_api"), OpenAIResponsesRuntime)
     assert isinstance(registry.require("gemini_api"), GeminiApiRuntime)

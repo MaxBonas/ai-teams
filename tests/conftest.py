@@ -12,9 +12,12 @@ import re
 import shutil
 import stat
 import uuid
+import warnings
 from pathlib import Path
 
 import pytest
+
+from scripts.cleanup_test_artifacts import pid_is_running
 
 
 _TEST_ENV_OVERRIDES = {
@@ -36,14 +39,18 @@ _TEST_ENV_OVERRIDES = {
     "GROQ_API_KEY": "",
     # Aisla la config de usuario (settings.json, projects_root) de la maquina
     # real; sin esto los tests leen LOCALAPPDATA/AI Teams si existe.
-    "AITEAM_USER_CONFIG_DIR": str(Path(__file__).resolve().parent.parent / ".pytest-user-config-tmp"),
+    "AITEAM_USER_CONFIG_DIR": "",
     "AITEAM_PROJECTS_ROOT": "",
     # El cost breaker se prueba en tests dedicados; apagado para el resto.
     "AITEAM_COST_BREAKER_CENTS": "0",
 }
 _PREVIOUS_TEST_ENV: dict[str, str | None] = {}
 _TEMP_PARENT = Path.cwd() / ".pytest-workspace-tmp"
-_TEMP_SESSION = _TEMP_PARENT / f"session-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+_USER_CONFIG_PARENT = Path.cwd() / ".pytest-user-config-tmp"
+_SESSION_NAME = f"session-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+_TEMP_SESSION = _TEMP_PARENT / _SESSION_NAME
+_USER_CONFIG_SESSION = _USER_CONFIG_PARENT / _SESSION_NAME
+_TEST_ENV_OVERRIDES["AITEAM_USER_CONFIG_DIR"] = str(_USER_CONFIG_SESSION)
 
 
 def _remove_test_tree(path: Path) -> None:
@@ -59,23 +66,27 @@ def _remove_test_tree(path: Path) -> None:
     shutil.rmtree(path, onerror=make_writeable)
 
 
-def _pid_is_running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
+def _clean_stale_root(root: Path, *, current: Path) -> None:
+    root.mkdir(exist_ok=True)
+    for candidate in root.iterdir():
+        if candidate == current:
+            continue
+        match = re.fullmatch(r"session-(\d+)-[0-9a-f]+", candidate.name)
+        if match and pid_is_running(int(match.group(1))):
+            continue
+        try:
+            _remove_test_tree(candidate)
+        except OSError as exc:
+            warnings.warn(
+                f"pytest cleanup retained locked stale path {candidate}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
 
 def _clean_stale_test_sessions() -> None:
-    _TEMP_PARENT.mkdir(exist_ok=True)
-    for candidate in _TEMP_PARENT.iterdir():
-        if candidate == _TEMP_SESSION:
-            continue
-        match = re.fullmatch(r"session-(\d+)-[0-9a-f]+", candidate.name)
-        if match and _pid_is_running(int(match.group(1))):
-            continue
-        _remove_test_tree(candidate)
+    _clean_stale_root(_TEMP_PARENT, current=_TEMP_SESSION)
+    _clean_stale_root(_USER_CONFIG_PARENT, current=_USER_CONFIG_SESSION)
 
 
 def _apply_test_env_overrides() -> None:
@@ -99,6 +110,7 @@ def pytest_configure(config) -> None:
     _apply_test_env_overrides()
     _clean_stale_test_sessions()
     _TEMP_SESSION.mkdir(parents=True, exist_ok=True)
+    _USER_CONFIG_SESSION.mkdir(parents=True, exist_ok=True)
 
 
 def pytest_unconfigure(config) -> None:

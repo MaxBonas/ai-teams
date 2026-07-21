@@ -34,13 +34,14 @@ from aiteam.db.comments import create_comment
 from aiteam.db.documents import append_summary_block, put_document
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.db.wakeups import enqueue_wakeup
+from aiteam.context_curator import CONTEXT_CURATOR_CHAR_THRESHOLD
 from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
 
 
 # ── Shared DB helpers ────────────────────────────────────────────────────────
 
-_CHAR_THRESHOLD = RunExecutor._CONTEXT_CURATOR_CHAR_THRESHOLD  # 8 000
+_CHAR_THRESHOLD = CONTEXT_CURATOR_CHAR_THRESHOLD  # fallback legacy: 8 000
 
 _ENGINEER_DONE = (
     "Implementación completada.\n\n"

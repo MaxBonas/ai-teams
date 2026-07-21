@@ -16,14 +16,19 @@ from aiteam.adapters.subscription_cli_adapter import (
     _build_codex_prompt,
     _build_system_prompt,
     _command_context,
+    _claude_mcp_config,
+    _extract_opencode_usage,
     _parse_antigravity_output,
     _parse_codex_output,
+    _parse_opencode_output,
+    _opencode_inline_config,
     _resolve_cli_cmd,
 )
 from aiteam.adapters.registry import AdapterDescriptor
 from aiteam.adapters.work_contract import parse_submit_work
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.project_adapters import reconcile_project_agent_policy
+from aiteam.user_config import record_model_health
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +100,7 @@ def test_antigravity_command_uses_headless_plan_contract(tmp_path, monkeypatch):
         AdapterDescriptor(adapter_type="subscription_cli", channel="subscription", provider="google-antigravity"),
         command=[str(binary)],
         cli_kind="antigravity",
-        model="Gemini 3.1 Pro (High)",
+        model="gemini-3.1-pro-high",
         timeout_sec=90,
     )
 
@@ -106,7 +111,182 @@ def test_antigravity_command_uses_headless_plan_contract(tmp_path, monkeypatch):
     assert ["--mode", "plan"] == command[4:6]
     assert "--sandbox" in command
     assert "--dangerously-skip-permissions" in command
-    assert command[-2:] == ["--model", "Gemini 3.1 Pro (High)"]
+    assert command[-2:] == ["--model", "gemini-3.1-pro-high"]
+
+
+def test_opencode_command_uses_exact_free_model_and_read_only_policy(tmp_path):
+    runtime = ClaudeSubscriptionCliRuntime(
+        AdapterDescriptor(adapter_type="subscription_cli", channel="free_gateway", provider="opencode-zen"),
+        command=[str(tmp_path / "opencode.cmd")],
+        cli_kind="opencode",
+        model="opencode/nemotron-3-ultra-free",
+    )
+    env = {"AITEAM_AGENT_ROLE": "lead", "AITEAM_WAKE_PAYLOAD_JSON": '{"objective":"plan"}'}
+
+    with _command_context(runtime, env, {"issue_id": "issue:free"}, effective_cwd=str(tmp_path)) as spec:
+        command = spec["command"]
+        policy = json.loads(spec["env_updates"]["OPENCODE_CONFIG_CONTENT"])
+        assert command[1:4] == ["run", "--format", "json"]
+        assert "--auto" not in command
+        assert command[command.index("--model") + 1] == "opencode/nemotron-3-ultra-free"
+        assert Path(command[command.index("--file") + 1]).is_file()
+        assert command.index("--file") > command.index(
+            "Follow the attached AI Teams contract. Return one JSON object with exactly "
+            "the top-level keys status, summary, and ops; return no Markdown or other text."
+        )
+        assert policy["share"] == "disabled"
+        assert policy["permission"]["read"] == "allow"
+        assert policy["permission"]["edit"] == "deny"
+        assert policy["permission"]["bash"] == "deny"
+
+
+def test_opencode_mcp_config_enforces_exact_owner_allowlist_without_secrets():
+    config = _opencode_inline_config([{
+        "name": "docs",
+        "command": "C:/tools/docs-mcp.exe",
+        "args": ["--stdio"],
+        "env_required": ["DOCS_TOKEN"],
+        "enabled_tools": ["lookup"],
+        "denied_tools": ["publish"],
+    }])
+
+    assert config["mcp"]["docs"]["command"] == ["C:/tools/docs-mcp.exe", "--stdio"]
+    assert config["mcp"]["docs"]["environment"] == {"DOCS_TOKEN": "{env:DOCS_TOKEN}"}
+    assert config["permission"]["docs_*"] == "deny"
+    assert config["permission"]["docs_lookup"] == "allow"
+    assert "docs_publish" not in config["permission"]
+    assert "secret-value" not in json.dumps(config)
+
+
+def test_parse_opencode_json_events_recovers_submit_work():
+    payload = {"status": "completed", "summary": "ok", "add_comment": "", "ops": []}
+    raw = "\n".join([
+        json.dumps({"type": "step_start"}),
+        json.dumps({"type": "text", "part": {"text": json.dumps(payload)}}),
+    ])
+
+    assert _parse_opencode_output(raw) == payload
+
+
+def test_extract_opencode_usage_sums_step_finish_events_and_keeps_session():
+    raw = "\n".join([
+        json.dumps({
+            "type": "step_finish",
+            "sessionID": "ses_opencode_123",
+            "part": {
+                "type": "step-finish",
+                "cost": 0,
+                "tokens": {
+                    "total": 130,
+                    "input": 100,
+                    "output": 25,
+                    "reasoning": 5,
+                    "cache": {"read": 40, "write": 3},
+                },
+            },
+        }),
+        json.dumps({
+            "type": "step_finish",
+            "sessionID": "ses_opencode_123",
+            "part": {
+                "type": "step-finish",
+                "cost": 0,
+                "tokens": {
+                    "total": 13,
+                    "input": 10,
+                    "output": 3,
+                    "reasoning": 0,
+                    "cache": {"read": 2, "write": 0},
+                },
+            },
+        }),
+    ])
+
+    assert _extract_opencode_usage(raw) == {
+        "input_tokens": 110,
+        "output_tokens": 28,
+        "reasoning_output_tokens": 5,
+        "cached_input_tokens": 42,
+        "cache_write_tokens": 3,
+        "total_tokens": 143,
+        "provider_session_id": "ses_opencode_123",
+    }
+
+
+def test_extract_opencode_usage_derives_total_without_double_counting_cache_or_reasoning():
+    raw = json.dumps({
+        "type": "step_finish",
+        "part": {
+            "type": "step-finish",
+            "tokens": {
+                "input": 80,
+                "output": 20,
+                "reasoning": 7,
+                "cache": {"read": 50, "write": 4},
+            },
+        },
+    })
+
+    assert _extract_opencode_usage(raw)["total_tokens"] == 100
+
+
+def test_codex_command_injects_ephemeral_mcp_without_secret_values():
+    runtime = ClaudeSubscriptionCliRuntime(
+        AdapterDescriptor(
+            adapter_type="subscription_cli", channel="subscription", provider="openai-codex"
+        ),
+        cli_kind="codex",
+    )
+
+    command = runtime._build_codex_command(
+        "task",
+        schema_path="/schema.json",
+        output_path="/out.json",
+        effective_cwd=None,
+        mcp_servers=[{
+            "name": "docs",
+            "command": "C:/tools/docs-mcp.exe",
+            "args": ["--stdio"],
+            "version": "1.2.3",
+            "enabled_tools": ["lookup"],
+        }],
+    )
+
+    overrides = [command[index + 1] for index, item in enumerate(command[:-1]) if item == "-c"]
+    assert 'mcp_servers.docs.command="C:/tools/docs-mcp.exe"' in overrides
+    assert 'mcp_servers.docs.args=["--stdio"]' in overrides
+    assert 'mcp_servers.docs.enabled_tools=["lookup"]' in overrides
+    assert all("SECRET" not in item for item in command)
+
+
+def test_claude_command_uses_strict_ephemeral_mcp_config_without_secret_values(tmp_path):
+    runtime = ClaudeSubscriptionCliRuntime(
+        AdapterDescriptor(
+            adapter_type="subscription_cli", channel="subscription", provider="anthropic"
+        ),
+        cli_kind="claude",
+    )
+    servers = [{
+        "name": "docs",
+        "command": "C:/tools/docs-mcp.exe",
+        "args": ["--stdio"],
+        "version": "1.2.3",
+        "env_required": ["DOCS_TOKEN"],
+        "enabled_tools": ["lookup"],
+        "denied_tools": ["publish"],
+    }]
+    config = _claude_mcp_config(servers)
+    assert config["mcpServers"]["docs"]["env"] == {"DOCS_TOKEN": "${DOCS_TOKEN}"}
+
+    config_path = tmp_path / "mcp.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    command = runtime._build_claude_command(
+        "SYSTEM", "USER", mcp_config_path=str(config_path), mcp_servers=servers
+    )
+    assert "--strict-mcp-config" in command
+    assert command[command.index("--mcp-config") + 1] == str(config_path)
+    assert "mcp__docs__publish" in command
+    assert all("secret-value" not in item for item in command)
 
 
 def test_antigravity_context_relays_large_prompt_through_ephemeral_file(tmp_path):
@@ -132,6 +312,29 @@ def test_antigravity_context_relays_large_prompt_through_ephemeral_file(tmp_path
         assert Path(command[-1]) == prompt_path.parent
 
     assert not prompt_path.exists()
+
+
+def test_antigravity_read_only_role_executes_outside_workspace(tmp_path):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    runtime = ClaudeSubscriptionCliRuntime(
+        AdapterDescriptor(
+            adapter_type="subscription_cli",
+            channel="subscription",
+            provider="google-antigravity",
+        ),
+        command=[str(tmp_path / "agy.exe")],
+        cli_kind="antigravity",
+        sandbox="read-only",
+    )
+    env = {
+        "AITEAM_AGENT_ROLE": "lead",
+        "AITEAM_WAKE_PAYLOAD_JSON": json.dumps({"workspace_files": []}),
+    }
+
+    with _command_context(runtime, env, {"issue_id": "issue:lead"}, effective_cwd=str(workspace)) as spec:
+        assert Path(spec["cwd"]) != workspace
+        assert Path(spec["cwd"]).is_dir()
 
 
 def test_submit_work_parser_skips_non_json_braces_before_valid_object():
@@ -170,6 +373,50 @@ def test_antigravity_parser_normalizes_observed_submit_work_body():
     }
 
 
+def test_antigravity_parser_normalizes_observed_text_envelope_with_preamble():
+    work = {
+        "status": "completed",
+        "summary": "implemented",
+        "ops": [
+            {"type": "write_file", "path": "conversor.py", "body": "VALUE = 1\n"},
+            {"type": "set_status", "status": "done"},
+        ],
+    }
+    raw = json.dumps({"text": "I will now submit the files:\n" + json.dumps(work)})
+
+    parsed = _parse_antigravity_output(raw)
+
+    assert parsed == work
+
+
+def test_antigravity_parser_prefers_top_level_ops_over_report_text():
+    ops = [
+        {"type": "write_file", "path": "conversor.py", "body": "VALUE = 1\n"},
+        {"type": "set_status", "status": "done"},
+    ]
+    raw = json.dumps({"text": "---AGENT-REPORT---\nresult: done", "ops": ops})
+
+    parsed = _parse_antigravity_output(raw)
+
+    assert parsed == {
+        "text": "---AGENT-REPORT---\nresult: done",
+        "ops": ops,
+        "status": "completed",
+        "summary": "Antigravity submit_work completed",
+    }
+
+
+def test_antigravity_parser_normalizes_ops_envelope_with_trailing_transport_noise():
+    ops = [{"type": "write_file", "path": "conversor.py", "body": "VALUE = 1\n"}]
+    raw = json.dumps({"text": "report", "ops": ops}) + "\nagy transport closed"
+
+    parsed = _parse_antigravity_output(raw)
+
+    assert parsed["ops"] == ops
+    assert parsed["status"] == "completed"
+    assert parsed["summary"] == "Antigravity submit_work completed"
+
+
 def test_antigravity_parser_rejects_unstructured_free_text():
     with pytest.raises(ValueError, match="submit_work JSON object not found"):
         _parse_antigravity_output("plain response without contract")
@@ -200,6 +447,24 @@ def test_codex_quorum_auditor_prompt_treats_lead_as_owner_and_forbids_implementa
     assert "Lead real del proyecto" in prompt
     assert "No implementes, no edites archivos" in prompt
     assert "---QUORUM-AUDIT---" in prompt
+
+
+def test_user_directives_are_presented_after_project_skill_and_override_it():
+    marker = "SKILL-LOCAL: usa siempre la opción A"
+    prompt = _build_codex_prompt(
+        {
+            "AITEAM_AGENT_ROLE": "engineer",
+            "AITEAM_AGENT_SKILL": marker,
+            "AITEAM_WAKE_PAYLOAD_JSON": json.dumps({
+                "user_directives": [{"decision": "Usa la opción B", "user_note": "B"}]
+            }),
+        },
+        {"issue_id": "issue:precedence"},
+    )
+
+    directive_heading = "=== Directivas del usuario (payload.user_directives) ==="
+    assert prompt.index(marker) < prompt.index(directive_heading)
+    assert "prevalecen sobre cualquier estándar o criterio anterior" in prompt
 
 # ---------------------------------------------------------------------------
 # _parse_codex_output
@@ -572,6 +837,30 @@ class TestExecuteCodexPath:
         assert result.status == "failed"
         assert result.error_code == "subscription_cli_usage_limit"
 
+    def test_model_requiring_newer_cli_is_model_unavailable(self, tmp_path):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stdout = (
+            "The 'gpt-5.6-luna' model requires a newer version of Codex. "
+            "Please upgrade to the latest app or CLI and try again."
+        )
+        mock_proc.stderr = ""
+        rt = self._make_runtime()
+        env = self._make_env(str(tmp_path))
+
+        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc):
+            with patch(
+                "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
+                return_value={
+                    "command": ["codex.cmd", "exec"],
+                    "read_output": lambda proc: proc.stdout,
+                },
+            ):
+                result = rt.execute({"issue_id": "issue-1"}, env)
+
+        assert result.status == "failed"
+        assert result.error_code == "model_unavailable"
+
     def test_add_comment_synthesised_as_op(self, tmp_path):
         output = json.dumps({"status": "completed", "summary": "ok", "add_comment": "check the tests"})
         mock_proc = MagicMock()
@@ -697,7 +986,7 @@ class TestExecuteCodexPath:
 
 
 # ---------------------------------------------------------------------------
-# reconcile upgrades API-only junior to CLI
+# reconcile preserves explicit transport assignments
 # ---------------------------------------------------------------------------
 
 
@@ -713,8 +1002,15 @@ def _init_db_with_agents(db_path: Path, agents: list[tuple]) -> None:
         conn.commit()
 
 
-class TestReconcileUpgradesApiOnlyJunior:
-    def test_engineer_on_openai_api_upgraded_to_codex_when_available(self, tmp_path: Path) -> None:
+class TestReconcilePreservesExplicitTransport:
+    def test_engineer_on_openai_api_stays_on_api_when_codex_is_available(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+        record_model_health(
+            "codex_subscription", "gpt-5.6-terra",
+            available=True, reason="test runtime inventory",
+        )
         db_path = tmp_path / "aiteam.db"
         _init_db_with_agents(db_path, [
             ("role:lead", "lead", "Lead", "lead", "openai_api", '{"profile_id":"openai_api"}', "[]"),
@@ -735,9 +1031,9 @@ class TestReconcileUpgradesApiOnlyJunior:
             )}
 
         assert "role:engineer" in repaired
-        assert rows["role:engineer"]["adapter_type"] == "subscription_cli"
+        assert rows["role:engineer"]["adapter_type"] == "openai_api"
         cfg = json.loads(rows["role:engineer"]["adapter_config_json"])
-        assert cfg["profile_id"] == "codex_subscription"
+        assert cfg["profile_id"] == "openai_api"
 
     def test_lead_on_openai_api_not_upgraded_to_codex(self, tmp_path: Path) -> None:
         """Senior roles should keep openai_api even when codex_subscription is available."""

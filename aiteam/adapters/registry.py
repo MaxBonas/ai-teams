@@ -106,6 +106,7 @@ def build_default_registry() -> AdapterRegistry:
     from aiteam.adapters.anthropic_adapter import AnthropicApiRuntime  # noqa: PLC0415
     from aiteam.adapters.gemini_adapter import GeminiApiRuntime  # noqa: PLC0415
     from aiteam.adapters.openai_adapter import OpenAIResponsesRuntime  # noqa: PLC0415
+    from aiteam.adapters.openai_compatible_adapter import OpenAICompatibleApiRuntime  # noqa: PLC0415
     from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntime  # noqa: PLC0415
     registry = AdapterRegistry()
     registry.register(
@@ -147,10 +148,10 @@ def build_default_registry() -> AdapterRegistry:
                 adapter_type="anthropic_api",
                 channel="api",
                 provider="anthropic",
-                model="claude-opus-4-5",
+                model="claude-opus-4-8",
                 cost_tier=3,
             ),
-            model="claude-opus-4-5",
+            model="claude-opus-4-8",
         )
     )
     registry.register(
@@ -159,10 +160,10 @@ def build_default_registry() -> AdapterRegistry:
                 adapter_type="anthropic_sonnet",
                 channel="api",
                 provider="anthropic",
-                model="claude-sonnet-4-5",
+                model="claude-sonnet-5",
                 cost_tier=2,
             ),
-            model="claude-sonnet-4-5",
+            model="claude-sonnet-5",
         )
     )
     registry.register(
@@ -171,10 +172,10 @@ def build_default_registry() -> AdapterRegistry:
                 adapter_type="openai_api",
                 channel="api",
                 provider="openai",
-                model="gpt-4.1",
+                model="gpt-5.6-terra",
                 cost_tier=2,
             ),
-            model="gpt-4.1",
+            model="gpt-5.6-terra",
         )
     )
     registry.register(
@@ -183,10 +184,21 @@ def build_default_registry() -> AdapterRegistry:
                 adapter_type="gemini_api",
                 channel="api",
                 provider="google",
-                model="gemini-2.5-flash",
+                model="gemini-3.5-flash",
                 cost_tier=2,
             ),
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
+        )
+    )
+    registry.register(
+        OpenAICompatibleApiRuntime(
+            AdapterDescriptor(
+                adapter_type="openai_compatible_api",
+                channel="api",
+                provider="openai-compatible",
+                model="configured",
+                cost_tier=0,
+            )
         )
     )
     registry.register(

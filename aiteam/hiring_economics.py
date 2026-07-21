@@ -31,12 +31,13 @@ _ADAPTER_DEFAULT_PROVIDER = {
     "gemini_api": "google",
     "anthropic_api": "anthropic",
     "anthropic_sonnet": "anthropic",
+    "openai_compatible_api": "openai-compatible",
 }
 _ADAPTER_DEFAULT_MODEL = {
-    "openai_api": "gpt-4.1",
-    "gemini_api": "gemini-2.5-flash",
-    "anthropic_api": "claude-sonnet-4-5",
-    "anthropic_sonnet": "claude-sonnet-4-5",
+    "openai_api": "gpt-5.6-terra",
+    "gemini_api": "gemini-3.5-flash",
+    "anthropic_api": "claude-opus-4-8",
+    "anthropic_sonnet": "claude-sonnet-5",
 }
 
 
@@ -76,7 +77,9 @@ def estimate_run_economics(db_path: Path, agent_id: str) -> tuple[int, int]:
     adapter_config = _decode_json(row["adapter_config_json"])
     provider, model = provider_and_model_for(str(row["adapter_type"] or ""), adapter_config)
     input_tokens, output_tokens = typical_tokens_for_role(db_path, role)
-    estimated = estimate_cost_cents(provider, model, input_tokens, output_tokens)
+    estimated = 0 if resolve_adapter_config(
+        str(row["adapter_type"] or ""), adapter_config
+    ).get("free_tier") else estimate_cost_cents(provider, model, input_tokens, output_tokens)
     premium = premium_alternative_cents(db_path, role, input_tokens, output_tokens)
     return (estimated, max(0, premium - estimated))
 
@@ -100,7 +103,8 @@ def premium_alternative_cents(db_path: Path, role: str, input_tokens: int, outpu
     model = str(selection.get("model") or "").strip() or _ADAPTER_DEFAULT_MODEL.get(
         str(selection.get("adapter_type") or ""), ""
     )
-    return estimate_cost_cents(provider, model, input_tokens, output_tokens)
+    config = (profile or {}).get("config") if isinstance((profile or {}).get("config"), dict) else {}
+    return 0 if config.get("free_tier") else estimate_cost_cents(provider, model, input_tokens, output_tokens)
 
 
 def log_hiring_decision(
@@ -125,13 +129,20 @@ def log_hiring_decision(
     """
     provider, model = provider_and_model_for(adapter_type, adapter_config)
     input_tokens, output_tokens = typical_tokens_for_role(db_path, role)
-    estimated = estimate_cost_cents(provider, model, input_tokens, output_tokens)
+    resolved_config = resolve_adapter_config(adapter_type, adapter_config or {})
+    estimated = 0 if resolved_config.get("free_tier") else estimate_cost_cents(
+        provider, model, input_tokens, output_tokens
+    )
     premium = premium_alternative_cents(db_path, role, input_tokens, output_tokens)
 
     deviation: str | None = None
     # Per-token billing is the deviation signal, not the rounded estimate —
     # cheap "mini" models cost <1¢/run and would escape an `estimated > 0` check.
-    if str(role or "").strip().lower() in JUNIOR_ROLES and price_per_mtok(provider, model) != (0, 0):
+    if (
+        str(role or "").strip().lower() in JUNIOR_ROLES
+        and not resolved_config.get("free_tier")
+        and price_per_mtok(provider, model) != (0, 0)
+    ):
         deviation = (
             "scoring_preferred_premium"
             if _zero_cost_channel_connected(db_path)
@@ -189,8 +200,12 @@ def detect_policy_deviations(db_path: Path) -> list[dict[str, Any]]:
         role = str(row["role"] or "").strip().lower()
         if role not in JUNIOR_ROLES:
             continue
-        provider, model = provider_and_model_for(str(row["adapter_type"] or ""), _decode_json(row["adapter_config_json"]))
-        if price_per_mtok(provider, model) == (0, 0):
+        adapter_config = _decode_json(row["adapter_config_json"])
+        provider, model = provider_and_model_for(str(row["adapter_type"] or ""), adapter_config)
+        if (
+            resolve_adapter_config(str(row["adapter_type"] or ""), adapter_config).get("free_tier")
+            or price_per_mtok(provider, model) == (0, 0)
+        ):
             continue
         input_tokens, output_tokens = typical_tokens_for_role(db_path, role)
         estimated = estimate_cost_cents(provider, model, input_tokens, output_tokens)
@@ -308,7 +323,11 @@ def _zero_cost_channel_connected(db_path: Path) -> bool:
     except Exception:
         return False
     for profile in profiles:
-        if str(profile.get("channel") or "") in {"local", "subscription"} and profile_is_connected(profile):
+        config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+        if (
+            str(profile.get("channel") or "") in {"local", "subscription", "free_gateway"}
+            or bool(config.get("free_tier"))
+        ) and profile_is_connected(profile):
             return True
     return False
 

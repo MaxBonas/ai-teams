@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+from ctypes import wintypes
 import os
 from pathlib import Path
 import re
@@ -15,7 +17,27 @@ TEMP_PARENT = REPO_ROOT / ".pytest-workspace-tmp"
 USER_CONFIG_TEMP = REPO_ROOT / ".pytest-user-config-tmp"
 
 
-def _pid_is_running(pid: int) -> bool:
+def pid_is_running(pid: int) -> bool:
+    if os.name == "nt":
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))) and (
+                exit_code.value == still_active
+            )
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except OSError:
@@ -34,23 +56,26 @@ def _remove_tree(path: Path) -> None:
     shutil.rmtree(path, onerror=make_writeable)
 
 
-def cleanup(*, include_live: bool = False) -> list[str]:
-    failures: list[str] = []
-    if TEMP_PARENT.exists():
-        for candidate in TEMP_PARENT.iterdir():
+def _cleanup_session_root(
+    root: Path, *, include_live: bool, failures: list[str]
+) -> None:
+    if root.exists():
+        for candidate in root.iterdir():
             match = re.fullmatch(r"session-(\d+)-[0-9a-f]+", candidate.name)
-            if not include_live and match and _pid_is_running(int(match.group(1))):
+            if not include_live and match and pid_is_running(int(match.group(1))):
                 continue
             try:
                 _remove_tree(candidate)
             except OSError as exc:
                 failures.append(f"{candidate}: {exc}")
-        if TEMP_PARENT.exists() and not any(TEMP_PARENT.iterdir()):
-            TEMP_PARENT.rmdir()
-    try:
-        _remove_tree(USER_CONFIG_TEMP)
-    except OSError as exc:
-        failures.append(f"{USER_CONFIG_TEMP}: {exc}")
+        if root.exists() and not any(root.iterdir()):
+            root.rmdir()
+
+
+def cleanup(*, include_live: bool = False) -> list[str]:
+    failures: list[str] = []
+    _cleanup_session_root(TEMP_PARENT, include_live=include_live, failures=failures)
+    _cleanup_session_root(USER_CONFIG_TEMP, include_live=include_live, failures=failures)
     return failures
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.utils import PROJECT_ROOT, _require_api_auth_request, _workspace_from_request, get_current_workspace, resolve_runtime_dir
 from aiteam.db.activity_log import log_activity
@@ -24,7 +24,9 @@ from aiteam.db.quorum_sessions import (
 from aiteam.hiring_economics import detect_policy_deviations, provider_router_health
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
 from aiteam.provider_governor import GOVERNOR
+from aiteam.plan_contract import present_plan_document
 from aiteam.run_profiles import LEAD_QUORUM, select_execution_profile
+from aiteam.subscription_quota import subscription_quota_snapshot
 from scripts.orchestrator_evals import evaluate_db
 
 router = APIRouter()
@@ -46,7 +48,8 @@ class CreateIssueRequest(BaseModel):
     run_profile: Literal["auto", "solo_lead", "lead_quorum", "full_team"] | None = None
     priority: int = 0
     assignee_agent_id: str | None = None
-    metadata: dict[str, Any] = {}
+    data_class: Literal["public", "internal", "confidential", "restricted"] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateIssueRequest(BaseModel):
@@ -58,6 +61,7 @@ class UpdateIssueRequest(BaseModel):
     complexity: str | None = None
     criticality: str | None = None
     metadata: dict[str, Any] | None = None
+    data_class: Literal["public", "internal", "confidential", "restricted"] | None = None
 
 
 @router.post("/api/issues")
@@ -79,6 +83,8 @@ async def post_issue(body: CreateIssueRequest, request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     metadata["profile"] = selection.profile
     metadata["profile_selection"] = selection.to_metadata()
+    if body.data_class:
+        metadata["data_class"] = body.data_class
     source_plan_revision_id = str(metadata.get("source_plan_revision_id") or "").strip()
     if source_plan_revision_id:
         try:
@@ -197,7 +203,12 @@ async def get_issue_by_id(issue_id: str, request: Request):
         plan_document = get_document(db, issue_id=issue_id, key="plan")
     except Exception:
         plan_document = None
-    return {"success": True, "issue": row, "pending_interactions": pending, "plan_document": plan_document}
+    return {
+        "success": True,
+        "issue": row,
+        "pending_interactions": pending,
+        "plan_document": present_plan_document(plan_document),
+    }
 
 
 @router.get("/api/issues/{issue_id}/quorum")
@@ -378,11 +389,22 @@ async def patch_issue(issue_id: str, body: UpdateIssueRequest, request: Request)
     _require_api_auth_request(request)
     db = _db(request)
     try:
+        metadata = body.metadata
+        if body.data_class is not None:
+            current = get_issue(db, issue_id=issue_id)
+            current_metadata: dict[str, Any] = {}
+            if current:
+                try:
+                    import json
+                    current_metadata = json.loads(str(current.get("metadata_json") or "{}"))
+                except (TypeError, ValueError):
+                    current_metadata = {}
+            metadata = {**current_metadata, **(body.metadata or {}), "data_class": body.data_class}
         row = update_issue(
             db, issue_id=issue_id, status=body.status, title=body.title,
             description=body.description, assignee_agent_id=body.assignee_agent_id,
             priority=body.priority, complexity=body.complexity,
-            criticality=body.criticality, metadata=body.metadata,
+            criticality=body.criticality, metadata=metadata,
         )
     except (ValueError, sqlite3.IntegrityError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -403,6 +425,7 @@ async def patch_issue(issue_id: str, body: UpdateIssueRequest, request: Request)
             "priority": body.priority,
             "complexity": body.complexity,
             "criticality": body.criticality,
+            "data_class": body.data_class,
         },
     )
     # Unblock dependent issues when this one reaches a terminal state
@@ -540,8 +563,16 @@ async def get_loop_health(request: Request):
                 "quorum": _eval["quorum"],
                 "liveness": _eval["liveness"],
             }
+            eval_requires_attention = (
+                not bool(_eval["liveness"].get("healthy", False))
+                or (
+                    bool(_eval["quorum"].get("available", False))
+                    and not bool(_eval["quorum"].get("healthy", False))
+                )
+            )
         except (FileNotFoundError, ValueError, sqlite3.Error):
             orchestrator_evals = {"available": False}
+            eval_requires_attention = False
 
         # Estado del cap de coste diario (real, por-token) para el dashboard.
         cost_cap: dict[str, Any] = {"enabled": False}
@@ -567,12 +598,24 @@ async def get_loop_health(request: Request):
                 }
         except Exception:
             cost_cap = {"enabled": False}
+        try:
+            subscription_quota = subscription_quota_snapshot(
+                db,
+                profiles=project_profiles(db.parent),
+            )
+        except Exception:
+            subscription_quota = []
+        subscription_profiles_requiring_attention = [
+            row["profile_id"] for row in subscription_quota if row.get("requires_attention")
+        ]
         requires_attention = (
             bool(detected_loops)
             or any(r["skip_count"] >= 2 for r in at_risk)
             or bool(providers_degraded)
             or bool(providers_unhealthy)
             or bool(cost_cap.get("reached"))
+            or bool(subscription_profiles_requiring_attention)
+            or eval_requires_attention
         )
         return {
             "success": True,
@@ -587,6 +630,12 @@ async def get_loop_health(request: Request):
             "decision_latency": decision_latency,
             "orchestrator_evals": orchestrator_evals,
             "cost_cap": cost_cap,
+            "capacity_profiles": subscription_quota,
+            "capacity_profiles_requiring_attention": subscription_profiles_requiring_attention,
+            # Compatibilidad transitoria con clientes anteriores al split
+            # subscription_pressure/api_rate_limit.
+            "subscription_quota": subscription_quota,
+            "subscription_profiles_requiring_attention": subscription_profiles_requiring_attention,
             "policy_deviations": policy_deviations,
             "summary": {
                 "total_loops": len(detected_loops),

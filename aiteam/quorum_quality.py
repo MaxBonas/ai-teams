@@ -43,13 +43,20 @@ def evaluate_plan_depth(body: str, *, min_words: int = 300) -> dict[str, Any]:
 
 def plan_contract_instruction(*, final: bool = False) -> str:
     label = "Plan B final" if final else "Plan A inicial"
-    return (
+    instruction = (
         f"El {label} debe ser profundo, accionable y autosuficiente (mínimo 300 palabras) e incluir "
         "secciones explícitas para: objetivo y alcance; estado actual/contexto; supuestos y restricciones; "
         "arquitectura o enfoque con alternativas descartadas; fases, dependencias y owners; riesgos, modos "
         "de fallo y rollback; criterios de aceptación, verificación y evidencia; preguntas abiertas, bloqueos "
         "y escalado; y continuación concreta de la siguiente run."
     )
+    if final:
+        instruction += (
+            " En la operación update_plan, el campo plan.narrative_markdown debe contener por sí "
+            "solo el Plan B completo con esas secciones y al menos 300 palabras; no lo uses como "
+            "resumen breve ni confíes en que los demás campos estructurados completen ese mínimo."
+        )
+    return instruction
 
 
 def quorum_audit_contract_instruction() -> str:

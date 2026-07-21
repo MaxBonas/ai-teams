@@ -281,10 +281,14 @@ def test_adversarial_mode_off_disables_even_on_high(tmp_path: Path, monkeypatch:
 def test_cross_provider_enforcement_covers_adversarial_qa(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """El atacante no debe compartir familia con el implementador."""
     from aiteam.project_adapters import write_project_adapter_policy
-    from aiteam.user_config import store_secret
+    from aiteam.user_config import model_options, record_model_health, store_secret
 
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
     store_secret(provider="google", name="default", secret="gemini-key")
+    for option in model_options().get("gemini_api", []):
+        record_model_health(
+            "gemini_api", str(option["value"]), available=True, reason="qa fixture"
+        )
     db_path = tmp_path / "aiteam.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))

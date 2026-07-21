@@ -6,7 +6,18 @@ from pathlib import Path
 from typing import Any
 
 from aiteam.tools.catalog import default_capabilities_for_role
-from aiteam.user_config import ROLE_CAPABILITY_PROFILES, load_adapter_profiles, model_options, model_options_for_role, profile_is_connected
+from aiteam.provider_identity import profile_perspective_key
+from aiteam.model_compatibility import compatibility_decision
+from aiteam.compatibility_service import resolve_assignment_compatibility
+from aiteam.policies import canonical_role
+from aiteam.user_config import (
+    ROLE_CAPABILITY_PROFILES,
+    load_adapter_profiles,
+    model_is_selectable,
+    model_options,
+    model_options_for_role,
+    profile_is_connected,
+)
 
 
 PROJECT_CONFIG_NAME = "project_config.json"
@@ -21,11 +32,6 @@ from aiteam.policies import (  # noqa: E402
     cost_policy_enforced as _cost_policy_enforced,
     default_autonomy,
 )
-
-# API-only adapters cannot write workspace files — they will immediately block
-# when assigned to junior roles that require file writes (engineer, worker).
-# reconcile_project_agent_policy upgrades these to subscription_cli when available.
-_API_ONLY_ADAPTER_TYPES = {"openai_api", "anthropic_api", "anthropic_sonnet", "gemini_api"}
 
 # Default Tier 3 agents created in every project.
 # key = canonical agent id, value = (role, display_name, seniority)
@@ -114,10 +120,56 @@ def choose_adapter_for_role(
     profiles: list[dict[str, Any]],
     *,
     demoted_profile_ids: set[str] | None = None,
+    run_profile: str = "",
+    criticality: str = "medium",
+    data_class: str = "",
+    required_capabilities: list[str] | None = None,
 ) -> dict[str, Any] | None:
     if not profiles:
         return None
-    role_key = str(role or "").strip().lower()
+    executable_profiles = []
+    role_key = canonical_role(role)
+    role_profile = ROLE_CAPABILITY_PROFILES.get(role_key, {})
+    for candidate in profiles:
+        supported_roles = candidate.get("supported_roles")
+        if (
+            isinstance(supported_roles, list)
+            and supported_roles
+            and role_key not in {str(item).strip().lower() for item in supported_roles}
+        ):
+            continue
+        candidate_options = candidate.get("model_options")
+        if not isinstance(candidate_options, list) or not candidate_options:
+            # Callers using minimal test/custom profiles have no runtime catalog;
+            # preserve their existing explicit configuration.
+            executable_profiles.append(candidate)
+            continue
+        static_by_value = {
+            str(item.get("value") or ""): item
+            for item in model_options().get(str(candidate.get("id") or ""), [])
+        }
+        enriched_options = [
+            {**static_by_value.get(str(item.get("value") or ""), {}), **item}
+            for item in candidate_options if isinstance(item, dict)
+        ]
+        compatible_options = [
+            item for item in enriched_options
+            if isinstance(item, dict) and compatibility_decision(
+                profile=candidate,
+                model=item,
+                role=role_key,
+                run_profile=run_profile,
+                criticality=criticality,
+                data_class=data_class,
+                required_capabilities=required_capabilities or [],
+                role_profile=role_profile,
+            ).get("allowed")
+        ]
+        if compatible_options:
+            executable_profiles.append({**candidate, "model_options": compatible_options})
+    if not executable_profiles:
+        return None
+    profiles = executable_profiles
     seniority_key = str(seniority or "").strip().lower()
     needs_senior = role_key in SENIOR_ROLES or seniority_key in {"lead", "senior"}
     ranked = sorted(
@@ -133,7 +185,23 @@ def choose_adapter_for_role(
     if demoted_profile_ids:
         ranked = sorted(ranked, key=lambda p: str(p.get("id") or "") in demoted_profile_ids)
     profile = ranked[0]
-    model = _choose_model(str(profile.get("id") or ""), role=role_key, needs_senior=needs_senior)
+    profile_config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+    runtime_options = profile.get("model_options") if isinstance(profile.get("model_options"), list) else []
+    selectable_models = None
+    if runtime_options:
+        selectable_models = {
+            str(item.get("value") or "")
+            for item in runtime_options
+            if isinstance(item, dict) and model_is_selectable(item)
+        }
+    model = _choose_model(
+        str(profile.get("id") or ""),
+        role=role_key,
+        needs_senior=needs_senior,
+        configured_model=str(profile_config.get("model") or "").strip() or None,
+        channel=str(profile.get("channel") or ""),
+        selectable_models=selectable_models,
+    )
     config = {"profile_id": profile.get("id")}
     if model:
         config["model"] = model
@@ -156,21 +224,34 @@ def _apply_cost_policy(role_key: str, ranked: list[dict[str, Any]]) -> list[dict
         return ranked
     if str(ranked[0].get("channel") or "") != "api":
         return ranked
-    zero_cost = [
-        p for p in ranked
-        if str(p.get("channel") or "") in {"local", "subscription"} and profile_is_connected(p)
-    ]
+    zero_cost = [p for p in ranked if _profile_has_zero_marginal_cost(p) and profile_is_connected(p)]
     if not zero_cost:
         return ranked
     remainder = [p for p in ranked if p not in zero_cost]
     return zero_cost + remainder
 
 
-def apply_adapter_policy_to_member(member: dict[str, Any], profiles: list[dict[str, Any]]) -> dict[str, Any]:
+def _profile_has_zero_marginal_cost(profile: dict[str, Any]) -> bool:
+    channel = str(profile.get("channel") or "")
+    config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+    return channel in {"local", "subscription", "free_gateway"} or bool(config.get("free_tier"))
+
+
+def apply_adapter_policy_to_member(
+    member: dict[str, Any],
+    profiles: list[dict[str, Any]],
+    *,
+    run_profile: str = "",
+    criticality: str = "medium",
+    data_class: str = "",
+) -> dict[str, Any]:
     selection = choose_adapter_for_role(
         str(member.get("role") or ""),
         str(member.get("seniority") or ""),
         profiles,
+        run_profile=run_profile,
+        criticality=criticality,
+        data_class=data_class,
     )
     if not selection:
         return dict(member)
@@ -189,11 +270,8 @@ def reconcile_project_agent_policy(db_path: Path, *, include_tier3: bool = True)
     Two upgrade paths:
     1. Default/placeholder adapters (role_builtin, lead_builtin, manual, empty) are
        always replaced with the best adapter for the role.
-    2. API-only adapters on junior roles (engineer, worker) are upgraded to
-       subscription_cli when a CLI profile is now available in the project's allowlist.
-       This handles projects that had only openai_api initially but later added
-       codex_subscription — without this, the engineer would stay on the API-only
-       adapter and block immediately on every run.
+    La capacidad de escritura ya no se infiere del tipo API/CLI: la decide el
+    gate modelo×rol. Reconcile nunca cambia de canal solo por ser API.
     """
 
     db_path = Path(db_path)
@@ -216,23 +294,34 @@ def reconcile_project_agent_policy(db_path: Path, *, include_tier3: bool = True)
         lead_id = _lead_agent_id(conn)
         for row in rows:
             role = str(row["role"] or "").strip()
+            current_adapter = str(row["adapter_type"] or "").strip()
+            try:
+                _current_config = json.loads(str(row["adapter_config_json"] or "{}"))
+            except (TypeError, ValueError):
+                _current_config = {}
+            if not isinstance(_current_config, dict):
+                _current_config = {}
+            is_adapter_missing_profile = (
+                current_adapter not in {"", "manual", "role_builtin", "lead_builtin"}
+                and not str(_current_config.get("profile_id") or "").strip()
+            )
             selection = choose_adapter_for_role(role, str(row["seniority"] or ""), profiles)
+            if not selection and is_adapter_missing_profile:
+                # Recovery only needs to restore the lost transport identity and
+                # preserves the agent's explicit legacy model below. Do not let
+                # a newer Team catalog prevent that metadata repair.
+                repair_profiles = [
+                    {key: value for key, value in profile.items() if key != "model_options"}
+                    for profile in profiles
+                ]
+                selection = choose_adapter_for_role(role, str(row["seniority"] or ""), repair_profiles)
             if not selection:
                 continue
             sets: list[str] = ["updated_at = CURRENT_TIMESTAMP"]
             params: list[Any] = []
-            current_adapter = str(row["adapter_type"] or "").strip()
             # Determine whether this agent's adapter should be replaced.
             is_placeholder = current_adapter in {"", "manual", "role_builtin", "lead_builtin"}
-            is_junior = role.lower() in JUNIOR_ROLES
             selected_adapter = str(selection.get("adapter_type") or "")
-            # Upgrade API-only junior agents to CLI when a CLI adapter is now available.
-            # This fires when a project adds codex_subscription after initial setup.
-            is_api_only_junior = (
-                is_junior
-                and current_adapter in _API_ONLY_ADAPTER_TYPES
-                and selected_adapter == "subscription_cli"
-            )
             # A subscription_cli agent whose config lost its profile_id falls
             # back to the runtime's default binary ('claude'), which may not be
             # installed at all — observed live: 95 straight failed runs with
@@ -243,38 +332,50 @@ def reconcile_project_agent_policy(db_path: Path, *, include_tier3: bool = True)
             # allowlist can drift (observed: only openai_api listed while the
             # whole team runs codex), and the siblings are the ground truth of
             # what actually works on this machine.
-            try:
-                _current_config = json.loads(str(row["adapter_config_json"] or "{}"))
-            except (TypeError, ValueError):
-                _current_config = {}
-            if not isinstance(_current_config, dict):
-                _current_config = {}
-            is_cli_missing_profile = (
-                current_adapter == "subscription_cli"
-                and not str(_current_config.get("profile_id") or "").strip()
-            )
-            _cli_repair_config: dict[str, Any] | None = None
-            if is_cli_missing_profile:
-                if selected_adapter == "subscription_cli":
-                    _cli_repair_config = dict(selection.get("adapter_config") or {})
-                else:
+            _profile_repair_config: dict[str, Any] | None = None
+            _profile_repair_adapter = current_adapter
+            _policy_repair_config: dict[str, Any] | None = None
+            if is_adapter_missing_profile:
+                if selected_adapter == current_adapter:
+                    _profile_repair_config = dict(selection.get("adapter_config") or {})
+                    _policy_repair_config = dict(_profile_repair_config)
+                elif current_adapter == "subscription_cli":
                     _sibling_profile = _sibling_cli_profile_id(conn, exclude_agent_id=str(row["id"]))
                     if _sibling_profile:
-                        _cli_repair_config = {"profile_id": _sibling_profile}
+                        _profile_repair_config = {"profile_id": _sibling_profile}
+                        _profile_repair_adapter = "subscription_cli"
                 # Keep an explicitly chosen model when only the profile was lost.
-                if _cli_repair_config is not None and str(_current_config.get("model") or "").strip():
-                    _cli_repair_config["model"] = _current_config["model"]
-            if is_placeholder or is_api_only_junior:
+                if _profile_repair_config is not None and str(_current_config.get("model") or "").strip():
+                    _profile_repair_config["model"] = _current_config["model"]
+                if _profile_repair_config is not None:
+                    repaired_decision = resolve_assignment_compatibility(
+                        adapter_type=_profile_repair_adapter,
+                        adapter_config=_profile_repair_config,
+                        role=role,
+                        profiles=profiles,
+                    )
+                    if not repaired_decision.get("allowed"):
+                        _profile_repair_config = _policy_repair_config
+                        if _profile_repair_config is not None:
+                            repaired_decision = resolve_assignment_compatibility(
+                                adapter_type=_profile_repair_adapter,
+                                adapter_config=_profile_repair_config,
+                                role=role,
+                                profiles=profiles,
+                            )
+                        if not repaired_decision.get("allowed"):
+                            _profile_repair_config = None
+            if is_placeholder:
                 sets.extend(["adapter_type = ?", "adapter_config_json = ?"])
                 params.extend([
                     selected_adapter or current_adapter or "manual",
                     json.dumps(selection.get("adapter_config") or {}, ensure_ascii=False, sort_keys=True),
                 ])
-            elif _cli_repair_config is not None:
+            elif _profile_repair_config is not None:
                 sets.extend(["adapter_type = ?", "adapter_config_json = ?"])
                 params.extend([
-                    "subscription_cli",
-                    json.dumps(_cli_repair_config, ensure_ascii=False, sort_keys=True),
+                    _profile_repair_adapter,
+                    json.dumps(_profile_repair_config, ensure_ascii=False, sort_keys=True),
                 ])
             caps = _decode_list(row["capabilities_json"])
             if not caps:
@@ -312,7 +413,7 @@ def _profile_score(profile: dict[str, Any], *, needs_senior: bool) -> int:
     if needs_senior:
         if any(token in profile_id for token in ("openai", "codex", "anthropic", "gemini")):
             score += 25
-        if channel in {"api", "subscription"}:
+        if channel in {"api", "subscription", "free_gateway"}:
             score += 15
         if any(token in profile_id for token in ("local", "qwen", "gem4", "gemma")):
             score -= 8
@@ -323,40 +424,52 @@ def _profile_score(profile: dict[str, Any], *, needs_senior: bool) -> int:
             score += 20
         if provider in {"ollama", "lmstudio"}:
             score += 20
-        # Engineer/QA roles need to write files — prefer adapters that can execute CLI.
-        # API-only adapters (openai_api, anthropic_api, gemini_api, anthropic_sonnet)
-        # cannot write workspace files and will immediately block with
-        # liveness_reason = "api_only_engineer_no_workspace_changes".
-        if adapter_type == "subscription_cli":
-            score += 30  # subscription_cli can write files — ideal for engineer
-        elif adapter_type in {"openai_api", "anthropic_api", "gemini_api", "anthropic_sonnet"}:
-            score -= 30  # API-only immediately blocks engineer (file-write required)
+        # Capacidad de workspace es un hard gate previo. Aquí solo se ordenan
+        # salud/economía; API y CLI no reciben premios o castigos ficticios.
     return score
 
 
-def _choose_model(profile_id: str, *, role: str = "", needs_senior: bool) -> str | None:
+def _choose_model(
+    profile_id: str,
+    *,
+    role: str = "",
+    needs_senior: bool,
+    configured_model: str | None = None,
+    channel: str = "",
+    selectable_models: set[str] | None = None,
+) -> str | None:
     """Select the best model for a given profile and role.
 
     Uses role capability profiles when available (prefers the top-scored option
     that matches the role's capability needs).  Falls back to the original
     senior/cheap heuristic for unknown roles.
     """
+    # Un perfil local representa un modelo que el owner ya instaló y probó.
+    # No lo sustituimos por una opción estática más nueva que quizá no exista
+    # en esa máquina; los upgrades locales requieren selección/health explícitos.
+    if str(channel or "").strip().lower() == "local" and configured_model:
+        return configured_model if selectable_models is None or configured_model in selectable_models else None
+
     # Calibración causal 2026-07-18: Codex mini obtuvo 0/3 en auth mientras
     # gpt-5.5 logró 2/2 y también 1/1 en queue. Como el gate productivo no
     # conoce las anclas semánticas ocultas, no puede escalar tras una pérdida
     # silenciosa. Promovemos solo este perfil; Haiku mantuvo 3/3 en auth.
     if role == "context_curator" and profile_id == "codex_subscription":
         options = model_options().get(profile_id, [])
-        premium = next((item for item in options if item.get("tier") == "premium"), None)
-        if premium:
-            return str(premium["value"])
+        calibrated = next((item for item in options if item.get("value") == "gpt-5.5"), None)
+        if calibrated and (selectable_models is None or str(calibrated["value"]) in selectable_models):
+            return str(calibrated["value"])
     if role:
         options = model_options_for_role(profile_id, role)
+        if selectable_models is not None:
+            options = [item for item in options if str(item.get("value") or "") in selectable_models]
         if options:
             return str(options[0]["value"])
 
     # Legacy fallback: senior → best, junior → cheapest option with "mini"/"flash"/"lite"
     options = model_options().get(profile_id, [])
+    if selectable_models is not None:
+        options = [item for item in options if str(item.get("value") or "") in selectable_models]
     if not options:
         return None
     if needs_senior:
@@ -377,7 +490,18 @@ def senior_model_for_profile(profile_id: str) -> str | None:
     scoring consideró suficiente para ese rol (el barato que acaba de fallar);
     la cascada necesita el tope del perfil, no otra vez el mismo peldaño.
     """
-    return _choose_model(profile_id, role="", needs_senior=True)
+    profile = next(
+        (item for item in load_adapter_profiles() if str(item.get("id") or "") == profile_id),
+        {},
+    )
+    config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+    return _choose_model(
+        profile_id,
+        role="",
+        needs_senior=True,
+        configured_model=str(config.get("model") or "").strip() or None,
+        channel=str(profile.get("channel") or ""),
+    )
 
 
 def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> list[str]:
@@ -393,7 +517,7 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
     created: list[str] = []
     profiles_by_id = {str(profile.get("id") or ""): profile for profile in profiles}
     used_profile_ids: set[str] = set()
-    used_providers: set[str] = set()
+    used_perspectives: set[str] = set()
     with sqlite3.connect(str(db_path), timeout=20.0) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
@@ -411,15 +535,17 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
                 existing_profile = profiles_by_id.get(existing_profile_id, {})
                 if existing_profile_id:
                     used_profile_ids.add(existing_profile_id)
-                existing_provider = str(existing_profile.get("provider") or "")
-                if existing_provider:
-                    used_providers.add(existing_provider)
+                if existing_profile:
+                    used_perspectives.add(profile_perspective_key(
+                        existing_profile,
+                        selected_model=str(existing_config.get("model") or ""),
+                    ))
                 continue
             # Independencia por construcción: el segundo auditor intenta primero
             # otro proveedor y después, si no existe, al menos otro perfil/canal.
             candidates = [
                 profile for profile in profiles
-                if str(profile.get("provider") or "") not in used_providers
+                if profile_perspective_key(profile) not in used_perspectives
             ] or [
                 profile for profile in profiles
                 if str(profile.get("id") or "") not in used_profile_ids
@@ -463,9 +589,11 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
                 created.append(agent_id)
                 if selected_profile_id:
                     used_profile_ids.add(selected_profile_id)
-                selected_provider = str(selected_profile.get("provider") or "")
-                if selected_provider:
-                    used_providers.add(selected_provider)
+                if selected_profile:
+                    used_perspectives.add(profile_perspective_key(
+                        selected_profile,
+                        selected_model=str((selection or {}).get("model") or ""),
+                    ))
         conn.commit()
     return created
 

@@ -9,9 +9,12 @@ from pathlib import Path
 import pytest
 
 from aiteam.extensions import (
+    MAX_ACTIVE_SKILL_BYTES,
+    MAX_LEARNED_SKILLS,
     delete_project_skill,
     list_project_skills,
     project_skills_for_role,
+    propose_learned_skill,
     set_project_skill_status,
     slugify_skill_name,
     upsert_project_skill,
@@ -128,3 +131,84 @@ def test_orphaned_registry_entry_skipped(tmp_path: Path) -> None:
 def test_slugify_examples() -> None:
     assert slugify_skill_name("Unity Scene Regen!") == "unity-scene-regen"
     assert slugify_skill_name("") == "skill"
+
+
+def test_learned_skill_is_evidence_backed_and_inert_until_owner_approval(tmp_path: Path) -> None:
+    rt = _runtime(tmp_path)
+    proposed = propose_learned_skill(
+        rt,
+        name="pytest on windows",
+        body="Usa el launcher local del proyecto.",
+        applies_to_roles=["engineer"],
+        evidence=["run-1 falló con python global", "run-2 pasó con scripts/pytest_local.bat"],
+        source_run_id="run-2",
+    )
+
+    assert proposed["origin"] == "learned"
+    assert proposed["status"] == "proposed"
+    assert project_skills_for_role(rt, "engineer") == []
+
+    activated = set_project_skill_status(rt, name=proposed["name"], status="active")
+    assert activated is not None
+    assert activated["approved_by"] == "user"
+    assert [item["name"] for item in project_skills_for_role(rt, "engineer")] == [proposed["name"]]
+
+
+def test_learned_proposal_requires_evidence_and_has_quantity_limit(tmp_path: Path) -> None:
+    rt = _runtime(tmp_path)
+    with pytest.raises(ValueError, match="evidence"):
+        propose_learned_skill(
+            rt, name="guess", body="Do X", applies_to_roles=[], evidence=[], source_run_id="run-1"
+        )
+
+    for index in range(MAX_LEARNED_SKILLS):
+        propose_learned_skill(
+            rt,
+            name=f"learned-{index}",
+            body=f"Observed rule {index}",
+            applies_to_roles=["engineer"],
+            evidence=[f"run-{index}"],
+            source_run_id=f"run-{index}",
+        )
+    with pytest.raises(ValueError, match="learned skill limit"):
+        propose_learned_skill(
+            rt,
+            name="one-too-many",
+            body="Observed rule",
+            applies_to_roles=["engineer"],
+            evidence=["run-final"],
+            source_run_id="run-final",
+        )
+
+
+def test_active_prompt_budget_is_enforced(tmp_path: Path) -> None:
+    rt = _runtime(tmp_path)
+    half = MAX_ACTIVE_SKILL_BYTES // 2
+    upsert_project_skill(rt, name="first", body="A" * half)
+    upsert_project_skill(rt, name="second", body="B" * half)
+    with pytest.raises(ValueError, match="prompt budget"):
+        upsert_project_skill(rt, name="overflow", body="C")
+
+
+def test_owner_edit_preserves_learned_provenance(tmp_path: Path) -> None:
+    rt = _runtime(tmp_path)
+    propose_learned_skill(
+        rt,
+        name="local-rule",
+        body="Original",
+        applies_to_roles=["engineer"],
+        evidence=["run-1"],
+        source_run_id="run-1",
+    )
+    edited = upsert_project_skill(
+        rt,
+        name="local-rule",
+        body="Corregida por el owner",
+        applies_to_roles=["reviewer"],
+        origin="owner",
+        status="proposed",
+        approved_by="user",
+    )
+    assert edited["origin"] == "learned"
+    assert edited["edited_by_owner_at"]
+    assert edited["evidence"] == ["run-1"]

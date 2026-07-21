@@ -22,6 +22,9 @@ _LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio", "local"})
 # Most-specific prefixes first — lookup is by prefix match in insertion order.
 PRICE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
     "openai": {
+        "gpt-5.6-sol":  (500, 3000),
+        "gpt-5.6-terra": (250, 1500),
+        "gpt-5.6-luna": (100, 600),
         "gpt-4.1-nano": (10, 40),
         "gpt-4.1-mini": (40, 160),
         "gpt-4.1":      (200, 800),
@@ -31,6 +34,9 @@ PRICE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
         "o3":           (200, 800),
     },
     "google": {
+        "gemini-3.1-pro-preview": (200, 1200),
+        "gemini-3.5-flash":      (150, 900),
+        "gemini-3.1-flash-lite": (25, 150),
         "gemini-2.0-flash-lite": (8, 30),
         "gemini-2.0-flash":      (10, 40),
         "gemini-2.5-flash-lite": (10, 40),
@@ -38,9 +44,14 @@ PRICE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
         "gemini-2.5-pro":        (125, 1000),
     },
     "anthropic": {
-        "claude-opus-4-5":   (1500, 7500),
+        "claude-fable-5":    (1000, 5000),
+        "claude-opus-4-8":   (500, 2500),
+        # Tarifa estándar desde 2026-09-01; el precio introductorio temporal
+        # no se usa como baseline durable de FinOps.
+        "claude-sonnet-5":    (300, 1500),
+        "claude-haiku-4-5":   (100, 500),
+        "claude-opus-4-5":   (500, 2500),
         "claude-sonnet-4-5": (300, 1500),
-        "claude-haiku-4-5":  (80, 400),
         "claude-3-5-sonnet-20241022": (300, 1500),
         "claude-3-haiku-20240307":    (25, 125),
     },
@@ -48,9 +59,9 @@ PRICE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
 
 # Fallback model when the exact model is unknown for a priced provider.
 _DEFAULT_MODEL_KEY = {
-    "openai": "gpt-4.1",
-    "google": "gemini-2.5-flash",
-    "anthropic": "claude-sonnet-4-5",
+    "openai": "gpt-5.6-terra",
+    "google": "gemini-3.5-flash",
+    "anthropic": "claude-sonnet-5",
 }
 
 # Conservative defaults when a role has no run history yet.
@@ -77,7 +88,17 @@ def price_per_mtok(provider: str, model: str) -> tuple[int, int]:
 def estimate_cost_cents(provider: str, model: str, input_tokens: int, output_tokens: int) -> int:
     in_price, out_price = price_per_mtok(provider, model)
     try:
-        cents = (int(input_tokens) * in_price + int(output_tokens) * out_price) // 1_000_000
+        normalized_input = int(input_tokens)
+        normalized_output = int(output_tokens)
+        model_key = str(model or "").strip().lower()
+        # Tramos oficiales que dependen del tamaño total del prompt. La tabla
+        # conserva la tarifa base; el estimador aplica el multiplicador real.
+        if model_key.startswith("gemini-3.1-pro-preview") and normalized_input > 200_000:
+            in_price, out_price = (400, 1800)
+        elif model_key.startswith(("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")) and normalized_input > 272_000:
+            in_price = in_price * 2
+            out_price = out_price * 3 // 2
+        cents = (normalized_input * in_price + normalized_output * out_price) // 1_000_000
     except (TypeError, ValueError):
         return 0
     return max(0, cents)

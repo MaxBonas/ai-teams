@@ -159,6 +159,21 @@ CREATE TABLE IF NOT EXISTS runs (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- The selected adapter profile is historical provenance, not mutable agent
+-- configuration.  Keeping it in an additive table lets existing SQLite
+-- projects acquire the contract through CREATE TABLE IF NOT EXISTS without an
+-- unsafe ALTER of the central runs table.
+CREATE TABLE IF NOT EXISTS run_adapter_profiles (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    profile_id TEXT NOT NULL,
+    provider TEXT,
+    model TEXT,
+    channel TEXT CHECK (channel IS NULL OR channel IN ('subscription', 'api', 'local')),
+    quota_policy_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS issue_comments (
     id TEXT PRIMARY KEY,
     issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
@@ -358,6 +373,8 @@ CREATE INDEX IF NOT EXISTS idx_issues_goal_status ON issues(goal_id, status);
 CREATE INDEX IF NOT EXISTS idx_issues_assignee_status ON issues(assignee_agent_id, status);
 CREATE INDEX IF NOT EXISTS idx_runs_agent_started ON runs(agent_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_runs_issue_status ON runs(issue_id, status);
+CREATE INDEX IF NOT EXISTS idx_run_adapter_profiles_profile
+    ON run_adapter_profiles(profile_id, channel, created_at);
 CREATE INDEX IF NOT EXISTS idx_wakeup_agent_status ON wakeup_requests(agent_id, status);
 CREATE INDEX IF NOT EXISTS idx_run_events_run_seq ON run_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_issue_documents_issue_key ON issue_documents(issue_id, key);

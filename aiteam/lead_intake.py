@@ -8,11 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from aiteam.action_routing import pick_role_for_routing, route_action
+from aiteam.compatibility_service import (
+    issue_compatibility_context,
+    require_compatible_assignment,
+)
 from aiteam.db.dependencies import sync_default_child_dependencies
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.hiring_economics import log_hiring_decision
-from aiteam.project_adapters import apply_adapter_policy_to_member
+from aiteam.project_adapters import apply_adapter_policy_to_member, project_profiles
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES
+from aiteam.provider_identity import profile_perspective_key
+from aiteam.policies import canonical_role
 from aiteam.run_profiles import (
     LEAD_QUORUM,
     SOLO_LEAD,
@@ -61,7 +67,7 @@ def build_team_proposal(
     ``lead_quorum`` — Lead + two senior quorum auditors review the plan before
                       execution begins.
 
-    ``full_team``   — Lead + engineer + reviewer + qa (default).
+    ``full_team``   — Lead + engineer + reviewer; QA solo como gate adversarial.
     """
     effective_profile = normalize_run_profile(profile or _issue_profile(issue))
     title = str(issue.get("title") or "Proyecto").strip()
@@ -75,9 +81,15 @@ def build_team_proposal(
         source="lead_intake",
     )
     pconf = profile_config(effective_profile)
+    try:
+        issue_metadata = json.loads(str(issue.get("metadata_json") or "{}"))
+    except (TypeError, ValueError):
+        issue_metadata = {}
+    if not isinstance(issue_metadata, dict):
+        issue_metadata = {}
 
     proposed_team: list[dict[str, Any]] = []
-    used_quorum_providers: set[str] = set()
+    used_quorum_perspectives: set[str] = set()
     for agent in blueprint.agents:
         if agent.role in {"team_lead", "lead"}:
             continue
@@ -85,14 +97,23 @@ def build_team_proposal(
         if effective_profile == LEAD_QUORUM:
             diverse = [
                 item for item in candidates
-                if str(item.get("provider") or item.get("id") or "") not in used_quorum_providers
+                if profile_perspective_key(item) not in used_quorum_perspectives
             ]
             candidates = diverse or candidates
-        member = _blueprint_to_member(agent, adapter_profiles=candidates)
+        member = _blueprint_to_member(
+            agent,
+            adapter_profiles=candidates,
+            run_profile=effective_profile,
+            criticality=str(issue.get("criticality") or "medium"),
+            data_class=str(issue_metadata.get("data_class") or ""),
+        )
         if effective_profile == LEAD_QUORUM:
             selected_id = str(member.get("adapter_profile_id") or "")
             selected = next((item for item in (adapter_profiles or []) if str(item.get("id") or "") == selected_id), {})
-            used_quorum_providers.add(str(selected.get("provider") or selected_id))
+            if selected:
+                used_quorum_perspectives.add(profile_perspective_key(
+                    selected, selected_model=str(member.get("model") or "")
+                ))
         proposed_team.append(member)
 
     suggested_issues = _suggested_issues_for_profile(effective_profile, parent_issue_id, proposed_team)
@@ -143,7 +164,14 @@ def _normalize_lead_id(agent_id: str | None) -> str | None:
     return "role:lead" if agent_id in _LEAD_ID_ALIASES else agent_id
 
 
-def _blueprint_to_member(agent: AgentBlueprint, *, adapter_profiles: list[dict[str, Any]]) -> dict[str, Any]:
+def _blueprint_to_member(
+    agent: AgentBlueprint,
+    *,
+    adapter_profiles: list[dict[str, Any]],
+    run_profile: str = "",
+    criticality: str = "medium",
+    data_class: str = "",
+) -> dict[str, Any]:
     member = {
         "id": agent.agent_id,
         "role": agent.role,
@@ -156,7 +184,13 @@ def _blueprint_to_member(agent: AgentBlueprint, *, adapter_profiles: list[dict[s
         "supervisor_agent_id": _normalize_lead_id(agent.supervisor_agent_id),
         "rationale": agent.assignment_reason,
     }
-    return apply_adapter_policy_to_member(member, adapter_profiles)
+    return apply_adapter_policy_to_member(
+        member,
+        adapter_profiles,
+        run_profile=run_profile,
+        criticality=criticality,
+        data_class=data_class,
+    )
 
 
 def _accountability_for_profile(profile: str) -> list[dict[str, Any]]:
@@ -317,10 +351,6 @@ def _suggested_issues_for_profile(
     ]
 
 
-_API_ONLY_ADAPTER_TYPES = {"openai_api", "anthropic_api", "gemini_api", "anthropic_sonnet"}
-_FILE_WRITING_ROLES = {"engineer", "qa", "worker"}
-
-
 def format_team_proposal(proposal: dict[str, Any]) -> str:
     profile = proposal.get("profile", "full_team")
     team = proposal.get("proposed_team") or []
@@ -346,14 +376,13 @@ def format_team_proposal(proposal: dict[str, Any]) -> str:
                 role = member.get("role", "")
                 adapter = member.get("adapter_type", "role_builtin")
                 model = (member.get("adapter_config") or {}).get("model") or ""
-                role_cap = ROLE_CAPABILITY_PROFILES.get(role.lower(), {})
+                role_cap = ROLE_CAPABILITY_PROFILES.get(canonical_role(role), {})
                 cap_note = role_cap.get("note", "")
                 # Build a concise model annotation
                 model_tag = f"modelo: {model}" if model else "modelo: automático (config.toml)"
-                ws_tag = " · ⚠️ requiere CLI" if role_cap.get("requires_workspace") and adapter in _API_ONLY_ADAPTER_TYPES else ""
                 lines.append(
                     f"- {member['name']} ({role}, {member.get('seniority','standard')})"
-                    f" — {adapter} · {model_tag}{ws_tag}"
+                    f" — {adapter} · {model_tag}"
                     f"\n  {cap_note}"
                     f"\n  {member.get('rationale','')}"
                 )
@@ -367,30 +396,6 @@ def format_team_proposal(proposal: dict[str, Any]) -> str:
             )
         lines += ["", "Acepta para crear el equipo y las issues. Rechaza para ajustar instrucciones."]
 
-        # ── API-only adapter warning ─────────────────────────────────────────
-        api_only_warnings = [
-            member
-            for member in team
-            if member.get("role", "").lower() in _FILE_WRITING_ROLES
-            and member.get("adapter_type", "").lower() in _API_ONLY_ADAPTER_TYPES
-        ]
-        if api_only_warnings:
-            lines += [
-                "",
-                "⚠️  ADVERTENCIA — Adapter API-only detectado en rol de implementación:",
-            ]
-            for member in api_only_warnings:
-                lines.append(
-                    f"   · {member['name']} ({member['role']}) usa `{member.get('adapter_type')}` "
-                    f"que NO puede escribir archivos en el workspace."
-                )
-            lines += [
-                "   El engineer necesita un adapter CLI/local (subscription_cli, Codex, Antigravity u Ollama)",
-                "   para producir evidencia de implementación. Si aceptas con este adapter el engineer",
-                "   quedará bloqueado inmediatamente con liveness_reason=api_only_engineer_no_workspace_changes.",
-                "   Cambia el adapter antes de aceptar o ajusta el proyecto para usar subscription_cli.",
-            ]
-
     return "\n".join(lines)
 
 
@@ -401,6 +406,20 @@ def apply_accepted_team_proposal(
     proposal: dict[str, Any],
     source_run_id: str,
 ) -> dict[str, Any]:
+    # La propuesta puede haber sido editada por el usuario entre sugerencia y
+    # aceptación. Revalídala completa antes de abrir la transacción para que
+    # una combinación incompatible no deje contrataciones parciales.
+    compatibility_context = issue_compatibility_context(db_path, parent_issue_id)
+    available_profiles = project_profiles(Path(db_path).parent)
+    for member in proposal.get("proposed_team") or []:
+        require_compatible_assignment(
+            adapter_type=str(member.get("adapter_type") or "manual"),
+            adapter_config=member.get("adapter_config") or {},
+            role=str(member.get("role") or "engineer"),
+            profiles=available_profiles,
+            **compatibility_context,
+        )
+
     created_agents: list[str] = []
     created_issues: list[str] = []
     with contextlib.closing(_connect(db_path)) as conn:

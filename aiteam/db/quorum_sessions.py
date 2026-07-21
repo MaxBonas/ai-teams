@@ -15,6 +15,7 @@ from aiteam.policies import (
     QUORUM_MIN_VALID_CONTRIBUTIONS,
 )
 from aiteam.db.activity_log import log_activity
+from aiteam.provider_identity import perspective_key
 
 
 TERMINAL_QUORUM_STATUSES = frozenset({"accepted", "degraded", "failed"})
@@ -148,9 +149,15 @@ def evaluate_quorum_session(
             for row in valid_rows
             if str(row["provider"] or "").strip()
         }
+        perspectives = {
+            perspective_key(str(row["provider"] or ""), str(row["model"] or ""))
+            for row in valid_rows
+        }
         min_valid = int(session["min_valid_contributions"])
         enough = len(valid_rows) >= min_valid
-        diverse = len(providers) >= min(2, min_valid)
+        # Dos perfiles o transportes del mismo fabricante no constituyen una
+        # revisión independiente (p. ej. Codex + OpenAI API sobre GPT).
+        diverse = len(perspectives) >= min(2, min_valid)
         gate_satisfied = enough and diverse
         current_status = str(session["status"])
         if current_status in TERMINAL_QUORUM_STATUSES:
@@ -175,6 +182,7 @@ def evaluate_quorum_session(
         "valid_contributions": len(valid_rows),
         "total_contributions": len(rows),
         "distinct_providers": len(providers),
+        "distinct_perspectives": len(perspectives),
         "missing_valid": max(0, min_valid - len(valid_rows)),
         "diversity_satisfied": diverse,
     }

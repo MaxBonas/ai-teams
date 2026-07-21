@@ -6,13 +6,13 @@ from typing import Any
 from aiteam.adapters.http_retry import post_json as _post_json
 from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
 from aiteam.pricing import estimate_cost_from_usage
-from aiteam.adapters.work_contract import OPENAI_SUBMIT_WORK_SCHEMA, build_execution_contract, ops_to_actions, parse_submit_work
+from aiteam.adapters.work_contract import OPENAI_SUBMIT_WORK_SCHEMA, build_execution_contract, ops_to_actions, validate_submit_work
 
 
 class OpenAIResponsesRuntime:
     """OpenAI Responses API runtime with structured submit_work output."""
 
-    def __init__(self, descriptor: AdapterDescriptor, *, model: str = "gpt-4.1", timeout: float = 120.0) -> None:
+    def __init__(self, descriptor: AdapterDescriptor, *, model: str = "gpt-5.6-terra", timeout: float = 120.0) -> None:
         self.descriptor = descriptor
         self._model = model
         self._timeout = timeout
@@ -52,7 +52,7 @@ class OpenAIResponsesRuntime:
 
         raw_text = _openai_output_text(data)
         try:
-            work = parse_submit_work(raw_text)
+            work = validate_submit_work(raw_text)
         except ValueError as exc:
             return ExecutionResult(status="failed", output=raw_text[:2048] or None, error=str(exc), error_code="tool_parse_error")
         ops = work.get("ops") if isinstance(work.get("ops"), list) else []

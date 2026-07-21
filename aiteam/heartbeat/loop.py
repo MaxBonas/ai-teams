@@ -19,6 +19,8 @@ from aiteam.db.liveness import (
 from aiteam.db.runs import reconcile_stale_runs
 from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
+from aiteam.mcp_runtime import refresh_due_mcp_servers
+from aiteam.mcp_needs import reconcile_mcp_needs
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,38 @@ class HeartbeatLoop:
                 logger.warning("tick: reconciled %d stale run(s): %s", len(stale), stale)
         except Exception:
             logger.exception("stale-run reconciler failed")
+
+        # One due MCP probe at most per tick. Failed probes back off in the
+        # registry and retire after three consecutive failures, so a broken
+        # extension cannot create a process storm or installation loop.
+        try:
+            refreshed = await loop.run_in_executor(
+                None,
+                lambda: refresh_due_mcp_servers(self.db_path.parent, max_checks=1),
+            )
+            for result in refreshed:
+                from aiteam.db.activity_log import log_activity
+
+                log_activity(
+                    self.db_path,
+                    action="extension.health_periodic",
+                    target_type="extension",
+                    target_id=str(result.get("name") or ""),
+                    payload={
+                        "status": result.get("status"),
+                        "health_status": (result.get("health") or {}).get("status"),
+                        "consecutive_failures": (result.get("health") or {}).get("consecutive_failures", 0),
+                    },
+                )
+        except Exception:
+            logger.exception("periodic MCP health failed")
+
+        try:
+            suggested_needs = await loop.run_in_executor(None, reconcile_mcp_needs, self.db_path)
+            if suggested_needs:
+                logger.info("MCP need detector woke Lead for roots: %s", suggested_needs)
+        except Exception:
+            logger.exception("MCP need detector failed")
 
         try:
             materialized = await loop.run_in_executor(None, reconcile_unassigned_role_issues, self.db_path)

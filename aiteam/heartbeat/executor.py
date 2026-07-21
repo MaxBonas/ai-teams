@@ -16,13 +16,16 @@ logger = logging.getLogger(__name__)
 
 from aiteam.adapters.registry import AdapterRegistry, ExecutionResult
 from aiteam.adapters.work_contract import filter_forbidden_ops_for_role
-from aiteam.context_budget import LEGACY_UNSYNTHESIZED_CHAR_THRESHOLD, evaluate_context_budget
-from aiteam.db.agents import create_agent
+from aiteam.context_curator import apply_curator_actions, evaluate_curator_trigger
+from aiteam.compatibility_service import (
+    issue_compatibility_context,
+    resolve_assignment_compatibility,
+)
+from aiteam.db.agents import create_agent, get_agent, update_agent
 from aiteam.db.activity_log import log_activity
 from aiteam.db.comments import create_comment
 from aiteam.db.dependencies import resolve_blocker_wakeups, sync_default_child_dependencies
-from aiteam.db.documents import DocumentConflict, append_summary_block, get_document, get_context_summary, put_document
-from aiteam.db.wake_payload import build_context_curation_target
+from aiteam.db.documents import DocumentConflict, get_document, put_document
 from aiteam.db.issues import create_issue
 from aiteam.db.finops import BudgetStatus, check_budget, current_period, record_cost
 from aiteam.db.interactions import create_interaction, get_interaction, list_interactions
@@ -44,6 +47,8 @@ from aiteam.db.wakeups import enqueue_wakeup, finish_wakeup
 from aiteam.heartbeat.scheduler import DispatchResult
 from aiteam.lead_intake import apply_accepted_team_proposal, build_team_proposal, format_team_proposal
 from aiteam.hiring_economics import log_hiring_decision
+from aiteam.mcp_runtime import mcp_servers_for_run
+from aiteam.plan_contract import PLAN_FORMAT, encode_plan_contract
 from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
 from aiteam.provider_governor import GOVERNOR
 from aiteam.quorum_quality import (
@@ -64,13 +69,17 @@ from aiteam.run_liveness import (
 )
 from aiteam.run_profiles import FULL_TEAM, LEAD_QUORUM, SOLO_LEAD, normalize_run_profile
 from aiteam.skills import compose_skill
+from aiteam.subscription_quota import record_run_adapter_profile
 from aiteam.tools.catalog import check_capability, default_capabilities_for_role, get_agent_capabilities
 from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntime
 from aiteam.user_config import (
     inject_adapter_secrets,
     load_adapter_profiles,
+    model_fallback_for_role,
     profile_is_connected,
+    record_model_health,
     resolve_adapter_config,
+    validate_model_selection,
 )
 from aiteam.workspace_evidence import WorkspaceDelta, diff_snapshots, snapshot_workspace, workspace_root_for_db
 
@@ -214,10 +223,14 @@ class RunExecutor:
                 from aiteam.adapters.openai_adapter import OpenAIResponsesRuntime
                 if isinstance(runtime, OpenAIResponsesRuntime):
                     runtime = OpenAIResponsesRuntime(runtime.descriptor, model=override_model)
-            elif override_model and adapter_type == "gemini_api":
+            elif adapter_type == "gemini_api":
                 from aiteam.adapters.gemini_adapter import GeminiApiRuntime
                 if isinstance(runtime, GeminiApiRuntime):
-                    runtime = GeminiApiRuntime(runtime.descriptor, model=override_model)
+                    runtime = runtime.with_config(adapter_cfg)
+            elif adapter_type == "openai_compatible_api":
+                from aiteam.adapters.openai_compatible_adapter import OpenAICompatibleApiRuntime
+                if isinstance(runtime, OpenAICompatibleApiRuntime):
+                    runtime = runtime.with_config(adapter_cfg)
             elif adapter_type == "subscription_cli" and isinstance(runtime, ClaudeSubscriptionCliRuntime):
                 # Orchestration/scout roles run the coding CLI read-only so they
                 # cannot edit files — they must delegate (Lead) or report
@@ -507,11 +520,16 @@ class RunExecutor:
                                                 self.db_path.parent,
                                                 name=str(_r_payload.get("name") or ""),
                                                 source=str(_r_payload.get("source") or ""),
+                                                version=str(_r_payload.get("version") or ""),
                                                 args=_r_payload.get("args") or [],
                                                 env_required=_r_payload.get("env_required") or [],
                                                 applies_to_roles=_r_payload.get("applies_to_roles") or [],
                                                 justification=str(_r_payload.get("justification") or ""),
                                                 approved_by="user",
+                                                catalog_id=str(_r_payload.get("catalog_id") or ""),
+                                                catalog_artifact_version=str(_r_payload.get("catalog_artifact_version") or ""),
+                                                catalog_reviewed_at=str(_r_payload.get("catalog_reviewed_at") or ""),
+                                                catalog_homepage=str(_r_payload.get("catalog_homepage") or ""),
                                             )
                                             log_activity(
                                                 self.db_path, action="extension.approved", target_type="issue",
@@ -522,7 +540,13 @@ class RunExecutor:
                                             reject_mcp_server(
                                                 self.db_path.parent,
                                                 name=str(_r_payload.get("name") or ""),
+                                                source=str(_r_payload.get("source") or ""),
+                                                version=str(_r_payload.get("version") or ""),
                                                 justification=str(_r_payload.get("justification") or ""),
+                                                catalog_id=str(_r_payload.get("catalog_id") or ""),
+                                                catalog_artifact_version=str(_r_payload.get("catalog_artifact_version") or ""),
+                                                catalog_reviewed_at=str(_r_payload.get("catalog_reviewed_at") or ""),
+                                                catalog_homepage=str(_r_payload.get("catalog_homepage") or ""),
                                             )
                                             log_activity(
                                                 self.db_path, action="extension.rejected", target_type="issue",
@@ -815,7 +839,10 @@ class RunExecutor:
         # ── Capability gate ────────────────────────────────────────────────
         # LLM / external adapters require at least one non-builtin capability.
         # Builtin roles (lead_builtin, role_builtin, manual) always pass.
-        _llm_adapters = {"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"}
+        _llm_adapters = {
+            "anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api",
+            "openai_compatible_api",
+        }
         if adapter_type in _llm_adapters and agent_info:
             caps = get_agent_capabilities(agent_info)
             if not caps:
@@ -855,6 +882,8 @@ class RunExecutor:
             provider=effective_provider,
             model=effective_model,
             channel=effective_channel,
+            profile_id=str(adapter_cfg.get("profile_id") or "") or None,
+            quota_policy=adapter_cfg.get("subscription_quota"),
         )
         # Keep the in-memory run aligned with the durable row.  Downstream
         # provenance writers (notably quorum contributions) run before the DB
@@ -939,12 +968,94 @@ class RunExecutor:
                 **env,
                 "AITEAM_OPENAI_MODEL": str(adapter_cfg["model"]),
                 "AITEAM_GEMINI_MODEL": str(adapter_cfg["model"]),
+                "AITEAM_MODEL": str(adapter_cfg["model"]),
             }
         env = inject_adapter_secrets(env, adapter_type, adapter_cfg)
         # workspace_root already computed above (before payload building)
         # Expose workspace root so CLI adapters (codex, claude, gemini) know
         # which directory to operate in when cwd is not explicitly configured.
         env = {**env, "AITEAM_WORKSPACE_ROOT": str(workspace_root)}
+        # MCP grants are evaluated per run. Only active, freshly healthy
+        # project entries matching both role and capability reach the CLI.
+        if adapter_type == "subscription_cli" and agent_info:
+            mcp_grants, mcp_denials = mcp_servers_for_run(
+                self.db_path.parent,
+                role=agent_role,
+                capabilities=get_agent_capabilities(agent_info),
+            )
+            if not (
+                isinstance(runtime, ClaudeSubscriptionCliRuntime)
+                and runtime.cli_kind in {"codex", "claude", "opencode"}
+            ):
+                mcp_denials.extend(
+                    {"name": item["name"], "reason": "mcp_adapter_not_supported"}
+                    for item in mcp_grants
+                )
+                mcp_grants = []
+            elif runtime.cli_kind == "claude":
+                for item in mcp_grants:
+                    mcp_denials.append({
+                        "name": item["name"],
+                        "reason": "mcp_adapter_cannot_enforce_tool_allowlist",
+                        "tool_decisions": [
+                            {
+                                "name": tool["name"],
+                                "decision": "denied",
+                                "reason": "mcp_adapter_cannot_enforce_tool_allowlist",
+                            }
+                            for tool in item.get("tool_decisions") or []
+                        ],
+                    })
+                mcp_grants = []
+            for grant in mcp_grants:
+                record_tool_access(
+                    self.db_path,
+                    run_id=run_id,
+                    agent_id=agent_id,
+                    issue_id=issue_id_str or None,
+                    tool_name=f"mcp:{grant['name']}",
+                    decision="allowed",
+                    reason="active health-checked MCP grant for role",
+                    metadata={"version": grant["version"], "role": agent_role},
+                )
+                for tool in grant.get("tool_decisions") or []:
+                    record_tool_access(
+                        self.db_path,
+                        run_id=run_id,
+                        agent_id=agent_id,
+                        issue_id=issue_id_str or None,
+                        tool_name=f"mcp:{grant['name']}:{tool['name']}",
+                        decision=tool["decision"],
+                        reason=tool["reason"],
+                        metadata={"version": grant["version"], "role": agent_role},
+                    )
+            for denial in mcp_denials:
+                record_tool_access(
+                    self.db_path,
+                    run_id=run_id,
+                    agent_id=agent_id,
+                    issue_id=issue_id_str or None,
+                    tool_name=f"mcp:{denial['name']}",
+                    decision="denied",
+                    reason=denial["reason"],
+                    metadata={"role": agent_role},
+                )
+                for tool in denial.get("tool_decisions") or []:
+                    record_tool_access(
+                        self.db_path,
+                        run_id=run_id,
+                        agent_id=agent_id,
+                        issue_id=issue_id_str or None,
+                        tool_name=f"mcp:{denial['name']}:{tool['name']}",
+                        decision=tool["decision"],
+                        reason=tool["reason"],
+                        metadata={"role": agent_role},
+                    )
+            if mcp_grants:
+                env = {
+                    **env,
+                    "AITEAM_MCP_SERVERS_JSON": json.dumps(mcp_grants, ensure_ascii=False),
+                }
         # ── Provider pacing gate ─────────────────────────────────────────────
         # Runs execute sequentially and share each provider's TPM budget; wait
         # out any active cooldown (learned from 429s) before spending tokens.
@@ -965,9 +1076,22 @@ class RunExecutor:
                 )
         before_workspace = snapshot_workspace(workspace_root)
         result: ExecutionResult
+        is_model_fallback_transition = False
         try:
-            _llm_adapters = {"anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api"}
-            if str(agent_role or "").strip().lower() == "test_runner":
+            _llm_adapters = {
+                "anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api",
+                "openai_compatible_api",
+            }
+            _model_fallback_resolution = self._resolved_model_fallback_result(
+                run=run,
+                agent_id=agent_id,
+                issue_id=issue_id_str,
+                ctx=ctx,
+            )
+            if _model_fallback_resolution is not None:
+                is_model_fallback_transition = True
+                result = _model_fallback_resolution
+            elif str(agent_role or "").strip().lower() == "test_runner":
                 # Ejecutar una suite es determinista (subprocess + exit code):
                 # un LLM aquí solo añade coste y la posibilidad de alucinar la
                 # evidencia que el quality gate exige. El builtin corre SIEMPRE,
@@ -993,13 +1117,27 @@ class RunExecutor:
                 result = self._execute_builtin_lead(run=run, agent_id=agent_id, context=ctx)
             elif adapter_type in _llm_adapters:
                 # Real LLM adapter — skip builtin path entirely
-                result = runtime.execute(run, env)
+                compatibility_result = self._model_compatibility_preflight(
+                    run=run,
+                    agent_id=agent_id,
+                    agent_role=agent_role,
+                    adapter_type=adapter_type,
+                    adapter_cfg=adapter_cfg,
+                )
+                result = compatibility_result or runtime.execute(run, env)
             elif adapter_type == "lead_builtin" or (adapter_type == "manual" and agent_role in {"lead", "team_lead"}):
                 result = self._execute_builtin_lead(run=run, agent_id=agent_id, context=ctx)
             elif adapter_type == "role_builtin":
                 result = self._execute_builtin_role(run=run, agent_id=agent_id, role=agent_role)
             else:
-                result = runtime.execute(run, env)
+                compatibility_result = self._model_compatibility_preflight(
+                    run=run,
+                    agent_id=agent_id,
+                    agent_role=agent_role,
+                    adapter_type=adapter_type,
+                    adapter_cfg=adapter_cfg,
+                )
+                result = compatibility_result or runtime.execute(run, env)
         except Exception as exc:
             result = ExecutionResult(status="failed", error=str(exc), exit_code=1)
 
@@ -1118,12 +1256,6 @@ class RunExecutor:
                     actor_agent_id=agent_id,
                     run_id=run_id,
                     payload={"issue_id": issue_id_str, "source": "run_executor"},
-                )
-                self._maybe_materialize_plan_comment(
-                    issue_id=issue_id_str,
-                    agent_id=agent_id,
-                    run_id=run_id,
-                    body=result.output,
                 )
                 # ── Persist the AGENT-REPORT as a validated artifact ──────────
                 # Provenance is captured at the source (this run, this agent)
@@ -1419,6 +1551,32 @@ class RunExecutor:
         final_status = result.status if result.status in _TERMINAL_EXEC_STATUSES else "completed"
         final_error = result.error or ("agent reported failure" if final_status == "failed" else None)
         final_error_code = result.error_code or ("agent_reported_failure" if final_status == "failed" else None)
+        selected_profile_id = str(adapter_cfg.get("profile_id") or "").strip()
+        model_fallback_pending = False
+        if selected_profile_id and effective_model and not is_model_fallback_transition:
+            if final_status == "completed":
+                record_model_health(
+                    selected_profile_id,
+                    effective_model,
+                    available=True,
+                    reason="run_completed",
+                )
+            elif final_error_code == "model_unavailable":
+                record_model_health(
+                    selected_profile_id,
+                    effective_model,
+                    available=False,
+                    reason=str(result.output or result.error or final_error_code)[:300],
+                )
+                model_fallback_pending = self._propose_model_fallback(
+                    issue_id=issue_id_str,
+                    agent_id=agent_id,
+                    agent_role=agent_role,
+                    run_id=run_id,
+                    profile_id=selected_profile_id,
+                    failed_model=effective_model,
+                    failure_reason=str(result.output or result.error or final_error_code)[:300],
+                )
         finished = finish_run(
             self.db_path,
             run_id=run_id,
@@ -1436,7 +1594,7 @@ class RunExecutor:
                 liveness_state=liveness_result.state,
                 liveness_reason=liveness_result.reason,
             )
-        if liveness_result.needs_continuation:
+        if liveness_result.needs_continuation and not model_fallback_pending:
             self._enqueue_liveness_continuation(
                 run=run,
                 agent_id=agent_id,
@@ -2561,6 +2719,7 @@ class RunExecutor:
             "delete_file": "file_ops",
             "accept_quorum_synthesis": "accept_quorum_synthesis",
             "append_context_summary": "append_context_summary",
+            "propose_skill": "skill_proposals",
         }
         from aiteam.adapters.work_contract import forbidden_ops_for_role
         _forbidden_action_keys = {
@@ -2590,155 +2749,70 @@ class RunExecutor:
                     pass
                 actions = {k: v for k, v in actions.items() if k != _forbidden_key}
 
-        # El curador solo puede cerrar tras persistir exactamente el rango que
-        # recibió. Recalculamos source/rango/ratio: el modelo no decide estos
-        # invariantes ni puede escribir sobre otra issue.
-        _context_summary_persisted = False
-        _context_summary_error = "missing append_context_summary operation"
-        _context_action = actions.get("append_context_summary")
-        if isinstance(_context_action, dict) and str(agent_role or "").strip().lower() == "context_curator":
+        # Learned skills are evidence-backed Lead proposals, never executable
+        # instructions at creation time. The owner activates/edits/retires them
+        # from Config; until then project_skills_for_role ignores them.
+        for _proposal in actions.get("skill_proposals") or []:
+            if str(agent_role or "").strip().lower() not in _LEAD_TIER_ROLES_P:
+                log_activity(
+                    self.db_path,
+                    action="role.op_denied",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id") or ""),
+                    payload={"role": agent_role, "action_group": "skill_proposals"},
+                )
+                continue
             try:
-                with contextlib.closing(_connect(self.db_path)) as _conn:
-                    _parent_row = _conn.execute(
-                        "SELECT parent_id FROM issues WHERE id=?", (issue_id,)
-                    ).fetchone()
-                _parent_id = str(_parent_row["parent_id"] or "") if _parent_row else ""
-                _expected = build_context_curation_target(self.db_path, issue_id=_parent_id)
-                if not _expected:
-                    raise ValueError("no unsynthesized parent context is available")
-                for _field in ("target_issue_id", "start_comment_id", "end_comment_id", "char_count_original"):
-                    if str(_context_action.get(_field) or "") != str(_expected.get(_field) or ""):
-                        raise ValueError(f"context summary {_field} does not match the durable source slice")
-                with contextlib.closing(_connect(self.db_path)) as _conn:
-                    _expected_end_row = _conn.execute(
-                        "SELECT LENGTH(body) AS body_chars FROM issue_comments WHERE id=? AND issue_id=?",
-                        (_expected["end_comment_id"], _parent_id),
-                    ).fetchone()
-                _whole_comment_range = bool(
-                    int(_expected["start_char_offset"]) == 0
-                    and _expected_end_row
-                    and int(_expected["end_char_offset"]) == int(_expected_end_row["body_chars"] or 0)
-                )
-                _offsets_omitted = (
-                    int(_context_action.get("start_char_offset") or 0) == 0
-                    and int(_context_action.get("end_char_offset") or 0) == 0
-                )
-                if not (_whole_comment_range and _offsets_omitted):
-                    for _field in ("start_char_offset", "end_char_offset"):
-                        if str(_context_action.get(_field) or "") != str(_expected.get(_field) or ""):
-                            raise ValueError(f"context summary {_field} does not match the durable source slice")
-                _summary_body = str(_context_action.get("summary_markdown") or "").strip()
-                if not _summary_body:
-                    raise ValueError("context summary body is empty")
-                if len(_summary_body) / int(_expected["char_count_original"]) > 0.30:
-                    raise ValueError("context summary exceeds the 30% compression budget")
-                _end_is_complete = bool(
-                    _expected_end_row
-                    and int(_expected["end_char_offset"]) >= int(_expected_end_row["body_chars"] or 0)
-                )
-                append_summary_block(
-                    self.db_path,
-                    issue_id=_parent_id,
-                    block={
-                        "summary_markdown": _summary_body,
-                        "start_comment_id": _expected["start_comment_id"],
-                        "end_comment_id": _expected["end_comment_id"],
-                        "char_count_original": _expected["char_count_original"],
-                        "start_char_offset": _expected["start_char_offset"],
-                        "end_char_offset": _expected["end_char_offset"],
-                    },
-                    synthesized_through_comment_id=(
-                        str(_expected["end_comment_id"]) if _end_is_complete else None
-                    ),
-                    partial_comment_id=(None if _end_is_complete else str(_expected["end_comment_id"])),
-                    partial_char_offset=(None if _end_is_complete else int(_expected["end_char_offset"])),
-                    run_id=str(run.get("id") or "") or None,
-                )
-                _context_summary_persisted = True
-                log_activity(
-                    self.db_path,
-                    action="context_summary.appended",
-                    target_type="issue",
-                    target_id=_parent_id,
-                    actor_agent_id=agent_id,
-                    run_id=str(run.get("id") or ""),
-                    payload={
-                        "start_comment_id": _expected["start_comment_id"],
-                        "end_comment_id": _expected["end_comment_id"],
-                        "char_count_original": _expected["char_count_original"],
-                        "char_count_summary": len(_summary_body),
-                    },
-                )
-            except Exception as exc:
-                _context_summary_error = str(exc)
-                logger.warning("append_context_summary rejected for issue %s: %s", issue_id, exc)
+                from aiteam.extensions import propose_learned_skill  # noqa: PLC0415
 
-        if (
-            str(agent_role or "").strip().lower() == "context_curator"
-            and actions.get("issue_status") == "done"
-            and not _context_summary_persisted
-        ):
-            actions = dict(actions)
-            _curator_issue = get_issue(self.db_path, issue_id=issue_id) or {}
-            _curator_metadata = _decode_json(_curator_issue.get("metadata_json") or "{}")
-            _recovery = _curator_metadata.get("context_curator_recovery")
-            if not isinstance(_recovery, dict):
-                _recovery = {}
-            _attempts = int(_recovery.get("corrective_attempts") or 0)
-            _diagnostic = (
-                "El bloque append_context_summary fue rechazado: "
-                f"{_context_summary_error}. Reutiliza exactamente "
-                "payload.context_curation_target y vuelve a emitir el artefacto."
-            )
-            _curator_metadata["context_curator_recovery"] = {
-                "corrective_attempts": min(_attempts + 1, 2),
-                "last_error": _context_summary_error,
-                "last_run_id": str(run.get("id") or ""),
-                "state": "retry_queued" if _attempts == 0 else "escalated",
-            }
-            update_issue(self.db_path, issue_id=issue_id, metadata=_curator_metadata)
-            actions.setdefault("add_comments", []).append(f"⚙ Sistema: {_diagnostic}")
-            if _attempts == 0:
-                # Conserva in_progress: Tier 3 no tiene autoridad para volver a
-                # todo. La wakeup durable crea la siguiente run sobre la misma
-                # issue una vez finalice la actual.
-                actions.pop("issue_status", None)
-                actions.pop("notify_supervisor", None)
-                enqueue_wakeup(
+                _learned = propose_learned_skill(
+                    self.db_path.parent,
+                    name=str(_proposal.get("name") or ""),
+                    body=str(_proposal.get("body") or ""),
+                    applies_to_roles=_proposal.get("applies_to_roles") or [],
+                    evidence=_proposal.get("evidence") or [],
+                    source_run_id=str(run.get("id") or ""),
+                )
+                log_activity(
                     self.db_path,
-                    agent_id=agent_id,
-                    source="context_curator_recovery",
-                    reason="context_summary_corrective_retry",
+                    action="skill.proposed",
+                    target_type="skill",
+                    target_id=_learned["name"],
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id") or ""),
                     payload={
-                        "issue_id": issue_id,
-                        "diagnostic": _diagnostic,
-                        "corrective_attempt": 1,
-                        "source_run_id": str(run.get("id") or ""),
+                        "name": _learned["name"],
+                        "applies_to_roles": _learned.get("applies_to_roles") or [],
+                        "evidence_count": len(_learned.get("evidence") or []),
                     },
-                    idempotency_key=f"context-curator-recovery:{issue_id}:1",
-                    trigger_detail=_context_summary_error,
+                )
+            except ValueError as exc:
+                create_comment(
+                    self.db_path,
+                    issue_id=issue_id,
+                    body=f"⚙ Sistema: propuesta de skill aprendida rechazada — {exc}.",
+                    author_user_id="system",
                 )
                 log_activity(
                     self.db_path,
-                    action="context_summary.recovery_queued",
+                    action="skill.proposal_rejected",
                     target_type="issue",
                     target_id=issue_id,
                     actor_agent_id=agent_id,
                     run_id=str(run.get("id") or ""),
-                    payload={"attempt": 1, "error": _context_summary_error},
+                    payload={"name": _proposal.get("name"), "reason": str(exc)},
                 )
-            else:
-                actions["issue_status"] = "blocked"
-                actions["notify_supervisor"] = True
-                log_activity(
-                    self.db_path,
-                    action="context_summary.recovery_exhausted",
-                    target_type="issue",
-                    target_id=issue_id,
-                    actor_agent_id=agent_id,
-                    run_id=str(run.get("id") or ""),
-                    payload={"attempts": _attempts + 1, "error": _context_summary_error},
-                )
+
+        if str(agent_role or "").strip().lower() == "context_curator":
+            actions = apply_curator_actions(
+                self.db_path,
+                issue_id=issue_id,
+                agent_id=agent_id,
+                run_id=str(run.get("id") or ""),
+                actions=actions,
+            )
 
         # ── Interaction gate: max 1 pending interaction per issue at a time ─────
         # Presenting multiple confirmation popups simultaneously confuses users:
@@ -2799,8 +2873,35 @@ class RunExecutor:
                         pass
                     continue
                 _ext_payload = interaction.get("payload") or {}
+                _catalog_id = str(_ext_payload.get("catalog_id") or "").strip()
+                if _catalog_id:
+                    try:
+                        from aiteam.mcp_catalog import resolve_catalog_proposal  # noqa: PLC0415
+
+                        _ext_payload = resolve_catalog_proposal(
+                            _ext_payload,
+                            workspace_root=workspace_root_for_db(self.db_path),
+                        )
+                        interaction["payload"] = _ext_payload
+                    except (LookupError, ValueError) as exc:
+                        create_comment(
+                            self.db_path,
+                            issue_id=issue_id,
+                            body=f"⚙ Sistema: propuesta de catálogo MCP rechazada — {exc}.",
+                            author_user_id="system",
+                        )
+                        log_activity(
+                            self.db_path,
+                            action="extension.catalog_proposal_rejected",
+                            target_type="issue",
+                            target_id=issue_id,
+                            actor_agent_id=agent_id,
+                            run_id=str(run.get("id") or ""),
+                            payload={"catalog_id": _catalog_id, "reason": str(exc)},
+                        )
+                        continue
                 _missing = [
-                    field for field in ("name", "source", "justification")
+                    field for field in ("name", "source", "version", "justification")
                     if not str(_ext_payload.get(field) or "").strip()
                 ]
                 if _missing:
@@ -2814,12 +2915,41 @@ class RunExecutor:
                             body=(
                                 f"⚙ Sistema: propuesta de extensión rechazada — faltan campos obligatorios: "
                                 f"{', '.join(_missing)}. payload.reason={EXTENSION_PROPOSAL_REASON} requiere "
-                                "name, source y justification."
+                                "name, source, version y justification."
                             ),
                             author_user_id="system",
                         )
                     except Exception:
                         logger.warning("failed to post extension-proposal rejection comment on %s", issue_id)
+                    continue
+                try:
+                    from aiteam.extensions import mcp_proposal_block_reason  # noqa: PLC0415
+
+                    _proposal_block = mcp_proposal_block_reason(
+                        self.db_path.parent,
+                        name=str(_ext_payload.get("name") or ""),
+                        source=str(_ext_payload.get("source") or ""),
+                        version=str(_ext_payload.get("version") or ""),
+                    )
+                except Exception:
+                    logger.warning("extension proposal cooldown check failed", exc_info=True)
+                    _proposal_block = "No se pudo verificar de forma segura el historial de la extensión"
+                if _proposal_block:
+                    create_comment(
+                        self.db_path,
+                        issue_id=issue_id,
+                        body=f"⚙ Sistema: propuesta MCP no creada — {_proposal_block}.",
+                        author_user_id="system",
+                    )
+                    log_activity(
+                        self.db_path,
+                        action="extension.proposal_suppressed",
+                        target_type="issue",
+                        target_id=issue_id,
+                        actor_agent_id=agent_id,
+                        run_id=str(run.get("id")),
+                        payload={"name": _ext_payload.get("name"), "reason": _proposal_block},
+                    )
                     continue
             # ── Cycle-close verification (non-negotiable) ─────────────────────
             # When a Lead proposes closing the cycle, append the machine-computed
@@ -3064,12 +3194,6 @@ class RunExecutor:
                     run_id=str(run.get("id")),
                     payload={"issue_id": issue_id, "source": "action:add_comment"},
                 )
-                self._maybe_materialize_plan_comment(
-                    issue_id=issue_id,
-                    agent_id=agent_id,
-                    run_id=str(run.get("id") or ""),
-                    body=body,
-                )
             except Exception:
                 logger.warning("add_comment action failed for issue %s", issue_id, exc_info=True)
 
@@ -3082,25 +3206,34 @@ class RunExecutor:
         # causa equivocada ("requires update_plan in the same run") y podría
         # quemar sus reintentos sin saber qué dimensiones faltan.
         _final_plan_depth_error = ""
-        if isinstance(plan_action, dict) and plan_action.get("body"):
+        if isinstance(plan_action, dict) and (plan_action.get("body") or plan_action.get("plan")):
             if isinstance(_quorum_action_candidate, dict):
-                final_depth = evaluate_plan_depth(str(plan_action["body"]))
+                plan_text = str(plan_action.get("body") or "")
+                if isinstance(plan_action.get("plan"), dict):
+                    plan_text = str(plan_action["plan"].get("narrative_markdown") or plan_text)
+                final_depth = evaluate_plan_depth(plan_text)
                 if not final_depth["valid"]:
                     _final_plan_depth_error = (
                         "el Plan B no cumple el contrato de profundidad — dimensiones ausentes: "
                         f"{', '.join(final_depth['missing_dimensions']) or 'ninguna'}; "
                         f"palabras: {final_depth['word_count']}/{final_depth['min_words']}"
                     )
-        if isinstance(plan_action, dict) and plan_action.get("body") and not _final_plan_depth_error:
+        if isinstance(plan_action, dict) and (plan_action.get("body") or plan_action.get("plan")) and not _final_plan_depth_error:
             try:
                 existing = get_document(self.db_path, issue_id=issue_id, key="plan")
+                structured_plan = plan_action.get("plan")
+                stored_body = str(plan_action.get("body") or "")
+                stored_format = "markdown"
+                if isinstance(structured_plan, dict):
+                    stored_body = encode_plan_contract(structured_plan)
+                    stored_format = PLAN_FORMAT
                 updated_plan = put_document(
                     self.db_path,
                     issue_id=issue_id,
                     key="plan",
                     title=str(plan_action.get("title") or "Plan"),
-                    body=str(plan_action["body"]),
-                    format="markdown",
+                    body=stored_body,
+                    format=stored_format,
                     run_id=str(run.get("id") or "") or None,
                     base_revision_id=str(existing.get("current_revision_id") or "") or None
                     if existing else None,
@@ -3113,8 +3246,7 @@ class RunExecutor:
 
         # ``lead_quorum`` is already an explicit user choice. Once Plan A is
         # durable, start its independent reviews without asking for a second
-        # hiring approval. This also supports Leads that emitted a plan-shaped
-        # add_comment: _maybe_materialize_plan_comment ran immediately above.
+        # hiring approval.
         self._maybe_start_explicit_quorum(issue_id=issue_id, run_id=str(run.get("id") or ""))
 
         quorum_action = _quorum_action_candidate
@@ -3646,6 +3778,7 @@ class RunExecutor:
                 role=role_for_issue,
                 supervisor_agent_id=agent_id,
                 source_run_id=str(run.get("id") or ""),
+                issue_id=issue_id,
             )
             parent_issue = get_issue(self.db_path, issue_id=issue_id)
             # Structured acceptance criteria travel with the issue so the
@@ -3905,7 +4038,14 @@ class RunExecutor:
     # Tier 3 cheap specialists — always prefer budget/local adapters.
     _TIER3_ROLES = frozenset({"file_scout", "web_scout", "context_curator", "test_runner"})
 
-    def _ensure_role_agent(self, *, role: str, supervisor_agent_id: str, source_run_id: str) -> str | None:
+    def _ensure_role_agent(
+        self,
+        *,
+        role: str,
+        supervisor_agent_id: str,
+        source_run_id: str,
+        issue_id: str = "",
+    ) -> str | None:
         role_key = role.strip().lower().replace(" ", "_").replace("-", "_")
         if not role_key:
             return None
@@ -3935,12 +4075,23 @@ class RunExecutor:
                     "adapter_type": lead_adapter_type or "role_builtin",
                     "adapter_config": lead_adapter_config,
                 }
-            elif role_key in self._TIER3_ROLES:
+            compatibility_context = issue_compatibility_context(self.db_path, issue_id) if issue_id else {}
+            if role_key in self._TIER3_ROLES:
                 effective_seniority = "cheap"
-                selection = choose_adapter_for_role(role_key, effective_seniority, project_profiles(Path(self.db_path).parent))
-            else:
+                selection = choose_adapter_for_role(
+                    role_key,
+                    effective_seniority,
+                    project_profiles(Path(self.db_path).parent),
+                    **compatibility_context,
+                )
+            elif role_key != "lead_executor":
                 effective_seniority = "standard"
-                selection = choose_adapter_for_role(role_key, effective_seniority, project_profiles(Path(self.db_path).parent))
+                selection = choose_adapter_for_role(
+                    role_key,
+                    effective_seniority,
+                    project_profiles(Path(self.db_path).parent),
+                    **compatibility_context,
+                )
             row = create_agent(
                 self.db_path,
                 agent_id=agent_id,
@@ -3984,8 +4135,12 @@ class RunExecutor:
         provider: str | None,
         model: str | None,
         channel: str | None,
+        profile_id: str | None,
+        quota_policy: Any = None,
     ) -> None:
-        normalized_channel = channel if channel in {"subscription", "api", "local"} else None
+        normalized_channel = "subscription" if channel == "free_gateway" else (
+            channel if channel in {"subscription", "api", "local"} else None
+        )
         with contextlib.closing(_connect(self.db_path)) as conn:
             conn.execute(
                 """
@@ -3998,6 +4153,16 @@ class RunExecutor:
                 WHERE id = ?
                 """,
                 (adapter_type, provider, model, normalized_channel, run_id),
+            )
+        if profile_id:
+            record_run_adapter_profile(
+                self.db_path,
+                run_id=run_id,
+                profile_id=profile_id,
+                provider=provider,
+                model=model,
+                channel=normalized_channel,
+                quota_policy=quota_policy,
             )
 
     @staticmethod
@@ -4025,38 +4190,6 @@ class RunExecutor:
                 channel = str(profile.get("channel") or "").strip() or runtime_channel
                 return provider, channel
         return runtime_provider, runtime_channel
-
-    def _maybe_materialize_plan_comment(
-        self,
-        *,
-        issue_id: str,
-        agent_id: str,
-        run_id: str,
-        body: str,
-    ) -> None:
-        if not issue_id or not _looks_like_plan(body):
-            return
-        agent = self._agent_info(agent_id) or {}
-        role = str(agent.get("role") or "").strip().lower()
-        if role not in {"lead", "team_lead"}:
-            return
-        if get_document(self.db_path, issue_id=issue_id, key="plan") is not None:
-            return
-        try:
-            put_document(
-                self.db_path,
-                issue_id=issue_id,
-                key="plan",
-                title="Plan recuperado del Lead",
-                body=body.strip(),
-                format="markdown",
-                run_id=run_id or None,
-                metadata={"source": "materialized_from_lead_comment"},
-            )
-        except DocumentConflict:
-            pass
-        except Exception:
-            logger.warning("_maybe_materialize_plan_comment failed for issue %s", issue_id, exc_info=True)
 
     def _proposal_state(self, issue_id: str) -> str | None:
         with contextlib.closing(_connect(self.db_path)) as conn:
@@ -4988,9 +5121,11 @@ class RunExecutor:
                 return False
 
         from aiteam.hiring_economics import provider_and_model_for  # noqa: PLC0415
+        from aiteam.provider_identity import perspective_key  # noqa: PLC0415
 
         root_id = self._root_issue_id(issue_id)
         engineer_provider = ""
+        engineer_model = ""
         with contextlib.closing(_connect(self.db_path)) as conn:
             row = conn.execute(
                 """
@@ -5002,7 +5137,7 @@ class RunExecutor:
                 (root_id,),
             ).fetchone()
             if row:
-                engineer_provider, _ = provider_and_model_for(
+                engineer_provider, engineer_model = provider_and_model_for(
                     str(row["adapter_type"] or ""), _decode_json(str(row["adapter_config_json"] or "{}"))
                 )
             me = conn.execute(
@@ -5010,10 +5145,11 @@ class RunExecutor:
             ).fetchone()
         if not engineer_provider or me is None:
             return False
-        my_provider, _ = provider_and_model_for(
+        my_provider, my_model = provider_and_model_for(
             str(me["adapter_type"] or ""), _decode_json(str(me["adapter_config_json"] or "{}"))
         )
-        if my_provider != engineer_provider:
+        engineer_perspective = perspective_key(engineer_provider, engineer_model)
+        if perspective_key(my_provider, my_model) != engineer_perspective:
             return False  # ya es cross-provider
 
         profiles = project_profiles(Path(self.db_path).parent)
@@ -5021,10 +5157,10 @@ class RunExecutor:
         for profile in profiles:
             if not profile_is_connected(profile):
                 continue
-            prov, _ = provider_and_model_for(
+            prov, model = provider_and_model_for(
                 str(profile.get("adapter_type") or ""), {"profile_id": profile.get("id")}
             )
-            if prov and prov != engineer_provider:
+            if prov and perspective_key(prov, model) != engineer_perspective:
                 candidates.append(profile)
         if not candidates:
             return False
@@ -5032,6 +5168,7 @@ class RunExecutor:
         selection = choose_adapter_for_role(
             agent_role, None, candidates,
             demoted_profile_ids=_demoted(self.db_path, candidates),
+            **issue_compatibility_context(self.db_path, issue_id),
         )
         if not selection:
             return False
@@ -5120,6 +5257,22 @@ class RunExecutor:
             return False
 
         new_config = {**config, "model": senior}
+        selected_profiles = project_profiles(Path(self.db_path).parent)
+        decision = resolve_assignment_compatibility(
+            adapter_type=str(agent_row["adapter_type"] or ""),
+            adapter_config=new_config,
+            role=agent_role,
+            profiles=selected_profiles or None,
+            **issue_compatibility_context(self.db_path, issue_id),
+        )
+        if not decision.get("allowed"):
+            logger.info(
+                "model escalation rejected by compatibility gate issue=%s code=%s",
+                issue_id,
+                decision.get("code"),
+            )
+            return False
+
         with contextlib.closing(_connect(self.db_path)) as conn:
             conn.execute(
                 "UPDATE agents SET adapter_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -5168,6 +5321,398 @@ class RunExecutor:
         )
         return True
 
+    def _model_compatibility_preflight(
+        self,
+        *,
+        run: dict[str, Any],
+        agent_id: str,
+        agent_role: str,
+        adapter_type: str,
+        adapter_cfg: dict[str, Any],
+    ) -> ExecutionResult | None:
+        """Fail closed before invoking a model and leave an owner continuation."""
+        issue_id = str(run.get("issue_id") or "").strip()
+        selected_profiles = project_profiles(self.db_path.parent)
+        if not str(adapter_cfg.get("profile_id") or "").strip() and not selected_profiles:
+            # DBs previas a la política de proyecto y runtimes aislados de test
+            # no tienen identidad suficiente para resolver el catálogo. El
+            # bootstrap/reconcile moderno siempre fija profile_id; conservar
+            # este shim evita fingir una decisión con datos inexistentes.
+            logger.warning(
+                "compatibility unresolved for legacy assignment %s (%s): no profile/project policy",
+                agent_id,
+                adapter_type,
+            )
+            return None
+        context = issue_compatibility_context(self.db_path, issue_id) if issue_id else {
+            "run_profile": "", "criticality": "medium", "data_class": "",
+            "required_capabilities": [],
+        }
+        decision = resolve_assignment_compatibility(
+            adapter_type=adapter_type,
+            adapter_config=adapter_cfg,
+            role=agent_role,
+            run_profile=context["run_profile"],
+            criticality=context["criticality"],
+            data_class=context["data_class"],
+            required_capabilities=context["required_capabilities"],
+            profiles=selected_profiles or None,
+        )
+        if decision.get("allowed"):
+            return None
+
+        code = str(decision.get("code") or "model_role_incompatible")
+        reason = str(decision.get("reason") or "Asignación incompatible")
+        alternatives = decision.get("alternatives") if isinstance(decision.get("alternatives"), list) else []
+        if code == "model_unavailable" and issue_id:
+            proposed = self._propose_model_fallback(
+                issue_id=issue_id,
+                agent_id=agent_id,
+                agent_role=agent_role,
+                run_id=str(run.get("id") or ""),
+                profile_id=str(decision.get("profile_id") or ""),
+                failed_model=str(decision.get("model") or ""),
+                failure_reason=reason,
+            )
+            if proposed:
+                return ExecutionResult(
+                    status="failed",
+                    error_code="model_unavailable",
+                    error=reason,
+                    output=f"model_unavailable: {reason}",
+                    actions={"issue_status": "blocked"},
+                )
+        if issue_id:
+            with contextlib.suppress(Exception):
+                update_issue(self.db_path, issue_id=issue_id, status="blocked")
+            alternatives_text = ", ".join(
+                f"`{item.get('value')}`" for item in alternatives if isinstance(item, dict)
+            ) or "ninguna alternativa compatible en este perfil"
+            with contextlib.suppress(Exception):
+                create_interaction(
+                    self.db_path,
+                    issue_id=issue_id,
+                    kind="request_confirmation",
+                    payload={
+                        "version": 1,
+                        "reason": "model_compatibility_blocked",
+                        "agent_id": agent_id,
+                        "failed_issue_id": issue_id,
+                        "decision": decision,
+                        "required_action": "change_team_assignment_then_accept_to_retry",
+                    },
+                    continuation_policy="wake_assignee",
+                    idempotency_key=(
+                        f"model_compatibility:{agent_id}:{decision.get('profile_id')}:"
+                        f"{decision.get('model')}:{code}"
+                    ),
+                    source_run_id=str(run.get("id") or "") or None,
+                    created_by_agent_id=agent_id,
+                    title=f"Modelo incompatible para {agent_role}: {code}",
+                    summary=(
+                        f"{reason} Alternativas del mismo perfil: {alternatives_text}. "
+                        "Cambia la asignación en Equipo y después acepta para reintentar; "
+                        "rechazar mantiene la issue bloqueada."
+                    ),
+                )
+        with contextlib.suppress(Exception):
+            record_tool_access(
+                self.db_path,
+                run_id=str(run.get("id") or ""),
+                agent_id=agent_id,
+                issue_id=issue_id or None,
+                tool_name=f"adapter:{adapter_type}",
+                decision="denied",
+                reason=f"{code}: {reason}",
+                metadata={"compatibility": decision},
+            )
+        with contextlib.suppress(Exception):
+            log_activity(
+                self.db_path,
+                action="run.model_compatibility_denied",
+                target_type="run",
+                target_id=str(run.get("id") or ""),
+                actor_agent_id=agent_id,
+                run_id=str(run.get("id") or "") or None,
+                payload={"issue_id": issue_id or None, "decision": decision},
+            )
+        return ExecutionResult(
+            status="failed",
+            error_code=code,
+            error=reason,
+            output=f"{code}: {reason}",
+            actions={"issue_status": "blocked"},
+        )
+
+    def _propose_model_fallback(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        agent_role: str,
+        run_id: str,
+        profile_id: str,
+        failed_model: str,
+        failure_reason: str,
+    ) -> bool:
+        """Block the issue and create one owner decision for a safe fallback."""
+        if not issue_id or not profile_id or not failed_model:
+            return False
+        update_issue(self.db_path, issue_id=issue_id, status="blocked")
+        compatibility_context = issue_compatibility_context(self.db_path, issue_id)
+        fallback = model_fallback_for_role(
+            profile_id,
+            failed_model,
+            agent_role,
+            run_profile=compatibility_context["run_profile"],
+            criticality=compatibility_context["criticality"],
+            data_class=compatibility_context["data_class"],
+            required_capabilities=compatibility_context["required_capabilities"],
+        )
+        if fallback is None:
+            log_activity(
+                self.db_path,
+                action="issue.model_fallback_unavailable",
+                target_type="issue",
+                target_id=issue_id,
+                actor_agent_id=agent_id,
+                run_id=run_id,
+                payload={
+                    "profile_id": profile_id,
+                    "failed_model": failed_model,
+                    "failure_reason": failure_reason,
+                },
+            )
+            with contextlib.suppress(Exception):
+                create_comment(
+                    self.db_path,
+                    issue_id=issue_id,
+                    author_agent_id=None,
+                    body=(
+                        f"⚙ Sistema: `{failed_model}` no está disponible en `{profile_id}` y no hay "
+                        "otro modelo ejecutable gobernado en ese perfil. La issue queda bloqueada; "
+                        "el Lead debe pedir al owner que habilite un modelo en Equipo o cambie de adapter."
+                    ),
+                    metadata={"source": "model_lifecycle", "reason": "no_same_adapter_fallback"},
+                )
+            with contextlib.suppress(Exception):
+                create_interaction(
+                    self.db_path,
+                    issue_id=issue_id,
+                    kind="request_confirmation",
+                    payload={
+                        "version": 1,
+                        "reason": "model_assignment_required",
+                        "agent_id": agent_id,
+                        "agent_role": agent_role,
+                        "profile_id": profile_id,
+                        "failed_model": failed_model,
+                        "failure_reason": failure_reason,
+                        "required_action": "verify_model_or_change_team_assignment",
+                    },
+                    continuation_policy="wake_assignee",
+                    idempotency_key=f"model_assignment_required:{agent_id}:{profile_id}:{failed_model}",
+                    source_run_id=run_id or None,
+                    created_by_agent_id=agent_id,
+                    title=f"Modelo sin alternativa ejecutable: {failed_model}",
+                    summary=(
+                        f"No hay fallback verificado dentro de `{profile_id}`. "
+                        "Prueba el modelo exacto o cambia la asignación en Equipo; "
+                        "después acepta para reintentar."
+                    ),
+                )
+            self._enqueue_supervisor_report(
+                issue_id=issue_id,
+                reporting_agent_id=agent_id,
+                source_run_id=run_id,
+                liveness_state="blocked",
+                liveness_reason="model_unavailable_no_fallback",
+            )
+            return True
+
+        proposed_model = str(fallback.get("value") or "")
+        changes: list[str] = []
+        if fallback.get("changes_family"):
+            changes.append("familia")
+        if fallback.get("changes_tier"):
+            changes.append("tier")
+        change_note = f" Cambia {', '.join(changes)} y requiere aprobación explícita." if changes else ""
+        interaction = create_interaction(
+            self.db_path,
+            issue_id=issue_id,
+            kind="request_confirmation",
+            payload={
+                "version": 1,
+                "reason": "model_fallback_required",
+                "agent_id": agent_id,
+                "agent_role": agent_role,
+                "failed_issue_id": issue_id,
+                "profile_id": profile_id,
+                "failed_model": failed_model,
+                "failed_tier": fallback.get("failed_tier"),
+                "proposed_model": proposed_model,
+                "proposed_tier": fallback.get("tier"),
+                "changes_family": bool(fallback.get("changes_family")),
+                "changes_tier": bool(fallback.get("changes_tier")),
+                "failure_reason": failure_reason,
+            },
+            idempotency_key=f"model_fallback:{agent_id}:{failed_model}",
+            source_run_id=run_id,
+            created_by_agent_id=agent_id,
+            title=f"Modelo no disponible: {failed_model}",
+            summary=(
+                f"El modelo falló antes de ejecutar. Propuesta dentro de `{profile_id}`: "
+                f"cambiar a `{proposed_model}`.{change_note} Rechazar mantiene la issue bloqueada."
+            ),
+        )
+        log_activity(
+            self.db_path,
+            action="issue.model_fallback_proposed",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=run_id,
+            payload={
+                "interaction_id": interaction.get("id"),
+                "profile_id": profile_id,
+                "failed_model": failed_model,
+                "proposed_model": proposed_model,
+                "changes_family": bool(fallback.get("changes_family")),
+                "changes_tier": bool(fallback.get("changes_tier")),
+            },
+        )
+        return True
+
+    def _resolved_model_fallback_result(
+        self,
+        *,
+        run: dict[str, Any],
+        agent_id: str,
+        issue_id: str,
+        ctx: dict[str, Any],
+    ) -> ExecutionResult | None:
+        """Apply an owner-approved model change without spending another LLM call."""
+        if (
+            str(ctx.get("wake_reason") or "") != "interaction_resolved"
+            or str(ctx.get("kind") or "") != "request_confirmation"
+        ):
+            return None
+        interaction_id = str(ctx.get("interaction_id") or "").strip()
+        interaction = get_interaction(self.db_path, interaction_id=interaction_id) if interaction_id else None
+        payload = _decode_json((interaction or {}).get("payload_json"))
+        if str(payload.get("reason") or "") != "model_fallback_required":
+            return None
+        target_issue_id = str(payload.get("failed_issue_id") or "").strip()
+        target_agent_id = str(payload.get("agent_id") or "").strip()
+        action = str(ctx.get("action") or "").strip().lower()
+        if target_issue_id != issue_id or target_agent_id != agent_id:
+            return ExecutionResult(
+                status="failed",
+                error_code="model_fallback_target_mismatch",
+                error="model fallback interaction does not match dispatched agent/issue",
+            )
+        if action != "accept":
+            log_activity(
+                self.db_path,
+                action="issue.model_fallback_rejected",
+                target_type="issue",
+                target_id=issue_id,
+                actor_agent_id=agent_id,
+                run_id=str(run.get("id") or "") or None,
+                payload={
+                    "profile_id": payload.get("profile_id"),
+                    "failed_model": payload.get("failed_model"),
+                    "proposed_model": payload.get("proposed_model"),
+                    "action": action,
+                },
+            )
+            return ExecutionResult(
+                status="skipped",
+                output="Fallback rechazado por el owner; la issue permanece bloqueada.",
+            )
+
+        agent = get_agent(self.db_path, agent_id=agent_id) or {}
+        current_config = _decode_json(agent.get("adapter_config_json"))
+        current_profile = str(current_config.get("profile_id") or "").strip()
+        current_model = str(current_config.get("model") or "").strip()
+        expected_profile = str(payload.get("profile_id") or "").strip()
+        failed_model = str(payload.get("failed_model") or "").strip()
+        proposed_model = str(payload.get("proposed_model") or "").strip()
+
+        if (current_profile, current_model) != (expected_profile, failed_model):
+            # The owner already changed Team while the card was pending. Preserve
+            # that newer decision and simply retry with the current assignment.
+            applied_model = current_model or None
+            resolution = "manual_override_preserved"
+        else:
+            try:
+                validate_model_selection({"profile_id": expected_profile, "model": proposed_model})
+                current_context = issue_compatibility_context(self.db_path, issue_id)
+                proposed_decision = resolve_assignment_compatibility(
+                    adapter_type=str(agent.get("adapter_type") or ""),
+                    adapter_config={**current_config, "model": proposed_model},
+                    role=str(payload.get("agent_role") or agent.get("role") or ""),
+                    run_profile=current_context["run_profile"],
+                    criticality=current_context["criticality"],
+                    data_class=current_context["data_class"],
+                    required_capabilities=current_context["required_capabilities"],
+                )
+                if not proposed_decision.get("allowed"):
+                    raise ValueError(
+                        f"{proposed_decision.get('code')}: {proposed_decision.get('reason')}"
+                    )
+            except ValueError as exc:
+                self._propose_model_fallback(
+                    issue_id=issue_id,
+                    agent_id=agent_id,
+                    agent_role=str(payload.get("agent_role") or ""),
+                    run_id=str(run.get("id") or ""),
+                    profile_id=expected_profile,
+                    failed_model=proposed_model,
+                    failure_reason=f"fallback became unavailable before acceptance: {exc}",
+                )
+                return ExecutionResult(
+                    status="skipped",
+                    output="El fallback aceptado dejó de estar disponible; se generó una nueva propuesta.",
+                )
+            update_agent(
+                self.db_path,
+                agent_id=agent_id,
+                adapter_config={**current_config, "model": proposed_model},
+            )
+            applied_model = proposed_model
+            resolution = "proposed_fallback_applied"
+
+        log_activity(
+            self.db_path,
+            action="issue.model_fallback_accepted",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=str(run.get("id") or "") or None,
+            payload={
+                "profile_id": expected_profile,
+                "failed_model": failed_model,
+                "applied_model": applied_model,
+                "resolution": resolution,
+                "interaction_id": interaction_id,
+            },
+        )
+        enqueue_wakeup(
+            self.db_path,
+            agent_id=agent_id,
+            source="model_fallback",
+            reason="assignment",
+            trigger_detail=f"model_fallback:{failed_model}->{applied_model or '?'}",
+            payload={"issue_id": issue_id, "wake_reason": "assignment"},
+            idempotency_key=f"model_fallback:{interaction_id}:accepted",
+        )
+        update_issue(self.db_path, issue_id=issue_id, status="todo")
+        return ExecutionResult(
+            status="skipped",
+            output=f"Fallback aplicado: `{failed_model}` → `{applied_model}`. La issue vuelve a la cola.",
+        )
+
     def _attempt_adapter_recovery(
         self,
         *,
@@ -5205,6 +5750,7 @@ class RunExecutor:
         selection = choose_adapter_for_role(
             agent_role, None, candidates,
             demoted_profile_ids=demoted_profile_ids(self.db_path, candidates),
+            **issue_compatibility_context(self.db_path, issue_id),
         )
         if not selection or str(selection.get("adapter_type") or "") == failed_adapter_type:
             return False
@@ -6402,137 +6948,26 @@ class RunExecutor:
     # Prevents runaway loops when the engineer repeatedly delivers wrong output.
     _MAX_FIX_CYCLES: int = 3
 
-    # Char threshold for auto-spawning a context_curator child.  When the
-    # unsynthesized portion of the parent issue thread exceeds this many characters
-    # (≈ 2 000 tokens) and no plan document exists, the Lead silently creates a
-    # context_curator to synthesise the next block before the next delegation round.
-    _CONTEXT_CURATOR_CHAR_THRESHOLD: int = LEGACY_UNSYNTHESIZED_CHAR_THRESHOLD
-
     def _maybe_spawn_context_curator(
         self, issue_id: str, agent_id: str, run: dict[str, Any]
     ) -> None:
-        """Silently spawn a context_curator child when unsynthesized thread content grows large.
-
-        Triggered in the ``child_report`` branch when ALL conditions hold:
-
-        1. Unsynthesized char count ≥ ``_CONTEXT_CURATOR_CHAR_THRESHOLD`` (8 000).
-           "Unsynthesized" means comments after ``synthesized_through_comment_id``
-           stored in the ``context_summary`` document, or all comments if no
-           synthesis has happened yet.
-        2. No ``plan`` document exists for the issue (curator adds the most value
-           before a plan is written; once a plan exists the thread is summarised).
-        3. No **active** (todo/in_progress/blocked) context_curator child exists.
-           - Done: the previous block is complete; a new block MAY be spawned when
-             new content accumulates past the threshold (this is the key difference
-             from the old comment-count model — done does NOT block re-spawn).
-           - Cancelled: the curator was abandoned; a fresh one is always allowed.
-
-        The spawned curator receives a description that tells it exactly which
-        comment to start from (``Synthesize from: comment:<id>`` or ``all``).
-
-        The method never raises — any failure is logged and silently swallowed so
-        the calling ``child_report`` path continues unaffected.
-        """
+        """Integra la decisión del contrato con la delegación general de issues."""
         try:
-            # ── 1. Read context_summary to get synthesized_through_comment_id ──────
-            summary_data = get_context_summary(self.db_path, issue_id=issue_id)
-            synthesized_through_id: str | None = None
-            if summary_data:
-                synthesized_through_id = summary_data.get("synthesized_through_comment_id")
-
-            # ── 2. Calculate unsynthesized char count ─────────────────────────────
-            with contextlib.closing(_connect(self.db_path)) as conn:
-                if synthesized_through_id is None:
-                    # No prior synthesis — count all comments
-                    unsynthesized_chars: int = conn.execute(
-                        "SELECT COALESCE(SUM(LENGTH(body)), 0)"
-                        " FROM issue_comments WHERE issue_id = ?",
-                        (issue_id,),
-                    ).fetchone()[0]
-                    first_row = conn.execute(
-                        "SELECT id FROM issue_comments WHERE issue_id = ?"
-                        " ORDER BY rowid ASC LIMIT 1",
-                        (issue_id,),
-                    ).fetchone()
-                    from_comment_id: str | None = first_row[0] if first_row else None
-                else:
-                    synth_row = conn.execute(
-                        "SELECT rowid FROM issue_comments WHERE id = ?",
-                        (synthesized_through_id,),
-                    ).fetchone()
-                    if synth_row is None:
-                        # synthesized_through ID no longer resolvable — count all
-                        unsynthesized_chars = conn.execute(
-                            "SELECT COALESCE(SUM(LENGTH(body)), 0)"
-                            " FROM issue_comments WHERE issue_id = ?",
-                            (issue_id,),
-                        ).fetchone()[0]
-                        from_comment_id = None
-                    else:
-                        synth_rowid: int = synth_row[0]
-                        unsynthesized_chars = conn.execute(
-                            "SELECT COALESCE(SUM(LENGTH(body)), 0)"
-                            " FROM issue_comments WHERE issue_id = ? AND rowid > ?",
-                            (issue_id, synth_rowid),
-                        ).fetchone()[0]
-                        next_row = conn.execute(
-                            "SELECT id FROM issue_comments"
-                            " WHERE issue_id = ? AND rowid > ? ORDER BY rowid ASC LIMIT 1",
-                            (issue_id, synth_rowid),
-                        ).fetchone()
-                        from_comment_id = next_row[0] if next_row else None
-
-            # ── 3. Evaluate the effective model comfort budget ───────────────────
             parent_payload = build_wake_payload(self.db_path, issue_id=issue_id)
-            shown_comment_chars = sum(
-                len(str(comment.get("body") or ""))
-                for comment in (parent_payload.get("comments") or [])
-                if isinstance(comment, dict)
+            trigger = evaluate_curator_trigger(
+                self.db_path,
+                issue_id=issue_id,
+                agent_id=agent_id,
+                parent_payload=parent_payload,
             )
-            base_payload_chars = max(
-                0,
-                len(json.dumps(parent_payload, ensure_ascii=False, default=str)) - shown_comment_chars,
-            )
-            with contextlib.closing(_connect(self.db_path)) as conn:
-                agent_row = conn.execute(
-                    "SELECT adapter_type, adapter_config_json FROM agents WHERE id=?", (agent_id,)
-                ).fetchone()
-            adapter_config = resolve_adapter_config(
-                str(agent_row["adapter_type"] or "") if agent_row else "",
-                _decode_json(agent_row["adapter_config_json"] if agent_row else "{}"),
-            )
-            budget = evaluate_context_budget(
-                unsynthesized_chars=unsynthesized_chars,
-                base_payload_chars=base_payload_chars,
-                adapter_config=adapter_config,
-            )
-            if not budget.should_compact:
+            if trigger is None:
                 return
-
-            # ── 4. Plan doc check (curator most useful before a plan exists) ──────
-            if get_document(self.db_path, issue_id=issue_id, key="plan") is not None:
-                return
-
-            # ── 5. Idempotency: only ACTIVE curators block a new spawn ────────────
-            with contextlib.closing(_connect(self.db_path)) as conn:
-                existing_active_curator = conn.execute(
-                    """
-                    SELECT id FROM issues
-                    WHERE parent_id = ? AND lower(role) = 'context_curator'
-                      AND status IN ('todo', 'in_progress', 'blocked')
-                    LIMIT 1
-                    """,
-                    (issue_id,),
-                ).fetchone()
-            if existing_active_curator is not None:
-                return
-
-            # ── 6. Spawn with description anchored to the first unsynthesized comment ─
-            from_label = f"comment:{from_comment_id}" if from_comment_id else "all"
+            budget = trigger.budget
+            from_label = f"comment:{trigger.from_comment_id}" if trigger.from_comment_id else "all"
             logger.info(
                 "Spawning context_curator for issue %s"
                 " (unsynthesized_chars=%d, policy=%s, estimated_tokens=%d, comfort_tokens=%s, from=%s)",
-                issue_id, unsynthesized_chars, budget.policy, budget.estimated_input_tokens,
+                issue_id, trigger.unsynthesized_chars, budget.policy, budget.estimated_input_tokens,
                 budget.comfortable_input_tokens, from_label,
             )
             self._create_delegated_issue(
@@ -7730,13 +8165,3 @@ def _safe_int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def _looks_like_plan(body: str) -> bool:
-    text = str(body or "").strip().lower()
-    if not text:
-        return False
-    if text.startswith(("plan inicial", "plan detallado", "# plan", "## plan")):
-        return True
-    markers = ("objetivo", "objective", "sub-issue", "delegacion", "delegación", "riesgo", "risk", "criterio")
-    return sum(1 for marker in markers if marker in text) >= 3

@@ -4,8 +4,8 @@ PR 1 — CRUD over ``.aiteam/extensions.json`` skills so the owner can attach
 local knowledge to a project from the Config tab.
 PR 2 — read-only listing of MCP server proposals (approve/reject happens via
 the existing pending-interactions popup, not a form here: the Lead proposes,
-the owner answers the card — see DESIGN_SELF_EXTENSION.md §4). Install/health
-check lands in PR 3.
+the owner answers the card — see ``task.md``, P2). The health endpoint performs
+the guarded stdio handshake that promotes an approved entry to active.
 """
 from __future__ import annotations
 
@@ -23,12 +23,17 @@ from api.utils import (
 )
 from aiteam.db.activity_log import log_activity
 from aiteam.extensions import (
+    approve_mcp_server_tools,
     delete_project_skill,
     list_mcp_servers,
     list_project_skills,
+    skill_governance_policy,
+    transition_mcp_server,
     set_project_skill_status,
     upsert_project_skill,
 )
+from aiteam.mcp_runtime import McpHealthError, check_and_activate_mcp_server
+from aiteam.mcp_catalog import CATALOG_VERSION, list_mcp_catalog
 
 router = APIRouter()
 
@@ -42,6 +47,19 @@ class SkillUpsertRequest(BaseModel):
 
 class SkillStatusRequest(BaseModel):
     status: str
+
+
+class McpToolPolicyItem(BaseModel):
+    name: str
+    access: str
+
+
+class McpToolPolicyRequest(BaseModel):
+    tools: list[McpToolPolicyItem]
+
+
+class McpLifecycleRequest(BaseModel):
+    action: str
 
 
 def _runtime_dir(request: Request) -> Path:
@@ -64,7 +82,12 @@ def _audit(runtime_dir: Path, action: str, payload: dict) -> None:
 @router.get("/api/project/skills")
 async def get_project_skills(request: Request):
     _require_api_auth_request(request)
-    return {"success": True, "skills": list_project_skills(_runtime_dir(request))}
+    runtime_dir = _runtime_dir(request)
+    return {
+        "success": True,
+        "skills": list_project_skills(runtime_dir),
+        "governance": skill_governance_policy(runtime_dir),
+    }
 
 
 @router.post("/api/project/skills")
@@ -92,7 +115,7 @@ async def patch_project_skill(name: str, body: SkillStatusRequest, request: Requ
     _require_api_auth_request(request)
     runtime_dir = _runtime_dir(request)
     try:
-        entry = set_project_skill_status(runtime_dir, name=name, status=body.status)
+        entry = set_project_skill_status(runtime_dir, name=name, status=body.status, changed_by="user")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if entry is None:
@@ -117,3 +140,76 @@ async def get_mcp_servers(request: Request):
     popup); this lists what the owner has already approved/rejected."""
     _require_api_auth_request(request)
     return {"success": True, "mcp_servers": list_mcp_servers(_runtime_dir(request))}
+
+
+@router.get("/api/project/extensions/mcp/catalog")
+async def get_mcp_catalog(request: Request):
+    """Reviewed descriptors only; listing cannot install, approve or execute."""
+    _require_api_auth_request(request)
+    return {
+        "success": True,
+        "catalog_version": CATALOG_VERSION,
+        "entries": list_mcp_catalog(),
+    }
+
+
+@router.post("/api/project/extensions/mcp/{name}/health")
+async def post_mcp_server_health(name: str, request: Request):
+    """Launch an approved executable without shell and require MCP initialize."""
+    _require_api_auth_request(request)
+    runtime_dir = _runtime_dir(request)
+    try:
+        result = check_and_activate_mcp_server(runtime_dir, name=name)
+    except McpHealthError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 409
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    _audit(
+        runtime_dir,
+        "extension.health_checked",
+        {"name": result.get("name"), "status": (result.get("health") or {}).get("status")},
+    )
+    return {"success": (result.get("health") or {}).get("status") == "ok", "mcp_server": result}
+
+
+@router.put("/api/project/extensions/mcp/{name}/tools")
+async def put_mcp_server_tools(name: str, body: McpToolPolicyRequest, request: Request):
+    """Persist the owner's positive read/write policy for the current inventory."""
+    _require_api_auth_request(request)
+    runtime_dir = _runtime_dir(request)
+    try:
+        result = approve_mcp_server_tools(
+            runtime_dir,
+            name=name,
+            tools=[item.model_dump() for item in body.tools],
+            approved_by="user",
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(
+        runtime_dir,
+        "extension.tools_approved",
+        {"name": result["name"], "tools": result.get("approved_tools") or []},
+    )
+    return {"success": True, "mcp_server": result}
+
+
+@router.patch("/api/project/extensions/mcp/{name}")
+async def patch_mcp_server(name: str, body: McpLifecycleRequest, request: Request):
+    """Owner lifecycle gate: retire or return a server to approved/unhealthy."""
+    _require_api_auth_request(request)
+    runtime_dir = _runtime_dir(request)
+    try:
+        result = transition_mcp_server(runtime_dir, name=name, action=body.action)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(
+        runtime_dir,
+        f"extension.{body.action.strip().lower()}",
+        {"name": result["name"], "status": result.get("status")},
+    )
+    return {"success": True, "mcp_server": result}

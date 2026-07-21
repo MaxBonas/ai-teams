@@ -45,11 +45,64 @@ interface PolicyDeviation {
   reason: string;
 }
 
+interface SubscriptionQuotaProfile {
+  profile_id: string;
+  label: string;
+  state: 'no_data' | 'unmetered' | 'metered' | 'api_metered' | 'at_risk' | 'limit_reached' | 'exhausted_observed';
+  quota_kind?: 'subscription_pressure' | 'api_rate_limit';
+  channel?: 'subscription' | 'api' | 'local';
+  requires_attention: boolean;
+  usage_limit_events: number;
+  api_rate_limits?: Array<{
+    model?: string | null;
+    dimension: 'rpm' | 'rpd' | 'tpm' | 'tpd' | 'itpm' | 'otpm';
+    remaining?: number | null;
+    limit?: number | null;
+    reset?: string | null;
+  }>;
+  forecast: {
+    status: string;
+    source?: string | null;
+    unit?: string | null;
+    remaining?: number | null;
+    estimated_runs_remaining?: number | null;
+    estimated_exhaustion_at?: string | null;
+  };
+}
+
 interface LoopHealth {
   detected_loops: LoopHealthEntry[];
   at_risk: Array<{ child_issue_id: string; child_title?: string | null; skip_count: number }>;
   thin_delegations_last_24h: number;
   policy_deviations?: PolicyDeviation[];
+  capacity_profiles?: SubscriptionQuotaProfile[];
+  subscription_quota?: SubscriptionQuotaProfile[];
+  subscription_profiles_requiring_attention?: string[];
+  orchestrator_evals?: {
+    available?: boolean;
+    economy?: {
+      total_tokens: number;
+      cost_cents: number;
+    };
+    context?: {
+      context_curator_issues: number;
+    };
+    quorum?: {
+      available: boolean;
+      healthy?: boolean;
+      invalid_contributions?: number;
+      accepted_without_provider_diversity?: number;
+      accepted_with_unresolved_findings?: number;
+    };
+    liveness?: {
+      nonterminal_runs: number;
+      stale_nonterminal_runs: number;
+      claimed_or_running_wakeups: number;
+      stale_claimed_or_running_wakeups: number;
+      stranded_nonterminal_roots: number;
+      healthy: boolean;
+    };
+  };
   summary: { total_loops: number; total_at_risk: number; requires_attention: boolean };
 }
 
@@ -61,16 +114,53 @@ interface ProjectSkill {
   status?: string;
   approved_by?: string;
   updated_at?: string;
+  evidence?: string[];
+}
+
+interface SkillGovernance {
+  max_project_skills: number;
+  max_learned_skills: number;
+  max_active_skill_bytes: number;
+  project_skills: number;
+  learned_skills: number;
+  active_skill_bytes: number;
 }
 
 interface McpServer {
   name: string;
   source?: string;
+  version?: string;
   applies_to_roles?: string[];
   status?: string;
   approved_by?: string;
   justification?: string;
   updated_at?: string;
+  approved_tools?: Array<{ name: string; access: 'read' | 'write' }>;
+  health?: {
+    status?: string;
+    detail?: string;
+    checked_at?: string;
+    next_check_at?: string | null;
+    consecutive_failures?: number;
+    tools?: Array<{ name: string; read_only?: boolean }>;
+  };
+}
+
+interface McpCatalogEntry {
+  id: string;
+  display_name: string;
+  description: string;
+  publisher: string;
+  homepage: string;
+  source: string;
+  required_local_command: string;
+  version: string;
+  distribution_version: string;
+  env_required: string[];
+  applies_to_roles: string[];
+  capabilities: string[];
+  risk: string;
+  reviewed_at: string;
 }
 
 interface WorkspacePayload {
@@ -204,7 +294,22 @@ interface AdapterProfile {
   provider?: string;
   status?: string;
   config?: Record<string, unknown>;
-  model_options?: Array<{ value: string; label: string }>;
+  model_options?: Array<{
+    value: string;
+    label: string;
+    available?: boolean;
+    selectable?: boolean;
+    availability?: string;
+    availability_reason?: string;
+    compatibility?: RoleModelOption['compatibility'];
+  }>;
+  model_catalog?: {
+    status?: string;
+    source?: string;
+    reason?: string;
+    installed_version?: string | null;
+    catalog_client_version?: string | null;
+  };
   health?: AdapterHealth;
 }
 
@@ -216,6 +321,16 @@ interface RoleModelOption {
   role_score?: number;
   tier?: string;
   price_note?: string;
+  available?: boolean;
+  selectable?: boolean;
+  availability?: string;
+  availability_reason?: string;
+  compatibility?: {
+    allowed?: boolean;
+    code?: string;
+    reason?: string;
+    alternatives?: Array<{ value: string; label: string }>;
+  };
 }
 
 interface CliStatus {
@@ -379,15 +494,46 @@ const PROFILE_BADGES: Record<string, { label: string; cls: string }> = {
   solo_lead: { label: 'Solo Lead', cls: 'solo' },
 };
 
-function issueProfile(issue: Issue | null | undefined): string | null {
-  if (!issue?.metadata_json) return null;
+function issueMetadata(issue: Issue | null | undefined): Record<string, unknown> {
+  if (!issue?.metadata_json) return {};
   try {
-    const meta = JSON.parse(issue.metadata_json) as Record<string, unknown>;
-    const profile = String(meta.profile || '').trim().toLowerCase();
-    return profile in PROFILE_BADGES ? profile : null;
+    return JSON.parse(issue.metadata_json) as Record<string, unknown>;
   } catch {
-    return null;
+    return {};
   }
+}
+
+function issueProfile(issue: Issue | null | undefined): string | null {
+  const profile = String(issueMetadata(issue).profile || '').trim().toLowerCase();
+  return profile in PROFILE_BADGES ? profile : null;
+}
+
+function issueCompatibilityContext(issue: Issue | null | undefined) {
+  const metadata = issueMetadata(issue);
+  const classification = typeof metadata.data_classification === 'object' && metadata.data_classification
+    ? metadata.data_classification as Record<string, unknown>
+    : {};
+  return {
+    runProfile: issueProfile(issue) || '',
+    criticality: String(issue?.criticality || 'medium'),
+    dataClass: String(metadata.data_class || classification.class || classification.level || ''),
+  };
+}
+
+function apiDetailText(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail === 'object') {
+    const value = detail as Record<string, unknown>;
+    const reason = String(value.reason || '').trim();
+    const code = String(value.code || '').trim();
+    if (reason) return code ? `${reason} (${code})` : reason;
+  }
+  return fallback;
+}
+
+function modelOptionCacheKey(profileId: string, role: string, issue: Issue | null | undefined): string {
+  const context = issueCompatibilityContext(issue);
+  return `${profileId}:${role}:${context.runProfile}:${context.criticality}:${context.dataClass}`;
 }
 
 function ProfileBadge({ profile, compact }: { profile: string | null; compact?: boolean }) {
@@ -571,6 +717,29 @@ interface PlanDocument {
   current_revision_id: string;
   updated_at?: string;
   created_at?: string;
+  plan?: {
+    schema_version: number;
+    objective: string;
+    scope: string[];
+    assumptions: string[];
+    architecture: string;
+    work_items: Array<{
+      id: string;
+      title: string;
+      owner_role: string;
+      reports_to: string;
+      deliverable: string;
+      evidence: string[];
+      accepted_by: string;
+      dependencies: string[];
+    }>;
+    risks: Array<{ risk: string; mitigation: string; rollback: string }>;
+    verification: Array<{ criterion: string; evidence: string; owner_role: string }>;
+    escalation_conditions: string[];
+    next_run_risks: string[];
+    narrative_markdown: string;
+  } | null;
+  contract_validation?: { valid: boolean; errors: string[] };
 }
 
 interface ProjectStatePayload {
@@ -811,6 +980,7 @@ export default function App() {
   const [newTaskProfile, setNewTaskProfile] = useState<string>('full_team');
   // Perfil inicial conservador; quorum se elige explícitamente cuando el riesgo lo justifica.
   const [newProjectRunProfile, setNewProjectRunProfile] = useState<string>('full_team');
+  const [newProjectDataClass, setNewProjectDataClass] = useState<string>('internal');
   // Plan aceptado adjunto a la próxima tarea (recibo por revisión, no texto copiado)
   const [pendingPlanRef, setPendingPlanRef] = useState<{ revisionId: string; sourceIssueId: string } | null>(null);
   // Agent config inline edit (sidebar)
@@ -825,6 +995,7 @@ export default function App() {
   // Tool capability catalog
   const [capabilityCatalog, setCapabilityCatalog] = useState<Record<string, CapabilityEntry>>({});
   const [adapterProfiles, setAdapterProfiles] = useState<AdapterProfile[]>([]);
+  const [adapterTestModels, setAdapterTestModels] = useState<Record<string, string>>({});
   const [roleModelOptions, setRoleModelOptions] = useState<Record<string, RoleModelOption[]>>({});
   const [cliStatus, setCliStatus] = useState<CliStatus[]>([]);
   const [secrets, setSecrets] = useState<SecretInfo[]>([]);
@@ -862,10 +1033,14 @@ export default function App() {
   const [autonomySaving, setAutonomySaving] = useState(false);
   // Project skills (self-extension PR1)
   const [projectSkills, setProjectSkills] = useState<ProjectSkill[]>([]);
-  const [skillDraft, setSkillDraft] = useState<{ name: string; roles: string; body: string }>({ name: '', roles: '', body: '' });
+  const [skillGovernance, setSkillGovernance] = useState<SkillGovernance | null>(null);
+  const [skillDraft, setSkillDraft] = useState<{ name: string; roles: string; body: string; status: string }>({ name: '', roles: '', body: '', status: 'active' });
   const [skillSaving, setSkillSaving] = useState(false);
   // MCP server proposals (self-extension PR2) — read-only; approve/reject via the Pendientes popup
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [mcpCatalog, setMcpCatalog] = useState<McpCatalogEntry[]>([]);
+  const [mcpBusy, setMcpBusy] = useState<string>('');
+  const [mcpToolDrafts, setMcpToolDrafts] = useState<Record<string, Record<string, 'off' | 'read' | 'write'>>>({});
   // In-flight guard: the 20 s baseline and 2 s active-run intervals overlap;
   // skip a poll tick while the previous /api/project/state is still pending.
   const projectStatePollBusy = useRef(false);
@@ -874,6 +1049,23 @@ export default function App() {
     () => issues.find((issue) => issue.id === selectedIssueId) || issues[0] || null,
     [issues, selectedIssueId],
   );
+  const onboardingCompatibilityIssue = useMemo<Issue>(() => ({
+    id: 'new-project',
+    title: projectName,
+    status: 'todo',
+    role: 'lead',
+    criticality: 'medium',
+    metadata_json: JSON.stringify({ profile: newProjectRunProfile, data_class: newProjectDataClass }),
+  }), [projectName, newProjectRunProfile, newProjectDataClass]);
+  const onboardingLeadOptions = roleModelOptions[
+    modelOptionCacheKey(leadAdapterProfileId, 'lead', onboardingCompatibilityIssue)
+  ] || [];
+  const onboardingLeadBlockReason = onboardingLeadOptions.length > 0
+    && onboardingLeadOptions.every((option) => option.selectable === false || option.available === false || option.compatibility?.allowed === false)
+    ? onboardingLeadOptions.find((option) => option.compatibility?.allowed === false)?.compatibility?.reason
+      || onboardingLeadOptions.find((option) => option.available === false)?.availability_reason
+      || 'El perfil no tiene un modelo Lead compatible.'
+    : '';
 
   const selectedComments = comments.filter((comment) => comment.issue_id === selectedIssue?.id);
   const selectedInteractions = interactions.filter((interaction) => interaction.issue_id === selectedIssue?.id);
@@ -1147,18 +1339,102 @@ export default function App() {
     try {
       const res = await apiFetch('/api/project/skills');
       if (!res.ok) return;
-      const json = (await res.json()) as { skills?: ProjectSkill[] };
+      const json = (await res.json()) as { skills?: ProjectSkill[]; governance?: SkillGovernance };
       setProjectSkills(json.skills || []);
+      setSkillGovernance(json.governance || null);
     } catch { /* ignore */ }
   };
 
   const loadMcpServers = async () => {
     try {
-      const res = await apiFetch('/api/project/extensions/mcp');
+      const [res, catalogRes] = await Promise.all([
+        apiFetch('/api/project/extensions/mcp'),
+        apiFetch('/api/project/extensions/mcp/catalog'),
+      ]);
       if (!res.ok) return;
       const json = (await res.json()) as { mcp_servers?: McpServer[] };
-      setMcpServers(json.mcp_servers || []);
+      const servers = json.mcp_servers || [];
+      setMcpServers(servers);
+      if (catalogRes.ok) {
+        const catalogJson = (await catalogRes.json()) as { entries?: McpCatalogEntry[] };
+        setMcpCatalog(catalogJson.entries || []);
+      }
+      setMcpToolDrafts((current) => {
+        const next = { ...current };
+        for (const server of servers) {
+          const approved = new Map((server.approved_tools || []).map((tool) => [tool.name, tool.access]));
+          next[server.name] = Object.fromEntries(
+            (server.health?.tools || []).map((tool) => [tool.name, approved.get(tool.name) || 'off']),
+          );
+        }
+        return next;
+      });
     } catch { /* ignore */ }
+  };
+
+  const runMcpHealth = async (server: McpServer) => {
+    if (mcpBusy) return;
+    setMcpBusy(server.name);
+    setError('');
+    try {
+      const res = await apiFetch(`/api/project/extensions/mcp/${encodeURIComponent(server.name)}/health`, { method: 'POST' });
+      const json = (await res.json()) as { success?: boolean; detail?: string; mcp_server?: McpServer };
+      if (!res.ok) throw new Error(json.detail || `mcp_health:${res.status}`);
+      if (!json.success) setError(json.mcp_server?.health?.detail || 'El servidor no superó el health check.');
+      await loadMcpServers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'mcp_health_failed');
+    } finally {
+      setMcpBusy('');
+    }
+  };
+
+  const saveMcpToolPolicy = async (server: McpServer) => {
+    if (mcpBusy) return;
+    const draft = mcpToolDrafts[server.name] || {};
+    const tools = Object.entries(draft)
+      .filter(([, access]) => access !== 'off')
+      .map(([name, access]) => ({ name, access }));
+    if (tools.length === 0) {
+      setError('Aprueba al menos una herramienta o retira el servidor.');
+      return;
+    }
+    setMcpBusy(server.name);
+    setError('');
+    try {
+      const res = await apiFetch(`/api/project/extensions/mcp/${encodeURIComponent(server.name)}/tools`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tools }),
+      });
+      const json = (await res.json()) as { success?: boolean; detail?: string };
+      if (!res.ok || !json.success) throw new Error(json.detail || `mcp_tools:${res.status}`);
+      await loadMcpServers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'mcp_tools_failed');
+    } finally {
+      setMcpBusy('');
+    }
+  };
+
+  const transitionMcpServer = async (server: McpServer, action: 'retire' | 'reactivate') => {
+    if (mcpBusy) return;
+    setMcpBusy(server.name);
+    setError('');
+    try {
+      const res = await apiFetch(`/api/project/extensions/mcp/${encodeURIComponent(server.name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const json = (await res.json()) as { success?: boolean; detail?: string };
+      if (!res.ok || !json.success) throw new Error(json.detail || `mcp_lifecycle:${res.status}`);
+      await loadMcpServers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'mcp_lifecycle_failed');
+    } finally {
+      setMcpBusy('');
+    }
   };
 
   const saveProjectSkill = async () => {
@@ -1171,11 +1447,11 @@ export default function App() {
       const res = await apiFetch('/api/project/skills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, body, applies_to_roles: roles }),
+        body: JSON.stringify({ name, body, applies_to_roles: roles, status: skillDraft.status }),
       });
       const json = (await res.json()) as { success?: boolean; detail?: string };
       if (!res.ok || !json.success) throw new Error(json.detail || `skill:${res.status}`);
-      setSkillDraft({ name: '', roles: '', body: '' });
+      setSkillDraft({ name: '', roles: '', body: '', status: 'active' });
       await loadProjectSkills();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'skill_save_failed');
@@ -1189,26 +1465,35 @@ export default function App() {
       name: skill.name,
       roles: (skill.applies_to_roles || []).join(', '),
       body: skill.body || '',
+      status: skill.status || 'active',
     });
   };
 
   const toggleProjectSkill = async (skill: ProjectSkill) => {
     const next = skill.status === 'active' ? 'retired' : 'active';
     try {
-      await apiFetch(`/api/project/skills/${encodeURIComponent(skill.name)}`, {
+      const res = await apiFetch(`/api/project/skills/${encodeURIComponent(skill.name)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: next }),
       });
+      const json = (await res.json()) as { success?: boolean; detail?: string };
+      if (!res.ok || !json.success) throw new Error(json.detail || `skill_status:${res.status}`);
       await loadProjectSkills();
-    } catch { /* ignore */ }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'skill_status_failed');
+    }
   };
 
   const deleteProjectSkill = async (skill: ProjectSkill) => {
     try {
-      await apiFetch(`/api/project/skills/${encodeURIComponent(skill.name)}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/project/skills/${encodeURIComponent(skill.name)}`, { method: 'DELETE' });
+      const json = (await res.json()) as { success?: boolean; detail?: string };
+      if (!res.ok || !json.success) throw new Error(json.detail || `skill_delete:${res.status}`);
       await loadProjectSkills();
-    } catch { /* ignore */ }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'skill_delete_failed');
+    }
   };
 
   /**
@@ -1511,13 +1796,30 @@ export default function App() {
       const rawPayload = (interaction as Interaction & { payload?: Record<string, unknown> }).payload;
       const team: ProposedTeamMember[] = (hiringDrafts[interaction.id] ?? (rawPayload?.proposed_team as ProposedTeamMember[])) || [];
       team.forEach((member) => {
-        const profileId = String(member.adapter_profile_id || (member.adapter_config as Record<string,string> | undefined)?.profile_id || '');
         const role = member.role || '';
-        if (profileId && role) void fetchRoleModelOptions(profileId, role);
+        const interactionIssue = issues.find((item) => item.id === interaction.issue_id) || selectedIssue;
+        if (role) adapterProfiles.forEach((profile) => {
+          void fetchRoleModelOptions(profile.id, role, interactionIssue);
+        });
       });
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingInteractions, hiringDrafts]);
+  }, [pendingInteractions, hiringDrafts, adapterProfiles, issues, selectedIssue]);
+
+  useEffect(() => {
+    if (!configModalAgent?.role) return;
+    adapterProfiles.forEach((profile) => {
+      void fetchRoleModelOptions(profile.id, configModalAgent.role || '', selectedIssue);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configModalAgent?.id, adapterProfiles, selectedIssue]);
+
+  useEffect(() => {
+    adapterProfiles.forEach((profile) => {
+      void fetchRoleModelOptions(profile.id, 'lead', onboardingCompatibilityIssue);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adapterProfiles, newProjectRunProfile, newProjectDataClass]);
 
   const createProject = async () => {
     setLoading(true);
@@ -1532,6 +1834,7 @@ export default function App() {
           adapter_profile_ids: selectedProjectAdapterIds,
           lead_adapter_profile_id: leadAdapterProfileId,
           run_profile: newProjectRunProfile,
+          data_class: newProjectDataClass,
         }),
       });
       const json = (await response.json()) as WorkspacePayload;
@@ -1748,10 +2051,15 @@ export default function App() {
       const response = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(agentDraft),
+        body: JSON.stringify({
+          ...agentDraft,
+          run_profile: issueCompatibilityContext(selectedIssue).runProfile,
+          criticality: issueCompatibilityContext(selectedIssue).criticality,
+          data_class: issueCompatibilityContext(selectedIssue).dataClass,
+        }),
       });
       const json = await response.json();
-      if (!response.ok) throw new Error(json.detail || `agent:${response.status}`);
+      if (!response.ok) throw new Error(apiDetailText(json.detail, `agent:${response.status}`));
       setEditingAgentId(null);
       setAgentDraft({});
       setConfigModalAgent(null);
@@ -1805,14 +2113,14 @@ export default function App() {
     }
   };
 
-  const testAdapterProfile = async (profileId: string) => {
+  const testAdapterProfile = async (profileId: string, model?: string) => {
     setLoading(true);
     setError('');
     try {
       const response = await apiFetch('/api/user-adapters/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile_id: profileId }),
+        body: JSON.stringify({ profile_id: profileId, ...(model ? { model } : {}) }),
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.detail || `adapter-test:${response.status}`);
@@ -1864,12 +2172,17 @@ export default function App() {
     const currentAdapterType = String(agentDraft.adapter_type ?? agent.adapter_type ?? 'manual');
     const adapterDefaultProfile = adapterProfiles.find((p) => p.adapter_type === currentAdapterType);
     const activeModelProfile = selectedProfile ?? adapterDefaultProfile;
-    const modelOptions = activeModelProfile?.model_options ?? [];
+    const roleOptionsKey = modelOptionCacheKey(currentProfileId, agent.role || '', selectedIssue);
+    const modelOptions = roleModelOptions[roleOptionsKey] ?? activeModelProfile?.model_options ?? [];
     const currentModel = String(
       (agentDraft.adapter_config as Record<string,unknown>)?.model
       ?? (agent.adapter_config as Record<string,unknown>)?.model
       ?? '',
     );
+    const currentModelOption = modelOptions.find((option) => option.value === currentModel);
+    const assignmentBlocked = currentModelOption?.selectable === false
+      || currentModelOption?.available === false
+      || currentModelOption?.compatibility?.allowed === false;
     const roleDef = ROLE_CATALOG[agent.role ?? ''];
     return (
       <div className="agent-form-v2">
@@ -1924,11 +2237,16 @@ export default function App() {
               <option value="">— Sin adapter (sin ejecución automática)</option>
               {adapterProfiles.map((profile) => {
                 const pState = profileState(profile);
+                const options = roleModelOptions[modelOptionCacheKey(profile.id, agent.role || '', selectedIssue)];
+                const profileDenied = Boolean(options?.length) && options.every(
+                  (option) => option.selectable === false || option.available === false || option.compatibility?.allowed === false,
+                );
+                const denyReason = options?.find((option) => option.compatibility?.allowed === false)?.compatibility?.reason;
                 const statusPrefix = pState.connected ? '● ' : '○ ';
                 const statusSuffix = !pState.connected ? ` — ${pState.label}` : '';
                 return (
-                  <option key={profile.id} value={profile.id}>
-                    {statusPrefix}{profile.label}{statusSuffix}
+                  <option key={profile.id} value={profile.id} disabled={profileDenied}>
+                    {statusPrefix}{profile.label}{statusSuffix}{profileDenied ? ` — incompatible: ${denyReason || 'sin modelo válido para este rol'}` : ''}
                   </option>
                 );
               })}
@@ -1962,10 +2280,43 @@ export default function App() {
               }))}
             >
               <option value="">Default del adapter</option>
-              {modelOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
+              {modelOptions.map((option) => {
+                const disabled = option.selectable === false || option.available === false || option.compatibility?.allowed === false;
+                const reason = option.selectable === false || option.available === false
+                  ? option.availability_reason || 'sin verificar'
+                  : option.compatibility?.reason;
+                return (
+                  <option key={option.value} value={option.value} disabled={disabled}>
+                    {option.label}{disabled ? ` — ${reason || 'incompatible'}` : ''}
+                  </option>
+                );
+              })}
             </select>
+            {activeModelProfile?.model_catalog?.status === 'cli_update_required' && (
+              <small className="field-warning">
+                Codex CLI {activeModelProfile.model_catalog.installed_version || '?'} no puede usar el catálogo {activeModelProfile.model_catalog.catalog_client_version || '?'}; actualiza el CLI y vuelve a probar el adapter.
+              </small>
+            )}
+            {currentModel && (currentModelOption?.selectable === false || currentModelOption?.available === false) && (
+              <small className="field-warning">
+                El modelo guardado no está disponible: {currentModelOption.availability_reason || 'health no demostrado'}.
+              </small>
+            )}
+            {currentModel && currentModelOption?.compatibility?.allowed === false && (
+              <small className="field-warning">
+                Asignación bloqueada: {currentModelOption.compatibility.reason || currentModelOption.compatibility.code}.
+              </small>
+            )}
+            {selectedProfile && currentModel && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={loading}
+                onClick={() => void testAdapterProfile(selectedProfile.id, currentModel)}
+              >
+                Probar este modelo
+              </button>
+            )}
           </div>
         </div>
 
@@ -2009,7 +2360,7 @@ export default function App() {
           </div>
           <div className="agent-form-actions">
             <button className="secondary-button" onClick={() => { setEditingAgentId(null); setAgentDraft({}); setConfigModalAgent(null); }}>Cancelar</button>
-            <button onClick={() => void saveAgent(agent.id)} disabled={loading}>Guardar cambios</button>
+            <button onClick={() => void saveAgent(agent.id)} disabled={loading || assignmentBlocked}>Guardar cambios</button>
           </div>
         </div>
       </div>
@@ -2132,7 +2483,7 @@ export default function App() {
         body: JSON.stringify(body),
       });
       const json = await response.json();
-      if (!response.ok) throw new Error(json.detail || `interaction:${response.status}`);
+      if (!response.ok) throw new Error(apiDetailText(json.detail, `interaction:${response.status}`));
       // Clear the note after successful submission
       setInteractionNotes((prev) => { const next = { ...prev }; delete next[interaction.id]; return next; });
       const runOnceJson = await runControlPlane();
@@ -2160,12 +2511,24 @@ export default function App() {
     });
   };
 
-  const fetchRoleModelOptions = async (profileId: string, role: string): Promise<RoleModelOption[]> => {
+  const fetchRoleModelOptions = async (
+    profileId: string,
+    role: string,
+    issue: Issue | null | undefined = selectedIssue,
+  ): Promise<RoleModelOption[]> => {
     if (!profileId || !role) return [];
-    const key = `${profileId}:${role}`;
+    const context = issueCompatibilityContext(issue);
+    const key = modelOptionCacheKey(profileId, role, issue);
     if (roleModelOptions[key]) return roleModelOptions[key];
     try {
-      const res = await apiFetch(`/api/user-adapters/models?profile_id=${encodeURIComponent(profileId)}&role=${encodeURIComponent(role)}`);
+      const params = new URLSearchParams({
+        profile_id: profileId,
+        role,
+        run_profile: context.runProfile,
+        criticality: context.criticality,
+        data_class: context.dataClass,
+      });
+      const res = await apiFetch(`/api/user-adapters/models?${params.toString()}`);
       if (!res.ok) return [];
       const json = (await res.json()) as { options?: RoleModelOption[] };
       const opts = json.options || [];
@@ -2179,8 +2542,15 @@ export default function App() {
   const updateHiringMemberProfile = async (interactionId: string, team: ProposedTeamMember[], idx: number, profileId: string) => {
     const profile = adapterProfiles.find((p) => p.id === profileId);
     const role = team[idx]?.role || '';
-    const opts = await fetchRoleModelOptions(profileId, role);
-    const defaultModel = String(opts[0]?.value || profile?.config?.model || profile?.model_options?.[0]?.value || '');
+    const interaction = interactions.find((item) => item.id === interactionId);
+    const interactionIssue = issues.find((item) => item.id === interaction?.issue_id) || selectedIssue;
+    const opts = await fetchRoleModelOptions(profileId, role, interactionIssue);
+    const defaultModel = String(
+      opts.find((option) => option.selectable !== false && option.available !== false && option.compatibility?.allowed !== false)?.value
+      || profile?.model_options?.find((option) => option.selectable !== false && option.available !== false)?.value
+      || profile?.config?.model
+      || '',
+    );
     const updated = team.map((member, i) => i === idx ? {
       ...member,
       adapter_type: profile?.adapter_type || member.adapter_type || 'manual',
@@ -2360,6 +2730,18 @@ export default function App() {
               el proyecto arranca planificando, no improvisando.
             </p>
           </div>
+          <label>
+            Clasificación de los datos
+            <select value={newProjectDataClass} onChange={(event) => setNewProjectDataClass(event.target.value)}>
+              <option value="public">Públicos</option>
+              <option value="internal">Internos</option>
+              <option value="confidential">Confidenciales</option>
+              <option value="restricted">Restringidos</option>
+            </select>
+          </label>
+          <p className="hint">
+            Los canales gratuitos externos solo se habilitan con una clasificación explícita y nunca para datos confidenciales o restringidos.
+          </p>
           <div className="project-adapter-picker">
             <div className="panel-title compact-title">
               <KeyRound size={16} />
@@ -2405,14 +2787,30 @@ export default function App() {
                 <option value="">Selecciona el proveedor/modelo base del Lead</option>
                 {adapterProfiles
                   .filter((profile) => selectedProjectAdapterIds.includes(profile.id))
-                  .map((profile) => (
-                    <option key={profile.id} value={profile.id}>{profile.label}</option>
-                  ))}
+                  .map((profile) => {
+                    const options = roleModelOptions[
+                      modelOptionCacheKey(profile.id, 'lead', onboardingCompatibilityIssue)
+                    ];
+                    const denied = Boolean(options?.length) && options.every(
+                      (option) => option.selectable === false || option.available === false || option.compatibility?.allowed === false,
+                    );
+                    const reason = options?.find(
+                      (option) => option.compatibility?.allowed === false,
+                    )?.compatibility?.reason;
+                    return (
+                      <option key={profile.id} value={profile.id} disabled={denied}>
+                        {profile.label}{denied ? ` — ${reason || 'sin Lead compatible'}` : ''}
+                      </option>
+                    );
+                  })}
               </select>
             </label>
             <p className="hint">
               Este agente será la autoridad Lead y redactará Plan A y Plan B. Podrás cambiar su adapter y modelo después en Equipo; Codex también puede actuar como senior del quorum.
             </p>
+            {onboardingLeadBlockReason && (
+              <p className="field-warning">Lead bloqueado: {onboardingLeadBlockReason}</p>
+            )}
             <div className="adapter-choice-list">
               {adapterProfiles.filter((profile) => profile.status !== 'blocked_by_provider').map((profile) => {
                 const state = profileState(profile);
@@ -2440,6 +2838,8 @@ export default function App() {
                 {adapterProfiles.filter((p) => p.status !== 'blocked_by_provider').map((profile) => {
                   const h = profile.health;
                   const hStatus = h?.status || 'untested';
+                  const testModel = adapterTestModels[profile.id]
+                    || String(profile.config?.model || profile.model_options?.[0]?.value || '');
                   return (
                     <div key={profile.id} className={`adapter-test-row health-${hStatus}`}>
                       <span className={`adapter-health-dot dot-${hStatus}`} />
@@ -2448,12 +2848,25 @@ export default function App() {
                         {hStatus === 'ok' ? (h?.reason || 'OK') : hStatus === 'installed' ? 'CLI encontrado, sin auth' : hStatus === 'failed' ? (h?.reason || 'error') : 'sin test'}
                       </small>
                       {h?.hint && <small className="adapter-test-hint">{h.hint}</small>}
+                      {profile.model_options?.length ? (
+                        <select
+                          value={testModel}
+                          onChange={(event) => setAdapterTestModels((current) => ({
+                            ...current,
+                            [profile.id]: event.target.value,
+                          }))}
+                        >
+                          {profile.model_options.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      ) : null}
                       <button
                         type="button"
                         className="secondary-button"
                         style={{ fontSize: '0.7rem', minHeight: '28px', padding: '0 8px' }}
                         disabled={loading}
-                        onClick={() => void testAdapterProfile(profile.id)}
+                        onClick={() => void testAdapterProfile(profile.id, testModel)}
                       >
                         Probar
                       </button>
@@ -2519,7 +2932,7 @@ export default function App() {
             </div>
           </div>
           <div className="actions">
-            <button onClick={() => void createProject()} disabled={loading || !projectName.trim() || selectedProjectAdapterIds.length === 0 || !leadAdapterProfileId}>
+            <button onClick={() => void createProject()} disabled={loading || !projectName.trim() || selectedProjectAdapterIds.length === 0 || !leadAdapterProfileId || Boolean(onboardingLeadBlockReason)}>
               Crear proyecto
             </button>
           </div>
@@ -2669,7 +3082,7 @@ export default function App() {
             <div className="loop-health-banner">
               <div className="loop-health-title">
                 <AlertCircle size={13} />
-                <span>Bucle detectado</span>
+                <span>Atención operativa</span>
               </div>
               {loopHealth.detected_loops.map((entry) => (
                 <button
@@ -2693,6 +3106,75 @@ export default function App() {
                   <span className="loop-health-badge">{entry.skip_count}×</span>
                 </button>
               ))}
+              {(loopHealth.orchestrator_evals?.liveness?.stranded_nonterminal_roots || 0) > 0 && (
+                <button
+                  className="loop-health-entry loop-health-critical"
+                  onClick={() => { setIssueFilter('open'); setViewMode('issue'); }}
+                  title="Raíces abiertas sin run, wakeup ni interacción pendiente"
+                >
+                  <span className="loop-health-label">Revisar raíces sin continuación</span>
+                  <span className="loop-health-badge">
+                    {loopHealth.orchestrator_evals?.liveness?.stranded_nonterminal_roots}
+                  </span>
+                </button>
+              )}
+              {((loopHealth.orchestrator_evals?.liveness?.stale_nonterminal_runs || 0) > 0
+                || (loopHealth.orchestrator_evals?.liveness?.stale_claimed_or_running_wakeups || 0) > 0) && (
+                <button
+                  className="loop-health-entry loop-health-warn"
+                  onClick={() => setViewMode('runs')}
+                  title="Inspeccionar runs y wakeups activos desde hace más de 30 minutos"
+                >
+                  <span className="loop-health-label">Inspeccionar ejecución estancada</span>
+                  <span className="loop-health-badge">
+                    {(loopHealth.orchestrator_evals?.liveness?.stale_nonterminal_runs || 0)
+                      + (loopHealth.orchestrator_evals?.liveness?.stale_claimed_or_running_wakeups || 0)}
+                  </span>
+                </button>
+              )}
+              {loopHealth.orchestrator_evals?.quorum?.available
+                && loopHealth.orchestrator_evals.quorum.healthy === false && (
+                <button
+                  className="loop-health-entry loop-health-quorum"
+                  onClick={() => setViewMode('runs')}
+                  title="Inspeccionar sesiones, contribuciones y provenance del quorum"
+                >
+                  <span className="loop-health-label">Auditar quorum inconsistente</span>
+                  <span className="loop-health-badge">Quorum</span>
+                </button>
+              )}
+              {(loopHealth.capacity_profiles ?? loopHealth.subscription_quota ?? []).filter((profile) => profile.requires_attention).map((profile) => {
+                const apiLimit = profile.api_rate_limits?.find((item) => item.remaining === 0)
+                  ?? profile.api_rate_limits?.[0];
+                const isApi = profile.quota_kind === 'api_rate_limit';
+                return (
+                  <button
+                    key={`subscription-quota-${profile.profile_id}`}
+                    className="loop-health-entry loop-health-warn"
+                    onClick={() => setViewMode('runs')}
+                    title={isApi
+                      ? `El proveedor API agotó ${apiLimit?.dimension?.toUpperCase() ?? 'un límite'}${apiLimit?.reset ? `; reset ${apiLimit.reset}` : ''}`
+                      : profile.state === 'exhausted_observed'
+                        ? 'El CLI devolvió un límite de uso y no hay una run posterior completada'
+                        : 'El umbral operativo de suscripción configurado por el owner está próximo o alcanzado'}
+                  >
+                    <span className="loop-health-label">
+                      {isApi
+                        ? 'Rate limit API'
+                        : profile.state === 'exhausted_observed' ? 'Cuota de suscripción agotada' : 'Presión de suscripción'}: {profile.label}
+                    </span>
+                    <span className="loop-health-badge">
+                      {isApi && apiLimit
+                        ? `${apiLimit.dimension.toUpperCase()} ${apiLimit.remaining ?? '—'}`
+                        : profile.state === 'exhausted_observed'
+                          ? 'Límite'
+                          : profile.forecast.estimated_runs_remaining != null
+                            ? `~${profile.forecast.estimated_runs_remaining} runs`
+                            : 'Revisar'}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -3081,7 +3563,28 @@ export default function App() {
               {planDocument ? (
                 <>
                   <h3 style={{ margin: '0 0 0.5rem' }}>{planDocument.title}</h3>
-                  <div className="plan-body">{renderMarkdownLite(planDocument.body)}</div>
+                  {planDocument.plan ? (
+                    <div className="plan-body">
+                      <h4>Objetivo</h4>
+                      <p>{planDocument.plan.objective}</p>
+                      <h4>Arquitectura y enfoque</h4>
+                      <p>{planDocument.plan.architecture}</p>
+                      <h4>Trabajo y accountability</h4>
+                      <ul>
+                        {planDocument.plan.work_items.map((item) => (
+                          <li key={item.id}>
+                            <strong>{item.title}</strong> · {item.owner_role} reporta a {item.reports_to}; acepta {item.accepted_by}.{' '}
+                            {item.deliverable}
+                          </li>
+                        ))}
+                      </ul>
+                      {planDocument.plan.narrative_markdown
+                        ? renderMarkdownLite(planDocument.plan.narrative_markdown)
+                        : null}
+                    </div>
+                  ) : (
+                    <div className="plan-body">{renderMarkdownLite(planDocument.body)}</div>
+                  )}
                 </>
               ) : (
                 <p className="muted">
@@ -3217,6 +3720,16 @@ export default function App() {
                 const hiringProfile = String(payload.profile || 'full_team');
                 const isDirect = payload.direct_work === true;
                 const hiringTeam = current ? (hiringDrafts[current.id] ?? proposedTeam) : proposedTeam;
+                const hiringIssue = currentIssue || selectedIssue;
+                const hiringBlockReason = hiringTeam.map((member) => {
+                  const profileId = String(member.adapter_profile_id || member.adapter_config?.profile_id || '');
+                  const model = String(member.model || member.adapter_config?.model || '');
+                  const options = roleModelOptions[modelOptionCacheKey(profileId, member.role || '', hiringIssue)] || [];
+                  const option = options.find((item) => item.value === model);
+                  if (option?.selectable === false || option?.available === false) return option.availability_reason || 'Modelo no verificado';
+                  if (option?.compatibility?.allowed === false) return option.compatibility.reason || option.compatibility.code || 'Modelo incompatible';
+                  return '';
+                }).find(Boolean) || '';
                 return (
                   <div className="inbox-layout">
                     <aside className="inbox-list">
@@ -3305,7 +3818,8 @@ export default function App() {
                                   <tbody>
                                     {hiringTeam.map((member, idx) => {
                                       const pId = String(member.adapter_profile_id || (member.adapter_config || {}).profile_id || '');
-                                      const roleKey = `${pId}:${member.role || ''}`;
+                                      const interactionIssue = issues.find((item) => item.id === current?.issue_id) || selectedIssue;
+                                      const roleKey = modelOptionCacheKey(pId, member.role || '', interactionIssue);
                                       const roleOpts = roleModelOptions[roleKey];
                                       const flatOpts = adapterProfiles.find((p) => p.id === pId)?.model_options || [];
                                       const displayOpts: RoleModelOption[] = roleOpts ?? flatOpts;
@@ -3321,9 +3835,22 @@ export default function App() {
                                               disabled={!isPending}
                                             >
                                               <option value="">Sin perfil</option>
-                                              {adapterProfiles.filter((p) => p.status !== 'blocked_by_provider').map((profile) => (
-                                                <option key={profile.id} value={profile.id}>{profile.label}</option>
-                                              ))}
+                                              {adapterProfiles.filter((p) => p.status !== 'blocked_by_provider').map((profile) => {
+                                                const options = roleModelOptions[
+                                                  modelOptionCacheKey(profile.id, member.role || '', interactionIssue)
+                                                ];
+                                                const denied = Boolean(options?.length) && options.every(
+                                                  (option) => option.selectable === false || option.available === false || option.compatibility?.allowed === false,
+                                                );
+                                                const reason = options?.find(
+                                                  (option) => option.compatibility?.allowed === false,
+                                                )?.compatibility?.reason;
+                                                return (
+                                                  <option key={profile.id} value={profile.id} disabled={denied}>
+                                                    {profile.label}{denied ? ` — ${reason || 'sin modelo compatible'}` : ''}
+                                                  </option>
+                                                );
+                                              })}
                                             </select>
                                           </td>
                                           <td>
@@ -3333,11 +3860,17 @@ export default function App() {
                                               disabled={!isPending}
                                             >
                                               <option value="">Modelo default</option>
-                                              {displayOpts.map((option) => (
-                                                <option key={option.value} value={option.value}>
-                                                  {option.recommended ? '★ ' : ''}{option.label}{option.price_note ? ` (${option.price_note})` : ''}
-                                                </option>
-                                              ))}
+                                              {displayOpts.map((option) => {
+                                                const disabled = option.selectable === false || option.available === false || option.compatibility?.allowed === false;
+                                                const reason = option.selectable === false || option.available === false
+                                                  ? option.availability_reason || 'sin verificar'
+                                                  : option.compatibility?.reason;
+                                                return (
+                                                  <option key={option.value} value={option.value} disabled={disabled}>
+                                                    {option.recommended ? '★ ' : ''}{option.label}{option.price_note ? ` (${option.price_note})` : ''}{disabled ? ` — ${reason || 'incompatible'}` : ''}
+                                                  </option>
+                                                );
+                                              })}
                                             </select>
                                           </td>
                                           <td className="hiring-table-why">{topRec?.fit_reason || member.rationale || '—'}</td>
@@ -3376,6 +3909,10 @@ export default function App() {
                             </div>
                           )}
 
+                          {isPending && isHiring && hiringBlockReason && (
+                            <p className="field-warning">No se puede contratar todavía: {hiringBlockReason}</p>
+                          )}
+
                           {isPending && (
                             <div className="actions inbox-actions">
                               <button
@@ -3397,7 +3934,7 @@ export default function App() {
                               )}
                               <button
                                 onClick={() => void resolveInteraction(current, 'accept', isHiring ? undefined : interactionNotes[current.id])}
-                                disabled={loading}
+                                disabled={loading || (isHiring && Boolean(hiringBlockReason))}
                               >
                                 {isQuestion ? 'Responder' : isHiring ? (isDirect ? 'Iniciar (solo Lead)' : 'Contratar equipo') : 'Aceptar'}
                               </button>
@@ -3671,6 +4208,13 @@ export default function App() {
                           wide
                         />
                       </div>
+                      {skillGovernance && (
+                        <p className="config-help">
+                          Uso: {skillGovernance.project_skills}/{skillGovernance.max_project_skills} skills;{' '}
+                          {skillGovernance.learned_skills}/{skillGovernance.max_learned_skills} aprendidas;{' '}
+                          {skillGovernance.active_skill_bytes.toLocaleString()}/{skillGovernance.max_active_skill_bytes.toLocaleString()} bytes activos.
+                        </p>
+                      )}
                       {projectSkills.length > 0 && (
                         <div className="skill-list">
                           {projectSkills.map((skill) => (
@@ -3682,8 +4226,13 @@ export default function App() {
                                     ? skill.applies_to_roles.join(', ')
                                     : 'todos los roles'}
                                 </span>
-                                {skill.status !== 'active' && <span className="skill-badge">retirada</span>}
+                                {skill.status === 'retired' && <span className="skill-badge">retirada</span>}
+                                {skill.origin === 'learned' && <span className="skill-badge">aprendida</span>}
+                                {skill.status === 'proposed' && <span className="skill-badge">pendiente de aprobación</span>}
                               </div>
+                              {skill.evidence && skill.evidence.length > 0 && (
+                                <div className="config-help">Evidencia: {skill.evidence.join(' · ')}</div>
+                              )}
                               <div className="skill-item-actions">
                                 <button className="config-inline-btn" onClick={() => editProjectSkill(skill)}>Editar</button>
                                 <button className="secondary-button" onClick={() => void toggleProjectSkill(skill)}>
@@ -3728,9 +4277,38 @@ export default function App() {
                       <div className="config-subsection-label">
                         Extensiones MCP
                         <InfoTip
-                          tip="El Lead propone integrar un servidor MCP (herramientas externas, p.ej. control de Unity) cuando el equipo se topa con un límite real. Instalar código de terceros SIEMPRE espera tu aprobación — responde la tarjeta en la Bandeja. Aquí solo se listan las ya aprobadas/rechazadas."
+                          tip="El Lead propone activar un servidor MCP ya instalado cuando el equipo se topa con un límite real. Ejecutar código de terceros SIEMPRE espera tu aprobación en la Bandeja. Después, esta pantalla comprueba el servidor y te permite autorizar cada herramienta como lectura o escritura."
                           wide
                         />
+                      </div>
+                      <div className="mcp-catalog">
+                        <div className="mcp-tool-policy-title">
+                          <span>Catálogo revisado</span>
+                          <small>Solo descriptores: no instala, aprueba ni ejecuta nada.</small>
+                        </div>
+                        <div className="skill-list">
+                          {mcpCatalog.map((entry) => (
+                            <div key={entry.id} className="skill-item mcp-item">
+                              <div className="skill-item-head">
+                                <strong>{entry.display_name}</strong>
+                                <code className="mcp-version">{entry.distribution_version}</code>
+                                <span className="skill-badge">revisado {entry.reviewed_at}</span>
+                              </div>
+                              <p className="config-hint" style={{ margin: 0 }}>{entry.description}</p>
+                              <p className="config-hint" style={{ margin: 0 }}>
+                                ID <code>{entry.id}</code> · requiere <code>{entry.required_local_command}</code> · serverInfo <code>{entry.version}</code>
+                              </p>
+                              <p className="config-hint" style={{ margin: 0 }}>
+                                Roles: {entry.applies_to_roles.join(', ')} · Capacidades: {entry.capabilities.join(', ')}
+                              </p>
+                              <p className="config-hint" style={{ margin: 0 }}>{entry.risk}</p>
+                              <div className="skill-item-actions">
+                                <a className="config-inline-btn" href={entry.homepage} target="_blank" rel="noreferrer">Fuente oficial</a>
+                                <button className="secondary-button" onClick={() => void navigator.clipboard.writeText(entry.id)}>Copiar ID</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                       {mcpServers.length === 0 ? (
                         <p className="config-hint">
@@ -3739,9 +4317,10 @@ export default function App() {
                       ) : (
                         <div className="skill-list">
                           {mcpServers.map((server) => (
-                            <div key={server.name} className="skill-item">
+                            <div key={server.name} className={`skill-item mcp-item status-${server.status || 'approved'}`}>
                               <div className="skill-item-head">
                                 <strong>{server.name}</strong>
+                                {server.version && <code className="mcp-version">v{server.version}</code>}
                                 <span className="skill-roles">
                                   {(server.applies_to_roles && server.applies_to_roles.length > 0)
                                     ? server.applies_to_roles.join(', ')
@@ -3751,6 +4330,59 @@ export default function App() {
                               </div>
                               {server.source && <p className="config-hint" style={{ margin: 0 }}><code>{server.source}</code></p>}
                               {server.justification && <p className="config-hint" style={{ margin: 0 }}>{server.justification}</p>}
+                              {server.health && (
+                                <div className="mcp-health-line">
+                                  <span className={`mcp-health-dot ${server.health.status === 'ok' ? 'ok' : 'bad'}`} />
+                                  <span>{server.health.status === 'ok' ? 'Health vigente' : server.health.detail || 'Health fallido'}</span>
+                                  {server.health.consecutive_failures ? <strong>{server.health.consecutive_failures}/3 fallos</strong> : null}
+                                </div>
+                              )}
+                              {(server.health?.tools || []).length > 0 && server.status === 'active' && (
+                                <div className="mcp-tool-policy">
+                                  <div className="mcp-tool-policy-title">
+                                    <span>Permisos explícitos</span>
+                                    <small>Las sugerencias del servidor no conceden acceso.</small>
+                                  </div>
+                                  {(server.health?.tools || []).map((tool) => (
+                                    <label key={tool.name} className="mcp-tool-row">
+                                      <code>{tool.name}</code>
+                                      <span>{tool.read_only ? 'sugiere lectura' : 'sin garantía'}</span>
+                                      <select
+                                        value={mcpToolDrafts[server.name]?.[tool.name] || 'off'}
+                                        onChange={(event) => setMcpToolDrafts((current) => ({
+                                          ...current,
+                                          [server.name]: {
+                                            ...(current[server.name] || {}),
+                                            [tool.name]: event.target.value as 'off' | 'read' | 'write',
+                                          },
+                                        }))}
+                                        disabled={mcpBusy === server.name}
+                                      >
+                                        <option value="off">No autorizar</option>
+                                        <option value="read">Lectura</option>
+                                        <option value="write">Escritura</option>
+                                      </select>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="skill-item-actions mcp-actions">
+                                {['approved', 'failed', 'active'].includes(server.status || 'approved') && (
+                                  <button className="config-inline-btn" onClick={() => void runMcpHealth(server)} disabled={Boolean(mcpBusy)}>
+                                    {mcpBusy === server.name ? 'Comprobando…' : server.status === 'approved' ? 'Probar y activar' : 'Comprobar ahora'}
+                                  </button>
+                                )}
+                                {server.status === 'active' && (server.health?.tools || []).length > 0 && (
+                                  <button onClick={() => void saveMcpToolPolicy(server)} disabled={Boolean(mcpBusy)}>
+                                    Guardar permisos
+                                  </button>
+                                )}
+                                {!['retired', 'rejected'].includes(server.status || '') ? (
+                                  <button className="danger-button" onClick={() => void transitionMcpServer(server, 'retire')} disabled={Boolean(mcpBusy)}>Retirar</button>
+                                ) : (
+                                  <button className="secondary-button" onClick={() => void transitionMcpServer(server, 'reactivate')} disabled={Boolean(mcpBusy)}>Reactivar</button>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -3798,9 +4430,11 @@ export default function App() {
                       </div>
                       <div className="api-key-rows">
                         {([
-                          { id: 'openai',    label: 'OpenAI',         desc: 'GPT-4.1, o1, o3…' },
-                          { id: 'google',    label: 'Google Gemini',  desc: 'Gemini 2.5 Flash / Pro…' },
-                          { id: 'anthropic', label: 'Anthropic',      desc: 'Claude Sonnet / Opus 4.5' },
+                          { id: 'openai',    label: 'OpenAI',         desc: 'GPT-5.6 Sol / Terra / Luna' },
+                          { id: 'google',    label: 'Google Gemini',  desc: 'Gemini 3.1 Pro / 3.5 Flash / Flash-Lite' },
+                          { id: 'google-free', label: 'Google Gemini Free', desc: 'Free tier BYOK · separado del perfil pagado' },
+                          { id: 'anthropic', label: 'Anthropic',      desc: 'Claude Opus 4.8 / Sonnet 5 / Haiku 4.5' },
+                          { id: 'groq',      label: 'Groq Free',      desc: 'GPT-OSS 120B, Qwen 3.6, Llama 3.3' },
                         ] as const).map((prov) => {
                           const saved = secrets.some((s) => s.provider === prov.id && s.has_secret);
                           const isActive = secretProvider === prov.id;
@@ -3878,6 +4512,8 @@ export default function App() {
                         {adapterProfiles.map((profile) => {
                           const pState = profileState(profile);
                           const healthStatus = profile.health?.status || 'untested';
+                          const testModel = adapterTestModels[profile.id]
+                            || String(profile.config?.model || profile.model_options?.[0]?.value || '');
                           return (
                             <div
                               key={profile.id}
@@ -3895,11 +4531,24 @@ export default function App() {
                                   : healthStatus === 'installed' ? 'instalado, auth sin verificar'
                                   : 'sin probar'}
                               </span>
+                              {profile.model_options?.length ? (
+                                <select
+                                  value={testModel}
+                                  onChange={(event) => setAdapterTestModels((current) => ({
+                                    ...current,
+                                    [profile.id]: event.target.value,
+                                  }))}
+                                >
+                                  {profile.model_options.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                              ) : null}
                               <button
                                 className="secondary-button"
                                 type="button"
                                 disabled={loading || profile.status === 'blocked_by_provider'}
-                                onClick={() => void testAdapterProfile(profile.id)}
+                                onClick={() => void testAdapterProfile(profile.id, testModel)}
                               >
                                 Probar
                               </button>

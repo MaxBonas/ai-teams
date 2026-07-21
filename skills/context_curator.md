@@ -27,8 +27,8 @@ Synthesize from: comment:<comment_id>   ← start here (or "all" for full thread
 
 1. Read `Synthesize from:` in your task description.
 2. Fetch comments on the **target issue** from that point via `GET /api/issues/{target_id}/comments`.
-3. Produce a compressed synthesis markdown (≤ 30% of the original char count of the comments you read).
-4. POST the block via `POST /api/issues/{target_id}/context-summary/blocks`.
+3. Produce a compressed synthesis markdown plus the causal index described in `payload.context_curation_target.semantic_contract`.
+4. Persist both with the structured `append_context_summary` operation.
 5. Set **your own task issue** to `done`.
 6. Do all of this in one run.
 
@@ -46,32 +46,27 @@ Read the assigned slice of the target issue thread. Extract:
 4. **Current state** — what is `done`, `in_progress`, `blocked`, `todo` across all children visible in this slice.
 5. **Open items** — pending tasks, unresolved blockers, waiting interactions.
 6. **Risk flags** — anything the Lead marked as high risk or escalation trigger.
+7. **Rejected options** — preserve the option and the reason it was discarded when that reason can affect later choices.
+
+For each material item emit a compact `causal_unit` with a stable `id`, `kind`,
+`statement`, the exact `source_comment_ids` and `links` written as
+`relation:value`. Accountability units link `owner`, `deliverable` and
+`accepted_by`; escalation units link `metric`, `threshold`, `window` and
+`action`; rejected options link `reason`. Do not create a kind absent from the
+assigned slice.
 
 Discard: pleasantries, repetition, intermediate reasoning that led to a final decision, raw file quotes longer than 10 lines, duplicate status updates.
 
 ## Compression target
 
-Your synthesis must be **≤ 30% of the original character count** of the comments you read (≤ 500 lines AND ≤ 3000 tokens absolute cap). If the raw slice is 10 000 chars, your block must be ≤ 3 000 chars.
+The Markdown must be **≤ 30% of the original character count** and the serialized causal index must stay within 4096 characters. If the raw slice is 10 000 chars, Markdown must be ≤ 3 000 chars. These budgets are separate because IDs and JSON syntax are provenance overhead, not summary prose.
 
-## Posting the synthesis block
+## Persisting the synthesis block
 
-Call the API exactly as:
-
-```
-POST /api/issues/{TARGET_ISSUE_ID}/context-summary/blocks
-Content-Type: application/json
-
-{
-  "summary_markdown": "<compressed markdown content>",
-  "start_comment_id": "<first comment id in this slice>",
-  "end_comment_id": "<last comment id in this slice>",
-  "char_count_original": <total chars of comments in this slice>
-}
-```
-
-The server validates that `len(summary_markdown) / char_count_original ≤ 0.30` and returns 422 if exceeded. If you get a 422, trim your synthesis further before retrying.
-
-If the API is unavailable, post the compressed synthesis as a comment on the **target issue** instead (still ≤ 30%), then close your own task issue.
+Emit exactly one `append_context_summary` operation. Copy `path`, comment IDs,
+character count and offsets from `context_curation_target`; include the Markdown
+in `body` and the structured index in `causal_units`. A comment is never a
+fallback artifact and does not permit closing the curator issue.
 
 ## Forbidden operations — Tier 3 strict boundary
 
@@ -86,7 +81,7 @@ You are Tier 3. The following ops are **forbidden** — the executor will silent
 | `append_file` | Same — no workspace modifications. |
 | `delete_file` | Same — no workspace modifications. |
 
-**Allowed ops:** `add_comment`, `set_status`, `notify_supervisor`.
+**Allowed ops:** `append_context_summary`, `add_comment`, `set_status`, `notify_supervisor`.
 
 ## Closing — MANDATORY
 

@@ -38,7 +38,8 @@ from aiteam.project_adapters import (
     write_project_adapter_policy,
 )
 from aiteam.run_profiles import FULL_TEAM, LEAD_QUORUM, normalize_run_profile
-from aiteam.user_config import profile_is_connected
+from aiteam.user_config import ROLE_CAPABILITY_PROFILES, profile_is_connected
+from aiteam.model_compatibility import compatibility_decision
 from aiteam.db.comments import create_comment
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.tools.catalog import default_capabilities_for_role
@@ -54,6 +55,7 @@ class NewProjectRequest(BaseModel):
     adapter_profile_ids: list[str] = Field(default_factory=list)
     lead_adapter_profile_id: str | None = None
     run_profile: Literal["solo_lead", "lead_quorum", "full_team"] = FULL_TEAM
+    data_class: Literal["", "public", "internal", "confidential", "restricted"] = ""
 
 class DeleteProjectRequest(BaseModel):
     confirmation: str
@@ -146,6 +148,8 @@ async def create_project(payload: NewProjectRequest, request: Request):
     # run that dies silently. Warn by default; hard-block when the operator
     # sets AITEAM_REQUIRE_CONNECTED_ADAPTER=1.
     selected_profiles = available_project_profiles(payload.adapter_profile_ids)
+    if not selected_profiles:
+        raise HTTPException(status_code=400, detail="Select at least one available adapter profile")
     if payload.lead_adapter_profile_id and payload.lead_adapter_profile_id not in {
         str(profile.get("id") or "") for profile in selected_profiles
     }:
@@ -153,6 +157,45 @@ async def create_project(payload: NewProjectRequest, request: Request):
             status_code=400,
             detail="El perfil elegido para el Lead debe estar entre las conexiones del proyecto",
         )
+    run_profile = normalize_run_profile(payload.run_profile)
+    lead_profiles = (
+        [profile for profile in selected_profiles if str(profile.get("id") or "") == payload.lead_adapter_profile_id]
+        if payload.lead_adapter_profile_id
+        else selected_profiles
+    )
+    lead_selection = choose_adapter_for_role(
+        "lead", "lead", lead_profiles,
+        run_profile=run_profile,
+        criticality="medium",
+        data_class=payload.data_class,
+    )
+    if not lead_selection:
+        decisions: list[dict[str, Any]] = []
+        for profile in lead_profiles:
+            options = profile.get("model_options") if isinstance(profile.get("model_options"), list) else []
+            config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+            configured = str(config.get("model") or "")
+            selected_model = next(
+                (item for item in options if str(item.get("value") or "") == configured),
+                options[0] if options else None,
+            )
+            decisions.append(compatibility_decision(
+                profile=profile,
+                model=selected_model,
+                role="lead",
+                run_profile=run_profile,
+                criticality="medium",
+                data_class=payload.data_class,
+                role_profile=ROLE_CAPABILITY_PROFILES["lead"],
+                candidate_models=options,
+            ))
+        primary = decisions[0] if decisions else {
+            "allowed": False,
+            "code": "model_role_incompatible",
+            "reason": "No hay un perfil/modelo compatible para el Lead.",
+            "alternatives": [],
+        }
+        raise HTTPException(status_code=422, detail={**primary, "evaluated_profiles": decisions})
     _unconnected = [str(p.get("id") or "") for p in selected_profiles if not profile_is_connected(p)]
     adapter_warning: str | None = None
     if selected_profiles and len(_unconnected) == len(selected_profiles):
@@ -172,12 +215,12 @@ async def create_project(payload: NewProjectRequest, request: Request):
     except ValueError as exc:
         shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    run_profile = normalize_run_profile(payload.run_profile)
     _initialize_project_runtime(
         target,
         initial_task=payload.initial_task,
         run_profile=run_profile,
         lead_adapter_profile_id=payload.lead_adapter_profile_id,
+        data_class=payload.data_class,
     )
     # VCS del workspace: solo en proyectos RECIÉN creados por la app (un
     # workspace externo seleccionado a posteriori nunca se toca — sin marker
@@ -397,6 +440,7 @@ def _initialize_project_runtime(
     initial_task: str | None = None,
     run_profile: str = FULL_TEAM,
     lead_adapter_profile_id: str | None = None,
+    data_class: str = "",
 ) -> None:
     run_profile = normalize_run_profile(run_profile)
     runtime_dir = resolve_runtime_dir(project_path, PROJECT_ROOT)
@@ -414,7 +458,14 @@ def _initialize_project_runtime(
         if lead_adapter_profile_id
         else profiles
     )
-    lead_adapter = choose_adapter_for_role("lead", "lead", lead_profiles)
+    lead_adapter = choose_adapter_for_role(
+        "lead", "lead", lead_profiles,
+        run_profile=run_profile,
+        criticality="medium",
+        data_class=data_class,
+    )
+    if not lead_adapter:
+        raise ValueError("No compatible Lead adapter/model selection")
     lead_adapter_type = str((lead_adapter or {}).get("adapter_type") or "lead_builtin")
     lead_adapter_config = json.dumps((lead_adapter or {}).get("adapter_config") or {}, ensure_ascii=False, sort_keys=True)
     with sqlite3.connect(str(db_path)) as conn:
@@ -493,6 +544,7 @@ def _initialize_project_runtime(
                         "profile": run_profile,
                         "source": "project_bootstrap",
                         "wake_reason": "new_project",
+                        "data_class": data_class or None,
                     },
                     ensure_ascii=False,
                     sort_keys=True,

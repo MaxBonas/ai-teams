@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,19 @@ from aiteam.db.migration import SCHEMA_PATH
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
+from aiteam.user_config import model_options, record_model_health
+
+
+@pytest.fixture(autouse=True)
+def _verified_api_model_fixture(tmp_path_factory, monkeypatch) -> None:
+    """Los tests del executor no auditan catálogo salvo cuando lo declaran."""
+    user_config_dir = tmp_path_factory.mktemp("executor-user-config")
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(user_config_dir))
+    for profile_id in ("openai_api", "gemini_api", "anthropic_api"):
+        for option in model_options().get(profile_id, []):
+            record_model_health(
+                profile_id, str(option["value"]), available=True, reason="executor fixture"
+            )
 
 
 def _init_db(
@@ -63,6 +77,25 @@ class _FailRuntime:
 
     def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
         return ExecutionResult(status="failed", error="adapter error", exit_code=1)
+
+
+class _ModelUnavailableRuntime:
+    descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+        return {"AITEAM_RUN_ID": run_id}
+
+    def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+        self.calls += 1
+        return ExecutionResult(
+            status="failed",
+            error="model requires a newer version of Codex",
+            error_code="model_unavailable",
+            exit_code=1,
+        )
 
 
 class _CountingRuntime:
@@ -232,6 +265,205 @@ def _dispatch_one(db_path: Path) -> Any:
     return scheduler.dispatch_next()
 
 
+@pytest.mark.parametrize(
+    ("owner_action", "expected_model", "expected_status", "expected_queued"),
+    [
+        ("accept", "gpt-5.5", "todo", 1),
+        ("reject", "gpt-5.6-luna", "blocked", 0),
+    ],
+)
+def test_model_unavailable_requires_owner_before_same_profile_fallback(
+    tmp_path: Path,
+    monkeypatch,
+    owner_action: str,
+    expected_model: str,
+    expected_status: str,
+    expected_queued: int,
+) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    import aiteam.user_config as config_mod
+
+    monkeypatch.setattr(config_mod, "_codex_catalog_compatibility", lambda _config: {
+        "status": "cli_update_required",
+        "installed_version": "0.128.0",
+        "catalog_client_version": "0.145.0",
+        "models": [],
+    })
+    record_model_health("codex_subscription", "gpt-5.5", available=True, reason="run_completed")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE agents SET adapter_config_json = ? WHERE id = 'agent-1'",
+            (json.dumps({
+                "profile_id": "codex_subscription",
+                "model": "gpt-5.6-luna",
+                "cli_kind": "codex",
+            }),),
+        )
+        conn.commit()
+
+    runtime = _ModelUnavailableRuntime()
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    executor.execute(_dispatch_one(db_path))
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        issue = conn.execute("SELECT status FROM issues WHERE id = 'issue-1'").fetchone()
+        interaction = conn.execute(
+            "SELECT * FROM issue_thread_interactions WHERE issue_id = 'issue-1' AND status = 'pending'"
+        ).fetchone()
+    assert issue["status"] == "blocked"
+    assert interaction is not None
+    payload = json.loads(interaction["payload_json"])
+    assert payload["reason"] == "model_fallback_required"
+    assert payload["failed_model"] == "gpt-5.6-luna"
+    assert payload["proposed_model"] == "gpt-5.5"
+    assert payload["changes_tier"] is True
+
+    resolve_interaction(
+        db_path,
+        interaction_id=interaction["id"],
+        action=owner_action,
+        resolved_by_user_id="user",
+    )
+    transition = HeartbeatScheduler(db_path).dispatch_next(agent_id="agent-1")
+    assert transition is not None
+    executor.execute(transition)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        agent = conn.execute(
+            "SELECT adapter_config_json FROM agents WHERE id = 'agent-1'"
+        ).fetchone()
+        issue = conn.execute("SELECT status FROM issues WHERE id = 'issue-1'").fetchone()
+        queued = conn.execute(
+            "SELECT COUNT(*) AS n FROM wakeup_requests WHERE status = 'queued' AND source = 'model_fallback'"
+        ).fetchone()
+    assert json.loads(agent["adapter_config_json"])["model"] == expected_model
+    assert issue["status"] == expected_status
+    assert queued["n"] == expected_queued
+    assert runtime.calls == 0
+
+
+def test_runtime_preflight_blocks_incompatible_role_without_calling_model(tmp_path: Path) -> None:
+    from aiteam.project_adapters import write_project_adapter_policy
+
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api"])
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            UPDATE agents
+            SET role = 'lead', adapter_type = 'openai_api', adapter_config_json = ?
+            WHERE id = 'agent-1'
+            """,
+            (json.dumps({"profile_id": "openai_api", "model": "gpt-5.6-luna"}),),
+        )
+        conn.execute(
+            "UPDATE issues SET role = 'lead', metadata_json = ? WHERE id = 'issue-1'",
+            (json.dumps({"profile": "full_team", "data_class": "internal"}),),
+        )
+        conn.commit()
+
+    class _CountingOpenAIRuntime:
+        descriptor = AdapterDescriptor(adapter_type="openai_api", channel="api", provider="openai")
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            self.calls += 1
+            return ExecutionResult(status="completed", output="no debe ejecutarse")
+
+    runtime = _CountingOpenAIRuntime()
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    executor.execute(_dispatch_one(db_path))
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        issue = conn.execute("SELECT status FROM issues WHERE id = 'issue-1'").fetchone()
+        interaction = conn.execute(
+            """
+            SELECT payload_json FROM issue_thread_interactions
+            WHERE issue_id = 'issue-1' AND status = 'pending'
+            """
+        ).fetchone()
+        denied = conn.execute(
+            "SELECT COUNT(*) AS n FROM tool_access WHERE issue_id = 'issue-1' AND decision = 'denied'"
+        ).fetchone()
+
+    assert runtime.calls == 0
+    assert issue["status"] == "blocked"
+    payload = json.loads(interaction["payload_json"])
+    assert payload["reason"] == "model_compatibility_blocked"
+    assert payload["decision"]["code"] == "model_tier_insufficient"
+    assert int(denied["n"]) == 1
+
+
+@pytest.mark.parametrize("verified", [False, True])
+def test_runtime_requires_exact_api_model_probe_before_consumption(
+    tmp_path: Path, monkeypatch, verified: bool,
+) -> None:
+    from aiteam.project_adapters import write_project_adapter_policy
+
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "isolated-user-config"))
+    if verified:
+        record_model_health(
+            "openai_api", "gpt-5.6-terra", available=True, reason="live_test_completed"
+        )
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api"])
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE agents SET adapter_type='openai_api', adapter_config_json=? WHERE id='agent-1'",
+            (json.dumps({"profile_id": "openai_api", "model": "gpt-5.6-terra"}),),
+        )
+        conn.execute(
+            "UPDATE issues SET role='engineer', metadata_json=? WHERE id='issue-1'",
+            (json.dumps({"profile": "full_team", "data_class": "internal"}),),
+        )
+        conn.commit()
+
+    class _Runtime:
+        descriptor = AdapterDescriptor(adapter_type="openai_api", channel="api", provider="openai")
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            self.calls += 1
+            return ExecutionResult(status="completed", output="Plan técnico completado.")
+
+    runtime = _Runtime()
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    executor.execute(_dispatch_one(db_path))
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        interaction = conn.execute(
+            """
+            SELECT payload_json FROM issue_thread_interactions
+            WHERE issue_id='issue-1' AND status='pending'
+            ORDER BY created_at DESC LIMIT 1
+            """
+        ).fetchone()
+
+    assert runtime.calls == (1 if verified else 0)
+    if not verified:
+        payload = json.loads(interaction["payload_json"])
+        assert payload["reason"] == "model_assignment_required"
+        assert payload["required_action"] == "verify_model_or_change_team_assignment"
+
+
 def _init_lead_db(db_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -318,6 +550,166 @@ def test_executor_completes_run_and_wakeup(tmp_path: Path) -> None:
         ("adapter:subscription_cli", "allowed")
     ]
     assert spent == 5
+
+
+@pytest.mark.parametrize("cli_kind,provider,channel", [
+    ("codex", "openai-codex", "subscription"),
+    ("opencode", "opencode-zen", "subscription"),
+])
+def test_subscription_run_injects_active_mcp_and_records_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    cli_kind: str, provider: str, channel: str,
+) -> None:
+    from aiteam.extensions import approve_mcp_server, approve_mcp_server_tools, set_mcp_server_health, set_mcp_server_status
+    from aiteam.mcp_runtime import artifact_identity
+
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE agents SET capabilities_json=? WHERE id='agent-1'",
+            (json.dumps(["external_mcp"]),),
+        )
+        conn.commit()
+    approve_mcp_server(
+        tmp_path,
+        name="docs",
+        source=sys.executable,
+        version="1.0.0",
+        args=["-m", "fake_mcp"],
+        applies_to_roles=["engineer"],
+        approved_by="user",
+    )
+    set_mcp_server_status(tmp_path, name="docs", status="active")
+    set_mcp_server_health(
+        tmp_path,
+        name="docs",
+        health={
+            "status": "ok",
+            "server_version": "1.0.0",
+            "artifact_identity": artifact_identity([sys.executable, "-m", "fake_mcp"]),
+            "tools": [
+                {"name": "lookup", "read_only": True},
+                {"name": "publish", "read_only": False},
+            ],
+        },
+    )
+    approve_mcp_server_tools(
+        tmp_path,
+        name="docs",
+        tools=[{"name": "lookup", "access": "read"}, {"name": "publish", "access": "write"}],
+        approved_by="user",
+    )
+    captured: dict[str, str] = {}
+
+    def _execute(_runtime, run, env):
+        captured.update(env)
+        return ExecutionResult(status="completed", output="done")
+
+    monkeypatch.setattr(ClaudeSubscriptionCliRuntime, "execute", _execute)
+    runtime = ClaudeSubscriptionCliRuntime(
+        AdapterDescriptor(
+            adapter_type="subscription_cli", channel=channel, provider=provider
+        ),
+        cli_kind=cli_kind,
+    )
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    dispatch = _dispatch_one(db_path)
+
+    executor.execute(dispatch)
+
+    injected = json.loads(captured["AITEAM_MCP_SERVERS_JSON"])
+    assert injected[0]["name"] == "docs"
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT decision, reason, metadata_json FROM tool_access "
+            "WHERE run_id=? AND tool_name='mcp:docs'",
+            (dispatch.run["id"],),
+        ).fetchone()
+    assert row[0] == "allowed"
+    assert "health-checked" in row[1]
+    assert json.loads(row[2])["version"] == "1.0.0"
+    with sqlite3.connect(str(db_path)) as conn:
+        tool_rows = conn.execute(
+            "SELECT tool_name, decision FROM tool_access "
+            "WHERE run_id=? AND tool_name LIKE 'mcp:docs:%' ORDER BY tool_name",
+            (dispatch.run["id"],),
+        ).fetchall()
+    assert tool_rows == [("mcp:docs:lookup", "allowed"), ("mcp:docs:publish", "denied")]
+
+
+def test_claude_read_only_role_denies_server_with_mixed_mcp_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aiteam.extensions import approve_mcp_server, approve_mcp_server_tools, set_mcp_server_health, set_mcp_server_status
+    from aiteam.mcp_runtime import artifact_identity
+
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE agents SET capabilities_json=? WHERE id='agent-1'",
+            (json.dumps(["external_mcp"]),),
+        )
+        conn.commit()
+    approve_mcp_server(
+        tmp_path,
+        name="mixed",
+        source=sys.executable,
+        version="1.0.0",
+        applies_to_roles=["engineer"],
+        approved_by="user",
+    )
+    set_mcp_server_status(tmp_path, name="mixed", status="active")
+    set_mcp_server_health(
+        tmp_path,
+        name="mixed",
+        health={
+            "status": "ok",
+            "server_version": "1.0.0",
+            "artifact_identity": artifact_identity([sys.executable]),
+            "tools": [
+                {"name": "lookup", "read_only": True},
+                {"name": "publish", "read_only": False},
+            ],
+        },
+    )
+    approve_mcp_server_tools(
+        tmp_path,
+        name="mixed",
+        tools=[{"name": "lookup", "access": "read"}, {"name": "publish", "access": "write"}],
+        approved_by="user",
+    )
+    captured: dict[str, str] = {}
+
+    def _execute(_runtime, run, env):
+        captured.update(env)
+        return ExecutionResult(status="completed", output="done")
+
+    monkeypatch.setattr(ClaudeSubscriptionCliRuntime, "execute", _execute)
+    runtime = ClaudeSubscriptionCliRuntime(
+        AdapterDescriptor(
+            adapter_type="subscription_cli", channel="subscription", provider="anthropic"
+        ),
+        cli_kind="claude",
+    )
+    executor = RunExecutor(db_path, AdapterRegistry([runtime]))
+    dispatch = _dispatch_one(db_path)
+
+    executor.execute(dispatch)
+
+    assert "AITEAM_MCP_SERVERS_JSON" not in captured
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            "SELECT tool_name, decision, reason FROM tool_access "
+            "WHERE run_id=? AND tool_name LIKE 'mcp:mixed%' ORDER BY tool_name",
+            (dispatch.run["id"],),
+        ).fetchall()
+    assert rows == [
+        ("mcp:mixed", "denied", "mcp_adapter_cannot_enforce_tool_allowlist"),
+        ("mcp:mixed:lookup", "denied", "mcp_adapter_cannot_enforce_tool_allowlist"),
+        ("mcp:mixed:publish", "denied", "mcp_adapter_cannot_enforce_tool_allowlist"),
+    ]
 
 
 def test_builtin_lead_creates_structured_team_proposal(tmp_path: Path) -> None:
@@ -1606,7 +1998,7 @@ def test_llm_lead_created_issue_agents_use_project_adapter_policy(tmp_path: Path
     assert engineer["adapter_type"] == "openai_api"
     config = json.loads(engineer["adapter_config_json"])
     assert config["profile_id"] == "openai_api"
-    assert config["model"] == "o4-mini"
+    assert config["model"] == "gpt-5.6-terra"
 
 
 def test_executor_repairs_existing_builtin_agent_before_execution(tmp_path: Path) -> None:
@@ -1631,15 +2023,15 @@ def test_executor_repairs_existing_builtin_agent_before_execution(tmp_path: Path
         run = conn.execute("SELECT status, adapter_type, model, channel FROM runs WHERE id = ?", (dispatch.run["id"],)).fetchone()
 
     assert agent["adapter_type"] == "openai_api"
-    assert json.loads(agent["adapter_config_json"])["model"] == "o4-mini"
+    assert json.loads(agent["adapter_config_json"])["model"] == "gpt-5.6-terra"
     assert "repo_read" in json.loads(agent["capabilities_json"])
     assert run["status"] == "completed"
     assert run["adapter_type"] == "openai_api"
-    assert run["model"] == "o4-mini"
+    assert run["model"] == "gpt-5.6-terra"
     assert run["channel"] == "api"
 
 
-def test_lead_plan_comment_is_materialized_as_plan_document(tmp_path: Path) -> None:
+def test_lead_plan_comment_does_not_mutate_plan_document(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init_lead_db(db_path)
     with sqlite3.connect(str(db_path)) as conn:
@@ -1655,10 +2047,7 @@ def test_lead_plan_comment_is_materialized_as_plan_document(tmp_path: Path) -> N
         conn.row_factory = sqlite3.Row
         doc = conn.execute("SELECT title, body, metadata_json FROM issue_documents WHERE issue_id = ? AND key = ?", ("issue:intake", "plan")).fetchone()
 
-    assert doc is not None
-    assert doc["title"] == "Plan recuperado del Lead"
-    assert "Plan inicial" in doc["body"]
-    assert json.loads(doc["metadata_json"])["source"] == "materialized_from_lead_comment"
+    assert doc is None
 
 
 def test_executor_creates_request_confirmation_for_high_criticality_issue(tmp_path: Path) -> None:
@@ -3506,6 +3895,14 @@ def test_adapter_recovery_reopens_exhausted_issue_with_alternative_adapter(tmp_p
     user_cfg = tmp_path / "user-config"
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(user_cfg))
     store_secret(provider="google", name="default", secret="gemini-key")
+    for profile_id in ("openai_api", "gemini_api"):
+        for option in model_options().get(profile_id, []):
+            record_model_health(
+                profile_id,
+                str(option["value"]),
+                available=True,
+                reason="recovery fixture",
+            )
 
     db_path = tmp_path / "aiteam.db"
     with sqlite3.connect(str(db_path)) as conn:
@@ -3513,8 +3910,18 @@ def test_adapter_recovery_reopens_exhausted_issue_with_alternative_adapter(tmp_p
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
         conn.execute(
-            "INSERT INTO agents (id, role, name, seniority, adapter_type) VALUES (?, ?, ?, ?, ?)",
-            ("agent-1", "engineer", "Engineer", "standard", "openai_api"),
+            """
+            INSERT INTO agents (id, role, name, seniority, adapter_type, adapter_config_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "agent-1",
+                "engineer",
+                "Engineer",
+                "standard",
+                "openai_api",
+                json.dumps({"profile_id": "openai_api", "model": "gpt-5.6-sol"}),
+            ),
         )
         conn.execute(
             "INSERT INTO issues (id, goal_id, title, status, assignee_agent_id, role) VALUES (?, ?, ?, ?, ?, ?)",
@@ -3967,11 +4374,24 @@ def test_subscription_run_provenance_uses_selected_profile_identity(tmp_path: Pa
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         run = conn.execute("SELECT provider, model, channel FROM runs").fetchone()
+        profile = conn.execute(
+            "SELECT profile_id, provider, model, channel FROM run_adapter_profiles"
+        ).fetchone()
     assert dict(run) == {
         "provider": "google-antigravity",
-        "model": "Gemini 3.1 Pro (High)",
+        "model": "gemini-3.1-pro-high",
         "channel": "subscription",
     }
+    assert dict(profile) == {
+        "profile_id": "antigravity_subscription",
+        "provider": "google-antigravity",
+        "model": "gemini-3.1-pro-high",
+        "channel": "subscription",
+    }
+    model_health = json.loads(
+        (tmp_path / "user-config" / "adapter_health.json").read_text(encoding="utf-8")
+    )["profiles"]["antigravity_subscription"]
+    assert model_health["verified_models"] == ["gemini-3.1-pro-high"]
 
 
 # ── Cascada de calidad: escalado de modelo antes de cambio de canal ───────────
@@ -3997,9 +4417,18 @@ def _escalation_db(tmp_path: Path, *, model: str = "gpt-5.4-mini") -> Path:
     return db_path
 
 
-def test_model_escalation_upgrades_to_profile_senior_once(tmp_path: Path) -> None:
+def test_model_escalation_upgrades_to_profile_senior_once(tmp_path: Path, monkeypatch) -> None:
     """Peldaño 1 de la cascada FrugalGPT: el mini agotado escala al modelo
     senior del MISMO perfil, reabre la issue y despierta al agente — una vez."""
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    import aiteam.user_config as config_mod
+    monkeypatch.setattr(config_mod, "_codex_catalog_compatibility", lambda _config: {
+        "status": "compatible",
+        "installed_version": "test",
+        "catalog_client_version": "test",
+        "models": ["gpt-5.6-sol"],
+    })
+    record_model_health("codex_subscription", "gpt-5.6-sol", available=True, reason="test")
     db_path = _escalation_db(tmp_path, model="gpt-5.4-mini")
     executor = RunExecutor(db_path, AdapterRegistry([]))
 
@@ -4018,7 +4447,7 @@ def test_model_escalation_upgrades_to_profile_senior_once(tmp_path: Path) -> Non
         ).fetchone()[0]
     config = json.loads(agent["adapter_config_json"])
     assert agent["adapter_type"] == "subscription_cli", "mismo canal: solo cambia el modelo"
-    assert config["model"] == "gpt-5.5"
+    assert config["model"] == "gpt-5.6-sol"
     assert issue["status"] == "todo"
     assert wake == 1
 
@@ -4030,7 +4459,7 @@ def test_model_escalation_upgrades_to_profile_senior_once(tmp_path: Path) -> Non
 
 
 def test_model_escalation_noop_when_already_on_senior_model(tmp_path: Path) -> None:
-    db_path = _escalation_db(tmp_path, model="gpt-5.5")
+    db_path = _escalation_db(tmp_path, model="gpt-5.6-sol")
     executor = RunExecutor(db_path, AdapterRegistry([]))
 
     assert executor._attempt_model_escalation(
@@ -4097,6 +4526,10 @@ def test_cross_provider_review_repoints_reviewer_on_high_criticality(tmp_path: P
 
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
     store_secret(provider="google", name="default", secret="gemini-key")
+    for option in model_options().get("gemini_api", []):
+        record_model_health(
+            "gemini_api", str(option["value"]), available=True, reason="review fixture"
+        )
     db_path = _cross_review_db(tmp_path, criticality="high")
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
 

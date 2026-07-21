@@ -195,6 +195,8 @@ def provider_for_url(url: str) -> str:
         return "google"
     if "anthropic" in host:
         return "anthropic"
+    if "groq" in host:
+        return "groq"
     return host
 
 

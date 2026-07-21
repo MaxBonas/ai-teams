@@ -164,7 +164,7 @@ def main(argv: list[str]) -> int:
         gc.collect()
         from scripts.cleanup_test_artifacts import cleanup
 
-        for failure in cleanup(include_live=True):
+        for failure in cleanup(include_live=False):
             print(f"cleanup warning: {failure}", file=sys.stderr)
         return result
     finally:

@@ -3,8 +3,16 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from aiteam.adapters.registry import ExecutionResult, build_default_registry
 from aiteam.adapters.work_contract import filter_forbidden_ops_for_role, ops_to_actions
+from aiteam.context_curator import (
+    apply_curator_actions,
+    build_context_curation_target,
+    evaluate_curator_trigger,
+    validate_causal_units,
+)
 from aiteam.db.comments import create_comment
 from aiteam.db.documents import get_context_summary
 from aiteam.db.migration import SCHEMA_PATH
@@ -44,16 +52,126 @@ def _project(tmp_path: Path) -> tuple[Path, str, str]:
     return db, parent_id, child_id
 
 
+def _causal_units(target: dict) -> list[dict]:
+    return [{
+        "id": "decision-1",
+        "kind": "decision",
+        "statement": "Se conserva la decisión material del slice.",
+        "links": [],
+        "source_comment_ids": [target["start_comment_id"]],
+    }]
+
+
 def test_curator_payload_contains_exact_parent_slice(tmp_path: Path) -> None:
     db, parent_id, child_id = _project(tmp_path)
 
-    target = build_wake_payload(db, issue_id=child_id)["context_curation_target"]
+    target = build_context_curation_target(db, issue_id=parent_id)
 
+    assert target is not None
     assert target["target_issue_id"] == parent_id
     assert target["char_count_original"] == 9_000
     assert len(target["comments"]) == 2
     assert target["start_comment_id"] == target["comments"][0]["id"]
     assert target["end_comment_id"] == target["comments"][-1]["id"]
+
+
+def test_contract_module_owns_trigger_evaluation(tmp_path: Path) -> None:
+    db, parent_id, child_id = _project(tmp_path)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE issues SET status='done' WHERE id=?", (child_id,))
+        conn.commit()
+    payload = build_wake_payload(db, issue_id=parent_id)
+
+    trigger = evaluate_curator_trigger(
+        db,
+        issue_id=parent_id,
+        agent_id="role:lead",
+        parent_payload=payload,
+    )
+
+    assert trigger is not None
+    assert trigger.unsynthesized_chars == 9_000
+    assert trigger.from_comment_id == payload["comments"][0]["id"]
+    assert trigger.budget.should_compact is True
+
+
+def test_contract_module_returns_durable_retry_transition(tmp_path: Path) -> None:
+    db, _parent_id, child_id = _project(tmp_path)
+
+    actions = apply_curator_actions(
+        db,
+        issue_id=child_id,
+        agent_id="role:context_curator",
+        run_id="run:curator",
+        actions={"issue_status": "done"},
+    )
+
+    assert "issue_status" not in actions
+    assert "notify_supervisor" not in actions
+    assert "missing append_context_summary operation" in actions["add_comments"][0]
+    with sqlite3.connect(db) as conn:
+        state = conn.execute(
+            "SELECT json_extract(metadata_json, '$.context_curator_recovery.state') "
+            "FROM issues WHERE id=?",
+            (child_id,),
+        ).fetchone()[0]
+        retry_count = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE source='context_curator_recovery'"
+        ).fetchone()[0]
+    assert state == "retry_queued"
+    assert retry_count == 1
+
+
+def test_causal_units_require_accountability_and_escalation_relations() -> None:
+    # Un slice sin hechos causales puede declarar una lista vacía; el contrato
+    # no fuerza al modelo a inventar contenido para satisfacer la forma.
+    validate_causal_units([], allowed_comment_ids={"comment-1"})
+    valid = [
+        {
+            "id": "owner-1",
+            "kind": "accountability",
+            "statement": "Engineer entrega rollback y Reviewer acepta el dry-run.",
+            "links": ["owner:Engineer", "deliverable:rollback_keys.py", "accepted_by:Reviewer"],
+            "source_comment_ids": ["comment-1"],
+        },
+        {
+            "id": "escalation-1",
+            "kind": "escalation",
+            "statement": "Pausar y escalar si crecen los 401.",
+            "links": ["metric:401", "threshold:0.5%", "window:5 min", "action:pause and escalate"],
+            "source_comment_ids": ["comment-1"],
+        },
+    ]
+    validate_causal_units(valid, allowed_comment_ids={"comment-1"})
+
+    invalid = [dict(valid[0], links=["owner:Engineer", "deliverable:rollback_keys.py"])]
+    with pytest.raises(ValueError, match="accepted_by"):
+        validate_causal_units(invalid, allowed_comment_ids={"comment-1"})
+
+
+def test_causal_units_reject_fabricated_provenance_and_reasonless_discard() -> None:
+    with pytest.raises(ValueError, match="outside the durable slice"):
+        validate_causal_units(
+            [{
+                "id": "decision-1",
+                "kind": "decision",
+                "statement": "Decisión atribuida a otro comentario.",
+                "links": [],
+                "source_comment_ids": ["comment-outside"],
+            }],
+            allowed_comment_ids={"comment-1"},
+        )
+    with pytest.raises(ValueError, match="reason"):
+        validate_causal_units(
+            [{
+                "id": "discard-1",
+                "kind": "rejected_option",
+                "statement": "Se descarta una alternativa.",
+                "links": [],
+                "source_comment_ids": ["comment-1"],
+            }],
+            allowed_comment_ids={"comment-1"},
+        )
 
 
 def test_append_context_summary_is_exclusive_to_curator() -> None:
@@ -79,6 +197,7 @@ def test_curator_persists_verified_block_before_closing(tmp_path: Path) -> None:
             "char_count_original": target["char_count_original"],
             "start_char_offset": target["start_char_offset"],
             "end_char_offset": target["end_char_offset"],
+            "causal_units": _causal_units(target),
         },
         {"type": "set_status", "status": "done"},
     ])
@@ -94,6 +213,7 @@ def test_curator_persists_verified_block_before_closing(tmp_path: Path) -> None:
     assert summary is not None
     assert summary["synthesized_through_comment_id"] == target["end_comment_id"]
     assert summary["blocks"][0]["char_count_original"] == 9_000
+    assert summary["blocks"][0]["causal_units"][0]["id"] == "decision-1"
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT status FROM issues WHERE id=?", (child_id,)).fetchone()[0] == "done"
 
@@ -107,6 +227,7 @@ def test_whole_comment_range_accepts_legacy_omitted_offsets(tmp_path: Path) -> N
             "start_comment_id": target["start_comment_id"],
             "end_comment_id": target["end_comment_id"],
             "char_count_original": target["char_count_original"],
+            "causal_units": _causal_units(target),
         },
         {"type": "set_status", "status": "done"},
     ])
@@ -136,6 +257,7 @@ def test_oversized_comment_is_sliced_by_durable_offsets_without_false_advance(tm
             "type": "append_context_summary", "path": parent_id, "body": "Primer segmento causal.",
             "start_comment_id": oversized_id, "end_comment_id": oversized_id,
             "char_count_original": 24_000, "start_char_offset": 0, "end_char_offset": 24_000,
+            "causal_units": _causal_units(first),
         },
         {"type": "set_status", "status": "done"},
     ])
@@ -171,6 +293,7 @@ def test_oversized_comment_is_sliced_by_durable_offsets_without_false_advance(tm
             "start_comment_id": oversized_id, "end_comment_id": oversized_id,
             "char_count_original": 6_000, "start_char_offset": 24_000,
             "end_char_offset": 30_000,
+            "causal_units": _causal_units(second),
         },
         {"type": "set_status", "status": "done"},
     ])

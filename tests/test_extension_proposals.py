@@ -24,8 +24,15 @@ _VALID_PAYLOAD = {
     "reason": EXTENSION_PROPOSAL_REASON,
     "name": "Unity MCP",
     "source": "npx -y unity-mcp@1.2.0",
+    "version": "1.2.0",
     "justification": "Reviewer cannot verify Play Mode from static YAML — 6 blocked review rounds.",
     "applies_to_roles": ["engineer", "reviewer"],
+}
+
+_CATALOG_PAYLOAD = {
+    "reason": EXTENSION_PROPOSAL_REASON,
+    "catalog_id": "github-readonly",
+    "justification": "El reviewer necesita contrastar issues y pull requests sin escribir en GitHub.",
 }
 
 
@@ -102,6 +109,38 @@ def test_lead_proposal_creates_pending_interaction(tmp_path: Path) -> None:
     assert payload["name"] == "Unity MCP"
 
 
+def test_catalog_proposal_expands_locked_descriptor_before_owner_gate(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_CATALOG_PAYLOAD)]))
+
+    executor.execute(_dispatch(db_path, agent_id="role:lead"))
+
+    pending = _pending_interactions(db_path)
+    assert len(pending) == 1
+    payload = json.loads(pending[0]["payload_json"])
+    assert payload["catalog_id"] == "github-readonly"
+    assert payload["source"] == "github-mcp-server"
+    assert payload["version"] == "1.6.0"
+    assert payload["args"][0] == "stdio"
+
+
+def test_catalog_proposal_cannot_substitute_reviewed_executable(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    payload = {**_CATALOG_PAYLOAD, "source": "other-mcp"}
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(payload)]))
+
+    executor.execute(_dispatch(db_path, agent_id="role:lead"))
+
+    assert _pending_interactions(db_path) == []
+    with sqlite3.connect(str(db_path)) as conn:
+        rejected = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action='extension.catalog_proposal_rejected'"
+        ).fetchone()[0]
+    assert rejected == 1
+
+
 def test_engineer_cannot_propose(tmp_path: Path) -> None:
     db_path = tmp_path / "aiteam.db"
     _init_db(db_path, proposer_role="engineer", proposer_id="role:engineer")
@@ -172,6 +211,7 @@ def test_accept_writes_approved_registry_entry(tmp_path: Path) -> None:
     assert servers[0]["name"] == "unity-mcp"
     assert servers[0]["status"] == "approved"
     assert servers[0]["source"] == "npx -y unity-mcp@1.2.0"
+    assert servers[0]["version"] == "1.2.0"
     assert servers[0]["approved_by"] == "user"
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
@@ -180,6 +220,30 @@ def test_accept_writes_approved_registry_entry(tmp_path: Path) -> None:
         ).fetchone()
     assert audit is not None
     assert json.loads(audit["payload_json"])["name"] == "Unity MCP"
+
+
+def test_accept_catalog_proposal_preserves_review_provenance(tmp_path: Path) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_CATALOG_PAYLOAD)]))
+    executor.execute(_dispatch(db_path, agent_id="role:lead"))
+    interaction_id = _pending_interactions(db_path)[0]["id"]
+
+    resolve_interaction(db_path, interaction_id=interaction_id, action="accept", resolved_by_user_id="user")
+    enqueue_wakeup(
+        db_path, agent_id="role:lead", source="interaction", reason="interaction_resolved",
+        payload={
+            "issue_id": "issue:intake", "wake_reason": "interaction_resolved",
+            "interaction_id": interaction_id, "action": "accept",
+        },
+    )
+    executor.execute(HeartbeatScheduler(db_path).dispatch_next(agent_id="role:lead"))
+
+    server = list_mcp_servers(db_path.parent)[0]
+    assert server["status"] == "approved"
+    assert server["catalog_id"] == "github-readonly"
+    assert server["catalog_artifact_version"] == "1.6.0"
+    assert server["catalog_reviewed_at"] == "2026-07-20"
 
 
 def test_reject_persists_rejection_without_granting(tmp_path: Path) -> None:
@@ -223,6 +287,7 @@ def test_approve_after_reject_overwrites(tmp_path: Path) -> None:
     reject_mcp_server(runtime_dir, name="unity", justification="not yet")
     approve_mcp_server(
         runtime_dir, name="unity", source="npx -y unity-mcp@1.2.0",
+        version="1.2.0",
         applies_to_roles=["engineer"], justification="now yes", approved_by="user",
     )
 
@@ -230,3 +295,31 @@ def test_approve_after_reject_overwrites(tmp_path: Path) -> None:
     assert len(servers) == 1
     assert servers[0]["status"] == "approved"
     assert servers[0]["source"] == "npx -y unity-mcp@1.2.0"
+
+
+def test_rejected_identical_contract_is_suppressed_during_cooldown(tmp_path: Path) -> None:
+    from aiteam.extensions import reject_mcp_server
+
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    reject_mcp_server(
+        db_path.parent,
+        name="Unity MCP",
+        source=_VALID_PAYLOAD["source"],
+        version=_VALID_PAYLOAD["version"],
+        justification="owner declined",
+    )
+    executor = RunExecutor(db_path, AdapterRegistry([_ProposeRuntime(_VALID_PAYLOAD)]))
+
+    executor.execute(_dispatch(db_path, agent_id="role:lead"))
+
+    assert _pending_interactions(db_path) == []
+    with sqlite3.connect(str(db_path)) as conn:
+        comment = conn.execute(
+            "SELECT body FROM issue_comments WHERE author_user_id='system' ORDER BY created_at DESC"
+        ).fetchone()[0]
+        suppressed = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action='extension.proposal_suppressed'"
+        ).fetchone()[0]
+    assert "cooldown" in comment
+    assert suppressed == 1

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import api.utils as utils
 from aiteam.db.migration import SCHEMA_PATH
 from api.main import app
+from aiteam.user_config import record_model_health
 
 
 def _setup_db(tmp_path: Path) -> Path:
@@ -22,7 +23,10 @@ def _setup_db(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+        record_model_health("openai_api", model, available=True, reason="test fixture")
     _setup_db(tmp_path)
     return TestClient(app, raise_server_exceptions=True)
 
@@ -56,7 +60,7 @@ def test_agent_crud(client):
     r = client.post("/api/agents", json={
         "role": "engineer",
         "name": "Bob",
-        "adapter_type": "subscription_cli",
+        "adapter_type": "role_builtin",
         "heartbeat_interval_sec": 30,
     })
     assert r.status_code == 200
@@ -87,6 +91,79 @@ def test_agent_crud(client):
 
     r = client.get("/api/agents/missing")
     assert r.status_code == 404
+
+
+def test_team_api_rejects_model_known_incompatible_with_installed_cli(
+    client, tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    import aiteam.user_config as config_mod
+
+    monkeypatch.setattr(config_mod, "_codex_catalog_compatibility", lambda _config: {
+        "status": "cli_update_required",
+        "installed_version": "0.128.0",
+        "catalog_client_version": "0.145.0",
+        "models": ["gpt-5.6-luna"],
+    })
+
+    response = client.post("/api/agents", json={
+        "role": "context_curator",
+        "name": "Curator",
+        "adapter_type": "subscription_cli",
+        "adapter_config": {
+            "profile_id": "codex_subscription",
+            "model": "gpt-5.6-luna",
+        },
+    })
+
+    assert response.status_code == 400
+    assert "not executable" in response.json()["detail"]
+
+
+def test_team_api_rejects_tier_3_model_for_lead(client) -> None:
+    response = client.post("/api/agents", json={
+        "role": "lead",
+        "name": "Lead débil",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-luna",
+        },
+        "run_profile": "full_team",
+        "data_class": "internal",
+    })
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "model_tier_insufficient"
+    assert detail["alternatives"] == [{"value": "gpt-5.6-sol", "label": "GPT-5.6 Sol"}]
+
+
+def test_team_api_rejects_incompatible_model_patch(client) -> None:
+    created = client.post("/api/agents", json={
+        "role": "lead",
+        "name": "Lead",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-sol",
+        },
+        "run_profile": "full_team",
+        "data_class": "internal",
+    })
+    assert created.status_code == 200
+
+    response = client.patch(f"/api/agents/{created.json()['agent']['id']}", json={
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-luna",
+        },
+        "run_profile": "full_team",
+        "data_class": "internal",
+    })
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "model_tier_insufficient"
 
 
 # ── Issues ────────────────────────────────────────────────────────────────────

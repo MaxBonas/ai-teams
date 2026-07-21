@@ -4,11 +4,14 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.project_adapters import (
     _profile_score, choose_adapter_for_role,
     ensure_quorum_agents, ensure_tier3_agents, reconcile_project_agent_policy,
 )
+from aiteam.user_config import record_model_health
 
 
 def _init_db(db_path: Path) -> None:
@@ -26,7 +29,10 @@ def _init_db(db_path: Path) -> None:
         conn.commit()
 
 
-def test_reconcile_project_agent_policy_repairs_builtin_agents_only(tmp_path: Path) -> None:
+def test_reconcile_project_agent_policy_repairs_builtin_agents_only(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+        record_model_health("openai_api", model, available=True, reason="test fixture")
     db_path = tmp_path / "aiteam.db"
     _init_db(db_path)
     (tmp_path / "project_config.json").write_text(
@@ -50,21 +56,23 @@ def test_reconcile_project_agent_policy_repairs_builtin_agents_only(tmp_path: Pa
         "role:file_scout", "role:web_scout", "role:context_curator",
     }
     assert rows["role:lead"]["adapter_type"] == "openai_api"
-    assert json.loads(rows["role:lead"]["adapter_config_json"])["model"] == "gpt-4.1"
+    assert json.loads(rows["role:lead"]["adapter_config_json"])["model"] == "gpt-5.6-sol"
     assert "skill_run" in json.loads(rows["role:lead"]["capabilities_json"])
     assert rows["role:engineer"]["adapter_type"] == "openai_api"
-    assert json.loads(rows["role:engineer"]["adapter_config_json"])["model"] == "o4-mini"
+    assert json.loads(rows["role:engineer"]["adapter_config_json"])["model"] == "gpt-5.6-terra"
     assert rows["role:engineer"]["supervisor_agent_id"] == "role:lead"
     assert "repo_write" in json.loads(rows["role:engineer"]["capabilities_json"])
     assert rows["role:reviewer"]["adapter_type"] == "subscription_cli"
     assert rows["role:reviewer"]["supervisor_agent_id"] == "role:lead"
 
 
-def test_reconcile_repairs_subscription_cli_missing_profile_id(tmp_path: Path) -> None:
+def test_reconcile_repairs_missing_profile_with_governed_model(tmp_path: Path, monkeypatch) -> None:
     """Live bug: one agent's adapter_config was {"model": "gpt-5.4"} with no
     profile_id — the subscription_cli runtime fell back to its default binary
     ('claude', not installed) and racked up 89 straight failed runs while
     every sibling carried codex_subscription."""
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    record_model_health("codex_subscription", "gpt-5.5", available=True, reason="test")
     db_path = tmp_path / "aiteam.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -97,15 +105,15 @@ def test_reconcile_repairs_subscription_cli_missing_profile_id(tmp_path: Path) -
 
     assert "role:engineer" in repaired
     assert config.get("profile_id") == "codex_subscription"
-    assert config.get("model") == "gpt-5.4"  # explicit model choice preserved
+    assert config.get("model") == "gpt-5.5"  # modelo legacy fuera de catálogo sustituido por uno verificado
     assert lead_config.get("model") == "gpt-5.5"  # healthy config untouched
 
 
-def test_reconcile_borrows_profile_from_sibling_when_allowlist_drifted(tmp_path: Path) -> None:
+def test_reconcile_does_not_restore_profile_outside_drifted_allowlist(tmp_path: Path) -> None:
     """The live variant that the selection-based repair missed: the project
     allowlist only lists openai_api (drift) while the whole team actually runs
-    subscription_cli/codex. The broken agent must borrow a sibling's working
-    profile_id instead of staying on the runtime's default 'claude' binary."""
+    subscription_cli/codex. Reintroducing Codex would bypass project policy;
+    preserve the invalid row so the runtime preflight can block and diagnose."""
     db_path = tmp_path / "aiteam.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -134,7 +142,7 @@ def test_reconcile_borrows_profile_from_sibling_when_allowlist_drifted(tmp_path:
         ).fetchone()
     config = json.loads(row["adapter_config_json"])
     assert row["adapter_type"] == "subscription_cli"
-    assert config.get("profile_id") == "codex_subscription"  # borrowed from the lead
+    assert config.get("profile_id") is None
     assert config.get("model") == "gpt-5.4"
 
 
@@ -154,16 +162,15 @@ def _make_profile(adapter_type: str, channel: str = "api", health_status: str = 
 
 
 class TestProfileScore:
-    def test_subscription_cli_scores_higher_than_openai_api_for_junior(self):
+    def test_transport_does_not_change_junior_score_by_itself(self):
         cli = _make_profile("subscription_cli", channel="subscription")
         api = _make_profile("openai_api", channel="api")
-        assert _profile_score(cli, needs_senior=False) > _profile_score(api, needs_senior=False)
+        assert _profile_score(cli, needs_senior=False) == _profile_score(api, needs_senior=False)
 
-    def test_openai_api_penalized_for_junior_roles(self):
+    def test_openai_api_is_not_penalized_for_junior_roles(self):
         api = _make_profile("openai_api", channel="api")
         score = _profile_score(api, needs_senior=False)
-        # With health="ok" (40 pts) but API-only penalty (-30) the score must be < 40
-        assert score < 40
+        assert score == 40
 
     def test_subscription_cli_not_penalized_for_senior(self):
         """CLI adapter should still work for senior roles (no penalty there)."""
@@ -178,15 +185,14 @@ class TestProfileScore:
         api = _make_profile("openai_api", channel="api")
         assert _profile_score(api, needs_senior=True) > _profile_score(cli, needs_senior=True)
 
-    def test_choose_adapter_for_role_prefers_cli_for_engineer(self):
-        """choose_adapter_for_role picks subscription_cli over openai_api for engineer."""
+    def test_choose_adapter_for_role_preserves_rank_when_both_can_engineer(self):
         profiles = [
             _make_profile("openai_api", channel="api"),
             _make_profile("subscription_cli", channel="subscription"),
         ]
         result = choose_adapter_for_role("engineer", "standard", profiles)
         assert result is not None
-        assert result["adapter_type"] == "subscription_cli"
+        assert result["adapter_type"] == "openai_api"
 
     def test_choose_adapter_for_role_still_uses_openai_for_lead(self):
         """Lead (senior) still picks openai_api when it's available."""
@@ -207,6 +213,85 @@ class TestProfileScore:
         result = choose_adapter_for_role("context_curator", "cheap", [profile])
         assert result is not None
         assert result["model"] == "gpt-5.5"
+
+    @pytest.mark.parametrize(
+        ("profile_id", "role", "expected"),
+        [
+            ("codex_subscription", "lead", "gpt-5.6-sol"),
+            ("codex_subscription", "engineer", "gpt-5.6-terra"),
+            ("codex_subscription", "file_scout", "gpt-5.6-luna"),
+            ("openai_api", "lead", "gpt-5.6-sol"),
+            ("openai_api", "reviewer", "gpt-5.6-terra"),
+            ("openai_api", "web_scout", "gpt-5.6-luna"),
+            ("anthropic_api", "lead", "claude-opus-4-8"),
+            ("anthropic_api", "architect", "claude-opus-4-8"),
+            ("anthropic_api", "engineer", "claude-sonnet-5"),
+            ("anthropic_api", "context_curator", "claude-haiku-4-5"),
+            ("gemini_api", "lead", "gemini-3.1-pro-preview"),
+            ("gemini_api", "engineer", "gemini-3.5-flash"),
+            ("gemini_api", "file_scout", "gemini-3.1-flash-lite"),
+            ("antigravity_subscription", "lead", "gemini-3.1-pro-high"),
+            ("antigravity_subscription", "engineer", "claude-sonnet-4-6"),
+            ("antigravity_subscription", "reviewer", "gemini-3.5-flash-high"),
+            ("antigravity_subscription", "web_scout", "gemini-3.5-flash-low"),
+        ],
+    )
+    def test_role_tier_selects_current_model(self, profile_id, role, expected):
+        profile = {
+            **_make_profile("subscription_cli" if "subscription" in profile_id else profile_id),
+            "id": profile_id,
+            "channel": "subscription" if "subscription" in profile_id else "api",
+        }
+        result = choose_adapter_for_role(role, None, [profile])
+        assert result is not None
+        assert result["model"] == expected
+
+    def test_local_profile_keeps_owner_configured_installed_model(self):
+        profile = {
+            **_make_profile("subscription_cli", channel="local"),
+            "id": "local_qwen_ollama",
+            "provider": "ollama",
+            "config": {"model": "qwen2.5-coder:32b"},
+        }
+        result = choose_adapter_for_role("engineer", "standard", [profile])
+        assert result is not None
+        assert result["model"] == "qwen2.5-coder:32b"
+
+    def test_hiring_skips_profile_with_no_executable_models(self):
+        unavailable_local = {
+            **_make_profile("subscription_cli", channel="local"),
+            "id": "local_gem4_lmstudio",
+            "provider": "lmstudio",
+            "config": {"model": "google/gemma-4-26b-a4b"},
+            "model_options": [{
+                "value": "google/gemma-4-26b-a4b",
+                "available": False,
+                "availability_reason": "runtime no verificado",
+            }],
+        }
+        available_api = {
+            **_make_profile("openai_api", channel="api"),
+            "id": "openai_api",
+            "model_options": [{
+                "value": "gpt-5.6-terra",
+                "available": True,
+            }],
+        }
+
+        result = choose_adapter_for_role("engineer", "standard", [unavailable_local, available_api])
+
+        assert result is not None
+        assert result["adapter_profile_id"] == "openai_api"
+        assert result["model"] == "gpt-5.6-terra"
+
+    def test_hiring_returns_none_when_every_profile_model_is_unavailable(self):
+        profile = {
+            **_make_profile("subscription_cli", channel="local"),
+            "id": "local_gem4_lmstudio",
+            "model_options": [{"value": "gemma-3-4b-it", "available": False}],
+        }
+
+        assert choose_adapter_for_role("engineer", "standard", [profile]) is None
 
 
 # ── ensure_quorum_agents ──────────────────────────────────────────────────────

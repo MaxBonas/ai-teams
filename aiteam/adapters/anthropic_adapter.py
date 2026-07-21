@@ -38,6 +38,7 @@ from aiteam.adapters.work_contract import (
     SUBMIT_WORK_TOOL,
     build_execution_contract,
     ops_to_actions,
+    validate_submit_work,
 )
 from aiteam.quorum_quality import quorum_audit_contract_instruction
 
@@ -53,7 +54,7 @@ class AnthropicApiRuntime:
         self,
         descriptor: AdapterDescriptor,
         *,
-        model: str = "claude-opus-4-5",
+        model: str = "claude-opus-4-8",
         max_tokens: int = 4096,
         timeout: float = 120.0,
     ) -> None:
@@ -137,11 +138,12 @@ class AnthropicApiRuntime:
             )
 
         try:
-            work: dict[str, Any] = (
+            candidate: Any = (
                 tool_use_block.input
                 if isinstance(tool_use_block.input, dict)
                 else json.loads(str(tool_use_block.input))
             )
+            work = validate_submit_work(candidate)
         except Exception as exc:
             return ExecutionResult(status="failed", error=f"bad tool input: {exc}", error_code="tool_parse_error")
 
@@ -214,6 +216,7 @@ def _build_user(wake_payload_raw: str, run: dict[str, Any]) -> str:
                     "Sintetiza exclusivamente el rango durable siguiente. Conserva decisiones, "
                     "restricciones, riesgos, evidencia, owners y escalados. Llama submit_work con "
                     "append_context_summary copiando IDs, char_count_original y offsets exactamente, "
+                    "y añade causal_units con provenance y relaciones según semantic_contract, "
                     "seguido de set_status done.\n\n"
                     + json.dumps({"context_curation_target": context_target}, ensure_ascii=False)
                 )
