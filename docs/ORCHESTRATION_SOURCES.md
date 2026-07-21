@@ -1,6 +1,6 @@
 # Fuentes de orquestación multi-modelo
 
-Última revisión: `2026-07-16`
+Última revisión: `2026-07-21`
 
 Registro canónico de fuentes usadas por [ORCHESTRATION.md](ORCHESTRATION.md). Verificar de nuevo información temporalmente inestable antes de cambiar código.
 
@@ -48,6 +48,20 @@ Registro canónico de fuentes usadas por [ORCHESTRATION.md](ORCHESTRATION.md). V
 - Calidad: A.
 - Cubre: skills, workflows repetibles, objetivos durables y evals.
 
+### OAI-6 Modelos GPT-5.6
+
+- URLs:
+  - https://developers.openai.com/api/docs/models
+  - https://developers.openai.com/api/docs/guides/latest-model
+  - https://developers.openai.com/api/reference/resources/models
+- Calidad: A.
+- Revisión: `2026-07-20`.
+- Cubre: IDs `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, capacidades,
+  ventanas, herramientas y precios; Sol=frontier, Terra=equilibrio y Luna=alto
+  volumen sensible a coste.
+- Evidencia de canal local: Codex CLI `0.128.0` expone los tres slugs en
+  `~/.codex/models_cache.json`, con ventana efectiva declarada de 258.400 tokens.
+
 ## Anthropic
 
 ### ANTH-1 Building effective agents
@@ -63,6 +77,97 @@ Registro canónico de fuentes usadas por [ORCHESTRATION.md](ORCHESTRATION.md). V
 - Calidad: C.
 - Cubre: arquitectura real de research, delegación, coordinación, prompts, evaluación y coste de tokens.
 - Limitación: resultados internos de un dominio concreto; no generalizar porcentajes a AI Teams.
+
+### ANTH-3 Claude Code MCP por run
+
+- URL: https://code.claude.com/docs/en/cli-usage
+- Calidad: A.
+- Cubre: `--mcp-config` para cargar configuración MCP y
+  `--strict-mcp-config` para ignorar configuraciones MCP ajenas a la invocación.
+- Uso local: traducción efímera del grant neutral de AI Teams al CLI de Claude;
+  no altera la autoridad del rol ni implica que Claude sea el Lead.
+
+### ANTH-4 Modelos Claude actuales, precios y Fable
+
+- URLs:
+  - https://platform.claude.com/docs/es/about-claude/models/overview
+  - https://platform.claude.com/docs/en/api/models/list
+  - https://platform.claude.com/docs/es/about-claude/pricing
+  - https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback
+  - https://platform.claude.com/docs/en/manage-claude/api-and-data-retention
+  - https://code.claude.com/docs/en/model-config
+- Calidad: A.
+- Revisión: `2026-07-20`.
+- Cubre: IDs, capacidad, latencia, contexto y precios de Fable 5, Opus 4.8,
+  Sonnet 5 y Haiku 4.5; selección/pinning en Claude Code; refusals/fallback y
+  retención obligatoria de 30 días para Fable.
+- Limitación local: Claude CLI no está instalado y el perfil sigue
+  `blocked_by_provider`; la matriz es política objetivo, no health demostrado.
+
+## Google y modelos locales
+
+### GOOG-1 Gemini 3 y precios
+
+- URLs:
+  - https://ai.google.dev/gemini-api/docs/models
+  - https://ai.google.dev/api/models
+  - https://ai.google.dev/gemini-api/docs/pricing
+- Calidad: A.
+- Revisión: `2026-07-21`.
+- Cubre: `gemini-3.1-pro-preview`, `gemini-3.5-flash` estable y
+  `gemini-3.1-flash-lite` estable, además de precios y tramos por longitud.
+- Evidencia de canal local: `agy 1.1.5 models` confirmó ocho IDs slug para Gemini 3.1 Pro,
+  Gemini 3.5 Flash, Claude Opus/Sonnet 4.6 y GPT-OSS 120B con los nombres que
+  acepta ese CLI; no confirmó usage comparable por run.
+
+### LOCAL-1 Qwen y Gemma
+
+- URLs:
+  - https://ollama.com/library/qwen3-coder
+  - https://ai.google.dev/gemma/docs/core
+  - https://ollama.com/library/gemma4
+- Calidad: A para documentación del fabricante/registry oficial.
+- Revisión: `2026-07-20`.
+- Cubre: Qwen3 Coder 30B como modelo agentic de coding y tamaños/capacidad de
+  Gemma 4. Los nombres instalados se verifican localmente; la publicación no
+  autoriza descarga ni promoción automática.
+
+## Catálogo MCP oficial
+
+Revisión local: `2026-07-20`. Las versiones son pins del catálogo, no una orden
+de descarga ni una política de actualización automática.
+
+### MCP-CAT-1 GitHub MCP Server
+
+- URLs:
+  - https://github.com/github/github-mcp-server
+  - https://github.com/github/github-mcp-server/releases
+- Calidad: A.
+- Pin revisado: distribución y `serverInfo` `1.6.0`.
+- Uso local: binario `github-mcp-server`, subcomando stdio, read-only y toolsets
+  acotados; requiere solo el nombre de `GITHUB_PERSONAL_ACCESS_TOKEN`.
+
+### MCP-CAT-2 Playwright MCP
+
+- URLs:
+  - https://github.com/microsoft/playwright-mcp
+  - https://www.npmjs.com/package/@playwright/mcp
+- Calidad: A.
+- Pin revisado: distribución y `serverInfo` `0.0.78`.
+- Uso local: shim previamente instalado `playwright-mcp`, headless e isolated;
+  no se usa el ejemplo oficial con `npx`/`latest`.
+
+### MCP-CAT-3 Filesystem MCP
+
+- URLs:
+  - https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem
+  - https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem
+- Calidad: A.
+- Pin revisado: distribución `2026.7.10`; el servidor declara `0.2.0` mediante
+  `serverInfo`, que es el pin operativo del health actual.
+- Uso local: shim previamente instalado `mcp-server-filesystem` y único argumento
+  resuelto al workspace. Incluye tools de escritura/destructivas, por lo que la
+  allowlist empieza vacía y cada tool requiere decisión owner.
 
 ## Papers
 
@@ -103,6 +208,75 @@ Registro canónico de fuentes usadas por [ORCHESTRATION.md](ORCHESTRATION.md). V
 - Cifras genéricas de “50–60% de ahorro” procedentes de vendors: no usar como expectativa local sin fuente primaria y condiciones comparables.
 - “17x error trap” de artículos practitioner: conservar solo el principio de error compounding, no la cifra.
 - Thresholds 5%/50% de tasa de escalado: tratar como heurísticas de diagnóstico, no como política canónica.
+
+## OpenCode Zen y modelos gratuitos
+
+### FREE-1 Gateway, catálogo y privacidad
+
+- URLs:
+  - https://opencode.ai/docs/zen
+  - https://opencode.ai/docs/cli
+  - https://opencode.ai/docs/permissions
+  - https://opencode.ai/docs/config
+- Calidad: A, documentación oficial.
+- Revisión: `2026-07-21`.
+- Cubre: IDs exactos, endpoint compatible con OpenAI, gratuidad temporal,
+  login/API key, inventario CLI, configuración inline y condiciones de uso de
+  datos. Limitación: no publica una cuota estable que AI Teams pueda prometer.
+
+### FREE-2 Capacidades de los modelos
+
+- URLs:
+  - https://api-docs.deepseek.com/quick_start/pricing/
+  - https://mimo.mi.com/docs/en-US
+  - https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard
+  - https://docs.cohere.com/docs/north-mini-code-1.0
+- Calidad: A para especificaciones y resultados declarados por cada fabricante.
+- Revisión: `2026-07-21`.
+- Cubre: contexto, tool use, structured output, arquitectura y orientación
+  agentic/coding. Limitación: la puntuación de
+  `MODELOS_GRATUITOS_OPENCODE.md` es screening de integración; no sustituye los
+  benchmarks locales por contrato de rol.
+
+### FREE-3 CLI, MCP, sesiones y telemetría
+
+- URLs:
+  - https://opencode.ai/docs/tools
+  - https://opencode.ai/docs/agents
+  - https://opencode.ai/docs/mcp-servers
+  - https://opencode.ai/docs/server
+  - https://opencode.ai/docs/sdk
+  - https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/run.ts
+  - https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/processor.ts
+- Calidad: A, documentación y código fuente oficial.
+- Revisión: `2026-07-21`.
+- Cubre: permisos por wildcard y agente, nombres `servidor_tool`, configuración
+  MCP local/remota, rechazo headless sin `--auto`, eventos JSONL `step_finish`,
+  tokens/coste por paso, sesiones, OpenAPI/SSE y salida SDK con JSON Schema.
+  Limitación: describe capacidad del transporte, no demuestra aislamiento de
+  escritura ni estabilidad del servicio Zen; ambos requieren canario local.
+
+### FREE-4 API keys gratuitas y límites
+
+- URLs:
+  - https://ai.google.dev/gemini-api/docs/billing
+  - https://ai.google.dev/gemini-api/docs/rate-limits
+  - https://console.groq.com/docs/rate-limits
+  - https://console.groq.com/docs/models
+  - https://console.groq.com/docs/api-reference
+  - https://console.groq.com/docs/structured-outputs
+  - https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models
+  - https://openrouter.ai/docs/faq
+  - https://docs.cohere.com/v2/docs/rate-limits
+  - https://huggingface.co/docs/inference-providers/en/pricing
+  - https://api-docs.deepseek.com/quick_start/pricing/
+  - https://mimo.mi.com/docs/en-US/price/pay-as-you-go
+- Calidad: A, documentación oficial de cada servicio.
+- Revisión: `2026-07-21`.
+- Cubre: existencia y alcance de free tiers, unidades/headers de cuota,
+  requisitos de key, límites de prototipo y precios directos vigentes. La
+  ausencia de una cuota NVIDIA pública verificable se trata como desconocida,
+  no como prueba de gratuidad o de pago.
 
 ## Regla de actualización
 

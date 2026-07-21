@@ -21,11 +21,76 @@ Registro de problemas detectados en runs reales del proyecto. Cada entrada docum
 
 ## Problemas abiertos
 
-*(ninguno actualmente)*
+### RUN-012 · ABIERTO — OpenCode Zen Free no alcanza estabilidad durable de reviewer
+
+**Detectado:** 2026-07-21
+**Run ID(s):** recibos `opencode-durable-review-v1-*.json`
+**Proyecto:** canario aislado de calibración P0.2
+**Síntomas:** DeepSeek completa reject→fix→approve en seed 1 pero no aprueba la
+corrección en seed 2; Nemotron produce `subscription_cli_parse_error`; MiMo no
+materializa un rechazo durable. North fue denegado correctamente antes de
+inferencia porque reviewer no pertenece a sus roles autorizados.
+**Causa raíz:** variabilidad de contrato/calidad por modelo gratuito. No existe
+evidencia de un fallo común del scheduler: las runs y wakeups terminan sin
+claims residuales, y el mismo transporte pasa el screening corto.
+**Mitigación vigente:** ningún modelo se promociona ni amplía roles; se detienen
+semillas posteriores cuando un candidato ya no puede alcanzar 3/3. DeepSeek,
+Nemotron y MiMo siguen manual-only para reviewer.
+**Verificación pendiente:** repetir solo después de un cambio de modelo,
+versión del CLI o transporte server/SDK; comparar de nuevo contra Flash High.
+La sonda diagnóstica Nemotron seed 101 confirma el nuevo recibo: conserva una
+llamada, 25.633 tokens y excerpts/resultados aunque el gate durable falle.
+
+---
 
 ---
 
 ## Problemas resueltos
+
+> Nota de vigencia (`2026-07-21`): las entradas de mayo que describen los
+> adapters API como estructuralmente incapaces de escribir pertenecen al
+> runtime anterior. Los adapters API actuales emiten `file_ops` estructurados y
+> `RunExecutor` los materializa antes de medir el delta, bajo RBAC. Sus lecciones
+> de liveness siguen siendo válidas: un rol de implementación que no produce
+> cambios no puede cerrar solo con texto. OpenCode Zen sí continúa read-only.
+
+### RUN-013 · RESUELTO — El probe de PID de pytest podía terminar suites vivas en Windows
+
+**Detectado:** 2026-07-21
+**Run ID(s):** auditoría concurrente local
+**Proyecto:** suite de desarrollo de AI Teams
+**Síntomas:** suites paralelas cerraban abruptamente su stdout; un árbol stale
+bloqueado podía abortar `pytest_configure`; todas las suites compartían además
+`.pytest-user-config-tmp`.
+**Causa raíz:** `os.kill(pid, 0)` se usaba como probe POSIX. En Windows,
+`os.kill` delega señales no CTRL a `TerminateProcess`, por lo que comprobar una
+sesión viva podía finalizarla. La eliminación stale propagaba `PermissionError`
+y el user config no estaba particionado por sesión.
+**Fix aplicado:** probe no destructivo mediante
+`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess`;
+workspace y user config usan el mismo `session-<pid>-<uuid>`; sesiones vivas se
+omiten y locks stale se conservan con warning. El cleanup externo procesa cada
+root por sesiones y el wrapper estable deja de usar `include_live=True`.
+**Verificación:** cinco tests específicos, wrappers normal/estable y dos suites
+concurrentes reales (`9 passed` y `5 passed`) con exit code cero.
+
+### RUN-011 · RESUELTO — OpenCode consumía el mensaje como segundo `--file`
+
+**Detectado:** 2026-07-21
+**Run ID(s):** screening OpenCode Zen Free
+**Proyecto:** canario aislado de calibración P0.2
+**Síntomas:** el CLI terminaba antes de inferencia con `File not found: Follow
+the attached AI Teams contract...`. Tras corregir el orden, los modelos podían
+responder pero omitían intermitentemente claves top-level del contrato.
+**Causa raíz:** `opencode run --file` acepta varios valores y absorbía el
+argumento posicional situado después. El relay inicial tampoco repetía las tres
+claves obligatorias del objeto `submit_work`.
+**Fix aplicado:** colocar primero el mensaje y después `--file`; exigir en el
+relay exactamente `status`, `summary` y `ops`, sin Markdown. El parser continúa
+fail-closed y no repara respuestas inválidas.
+**Verificación:** screening real válido con Nemotron, DeepSeek, MiMo, North y
+Laguna; `tests/test_subscription_cli_adapter.py` protege orden, ausencia de
+`--auto`, archivo temporal y policy read-only.
 
 ### RUN-001 · RESUELTO — Agente API-only escapa detección por evitar verbos de implementación
 
@@ -256,12 +321,28 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 
 ---
 
+### RUN-010 · MITIGADO — cache de modelos Codex más nuevo que el CLI instalado
+
+**Detectado:** 2026-07-20
+
+**Run ID(s):** canario `context-curator-auth-codex-luna-seed-1`
+
+**Síntoma:** `gpt-5.6-luna` aparece en `models_cache.json`, pero Codex CLI `0.128.0` termina antes de ejecutar porque el catálogo requiere un cliente `0.145.0`. No hay summary, usage ni score comparable.
+
+**Causa raíz:** el catálogo persistido y el binario ejecutor se actualizaron de forma independiente; presencia en cache no implica compatibilidad de ejecución.
+
+**Mitigación (2026-07-20):** el adapter clasifica el error como `model_unavailable`; Equipo compara versión de CLI y catálogo, deshabilita opciones no demostradas, conserva evidencia de runs completadas y el hiring no fija esos modelos. La issue se bloquea y propone GPT-5.5 dentro del mismo perfil mediante una interacción owner; solo la aceptación actualiza el agente y reencola. GPT-5.5 continúa habilitado por evidencia real.
+
+**Pendiente externo:** actualizar Codex CLI y repetir las semillas auth+queue. El JSON del canario es diagnóstico, no evidencia A/B.
+
+---
+
 ## Patrones de riesgo conocidos
 
 ### P-1: Agente API-only en rol engineer
-**Síntoma:** Agente produce texto/plan, issue no avanza.  
-**Detección:** `liveness_state = "blocked"`, `reason = "api_only_engineer_no_workspace_changes"`  
-**Acción:** Reasignar a adapter CLI/local (Codex, Antigravity, Ollama/subprocess local).
+**Síntoma histórico:** Agente produce texto/plan, issue no avanza.
+**Detección vigente:** ausencia de `file_ops` materializados/delta tras las continuaciones acotadas; el nombre legacy de la razón puede conservar `api_only`.
+**Acción vigente:** diagnosticar contrato/ops y compatibilidad del modelo; reasignar solo si el adapter o modelo no puede cumplir, no por ser API automáticamente.
 
 ### P-2: Agente CLI sin cambios en workspace tras múltiples intentos
 **Síntoma:** `liveness_state = "plan_only"` o `"empty_response"` en 2+ runs consecutivas.  
@@ -299,6 +380,11 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 **Síntoma:** El proyecto tiene `subscription_cli` disponible pero el engineer recibe `openai_api` al ser contratado via `choose_adapter_for_role`, bloqueando en la primera run.  
 **Causa:** `_profile_score` no diferenciaba API vs CLI para roles junior (`engineer`, `qa`, `worker`). El score era idéntico entre `openai_api` y `subscription_cli` en igualdad de condiciones de salud.  
 **Acción (2026-05-05):** `_profile_score` ahora penaliza -30 pts los adapters API-only para roles no-senior y añade +30 pts a `subscription_cli`. Propuesta del lead también advierte explícitamente si el engineer recibiría un adapter API-only al aceptar.
+
+**Revisión (2026-07-21):** esa penalización y la advertencia ya no expresan la
+capacidad actual: los adapters API pueden escribir mediante ops estructurados.
+P0.3 de `task.md` reemplazará la heurística por compatibilidad explícita de
+adapter×modelo×rol y retirará el warning genérico.
 
 ### P-9: Engineer pide al Lead el contenido de archivos (file-access blocking)
 **Síntoma:** El engineer crea una interacción `lead_wants_file_read` o escala al Lead pidiendo que le "envíe" el contenido de archivos antes de poder implementar. El Lead queda en espera; el engineer nunca produce workspace changes.  
@@ -339,7 +425,7 @@ Paperclip computa `blockerAttention` con estados `covered/needs_attention/stalle
 **Síntoma:** Un proyecto legacy con `role:qa` (Tier 2) en DB tiene el agente bloqueado porque el adapter API-only no puede ejecutar comandos de test. El QA emite `result: blocked` con `blocker: no_workspace_access`. El Lead no tiene instrucciones para crear un `test_runner` en su lugar.  
 **Causa:** El rol QA Tier 2 mezclaba ejecución de tests de runtime (que requiere CLI) con validación estática (que puede hacer cualquier LLM). Al eliminarse, el sucesor natural (`test_runner` Tier 3 para ejecución + `reviewer` absorbiendo QA estático) no se wired automáticamente.  
 **Detección:** `SELECT id, role, adapter_type FROM agents WHERE lower(role) = 'qa'`. Runs con `agent_id LIKE 'role:qa%'` y `liveness_state = 'api_only_no_workspace'`.  
-**Acción (2026-05-13):** `skills/qa.md` eliminado; rol `qa` marcado deprecated en `work_contract.py`, `run_profiles.py` y `project_adapters.py`. Reviewer absorbe QA estático. Nuevo `test_runner` (Tier 3) para ejecución de comandos: recibe lista de comandos, reporta stdout/exitcode, no toma decisiones. Script de migración en `docs/MIGRATION_2026_05_12.md`. Tests: `tests/test_full_team_no_qa.py` (5 tests), `tests/test_test_runner_scout.py` (9 tests).
+**Acción (2026-05-13):** `skills/qa.md` eliminado; rol `qa` marcado deprecated en `work_contract.py`, `run_profiles.py` y `project_adapters.py`. Reviewer absorbe QA estático. Nuevo `test_runner` (Tier 3) para ejecución de comandos: recibe lista de comandos, reporta stdout/exitcode, no toma decisiones. La migración quedó consolidada en `docs/HISTORY.md`. Tests: `tests/test_full_team_no_qa.py` (5 tests), `tests/test_test_runner_scout.py` (9 tests).
 
 ### P-15: Context curator en loop infinito (done bloqueaba re-spawn pero umbrales eran por conteo)
 **Síntoma:** Hilo con 50 comentarios cortos (< 200 chars cada uno) no dispara el curator porque el conteo supera el umbral pero el contenido acumulado es trivial. O al revés: 3 comentarios de 5 000 chars c/u NO disparan el curator porque el conteo (3) es < 8.  

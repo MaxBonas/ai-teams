@@ -1,161 +1,673 @@
-# Estado actual y siguientes pasos
+# Plan y trabajo vigente
 
-Fecha: `2026-07-17`
+Fecha: `2026-07-21`
 
-Plan rector activo: `docs/MIGRATION_PAPERCLIP.md`.
+Este es el único documento de objetivos, backlog y orden de ejecución. El plan
+rector arquitectónico está en `docs/MIGRATION_PAPERCLIP.md`; las decisiones ya
+cerradas viven en `docs/HISTORY.md`.
 
-- [x] Generalizar la autoridad del quorum: Lead configurable por el usuario al
-  crear el proyecto o desde Equipo; ningún proveedor queda codificado como Lead
-  y Codex puede participar como senior auditor.
-- [x] Congelar de forma efectiva el objetivo quorum: un prompt posterior debe
-  crear Nueva tarea; Chat no puede mutar una sesión existente. Persistencia
-  valida ownership Lead y que Plan B nazca en la misma run de síntesis.
+## Objetivo del producto
 
-## Limpieza profunda
+AI Teams debe ser un control plane Paperclip-like para equipos de programación:
 
-- [x] Retirar documentacion legacy, archivo historico interno y docs desalineados.
-- [x] Retirar `CLAUDE.md`, `GEMINI.md` y `walkthrough.md`.
-- [x] Retirar tests legacy que protegian dogfooding, JSONL, router antiguo, `[WORKFLOW_PLAN]`, gates antiguos y flujos round-based.
-- [x] Limpiar runtime local antiguo: DB, JSONL, memoria, sesiones, sandboxes y configs runtime no fuente de verdad.
-- [x] Retirar `AtomicFileWriter`/tests JSONL y plantillas legacy de router/MCP/model catalog.
-- [x] Rescatar piezas legacy valiosas como snapshots aislados y notas de port v2 en `docs/legacy_rescue/`.
-- [ ] Eliminar restos temporales bloqueados por Windows tras reinicio o liberacion de handles.
-- [x] Extirpar codigo legacy ahora que la suite vieja ya no lo protege.
+- SQLite como fuente durable única para issues, runs, wakeups, interactions,
+  reports, costes, actividad y recovery;
+- Lead-first: el usuario entrega un objetivo y el Lead lo mantiene vivo hasta
+  cerrarlo o solicitar una decisión humana real;
+- perfiles `solo_lead`, `lead_quorum` y `full_team` elegidos de forma
+  proporcional al riesgo y a la necesidad de accountability;
+- hiring dinámico y económico, reservando modelos fuertes para planificación,
+  supervisión y alto riesgo;
+- evidencia y revisión suficientes para reducir riesgo, sin burocracia en
+  tareas simples;
+- adapters API y suscripción independientes, con coste, provenance, health y
+  recuperación observables.
 
-## Migracion Paperclip Patterns
+## Estado de partida
 
-- [x] **Fase 0 - Preparacion documental**: plan rector registrado y docs activas reducidas.
-- [x] **Fase 1 - Schema v2 paralelo agresivo**: `aiteam/db/schema.sql`, migrador idempotente y tests para issues, agents, blueprints, assignments, runs, wakeups, events y costes.
-- [x] **Fase 1.5 - Lead-first + perfiles**: `solo_lead`, `lead_quorum`, `full_team`, hiring dinamico y politica de delegacion economica.
-- [x] **Fase 2 - Checkout atomico**: primitiva SQLite + endpoint `POST /api/issues/{id}/checkout`; `FileLockRegistry` retirado del camino principal.
-- [x] **Fase 3 - Runs durables con economia**: enganchar ejecucion real a `runs`, coste, canal subscription/API, supervisor y ahorro estimado/real.
-- [x] **Fase 3.1 - FinOps v2 rescatado**: `record_cost`/`check_budget` sobre `cost_events`, periodo mensual y `budget_monthly_cents`; `RunExecutor` registra coste real y bloquea presupuesto excedido con `request_confirmation`.
-- [x] **Fase 4a - Retirar round-based legacy**: `api/main.py` reducido a control plane, `api/chat_*` y `/api/aiteam` legacy retirados, `aiteam/orchestrator.py` convertido en stub explicito sin `process_once()`/`run_until_idle()`.
-- [x] **Fase 4a.1 - Poda de modulos legacy no activos**: retirados router/scoring viejo, JSONL ledgers, MCP/tooling legacy, memoria/mailbox, policies de chat y scripts de ingestion antiguos.
-- [x] **Fase 4a.2 - Frontend v2 minimo**: Vite reducido a cockpit de control plane; retirados TeamChat, routing UI legacy, MCP panels, logs JSONL, Monaco/xterm/layout IDE viejo y dependencias asociadas.
-- [x] **Fase 5a - Adapter registry minimo**: retirados adapters legacy REST/subscription/external; queda contrato `AdapterRegistry`/`AdapterDescriptor` por `adapter_type`.
-- [x] **Fase 5a.1 - Config v2 minima**: `prepare_dev_env` ya solo rehidrata `control_plane.json` y `agents.json`; retiradas plantillas legacy de router, MCP, skills library y tool catalogs.
-- [x] **Fase 5a.2 - TaskBoard retirado**: tras confirmar cero consumidores en runtime/API/scripts, se eliminaron el shim y su suite exclusiva; `issues` + checkout v2 son el camino activo.
-- [x] **CLI v2 minimo**: `aiteam.cli` ya no importa router/adapters legacy; comandos vivos `system-check`, `migrate-to-v2`, `budget-status`.
-- [x] **Fase 4b - Wakeup queue real**: loop persistente, adapter execution y reconciliation.
-- [x] **Fase 5b - Adapter execution real**: conectar registry v2 a procesos/API reales con env context y coste.
-- [x] **Fase 6 - Interactions**: reemplazar pausa por bracket directives con `issue_thread_interactions`.
-- [x] **CRUD endpoints + activity_log**: issues, agents, goals, runs list; `activity_log` helper; pending_interactions inline en GET /api/issues/{id}.
-- [x] **Fase 6.1 - Approvals sensibles v2**: `RunExecutor` crea/bloquea por `request_confirmation` en issues `high`/`critical`; acepta ejecuta, rechaza falla con `approval_rejected`, sin arrancar adapter antes de approval.
-- [x] **Fase 6.2 - Lead-first funcional**: `lead_builtin` propone equipo/backlog por `suggest_tasks`, aceptar crea agentes/issues/wakeups, roles reportan al Lead y el Lead pide confirmacion ligera de cierre.
-- [x] **Fase 6.3 - Cockpit operativo v2**: primera apertura, timeline, issue thread, runs, equipo, pendientes y nueva tarea para el Lead dentro del proyecto activo.
-- [x] **Fase 6.4 - Timeline backend**: `/api/timeline` ordena eventos desde SQLite y el frontend lo usa como fuente durable de cronologia.
-- [x] **Fase 8.0 - Timeline observability base**: `/api/timeline` incluye `activity_log`, `cost_events` y `tool_access` ademas de issues/comments/interactions/runs.
-- [x] **Fase 8.1 - Activity logging base**: issues/comments/interactions y `RunExecutor` escriben `activity_log` para que el cockpit vea acciones humanas/API e internas.
-- [x] **Fase 8.2 - Activity logging control-plane**: goals, agents, wakeups, checkout y `run-once` escriben actividad durable.
-- [x] **Fase 8.3 - Tool access base**: `RunExecutor` registra adapters como `tool_access` y `GET /api/tool-access` expone auditoria directa.
-- [x] **Fase 7 - Skills markdown base**: promptaje por skills legibles (`lead`, `engineer`, `reviewer`, `qa`, `quorum_senior`) e inyeccion por env en `RunExecutor`.
-- [x] **Fase 6.5 - Liveness Lead/no-op**: wake manual sin trabajo pendiente queda como `skipped/no_pending_lead_work`; proyectos sucios con cierre aceptado pero padre abierto se reconcilian a `done`.
-- [x] **Fase 6.6 - Cockpit runs recientes**: timeline descendente, banda de ultima run y etiquetas humanas para distinguir progreso real de no-op.
-- [x] **Fase 7.1 - Skills desde rescate**: convertir taxonomia de delegacion, quorum y planificacion detallada en skills markdown.
-- [x] **Fase 7.2 - Plan documents v2**: `issue_documents` + revisiones para que el plan del Lead viva como artefacto estable, con conflicto `base_revision_id` estilo Paperclip.
-- [x] **Fase 8 - SQLite logs**: mover events/cost/audit/tool access a tablas.
-- [x] **Fase 8.1 - Tools/MCP v2**: `aiteam/tools/catalog.py` con catálogo canónico de capacidades, `capabilities_json` por agente, gate de capacidades en el executor, `GET /api/tools/catalog`, org chart en el equipo, chips de capacidades en el form de agente.
-- [x] **Fase 8.2 - Hiring v2**: perfiles `solo_lead`/`lead_quorum`/`full_team` dinámicos desde `run_profiles.py`, selector de perfil en nueva tarea, panel de hiring editable con adapters por miembro, `resolution_data` desde el frontend al Lead.
-- [x] **Fase 8.3 - Config de usuario para adapters**: perfiles locales de usuario, vault DPAPI para API keys, refs `secret:provider:name`, CLI status en cockpit, perfiles Codex/Gemini/Claude, y modelos locales Qwen/Gemma via Codex OSS.
-- [x] **Fase 8.4 - Adapters por proyecto + borrado seguro**: crear proyecto exige al menos un perfil de adapter, `.aiteam/project_config.json` limita hirings a esos perfiles, seniors reciben modelos avanzados, workers baratos/locales cuando hay, y el cockpit permite borrar proyecto con confirmacion `DELETE` y vuelta a primera apertura.
-- [x] **Fase 8.5 - Paperclip como guia viva**: `docs/PAPERCLIP_GUIDE.md` documenta los patrones consultados en Paperclip y como adaptarlos sin perder Lead-first, hiring dinamico y delegacion economica.
-- [x] **Fase 8.6 - Onboarding de conexiones**: la creacion de proyecto muestra adapters conectados, permite conectar mas via API key o login de suscripcion, y el login Windows usa launcher `.cmd` para evitar quoting roto en `WindowsApps`.
-- [x] **Canario e2e honesto**: un único `HeartbeatLoop.run_once()` demuestra Lead denegado antes del test runner, comentario correctivo, evidencia exit 0 y cierre recuperado; checks e información están separados.
-- [x] **Conocimiento de orquestación compartido**: `docs/ORCHESTRATION.md` + `docs/ORCHESTRATION_SOURCES.md` son fuente canónica; Claude/Codex usan adaptadores finos.
-- [x] **Primer benchmark vs Codex solo**: `cli_conversor` pasa 9/9 en ambos brazos; `full_team` usa 3,31× input tokens y 3,82× tiempo en la semilla exploratoria. Harness v2 limita una run por iteración.
-- [x] **Evals SQL del orquestador**: `scripts/orchestrator_evals.py` mide economía, wakeups, rework, contradicción reviewer/test, dieta de contexto y liveness sin ejecutar LLMs.
-- [x] **Antiloop de verificación**: un Test Runner fallido no puede reejecutarse contra el mismo digest; el Lead recibe una corrección durable y debe delegar el arreglo antes de repetir tests.
-- [x] **Gobernanza efectiva de `solo_lead`**: un único `role:lead` todopoderoso planifica, edita, verifica y cierra directamente; cualquier creación de sub-issues se rechaza en código.
-- [x] **Serie mínima limpia de `solo_lead`**: semillas 3, 4 y 5 pasan 9/9 tests ocultos; la tercera confirma que calidad de artefacto y convergencia del control plane deben medirse por separado.
-- [x] **Corregir el contrato causante del deadlock de `solo_lead`**: retirado el falso manager + `lead_executor`; el Lead conserva escritura y cierre directo, recibe una skill no jerárquica y verifica mecánicamente antes de cerrar, sin esperar roles inexistentes.
-- [x] **Canario `solo_lead` sin tokens**: `scripts/e2e_solo_lead_canary.py` prueba un único agente con escritura, cierre terminal, cero hijos, rechazo de delegación y cola vacía.
-- [x] **Validación real `solo_lead` v3**: la semilla 7 produce los tres entregables y pasa 9/9 tests ocultos como un único agente; el gate corregido reutiliza pytest determinista y recupera la raíz a `done` sin crear Test Runner.
-- [x] **Validación limpia `solo_lead` v3**: semilla 8 termina `done` en una sola run, pasa 9/9 tests ocultos, registra verificación mecánica, no crea hijos ni deja wakeups activos. Los proyectos nuevos del perfil contienen únicamente `role:lead`.
+La migración estructural está completada. El camino activo es
+`HeartbeatLoop` → `HeartbeatScheduler` → `RunExecutor` sobre SQLite. Checkout,
+dependencias, wakeups, interactions, hiring, reports, gates, cockpit v2,
+canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
+cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
+orquestador legacy.
 
-## Siguiente bloque activo
+Última suite completa registrada (`2026-07-21`): **1161 passed en 137,21 s**.
+Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
+cambio material lo justifique.
 
-- [x] **P0 - Máquina de estados terminal del quorum**: `accepted`, `degraded` y `failed` son absorbentes; contribuciones tardías se rechazan, la reevaluación terminal no reactiva el gate y repetir la misma aceptación es idempotente. Cubierto por tests dirigidos.
-- [x] **P1 - Auditoría de liveness del quorum**: `scripts/audit_project_db.py` observa sesiones y contribuciones mediante rutas vivas (auditor/run/wakeup/síntesis/interacción) y detecta `ready` sin continuación, `degraded` sin escalado, `accepted` con issue abierta y provenance incompleta.
-- [x] **P1 - Coste quorum e2e determinista**: una run de auditor atraviesa scheduler + `RunExecutor`, registra contribución y deja `cost_event` enlazado con provider/model/channel y tokens de suscripción aunque el coste sea cero. La validación con CLIs/proveedores externos sigue bajo telemetría comparable.
-- [x] **P1 - Consolidación segura del bloque actual**: bloque separado en tres commits coherentes sobre `codex/orchestration-hardening` (runtime/quorum, benchmarks/evals y documentación/skills); `.claude/skills/aiteams-frontend/` quedó fuera por origen no atribuido.
-- [x] **P2 - Limpieza y actualización documental**: auditadas fuentes vivas, skills y prompts; `AITEAM_AUTO_QUORUM` solo queda como advertencia o archivo legacy, no hay enlaces Markdown locales rotos, cifras/estados activos se reconciliaron y `legacy_rescue/` permanece no normativo.
-- [x] **P1 - Higiene del workspace de desarrollo**: retirados 11,1 GB de temporales pytest y runtime JSON/JSONL legacy; los wrappers aíslan cada sesión, limpian desde un proceso posterior al cierre de SQLite, desactivan cache/bytecode y dejan cero carpetas temporales tras la suite.
-- [x] **Selector proporcional backend v1**: `POST /api/issues` decide únicamente `solo_lead` frente a `full_team` con criticidad, ambigüedad, verificación independiente, ramas y reversibilidad; override explícito prevalece y `lead_quorum` nunca se autoselecciona.
-- [x] **Matriz de calibración determinista v4**: 30 casos frontera etiquetados en siete familias, 30/30 correctos, cero falsos `solo_lead` y cero sobreuso respecto a las etiquetas vigentes en `scripts/profile_selector_evals.py`; valida consistencia de política, no que sus etiquetas maximicen rendimiento LLM.
-- [x] **Primer caso empírico medio/alto**: `sqlite_job_queue` confirma la selección conservadora de `full_team`: equipo 10/10 frente a `solo_lead` 9/10, a cambio de 1,84× tokens y 1,73× tiempo. La run de equipo descubrió y motivó corregir el autocierre omitido de `test_designer`.
-- [x] **Juez oculto resistente a shadowing**: harness v3 importa pytest en modo aislado antes de exponer el workspace; un `pytest.py` candidato ya no puede sustituir el runner ni producir falsos verdes.
-- [ ] **Calibrar selector con más benchmarks reales**: añadir casos medios reversibles y complejos de otra naturaleza, además de nuevas semillas, para medir varianza antes de relajar el default conservador o conectarlo a más superficies.
-- [x] **Segunda familia empírica reversible**: `config_redactor` pasa 3/3 en ambos brazos; `solo_lead` consumió 4,68× input tokens y 5,17× tiempo frente a Codex directo. La run descubrió y corrigió colección pytest sobre temporales CLI bloqueados.
-- [x] **Tercera familia empírica reversible**: `release_notes_indexer` pasa 7/7 con `solo_lead`, `full_team` y Codex directo. `solo_lead` cerró en 215,4 s/1 run/417.104 tokens de entrada; Codex directo en 243,9 s/697.158; `full_team` alcanzó la misma calidad pero agotó 15 min en estado `in_progress`, con 7 runs y 1.811.217 tokens. El juez de Ruff dejó de contar el mensaje de éxito como una incidencia.
-- [x] **Segunda familia empírica compleja, dos semillas**: `deployment_wave_planner` pasa 16/16 en 2/2 runs de `solo_lead` y `full_team`. Solo cerró ambas en una run (130,4–154,0 s; 184.370–383.155 tokens). Equipo cerró 1/2 (426,0–821,9 s; 10–12 runs; 620.966–1.497.923 tokens), corrigió manejo de salida CLI en seed 1 y dejó un F401 en seed 2. Se conserva `independent_verification=true` como requisito explícito de accountability, pero no debe inferirse solo por complejidad aparente en trabajo reversible de una superficie.
-- [x] **Primera familia empírica de seguridad**: `tenant_authorizer` obtuvo 2/5 con `full_team` frente a 4/5 con Codex directo; equipo usó 0,76× input tokens pero no justificó su coordinación. Se conserva como evidencia negativa, no como victoria del selector.
-- [x] **Harness específico de planificación quorum**: compara Plan A/Plan B con rúbrica oculta determinista, hard gates, diversidad, provenance, tokens, coste y latencia; incluye casos de datos, seguridad y failover y diagnostica runs incompletas.
-- [ ] **Calibración real del benchmark quorum**: `provider_failover` tiene tres semillas aceptadas con Codex + Anthropic (+4,35, −8,70 y +8,70; media +1,45) y una quinta degradada diagnóstica: Anthropic aportó válido, pero Codex subscription agotó cuota y fue reintentado inútilmente. El runtime clasifica ahora `subscription_cli_usage_limit` y degrada/escalada sin reintento inmediato. `sqlite_online_migration` suma una sesión aceptada Codex + Antigravity Flash con regresión −8,69. `multitenant_authorization` aporta una degradada y dos aceptadas tras fixes: 91,30→100 (+8,70) y 100→100 (0), media +4,35. La varianza y el efecto techo siguen altos; faltan más semillas cuando Codex recupere cuota.
-- [x] **Equipo - contratación canónica de quorum**: las tarjetas Quorum Auditor 1/2 usan `POST /api/agents/quorum/reconcile`, crean IDs canónicos provider-diversos de forma idempotente y desaparecen de “Disponibles” al existir; no pasan por el hiring conversacional `full_team`.
-- [x] **Canales Google actualizados**: Gemini API conserva su API key como canal independiente; Gemini CLI legacy fue desinstalado y retirado. `antigravity_subscription` usa `agy` 1.1.4: auth, payload largo, permisos headless, normalización de envelopes y contribución quorum real están verificados. Hiring enruta `quorum_auditor` a Gemini 3.1 Pro High; `agy --print` aún no expone usage comparable.
-- [x] **Contexto causal acotado**: contrato durable, recovery, offsets y activación dinámica están cerrados. Calibración: en `auth_migration`, Codex mini quedó 0/3, `gpt-5.5` 2/2 y Anthropic Haiku 3/3; en `queue_rollout`, Codex mini alcanzó 3/3 y senior/Antigravity 1/1 cada uno. Todas las nuevas SQLite auditadas están sanas. Anthropic recibe ahora el target completo y el harness imprime UTF-8 correctamente en Windows.
-- [x] **Recovery acotado del context curator**: el primer artefacto ausente/inválido conserva la issue `in_progress`, persiste contador y diagnóstico, y encola una única run correctiva idempotente; el segundo fallo deja estado `escalated`, bloquea y despierta al Lead. La auditoría detecta tanto retries como escalados sin continuación durable.
-- [x] **Comentario indivisible sobredimensionado**: los comentarios de más de 24.000 caracteres se dividen por offsets durables `[start,end)` sin truncar. Cada bloque conserva IDs, offsets y tamaño exactos; `synthesized_through_comment_id` solo avanza al consumir el último segmento y el cursor parcial se elimina entonces.
-- [x] **Activación por presupuesto cómodo de contexto**: perfiles con capacidad declarada calculan `payload base + hilo no sintetizado` en tokens estimados y activan el curador antes de superar su zona cómoda, reservando salida y herramientas. Codex obtiene la ventana del `models_cache.json` local; otros canales pueden declarar `context_window_tokens`, ratio, reservas y `chars_per_token`. Perfiles sin metadata conservan el fallback seguro de 8.000 caracteres. La decisión queda persistida en issue y `activity_log`.
-- [x] **Criterio de promoción del curador**: descartado el budget universal. Codex mini pierde anclas semánticas válidas sin activar recovery, por lo que nuevas contrataciones `context_curator` sobre `codex_subscription` usan `gpt-5.5`; Anthropic conserva Haiku tras 3/3 en auth. La selección sigue respetando proveedor y cambios explícitos del usuario; no reescribe agentes existentes configurados manualmente.
-- [ ] **Reducir concentración de `RunExecutor`**: 7.608 líneas; extraer solo políticas tocadas por una necesidad funcional. La nueva frontera justificada es encapsular el contrato de context curator y, si vuelve a crecer, evaluación/transiciones/continuaciones de quorum.
-- [x] **Integración de evals en health**: `GET /api/loop-health` expone aditivamente `orchestrator_evals` con economía, dieta de contexto, salud quorum y liveness/stranded roots usando las mismas definiciones de `scripts/orchestrator_evals.py`.
-- [x] **Frontend - pedir cambios en hiring**: la Bandeja ofrece feedback obligatorio y outcome durable `changes_requested`; no aplica hiring, despierta al Lead con la nota y conserva la propuesta resuelta en el historial. La siguiente propuesta debe crear una interacción nueva.
-- [x] **Frontend - validar QuorumStepper capa-2**: sesión real con Codex subscription + Ollama/Qwen local verificada en navegador. El modelo local omitió dos veces el reporte estructurado: la sesión degradó de forma durable, el Lead recibió wakeup, el stepper muestra `1/2`, gate pendiente y motivo, y `audit_project_db.py` dejó todos los invariantes en verde. Sigue faltando una run aceptada para calibrar Plan A/B.
-- [x] **Frontend - lint de ThreadView**: retirada la actualización síncrona de estado invocada desde `useEffect`; carga compacta asíncrona cancelable y remount por `issueId`, sin cambiar placeholder ni comportamiento visible.
-- [x] **Contrato durable Lead + Quorum**: `lead_quorum` es solo planificación multicultural; prefiere dos aportes provider-diversos y se adapta a uno si es el único senior contratado, registra síntesis/disposiciones y termina con `accepted_plan`, sin ejecutar código.
-- [x] **Quorum profundo Lead-owned**: objetivo y Plan A se congelan; Plan A/Plan B tienen gate estructural de profundidad; seniors entregan `QUORUM-AUDIT` con razonamiento, justificación, recomendación y trade-offs; RBAC los limita a informar al Lead; Plan B exige rationale por finding. Dos seniors son el objetivo, pero un equipo aceptado de uno produce quorum reducido válido.
-- [x] **Canario quorum sin tokens**: `scripts/e2e_quorum_canary.py` protege plan A → auditores → gate → plan B → transición y liveness sobre SQLite.
-- [x] **Integración quorum en runtime**: aceptación multicanal crea sesión/issues sin replay LLM; reports generan contribuciones; `quorum_ready` inyecta findings; el Lead emite plan B + disposiciones y el executor cierra la planificación. Degradaciones y síntesis inválidas escalan con cap.
-- [x] **Activación backend de perfiles al crear proyecto**: `POST /api/projects/new` valida el perfil canónico, lo persiste en goal/issue/wakeup y aprovisiona los dos auditores cuando se solicita `lead_quorum`; el benchmark usa este mismo bootstrap sin parche SQL.
-- [x] **Retirada de quorum legacy**: eliminado `aiteam/quorum.py` tras confirmar cero consumidores; la activación automática por entorno y los prompts encadenados quedan sustituidos por sesiones, reports, gates y continuación durable SQLite.
+## Plan de ejecución
 
-## Objetivo funcional
+### P0 — Calibración antes de cambiar política
 
-AI Teams debe parecerse a Paperclip en robustez operativa:
+- [x] **Ampliar benchmarks del selector** con al menos otra familia media
+  reversible y otra compleja de distinta naturaleza, usando varias semillas.
+  Comparar calidad oculta, convergencia, runs, tokens, coste y tiempo. Progreso:
+  `accessible_checkout_form` añade frontend multisuperficie con dos semillas e
+  `inventory_snapshot_diff` añade datos medios reversibles con dos semillas.
+- [x] **Decidir con evidencia si relajar el default conservador**: se mantiene.
+  No inferir `independent_verification` solo por complejidad aparente;
+  conservarla cuando sea requisito explícito de accountability. Las nuevas
+  familias no muestran mejora de calidad del equipo y sí sobrecoste/rework.
+- [x] **Ampliar el benchmark real de quorum** con Codex subscription y
+  Anthropic API: `provider_failover` suma cuatro sesiones aceptadas y
+  `multitenant_authorization_v2` tres. Las runs degradadas y la familia SQLite,
+  que aún no alcanza la muestra mínima, permanecen como evidencia separada de
+  disponibilidad/liveness y no entran en el delta A/B.
+- [x] **Establecer criterio de suficiencia estadística** antes de modificar
+  thresholds: mínimo tres sesiones aceptadas por familia, dos proveedores
+  válidos con provenance completa, degradaciones fuera del delta A/B y reporte
+  de mediana más rango. No cambiar política si el signo es inestable, aparece
+  efecto techo o el Plan B no supera consistentemente los hard gates.
 
-- una tabla por concepto;
-- cola durable en DB;
-- runs como entidad central;
-- checkout atomico;
-- wake reasons explicitos;
-- recovery/liveness auditable.
+Decisión: mantener thresholds. En `provider_failover` la mediana del delta es
+`+6,52` puntos pero el rango es `-8,70..+8,70`; en
+`multitenant_authorization_v2` la mediana es `+8,69` y el rango `0..+8,70`, pero
+solo dos de tres Plan B superan el hard gate. La aceptación durable del quorum
+demuestra coordinación y provenance, no calidad semántica suficiente por sí
+sola.
 
-Pero debe conservar identidad propia:
+Criterio de cierre P0: existe evidencia multi-familia suficiente para mantener
+o cambiar el selector, y la decisión queda reflejada en tests, documentación y
+telemetría sin convertir un caso aislado en regla universal.
 
-- equipos de programacion, no empresas genericas;
-- Lead-first y hiring dinamico;
-- entrada de tarea estilo Paperclip: el usuario propone una tarea para un proyecto y el Lead la convierte en issues/runs/wakeups hasta conseguirla o pedir decision humana;
-- perfiles `solo_lead`, `lead_quorum`, `full_team`;
-- planificacion detallada obligatoria por flujo: objetivo, sub-issues, delegaciones, riesgos, posibles roturas para la siguiente run y criterios de revision;
-- accountability por rol: quien ejecuta, a quien reporta, que evidencia entrega, quien revisa y quien acepta/rechaza;
-- bajo ruido operativo: gates proporcionales al riesgo, checks con utilidad clara y evitando approvals/quorum/reviews pesados para trabajo simple;
-- ahorro de tokens por delegacion economica;
-- seniors/quorum para planificacion y supervision;
-- workers baratos para tareas simples, lectura, investigacion, compresion y herramientas sencillas;
-- suscripciones y APIs como canales independientes.
+### P0.1 — Correcciones de la auditoría independiente
 
-## Tests vivos
+Antes de continuar con nuevas capacidades P2, cerrar en este orden los huecos
+confirmados por la auditoría del `2026-07-20`:
 
-La suite activa debe proteger el nuevo control plane, no el sistema viejo.
+- [x] **Separar actividad viva de liveness defectuoso en `loop-health`**. Una
+  run `queued/running` o wakeup `claimed/running` reciente es trabajo normal,
+  no un zombi. Aplicar una antigüedad coherente con lease/heartbeat/recovery y
+  conservar `stranded_nonterminal_roots` como señal pura. Añadir tests de run
+  reciente sin alerta y run antigua con alerta.
+- [x] **Cerrar la autorización MCP frente a inventarios no confiables o
+  cambiantes**. `readOnlyHint` es información para revisión, no una frontera de
+  seguridad. Persistir una allowlist positiva aprobada por el owner; tools
+  nuevas/no aprobadas quedan denegadas incluso con `repo_write`. Exigir
+  enforcement positivo del adapter o denegar el servidor para esa run. Añadir
+  TTL de health, pero no tratarlo como sustituto de la allowlist ni como defensa
+  completa frente a cambios entre health y ejecución.
+- [x] **Corregir el contrato HTTP de health MCP**: inexistente `404`, aún no
+  aprobado `409`, contrato inválido `400/422` y probe fallido como resultado
+  estructurado/auditado. Cubrir todos los caminos negativos del endpoint.
+- [x] **Pinear la identidad del artefacto MCP ejecutado**, no solo la versión
+  auto-reportada ni únicamente el binario intérprete. La identidad debe cubrir
+  ejecutable resuelto, contrato de argumentos y script/paquete verificable;
+  un cambio invalida health y grant hasta nueva aprobación.
+- [x] **Documentar por test la identidad del Lead en quorum**. El hallazgo F7
+  fue refutado: la capa durable `aiteam.db.quorum_sessions` exige que el agente
+  de `synthesis_run_id` sea `issues.assignee_agent_id`; el executor no duplica
+  esa política. `test_persistence_rejects_synthesis_not_owned_by_configured_lead`
+  protege la invariante con un agente no asignado y una reproducción temporal
+  confirma que un segundo `team_lead` tampoco puede aceptar la sesión.
+- [x] **Añadir la regresión nominal con un segundo `team_lead` no asignado**.
+  No corrige una vulnerabilidad abierta —la persistencia ya lo rechaza—, pero
+  alinea el nombre del escenario auditado con la evidencia automatizada y evita
+  que una futura refactorización confíe solo en el rol. Cerrado por
+  `test_persistence_rejects_second_team_lead_not_assigned_to_issue`.
 
-Mantener como base:
+Criterio de cierre P0.1: la operación normal no genera fatiga de alertas, una
+tool MCP no puede ampliar permisos mediante hints o cambios de inventario, los
+errores de activación tienen contrato HTTP estable y la identidad del Lead queda
+protegida por un test explícito.
 
-- `tests/test_migration_paperclip.py`
-- `tests/test_run_profile_model.py`
-- `tests/test_issue_checkout.py`
-- `tests/test_runs_db.py`
-- `tests/test_wakeups_db.py`
-- `tests/test_control_plane_api.py`
-- `tests/test_heartbeat_scheduler.py`
-- `tests/test_run_executor.py`
-- `tests/test_comments.py`
-- `tests/test_skills.py`
+### P0.2 — Renovación de modelos y economía por canal
 
-## Riesgos
+- [x] **Investigar e integrar el catálogo gratuito actual de OpenCode Zen**.
+  `docs/MODELOS_GRATUITOS_OPENCODE.md` puntúa y clasifica Nemotron 3 Ultra
+  (86/Tier 1), DeepSeek V4 Flash (82/Tier 2), MiMo V2.5 (80/Tier 2) y North
+  Mini Code (74/Tier 3). El perfil built-in `opencode_zen_free` reutiliza la
+  sesión del CLI, descubre IDs con `opencode models opencode` y nunca embebe ni
+  copia credenciales. La integración es read-only y solo admite roles de
+  planificación, auditoría, review/QA y scouts; Engineer queda excluido.
+- [ ] **Calibrar OpenCode Zen Free en ejecución real antes de promoverlo a
+  política automática**. OpenCode `1.18.4` está instalado y la sesión OAuth
+  local enumera cinco IDs vivos, incluido el nuevo `laguna-s-2.1-free`. El
+  screening público de una semilla ya valida transporte, contrato y usage para
+  Nemotron, DeepSeek, MiMo y Laguna; North diagnostica el defecto pero devuelve
+  cero ops y todavía no supera el cierre durable. El canario durable v1 de
+  reviewer descarta la promoción: Nemotron falla el parseo en seed 1, MiMo no
+  produce rechazo durable, North queda correctamente denegado por rol y
+  DeepSeek pasa seed 1 pero no aprueba la corrección en seed 2. Ningún modelo
+  alcanza 3/3, por lo que no se ejecutan más semillas ni cambia el default.
+  Exigir tres semillas por
+  modelo/contrato frente al baseline del rol,
+  registrar duración/runs y confirmar que la oferta sigue activa. Solo usar
+  datos no confidenciales: los endpoints son temporales y sus términos
+  permiten retención o mejora de producto/modelo.
+- [x] **Integrar OpenCode en los afinamientos de gobierno existentes**. El
+  runtime ya falla cerrado sin `--auto`, traduce grants MCP a una allowlist
+  positiva por tool, bloquea MCP ajenos y conserva roles read-only. El JSONL
+  agrega input/output, razonamiento, caché, total e ID de sesión; quota pressure
+  registra tokens/runs/duración/429 bajo el perfil exacto sin convertir cero
+  coste marginal en consumo ilimitado. Engineer continúa excluido: tool
+  permissions no equivalen a un sandbox de sistema operativo.
+- [ ] **Evaluar el transporte OpenCode server/SDK frente al CLI efímero**.
+  Medir salida JSON Schema, cancelación, hangs, health MCP, continuidad por ID y
+  aislamiento entre issues. No activar reanudación ni daemon compartido hasta
+  superar varias semillas de memoria/override/contaminación y recovery; no
+  considerar esta mejora una solución al sandbox de escritura.
+- [x] **Comparar Zen con APIs gratuitas BYOK**. La decisión es híbrida, no una
+  migración total: una API directa ofrece mejor provenance, usage, cuota y
+  control de tools, pero DeepSeek V4 y MiMo V2.5 directos son de pago, Cohere es
+  evaluación y NVIDIA no publica una capacidad gratuita estable verificable.
+  Conservar Zen para esos endpoints; priorizar Gemini API Free y Groq Free,
+  dejar GitHub Models/OpenRouter exacto como fallback de baja frecuencia y
+  descartar el router aleatorio y Hugging Face Free como capacidad base.
+- [x] **Implementar la base `free_api_byok`**. `gemini_api_free` y
+  `groq_api_free` son perfiles built-in separados de pago/CLI; usan referencias
+  del vault, health real, modelos exactos, privacy label, usage, 429 y quota
+  pressure por perfil. El runtime `openai_compatible_api` soporta JSON Schema
+  estricto para GPT-OSS y JSON Object Mode validado para Qwen. Equipo permite
+  guardar las keys Groq y Google Free en slots distintos de los perfiles
+  pagados; una credencial no activa ambos canales por inferencia.
+  `actual_cost_cents=0` no elimina tokens, runs ni duración.
+- [ ] **Extender BYOK gratuito solo con catálogo ejecutable demostrado**.
+  Evaluar GitHub Models y OpenRouter por ID exacto, nunca router aleatorio;
+  descubrir modelos con la key real, verificar salida estructurada y persistir
+  límites observados. Añadir rate-limit headers de API a la telemetría cuando el
+  helper HTTP pueda conservarlos sin exponer secretos. Calibrar Gemini/Groq por
+  rol antes de ampliar `supported_roles` o hacerlos defaults.
+- [x] **Reinvestigar los catálogos actuales con fuentes oficiales y probes
+  locales**. OpenAI queda en Sol/Terra/Luna; Anthropic en Opus 4.8/Sonnet
+  5/Haiku 4.5 con Fable 5 como escalado; Gemini en 3.1 Pro Preview/3.5
+  Flash/3.1 Flash-Lite. `agy 1.1.5 models` confirma ocho IDs ejecutables para
+  Gemini, Claude 4.6 y GPT-OSS 120B; Equipo conserva etiquetas legibles aparte.
+- [x] **Actualizar selección, defaults y FinOps por adapter**. Los tiers se
+  resuelven por rol dentro del canal configurado; API conserva precio marginal
+  y tramos de contexto, suscripción/local registran 0 céntimos marginales. Los
+  adapters locales mantienen el modelo instalado/configurado y nunca descargan
+  ni autoascienden por catálogo.
+- [x] **Impedir una promoción automática insegura a Fable 5**. Permanece
+  visible para selección manual, pero el default Anthropic Tier 1 es Opus 4.8
+  hasta gobernar retención obligatoria, refusals/fallback, elegibilidad y coste.
+- [x] **Hacer que el catálogo de Equipo represente capacidad ejecutable**.
+  Cada opción conserva su nombre exacto por adapter, pero queda deshabilitada
+  si el CLI/runtime no la enumera, el perfil está bloqueado o una run devolvió
+  `model_unavailable`. Las runs completadas verifican el par perfil+modelo; el
+  hiring automático y el guardado de Equipo usan esa misma evidencia. `agy
+  models` aporta las ocho opciones actuales, incluida `Gemini 3.1 Pro (Low)`;
+  Ollama/LM Studio solo habilitan modelos instalados.
+- [ ] **Calibrar los modelos nuevos por contrato de rol**, no con benchmarks de
+  vendor: Sol/Terra/Luna, Opus/Sonnet/Haiku y Pro/Flash/Flash-Lite deben
+  compararse con los baselines locales en tareas de Lead, coding, review y
+  scouts antes de modificar gates o cascadas. Progreso: Antigravity 1.1.5 ya
+  completa el screening estructural con **27 runs**, tres muestras por par y
+  control contra el baseline real de review. Se mantienen Pro High, Flash High
+  y Flash Low. Sonnet 4.6/coding pasó después su prueba conductual y es ya el
+  default de Engineer; Flash Medium/review (empate, -1,48 s) pasa a validación
+  económica. Opus 4.6, Pro Low y GPT-OSS no mejoran sus baselines. El agregado
+  declara `default_change_allowed=false`: falta validar esos dos candidatos con
+  evidencia conductual independiente y completar el resto de adapters. El
+  inventario vivo del `2026-07-21` añadió Gemini 3.6 Flash High/Medium/Low.
+  High y Low fueron enumerados pero rechazados por submit; quedan visibles,
+  manual-only y no seleccionables hasta un probe exacto. Medium completó review 3/3 con 100 %, igual
+  que 3.5 High, pero fue 0,407 s más lento en mediana. Se conserva 3.5 High y
+  3.6 Medium pasa al canario durable sin promoción automática; discovery por sí
+  solo tampoco lo habilita en Equipo y un probe exacto verificado sí.
+- [x] **Validar Sonnet 4.6 contra Flash High en coding conductual**. Ambos pasan
+  9/9 tests ocultos en tres semillas. Sonnet cierra 3/3, Ruff limpio 3/3 y
+  mediana 51,14 s; Flash cierra 2/3, Ruff limpio 1/3 y mediana 105,48 s. El
+  agregado v3 supera la auditoría canónica de matriz y promociona Sonnet para
+  `engineer`/`software_engineer` de Antigravity. El primer A/B se repitió tras
+  corregir envelopes `text + ops`/stdout ruidoso; esos intentos son diagnóstico
+  de transporte y no evidencia de calidad.
+- [x] **Validar Flash Medium contra Flash High en review durable** sobre defectos
+  causales y aceptación/rechazo real. Exigir al menos tres semillas, mismo diff
+  y mismo juez. Medir runs y duración como presión de cuota; no inventar tokens
+  ni coste API. Cerrado con el canario v4: ambos brazos rechazan el defecto,
+  materializan el fix mediante el Lead y aprueban la corrección en 3/3 semillas.
+  Flash Medium tarda 43,078 s medianos frente a 99,999 s de Flash High, pero sin
+  tokens ni denominador de cuota la latencia aislada no autoriza promoción; se
+  conserva Flash High. Recibo: `antigravity-durable-review-v4-aggregate.json`.
+- [ ] **Probar Luna como `context_curator` contra el baseline causal GPT-5.5**
+  en auth y queue, con varias semillas, anclas, ratio total, runs y tiempo.
+  El primer canario auth del 2026-07-20 no alcanzó la evaluación: Codex CLI
+  `0.128.0` rechazó `gpt-5.6-luna` porque el catálogo local requiere un cliente
+  `0.145.0`. Se conserva como evidencia diagnóstica, no como resultado A/B, en
+  `benchmarks/results/context-curator-auth-codex-luna-seed-1.json`. Hasta
+  actualizar el CLI y superar auth+queue, Codex curator conserva `gpt-5.5`
+  aunque sea un rol Tier 3.
+- [ ] **Asignar cadencia y owner al drift de catálogos/modelos**. Ejecutar
+  inventario autenticado y matriz hermética al cambiar versión de CLI/provider
+  y, como mínimo, en una revisión mensual mientras existan modelos preview o
+  gratuitos temporales. Un alta, retirada o cambio de ID debe abrir calibración
+  por par perfil+modelo+rol; discovery nunca autoriza defaults por sí solo.
+- [x] **Implementar presión y forecast de cuota por perfil de suscripción**.
+  `run_adapter_profiles` congela el perfil real por run y
+  `subscription_quota_snapshot` agrega runs, duración, usage disponible y
+  errores `subscription_cli_usage_limit`. El forecast solo aparece si el owner
+  configura `config.subscription_quota` con `unit`, `limit` y `window_hours`;
+  si falta capacidad demostrada devuelve `capacity_unknown`, sin porcentaje ni
+  ETA inventados. Codex puede usar tokens durables; Claude hace lo mismo cuando
+  su recibo los expone; Antigravity usa únicamente runs/segundos como proxy
+  explícito del owner. `loop-health` eleva agotamiento observado o presión
+  configurada y lleva a Runs. Ninguna señal se convierte a coste API ni se
+  comparten pesos entre perfiles. OpenCode añade tokens/caché/razonamiento desde
+  `step_finish` y conserva coste marginal cero; `free_gateway` se normaliza como
+  canal durable de suscripción conservando profile/provider/model exactos, sin
+  reconstruir la restricción SQLite existente.
+- [x] **Cerrar el ciclo de lifecycle de modelos preview/retirados**. Health
+  valida el ID, registra `model_unavailable`, impide nuevas selecciones y evita
+  que hiring las fije. La issue queda bloqueada y el control plane propone el
+  fallback ejecutable menos disruptivo dentro del mismo perfil: preserva
+  familia antes que tier, excluye modelos manual-only y explicita ambos cambios.
+  Una interacción idempotente exige decisión del owner; aceptar actualiza el
+  agente y reencola la issue sin otra llamada LLM, rechazar conserva el bloqueo.
+  Si no existe candidato, se despierta al supervisor sin cambiar de adapter.
 
-- [x] `api/main.py` y `aiteam/orchestrator.py` ya no contienen el flujo legacy activo; la poda de modulos no activos dejo la fuente viva centrada en control plane v2.
-- [ ] Quedan restos temporales bloqueados por Windows fuera de Git; borrar tras reinicio si molestan.
-- [x] `TaskBoard` retirado tras confirmar cero consumidores activos. `sqlite_store` permanece únicamente donde soporta fixtures/migración legacy explícita.
-- [ ] Windows puede dejar temporales bloqueados hasta reinicio.
+Criterio de cierre P0.2: cada rol recibe un modelo ejecutable y calibrado en su
+canal; API y cuota de suscripción se predicen con unidades separadas; ningún
+modelo preview, local no instalado o Fable no gobernado entra silenciosamente.
+El lifecycle queda cerrado; la calibración multi-modelo y el canario Luna tras
+actualizar Codex CLI siguen siendo trabajo de evaluación, no deuda del fallback.
+
+### P0.3 — Compatibilidad efectiva adapter × modelo × rol
+
+Bloque activo y previo a ampliar catálogos o promover nuevos defaults. La
+auditoría del `2026-07-21` confirma que `supported_roles` filtra perfiles en el
+hiring automático, pero `best_for` solo ordena modelos. Crear/editar agentes,
+el selector de Equipo, la edición de una propuesta y el fallback validan
+ejecutabilidad, no compatibilidad dura con el rol. Además, un perfil de Lead
+explícito pero incompatible puede acabar silenciosamente en `lead_builtin`.
+
+Orden interno: (1) vocabulario e identidad, (2) decisión pura de
+compatibilidad, (3) enforcement backend/pre-run, (4) proyección en Equipo y
+(5) catálogo vivo/E2E. No se ampliarán defaults antes de cerrar 1–3.
+
+- [x] **Unificar la taxonomía de roles sin romper proyectos persistidos**.
+  `aiteam.policies` es fuente canónica de aliases, tier y estado. `worker` queda
+  inequívocamente en Tier 3; `qa` es un guardrail condicional, no miembro del
+  `full_team`; `test_runner` es determinista; `researcher` y `quorum_senior`
+  quedan legibles como legacy. Ranking y API normalizan aliases sin reescribir
+  la identidad almacenada.
+- [x] **Separar proveedor, perspectiva y capacidad**. La identidad derivada
+  distingue organización del canal, vendor del modelo, transporte, perspectiva
+  y pool de cuota. Quorum y review crítico exigen vendor/perspectiva distintos:
+  Codex + OpenAI API sobre GPT ya no cuenta como diversidad; Antigravity sobre
+  Claude tampoco es independiente de Anthropic. Cuota/rate-limit conserva el
+  perfil/key como pool separado y los registros históricos se interpretan sin
+  migración destructiva.
+- [x] **Dar metadata de gobernanza a perfiles personalizados**. La API conserva
+  y valida `supported_roles`, `data_policy`, `privacy_note`, `capabilities`,
+  `workspace_mode`, `mcp_transport` y `structured_output`, y proyecta identidad
+  normalizada. Los aliases se canonicalizan y un rol desconocido se rechaza.
+
+- [x] **Crear una única decisión pura de compatibilidad y proyectarla por API**
+  para `(profile_id, model, role, run_profile, criticality,
+  data_class, required_capabilities)`. Debe devolver `allowed`, código estable,
+  explicación en español, roles/modos permitidos y alternativas ejecutables.
+  `aiteam.model_compatibility` no consulta DB/red y separa tier, capacidades,
+  workspace, MCP, salida estructurada, criticidad y datos. El catálogo y
+  `POST /api/user-adapters/compatibility` exponen la misma decisión y alternativas
+  sin colapsarla en `available`. La metadata admite allow/deny por rol,
+  criticidad máxima, salida estructurada y modos de run; `best_for` sigue siendo
+  solo recomendación. Perfiles custom pueden declarar un catálogo gobernado.
+- [x] **Aplicar el gate en todas las rutas de mutación y justo antes de una
+  run**: bootstrap del Lead, `POST/PATCH /api/agents`, aceptación/editado de
+  hiring, reconcile, selección automática y lifecycle/fallback. Una selección
+  explícita incompatible responde HTTP 422 con el código específico de la
+  dimensión fallida (`model_role_incompatible`, `model_tier_insufficient`,
+  `workspace_write_required`, etc.; 400 queda reservado a configuración malformada),
+  con causa y alternativas; nunca degradar a builtin, cambiar de adapter ni
+  esperar a que falle la run. Auditar también configuraciones antiguas al
+  cargarlas y bloquear la issue con continuación owner si ya no son válidas.
+  Implementado mediante `aiteam.compatibility_service`: el contexto durable se
+  hereda por la jerarquía de issues, las propuestas editadas se validan antes
+  de abrir su transacción y el preflight registra interaction, actividad y
+  `tool_access=denied` sin invocar el modelo.
+- [x] **Hacer que Equipo informe en vez de ocultar**. Perfiles y modelos
+  incompatibles permanecen visibles pero deshabilitados, con razón concreta
+  (`solo lectura`, `sin MCP gobernado`, `no calibrado para criticidad alta`,
+  `datos confidenciales`, `modelo ausente`, etc.). El picker de Lead debe
+  considerar también `solo_lead`/`lead_quorum`; el de cada miembro debe usar la
+  misma respuesta que valida el guardado. Corregir el cache al cambiar rol,
+  perfil, criticidad o modo del proyecto. El catálogo por rol conserva también
+  modelos no ejecutables, anota compatibilidad sin pisar health y la UI cachea
+  por perfil+rol+run profile+criticidad+clasificación. Equipo e hiring muestran
+  cada opción deshabilitada con su motivo e impiden guardar/aceptar un deny
+  conocido; el backend vuelve a resolverlo como autoridad final.
+- [x] **Resolver la semántica real de escritura y MCP por transporte**. Las
+  APIs actuales sí materializan `write_file`/`append_file`/`delete_file` bajo
+  RBAC, por lo que el warning legacy “API-only no puede escribir” contradice al
+  executor y debe retirarse o convertirse en un check de capacidad real. Retirar
+  también la penalización fija `-30` y el reconcile que migra juniors de API a
+  CLI solo por tipo de transporte; coste/cuota y capacidad se rankean después
+  del hard gate. En cambio, OpenCode Zen continúa read-only y queda prohibido para Engineer,
+  Worker y Lead en `solo_lead`. Los adapters API no reciben MCP externo hoy:
+  bloquear `mcp_operator` o cualquier asignación que requiera `external_mcp`
+  hasta implementar un loop gobernado, sin confundir tools del proveedor con
+  grants de AI Teams.
+- [x] **Codificar la matriz provisional de perfiles gratuitos**:
+  Nemotron puede optar a Lead/arquitectura/quorum y revisión read-only;
+  DeepSeek V4 Flash y MiMo V2.5 a review/QA; North Mini a scouts/curator.
+  Gemini 3.5 Flash Free y GPT-OSS 120B a review/QA; Gemini Flash-Lite, Qwen
+  3.6 y GPT-OSS 20B a scouts/curator. Hasta superar canarios locales, bloquear
+  Lead/quorum en Gemini/Groq Free y review crítico en los modelos Tier 3. Una
+  categoría Tier 1/2/3 describe capacidad/coste, pero no concede por sí sola
+  un rol, escritura, MCP ni acceso a datos.
+- [ ] **Calibrar con canarios vivos las promociones gratuitas provisionales**.
+  Mantener bloqueos actuales hasta demostrar por par exacto perfil+modelo+rol
+  que el contrato, la criticidad y la recuperación funcionan; un health del
+  perfil o un benchmark de otro transporte no sirve como evidencia.
+- [x] **Cerrar catálogo y health por modelo visible**. Los perfiles API no
+  deben marcar todo su catálogo como ejecutable solo por ser un ID estático:
+  descubrir con la key del owner cuando el proveedor lo permita, intersectar
+  con la allowlist aprobada y ejecutar un probe estructurado por modelo antes
+  de prometer que funciona. Conservar estados distintos `catalogued`,
+  `verified`, `rate_limited`, `retired` e `incompatible`; una prueba del modelo
+  default no verifica los demás. Discovery autenticado y probe estructurado se
+  persisten por separado; `available` expresa presencia y `selectable` exige
+  evidencia ejecutable exacta. OpenAI, Anthropic, Gemini y Groq enumeran con la
+  key del owner y paginación acotada; la allowlist viva se intersecta con el
+  catálogo gobernado. Equipo permite probar cada modelo y el preflight bloquea
+  sin consumo, con continuación owner, si falta evidencia.
+- [x] **Endurecer modelos con contrato estructurado parcial**. El boundary API
+  valida recursivamente `submit_work` completo: tipos, enums, requeridos,
+  mínimos y propiedades extra; recuperar un objeto JSON ya no demuestra el
+  contrato. Qwen/JSON Object dispone de un único repair acotado a 12 KB, suma
+  el usage de ambos intentos y solo se acepta si conserva exactamente `ops` y
+  `status`; nunca puede inventar autoridad. Un segundo fallo queda
+  `tool_parse_error`, 429/model removal del repair conservan su clase real y
+  los modelos strict nunca reintentan. Qwen permanece limitado a Tier 3 y
+  criticidad máxima media.
+- [x] **Hacer que fallback, cuota y privacidad respeten el mismo gate**. El
+  fallback dentro del perfil debe excluir candidatos incompatibles aunque
+  coincidan familia/tier. Groq debe capturar límites por modelo y unidades
+  RPM/RPD/TPM/TPD en vez de tratar 1.000 runs/día como capacidad completa;
+  Gemini conserva capacidad desconocida si no hay denominador. Separar en UI
+  cuota API gratuita de suscripción. `non_confidential_only` y los términos de
+  free tier requieren clasificación/confirmación antes de enviar datos, no una
+  nota decorativa. El filtrado de fallback y la clasificación fail-closed ya
+  consumen el gate común. Groq captura los headers oficiales RPD/TPM por run y
+  modelo, incluidos 429, sin congelar cuotas
+  comerciales; Gemini declara RPM/TPM/RPD/TPD como dimensiones posibles pero
+  conserva `capacity_unknown` porque el denominador efectivo pertenece al
+  proyecto en AI Studio. El snapshot separa `api_rate_limit` de
+  `subscription_pressure`, las APIs nunca consumen el proxy de runs de una
+  suscripción y Equipo etiqueta ambos estados de forma distinta.
+- [x] **Añadir la matriz hermética positiva y negativa por modelo**. El auditor
+  `scripts/audit_model_flow_matrix.py` recorre los 12 perfiles y 46 modelos
+  built-in, valida identidad/metadata, recomendaciones ejecutables, roles
+  positivos y negativos, perfiles bloqueados, privacidad fail-closed, MCP API,
+  criticidad y JSON Schema. La matriz actual contiene 334 celdas positivas y
+  402 negativas sin fallos. GET de Equipo y POST de compatibilidad devuelven la
+  misma decisión para cada modelo; onboarding prueba cada modelo API exacto y
+  demuestra que no habilita a sus hermanos. Los flujos representativos de
+  bootstrap, hiring, edición, dispatch, escritura API, deny OpenCode, retirada,
+  429 y fallback permanecen cubiertos por las suites de workspace/executor.
+- [x] **Completar canarios vivos por modelo y run profile**. Ejecutar con las
+  keys/CLIs del owner creación real en `solo_lead`, `lead_quorum` y `full_team`,
+  registrando versión de adapter/modelo, contrato, privacidad, consumo/cuota y
+  causa de cualquier deny. Mantener estos recibos fuera de la suite hermética;
+  una indisponibilidad externa no debe romper CI. Cada recibo registra versión
+  de CLI/API, modelo exacto, rol y fecha; la suite hermética conserva
+  catálogo→discovery→probe, bloqueo pre-consumo, ejecución, rate-limit,
+  retirada y fallback con o sin candidato.
+  Progreso `2026-07-21`: nueve submits estructurales y doce inferencias de review
+  durable de Antigravity produjeron una
+  matriz review 3×2 completa y tres diagnósticos de catálogo 3.6. Los recibos
+  viven en `benchmarks/results/model_calibration/antigravity-1.1.5-gemini-3.6-*`.
+  La matriz durable valida rechazo→fix del Lead→aprobación en 3×2, sin runs ni
+  wakeups tomados al terminar. Creación viva `solo_lead` pasa con Antigravity
+  Pro High en una run y 54,656 s: un agente, archivo materializado, verificación
+  de máquina, raíz cerrada y cero trabajo vivo residual. `full_team` pasa en la
+  semilla 3 con 12 runs/635,969 s: Lead Codex GPT-5.5, Sonnet Engineer, Flash
+  High Reviewer/Test Designer, Flash Low Scout y test runner determinista; la
+  raíz cierra tras deny previo a exit 0 y no queda cola. `lead_quorum` cierra en
+  seed 4 con 4 runs/305,7 s, Plan A y Plan B estructuralmente válidos, dos
+  contribuciones cross-provider válidas y sesión `accepted`.
+  Tres canarios quorum degradaron correctamente: seed 1 por auditoría
+  Antigravity sin findings, seed 2 tras dos Plan B cuya narrative quedó por
+  debajo de 300 palabras y seed 3 por AGENT-REPORT Codex inválido dos veces.
+  La instrucción final ahora nombra explícitamente `plan.narrative_markdown` y
+  seed 4 valida en vivo la corrección. Los tres perfiles quedan demostrados;
+  las promociones de modelos gratuitos conservan su ítem separado y sus gates.
+
+Criterio de cierre P0.3: no existe ninguna ruta que guarde, contrate, ejecute o
+proponga como fallback una pareja modelo/rol que el catálogo de Equipo marca
+incompatible; toda denegación explica causa y alternativa. Cada opción visible
+como habilitada tiene inventario y contrato de ejecución demostrados, y los
+tres perfiles de run conservan un Lead realmente capaz de cumplir su contrato.
+
+### P1 — Endurecimiento oportunista
+
+- [x] **Convertir el plan durable en contrato API/SQLite estructurado**. El
+  formato `aiteam.plan.v1+json` versiona objetivo, alcance, supuestos,
+  arquitectura, work items con reporting/aceptación/evidencia, riesgos y
+  rollback, verificación, escalado y riesgos de la siguiente run. Sigue usando
+  `issue_documents` y sus revisiones optimistas: no existe una segunda tabla ni
+  estado específico de proveedor. `update_plan` acepta el contrato estructurado,
+  el cockpit lo proyecta y la API valida que cualquier `run_id` pertenezca al
+  Lead asignado. Los comentarios dejaron de materializar planes implícitamente;
+  las nuevas revisiones por API exigen estructura. Markdown queda como shim
+  transitorio, visible como `legacy_unstructured_plan`, para documentos y
+  adapters antiguos mientras se migra su emisión sin romper runs activas.
+- [x] **Extraer el contrato de context curator de `RunExecutor`**. El módulo
+  `aiteam/context_curator.py` concentra el slice durable, la evaluación del
+  presupuesto efectivo, idempotencia del trigger, validación y persistencia del
+  artefacto, offsets parciales y transición retry → escalado. `RunExecutor`
+  conserva únicamente la integración con la delegación general de issues. Hay
+  tests directos del módulo y canarios de integración para payload, recovery,
+  auditoría y contratación automática.
+- [ ] **Extraer políticas de quorum solo si vuelven a crecer**. No hacer una
+  partición mecánica de las 7.608 líneas sin una frontera funcional verificable.
+- [x] **Consumir `orchestrator_evals` en el cockpit** mediante el endpoint
+  aditivo `loop-health`: raíces stranded elevan atención y llevan a issues
+  abiertas; runs/wakeups activos o quorum inconsistente llevan a Runs. No se
+  añadió un panel genérico ni se duplicaron las definiciones del harness.
+- [ ] **Mantener telemetría comparable para Antigravity** antes de incluir ese
+  canal en comparaciones de coste. Verificado de nuevo el `2026-07-21` con
+  `agy 1.1.5`: `--help`, `--print` y el changelog no exponen recibos headless
+  de tokens por run. La cuota visible en TUI no se parsea ni se sustituye por
+  estimaciones sin provenance.
+- [x] **Reforzar la fidelidad semántica del context curator sin confundir
+  estructura con verdad**. Cada bloque conserva Markdown y un índice causal v1
+  con unidades tipadas, provenance por comentario y relaciones compactas. El
+  gate verifica forma y enlaces críticos: accountability exige
+  owner/deliverable/accepted_by; escalado exige metric/threshold/window/action;
+  una opción descartada exige reason. Se mantienen slice, offsets, recovery y
+  ratio Markdown ≤30 %; el índice tiene tope independiente de 4 KiB y se mide
+  su coste efectivo. La rúbrica oculta evalúa ambos artefactos. Spot-checks
+  reales nuevos con `codex_subscription/gpt-5.5`: auth 9/9, Markdown 12,77 %,
+  índice 2.956 chars y cierre en una run; queue 9/9, 12,96 %, índice 3.564 chars
+  y cierre en una run. El ratio efectivo total fue 47,56 % y 54,37 %: mejora
+  trazabilidad, pero no es compresión gratuita ni autoriza cambios de routing.
+- [ ] **Robustecer la clasificación de cuotas de suscripción** cuando exista
+  señal estructurada del CLI o aparezcan variantes reales. Conservar el fallback
+  seguro y añadir fixtures de mensajes/idiomas observados, sin perseguir strings
+  hipotéticos ni reintentar una cuota agotada.
+
+Criterio de cierre P1: cada extracción reduce una política mutable del executor
+sin cambiar semántica, y cada dato nuevo de UI conduce a una acción operativa.
+
+### P2 — Completar auto-extensión gobernada
+
+Bloque completado sobre skills por proyecto, registry, propuestas Lead-only,
+approval/rejection y auditoría:
+
+- [x] **MCP runtime mínimo**: contrato neutral al proveedor con versión pineada,
+  handshake `initialize` obligatorio, grants por rol+`external_mcp` y recibos en
+  `tool_access`. Codex recibe overrides efímeros; Claude recibe
+  `--strict-mcp-config` efímero. Antigravity conserva rol/autoridad pero deniega
+  el grant de forma auditable hasta ofrecer inyección aislada por run.
+- [x] **Base de seguridad MCP**: secretos fuera del registry/prompt, health y
+  `tools/list` con timeout/cap, idempotencia por contrato+versión, cero shell o
+  auto-install y denegación de tools no declaradas como lectura. Esta base no
+  convierte `readOnlyHint`, `serverInfo.version` ni un inventario cacheado en
+  evidencia confiable: el endurecimiento por allowlist aprobada, identidad de
+  artefacto y frescura vive en P0.1. Cada decisión se registra por tool.
+- [x] **Detección de necesidad**: `capability_gap` explícito o un bloqueo
+  realmente no verificable genera sugerencia; señales ambiguas requieren dos
+  runs distintas de la misma capacidad. El reconciler agrupa por raíz+capacidad,
+  persiste evidencia como comentario, reutiliza la ruta viva del Lead y crea una
+  wakeup solo si hace falta. Es una sugerencia: el Lead investiga y el owner
+  conserva los gates de propuesta, health, allowlist y activación.
+- [x] **Skills aprendidas gobernadas**: el Lead puede proponer conocimiento
+  reutilizable solo con evidencia y queda `proposed`, fuera del prompt, hasta
+  aprobación del owner. Se aplican topes de 24 skills vivas, 8 aprendidas,
+  8 KB por aprendida y 48 KB de presupuesto activo. Config expone origen,
+  evidencia y consumo; el owner puede corregir, activar, retirar o borrar sin
+  perder provenance. Las directivas del usuario conservan precedencia explícita
+  y comprobada sobre cualquier skill local.
+- [x] **Health y retiro operables**: endpoint y UI permiten probar/activar,
+  aprobar tools, retirar y reactivar. El loop ejecuta como máximo un probe
+  vencido por tick, aplica backoff y retira tras tres fallos consecutivos. Un
+  contrato rechazado o ya existente suprime propuestas repetidas con comentario
+  correctivo y auditoría; reactivar vuelve a `approved` y exige health nuevo.
+- [x] **Catálogo curado inicial**: tres descriptores oficiales revisados
+  (`github-readonly`, `playwright-browser`, `filesystem-workspace`) nombran solo
+  ejecutables ya instalados, con versiones exactas, riesgos y fuentes. El Lead
+  puede referenciarlos por `catalog_id`; el control plane rellena y bloquea el
+  contrato antes de crear la interacción normal. En paquetes Node resuelve el
+  entrypoint real y verifica `package.json`, evitando sellar solo el shim. El catálogo no instala,
+  ejecuta, aprueba ni autoriza tools y cualquier sustitución del descriptor se
+  deniega de forma auditable.
+
+Criterio de cierre P2: una extensión aprobada puede pasar propuesta → pin →
+health → grant → uso auditado → retiro, y ninguna extensión puede ampliar por
+sí sola el privilegio de un rol.
+
+### P3 — Economía y rendimiento posteriores
+
+- [ ] **Informe de coste por entrega/proyecto**: coste real, ahorro estimado,
+  latencia y calidad por perfil; solo construirlo cuando haya volumen suficiente
+  para no presentar estimaciones como hechos.
+- [x] **Evaluar sesiones persistentes de CLI** con un experimento acotado. Las
+  columnas `session_id_before/after` existen, pero solo activar reanudación si
+  reduce re-derivación sin introducir contaminación de contexto o recovery
+  frágil. Instrumentación offline completada: `aiteam/session_continuity.py`
+  exige opt-in e identidad exacta de agente+issue+adapter+perfil+provider+modelo+
+  canal+workspace; prohíbe `--last`/`--continue` y extrae el ID explícito de
+  Codex. `scripts/benchmark_cli_sessions.py` prueba capacidades sin consumo y
+  audita A/B stateless/resumed con memoria, override, contaminación, tokens y
+  duración. Probe real: Codex 0.128.0 y Antigravity 1.1.5 soportan ID explícito;
+  Claude no está instalado. Canario Codex GPT-5.5 completado con dos semillas:
+  ambos brazos conservan memoria, override y ausencia de la instrucción
+  revocada, pero resumed casi duplica tokens brutos (mediana de ahorro
+  `-99,75 %`) y solo mejora `3,74 %` la duración. Antigravity 1.1.5 reanuda por
+  conversation UUID explícito y conserva el marcador, pero carece de usage
+  comparable. Decisión: mantener producción stateless; el harness conserva
+  `production_enabled=false` y no se usan `--last`/`--continue`.
+- [ ] **Revisar paralelismo por canal** únicamente con evidencia de cuello de
+  botella; conservar límites, governor y semántica durable de checkout/wakeups.
+- [x] **Fortalecer el instrumento de benchmark antes de conclusiones nuevas**.
+  `scripts/benchmark_integrity.py` audita offline la matriz brazo×semilla,
+  duplicados, suites comparables, evidencia independiente, muestra, providers,
+  provenance, hard gates, estabilidad del signo, mediana+rango y riesgo de
+  Goodhart. Las runs incompletas quedan fuera del delta sin perderse como
+  liveness. El harness de código v4 declara suite oculta+Ruff y usa GPT-5.5 como
+  baseline por defecto; quorum añade el contrato estructural de profundidad sin
+  alterar su score léxico. La auditoría histórica acepta
+  `accessible_checkout_form` (2×2 balanceado) y niega una conclusión nueva en
+  `provider_failover`: cuatro sesiones aceptadas y dos incompletas, mediana
+  `+6,52`, rango `-8,70..+8,70`, signo inestable y resultados legacy sin
+  contrato estructural. La evidencia previa sigue siendo direccional.
+- [ ] **Reducir dependencia de rúbricas léxicas en familias nuevas**. Conservar
+  los scores históricos solo para comparabilidad; cada promoción nueva debe
+  añadir al menos una evidencia independiente ejecutable o causal —hidden
+  tests, invariantes de estado, análisis estático, juez determinista o revisión
+  humana muestreada— y declarar explícitamente los constructos que no mide.
+- [ ] **Medir los flujos de orientación del usuario antes de ampliar frontend**.
+  Definir una prueba E2E y una métrica mínima para Bandeja, selección consciente
+  de `solo_lead`/`lead_quorum`/`full_team`, lectura del coste/riesgo y CTA desde
+  plan aceptado a nueva tarea. No inferir adopción o claridad por la mera
+  presencia de componentes; registrar abandono, errores y pasos innecesarios.
+
+### Mantenimiento no bloqueante
+
+- [x] **Hacer la limpieza de pytest segura ante concurrencia y locks de
+  Windows**. Mantener sesiones por PID, aislar también user config por sesión y
+  no abortar `pytest_configure` si un directorio stale devuelve
+  `PermissionError`: conservarlo con warning para limpieza posterior. Añadir
+  tests de sesión hermana viva y árbol stale bloqueado. Unificar el wrapper
+  canónico con las garantías ya presentes en `pytest_local_stable.py`. Cerrado:
+  el probe Windows usa `OpenProcess`/`GetExitCodeProcess` en vez de
+  `os.kill(pid, 0)`, workspace y user config comparten un ID de sesión por PID,
+  los locks stale solo generan warning y dos suites concurrentes terminan 9/9 y
+  5/5 sin eliminarse entre sí. Ambos wrappers conservan el exit code.
+- [ ] **Consolidar Git al cerrar cada bloque material**. El árbol actual está
+  13 commits por delante del upstream y contiene 129 entradas sin consolidar;
+  revisar alcance, separar cambios deliberadamente, ejecutar gates, commit y
+  push sin incluir secretos/runtime. Git sigue siendo la fuente de verdad; la
+  documentación reconciliada no sustituye una revisión reproducible remota.
+
+- [ ] Eliminar temporales retenidos por Windows después de reinicio o liberación
+  de handles, verificando primero rutas exactas. `.pytest-workspace-tmp` y
+  `.pytest-user-config-tmp` ya no existen. Quedan solo
+  `.tmp_pytest/tmpi0cx_njg` y `.tmp_pytest/tmpmzgfjkhr`, creados el 2026-04-02:
+  son directorios temporales ignorados, ordinarios y sin reparse point, pero sus
+  ACL privadas niegan incluso enumeración al owner actual. El borrado exacto fue
+  bloqueado por la política del entorno antes de ejecutarse; no se tocó ningún
+  archivo ni se deben borrar `.pytest_cache`, `.ruff_cache` o caches de runtime.
+- [x] Reconciliar este documento y `HANDOFF.md` después de cada bloque material.
+  Reconciliados el 2026-07-21 tras endurecer el benchmark, auditar temporales,
+  evaluar sesiones persistentes y corregir los IDs de Antigravity 1.1.5.
+  No crear roadmaps paralelos fechados; reabrir este control en el siguiente
+  bloque material.
+
+## Decisiones vigentes
+
+- `lead_quorum` solo se activa por perfil explícito; nunca mediante
+  `AITEAM_AUTO_QUORUM` ni scoring oculto.
+- Una tarea simple no requiere quorum ni review pesado.
+- Un quorum de un solo senior es degradación disponible, no equivalencia a dos
+  proveedores.
+- Compresión de contexto no implica retención semántica; se mide por familia.
+- `readOnlyHint` y `serverInfo.version` son declaraciones del servidor MCP, no
+  fronteras de confianza. El owner aprueba la allowlist y la identidad del
+  artefacto; cada adapter debe imponerlas o denegar el grant.
+- `RunExecutor` se divide por fronteras funcionales, no por objetivo de líneas.
+- No reintroducir `[WORKFLOW_PLAN]`, rondas, router multifactor, JSONL primario,
+  `TaskBoard` ni prompts raíz de proveedor. `lead_executor` sigue activo como
+  brazo Tier 1 del Lead para ejecución directa y hereda siempre su adapter.
+- AI Teams nunca crea `AGENTS.md`, `CLAUDE.md` o `GEMINI.md` en proyectos
+  externos; usa `.aiteam/instructions.md`.
+- Lead, Engineer, Reviewer y demás roles son autoridades del producto, no
+  aliases de proveedor. Un adapter puede carecer temporalmente de un transporte
+  MCP sin perder ownership ni ser sustituido silenciosamente por otro.
+- El modelo se elige dentro del adapter del rol. API optimiza coste por token;
+  suscripción optimiza capacidad frente a presión de cuota; local optimiza
+  capacidad frente a health/recursos. `test_runner` no consume un LLM.
+- Fable 5 es escalado manual, no default Tier 1. Antigravity con un modelo
+  Claude sigue siendo el mismo canal/cuota Antigravity y no cuenta por sí solo
+  como diversidad independiente de proveedor.
+
+## Evidencia ya disponible
+
+- Selector determinista: 31/31 sobre siete familias etiquetadas; mide
+  consistencia de política, no optimalidad LLM.
+- `sqlite_job_queue`: equipo 10/10 frente a `solo_lead` 9/10, con 1,84× tokens
+  y 1,73× tiempo.
+- `config_redactor`: empate 3/3; `solo_lead` fue más caro/lento que Codex directo.
+- `release_notes_indexer`: empate 7/7; `full_team` consumió muchas más runs y no
+  convergió dentro de 15 minutos.
+- `deployment_wave_planner`: ambos 16/16 en dos semillas; equipo cerró 1/2 y
+  consumió bastante más tiempo y entrada.
+- `tenant_authorizer`: `full_team` 2/5 frente a Codex directo 4/5.
+- `accessible_checkout_form`, dos semillas: `solo_lead` y `full_team` pasan
+  siempre 10/10. Solo cierra 2/2 en una run (122,7–147,8 s; 143.026–166.639
+  tokens de entrada); equipo cierra 1/2 en 10–12 runs (629,1–826,5 s;
+  787.619–1.259.330 tokens). Equipo promedia 5,38× el tiempo y 6,61× la entrada.
+  La run incompleta conserva continuación durable y liveness sano. Codex directo
+  tiene una semilla 10/10 de 374,8 s/699.317 tokens.
+- `inventory_snapshot_diff`, dos semillas: ambos perfiles pasan siempre 20/20.
+  `solo_lead` cierra 2/2 en una run (178,6–283,8 s; 296.683–864.627 tokens de
+  entrada); `full_team` cierra 0/2 dentro de 12 runs (517,1–832,6 s;
+  623.564–1.599.277 tokens), promedia 2,92× tiempo/1,91× entrada y deja un F401
+  en la segunda semilla. Codex directo obtiene 20/20 en 159,3 s/241.922 tokens.
+- Quorum Anthropic aceptado: cambios observados +4,35, −8,70 y +8,70; la media
+  pequeña y la varianza no justifican todavía una política de calidad.
+
+## Verificación mínima por bloque
+
+```powershell
+.\scripts\pytest_local.bat tests -q --tb=short
+.\scripts\python_local.bat scripts\e2e_canary.py
+.\scripts\python_local.bat scripts\e2e_quorum_canary.py
+.\scripts\python_local.bat scripts\e2e_solo_lead_canary.py
+```
+
+Ejecutar únicamente la verificación proporcional al cambio durante iteración;
+reservar la suite completa y los canarios relevantes para el cierre del bloque.

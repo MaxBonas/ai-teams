@@ -1,26 +1,43 @@
-# Indice de documentacion viva
+# Índice y autoridad documental
 
-Actualizado: `2026-07-18`
+Actualizado: `2026-07-20`
 
-Este repo fue limpiado de documentacion legacy. El pasado queda en Git y las piezas antiguas con valor quedan aisladas en `legacy_rescue/`.
+Este índice distingue contratos activos e historial. Objetivos, pendientes y
+orden de ejecución viven juntos en `../task.md`; no existen planes paralelos.
 
-## Fuentes de verdad
+## Fuentes de verdad activas
 
 | Documento | Uso |
 |---|---|
 | `MIGRATION_PAPERCLIP.md` | Plan rector de reconstruccion Paperclip-like sobre SQLite. |
 | `PAPERCLIP_GUIDE.md` | Guia practica para consultar Paperclip y adaptar sus patrones sin perder identidad AI Teams. |
+| `EXECUTION_SEMANTICS.md` | Contrato de issues, runs, wakeups, interactions, relaciones padre/hijo y liveness. |
 | `ORCHESTRATION.md` | Fuente canónica de routing, delegación, verificación, contexto, liveness y economía multi-LLM. |
 | `ORCHESTRATION_SOURCES.md` | Registro fechado de fuentes primarias, calidad, cifras y limitaciones. |
+| `MODELOS_GRATUITOS_OPENCODE.md` | Evaluación, tiers, gobierno y contrato de integración de OpenCode Zen Free. |
+| `RUN_PROBLEMS_REGISTRY.md` | Registro operativo de fallos observados y mitigaciones aplicadas. |
 | `PROMPT_HANDOFF_QUORUM_PROFUNDO.md` | Prompt reutilizable para continuar el contrato Lead-owned de quorum profundo. |
 | `../task.md` | Backlog vivo y estado de fases. |
 | `../HANDOFF.md` | Punto de entrada para continuar una sesion. |
 | `../AGENTS.md` | Instrucciones para agentes de desarrollo. |
-| `HISTORY.md` | Historial condensado, no backlog. |
-| `legacy_rescue/README.md` | Indice de piezas legacy rescatadas como referencia, no fuente viva. |
+
+## Historial consolidado
+
+No usar estos archivos para determinar el estado actual ni reabrir trabajo sin
+contrastarlos con `../task.md`, código y tests.
+
+| Documento | Uso histórico |
+|---|---|
+| `HISTORY.md` | Decisiones, diseños, migraciones y planes cerrados consolidados. |
+| `legacy_rescue/README.md` | Índice de snapshots legacy rescatados como referencia. |
 
 ## Regla
 
-Si una decision no esta en estos documentos, en el codigo o en tests activos, tratarla como no vigente. Los snapshots de `legacy_rescue/source_snapshots/` solo sirven para portar ideas a v2 con tests nuevos.
+Si una decisión no está en las fuentes activas, en el código o en tests activos,
+tratarla como no vigente. Ante conflicto, prevalecen `AGENTS.md`, `task.md` y
+`HANDOFF.md`, en ese orden. Los snapshots de `legacy_rescue/source_snapshots/`
+solo sirven para portar ideas a v2 con tests nuevos.
 
-La limpieza documental pendiente está registrada en `../task.md`: debe reconciliar fuentes vivas, skills y prompts activos, validar enlaces y retirar referencias operativas obsoletas sin convertir snapshots históricos en autoridad.
+La limpieza documental es mantenimiento continuo. Toda reconciliación material
+debe registrarse en `../task.md`; no se mantiene un segundo backlog dentro de este
+índice.
