@@ -1,0 +1,379 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "multitenant_authorization_v2",
+  "base": {
+    "score": 19.0,
+    "max_score": 23.0,
+    "score_pct": 82.61,
+    "hard_failures": [
+      "tenant_boundary",
+      "deny_default"
+    ],
+    "passes_hard_gate": false,
+    "word_count": 1541,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "objetiv"
+        ],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "criteri.{0,20}(cierre|aceptaci)",
+          "done|completad"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "siguiente run|continuaci|wakeup|heartbeat|reanud"
+        ],
+        "required": false
+      },
+      {
+        "id": "tenant_boundary",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": true
+      },
+      {
+        "id": "deny_default",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": true
+      },
+      {
+        "id": "object_level_authz",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "object.level|recurso.{0,30}autoriz|autorizaci[oó]n.{0,30}objeto|policy checks?.{0,20}(por|per).{0,10}recurso|recurso.{0,60}(tenant activo|pertenece al tenant|ownership)"
+        ],
+        "required": true
+      },
+      {
+        "id": "cache_scope",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "cache.{0,30}tenant|clave.{0,30}tenant|invalidaci[oó]n.{0,20}cache"
+        ],
+        "required": false
+      },
+      {
+        "id": "negative_tests",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "(test|prueb).{0,30}(negativ|cross.tenant)|acceso cruzado|IDOR"
+        ],
+        "required": true
+      },
+      {
+        "id": "audit",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "audit|trazabilidad|activity.log"
+        ],
+        "required": false
+      },
+      {
+        "id": "migration",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backfill|migraci[oó]n|compatibilidad"
+        ],
+        "required": false
+      },
+      {
+        "id": "incident_rollback",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "rollback|feature.flag|kill.switch|revers"
+        ],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "client_side_authz",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "final": {
+    "score": 21.0,
+    "max_score": 23.0,
+    "score_pct": 91.3,
+    "hard_failures": [
+      "tenant_boundary"
+    ],
+    "passes_hard_gate": false,
+    "word_count": 1554,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "objetiv"
+        ],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "done|completad"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "siguiente run|continuaci|wakeup|heartbeat|reanud"
+        ],
+        "required": false
+      },
+      {
+        "id": "tenant_boundary",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": true
+      },
+      {
+        "id": "deny_default",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "deny.{0,3}by.{0,3}default|denegar por defecto|default.{0,3}deny"
+        ],
+        "required": true
+      },
+      {
+        "id": "object_level_authz",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "object.level|recurso.{0,30}autoriz|autorizaci[oó]n.{0,30}objeto|policy checks?.{0,20}(por|per).{0,10}recurso|recurso.{0,60}(tenant activo|pertenece al tenant|ownership)"
+        ],
+        "required": true
+      },
+      {
+        "id": "cache_scope",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "cache.{0,30}tenant|clave.{0,30}tenant|invalidaci[oó]n.{0,20}cache"
+        ],
+        "required": false
+      },
+      {
+        "id": "negative_tests",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "(test|prueb).{0,30}(negativ|cross.tenant)|acceso cruzado|IDOR"
+        ],
+        "required": true
+      },
+      {
+        "id": "audit",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "audit|trazabilidad|activity.log"
+        ],
+        "required": false
+      },
+      {
+        "id": "migration",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backfill|migraci[oó]n|compatibilidad"
+        ],
+        "required": false
+      },
+      {
+        "id": "incident_rollback",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "rollback|feature.flag|kill.switch|revers"
+        ],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "client_side_authz",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "delta_score_pct": 8.69,
+  "improved": true,
+  "regressed": false,
+  "hard_gate_improved": false,
+  "provenance": {
+    "session": {
+      "id": "2e1c7ee8-cbdf-465f-9619-d6a91c6b3ffb",
+      "issue_id": "issue:intake",
+      "status": "accepted",
+      "base_plan_revision_id": "6340126e-42e3-4c49-98f4-91640a84453f",
+      "final_plan_revision_id": "5e014b0b-96f8-49b0-a2ff-6b7777bccf21",
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": null
+    },
+    "contributions": [
+      {
+        "ordinal": 1,
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:6431248c-afa8-4e27-b4f6-ac82320c0fd6",
+        "input_tokens": 22402,
+        "output_tokens": 4053,
+        "cost_cents": 0
+      },
+      {
+        "ordinal": 2,
+        "provider": "anthropic",
+        "model": "claude-opus-4-5",
+        "channel": "api",
+        "valid": 1,
+        "run_id": "run:b39a7919-e31d-43d3-81fa-8639adf73a8f",
+        "input_tokens": 8169,
+        "output_tokens": 2269,
+        "cost_cents": 29
+      }
+    ],
+    "runtime": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 324.0,
+      "ticks": 4,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 4,
+      "tokens_in": 90657,
+      "tokens_out": 12583,
+      "cost_cents": 29
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_durable_review",
+  "seed": 1,
+  "profile_id": "antigravity_subscription",
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.5-flash-high",
+  "contract": "same_broken_diff_then_same_fix_v1",
+  "reject": {
+    "ok": true,
+    "seconds": 76.937,
+    "report": {
+      "id": "a910a744-f24f-4ea3-9dba-0bbb71b1aa13",
+      "issue_id": "issue:review",
+      "agent_id": "role:reviewer",
+      "run_id": "run:40e3e56f-1076-4f53-8fde-18280526eaea",
+      "agent_role": "reviewer",
+      "result": "changes_requested",
+      "issue_status": "done",
+      "next_owner": "engineer",
+      "tech_match": "yes",
+      "blocker": "close_issue.py lacks tenant/assignee validation, atomicity, exception propagation, and idempotent non-null parent checking.",
+      "evidence": "close_issue.py:1-9",
+      "valid": 1,
+      "is_assignee": 1,
+      "raw_json": "{\"blocker\": \"close_issue.py lacks tenant/assignee validation, atomicity, exception propagation, and idempotent non-null parent checking.\", \"evidence\": \"close_issue.py:1-9\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"reviewer\", \"tech_match\": \"yes\"}",
+      "created_at": "2026-07-21 17:59:26"
+    }
+  },
+  "approve": {
+    "ok": true,
+    "seconds": 23.062,
+    "report": {
+      "id": "f26c104b-e915-48e0-9860-719db494bbe5",
+      "issue_id": "issue:review",
+      "agent_id": "role:reviewer",
+      "run_id": "run:00024fed-adf6-4517-9e61-5b2c23a6802b",
+      "agent_role": "reviewer",
+      "result": "approved",
+      "issue_status": "done",
+      "next_owner": "lead",
+      "tech_match": "yes",
+      "blocker": "none",
+      "evidence": "close_issue.py:1-12",
+      "valid": 1,
+      "is_assignee": 1,
+      "raw_json": "{\"blocker\": \"none\", \"evidence\": \"close_issue.py:1-12\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"approved\", \"role\": \"reviewer\", \"tech_match\": \"yes\"}",
+      "created_at": "2026-07-21 17:59:49"
+    }
+  },
+  "runs": [
+    {
+      "id": "run:40e3e56f-1076-4f53-8fde-18280526eaea",
+      "status": "completed",
+      "error_code": null,
+      "usage_json": "{}",
+      "started_at": "2026-07-21T17:58:10.232241+00:00",
+      "finished_at": "2026-07-21T17:59:26.890711+00:00"
+    },
+    {
+      "id": "run:0e26befb-0fa3-492c-859a-8039a13ee048",
+      "status": "completed",
+      "error_code": null,
+      "usage_json": "{}",
+      "started_at": "2026-07-21T17:59:26.918825+00:00",
+      "finished_at": "2026-07-21T17:59:26.967858+00:00"
+    },
+    {
+      "id": "run:00024fed-adf6-4517-9e61-5b2c23a6802b",
+      "status": "completed",
+      "error_code": null,
+      "usage_json": "{}",
+      "started_at": "2026-07-21T17:59:27.212515+00:00",
+      "finished_at": "2026-07-21T17:59:49.966517+00:00"
+    },
+    {
+      "id": "run:76e64bb4-635a-4516-bbb3-b528e9b2f222",
+      "status": "completed",
+      "error_code": null,
+      "usage_json": "{}",
+      "started_at": "2026-07-21T17:59:49.994679+00:00",
+      "finished_at": "2026-07-21T17:59:50.042930+00:00"
+    }
+  ],
+  "quota_observation": {
+    "runs": 4,
+    "wall_seconds": 99.999,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  },
+  "liveness": {
+    "live_runs": 0,
+    "claimed_wakeups": 0
+  },
+  "ok": true
+}

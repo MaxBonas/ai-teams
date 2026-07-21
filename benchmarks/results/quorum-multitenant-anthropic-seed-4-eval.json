@@ -1,0 +1,66 @@
+{
+  "db": "runtime/bench/quorum-multitenant-seed-4/lead_quorum/.aiteam/aiteam.db",
+  "outcome": {
+    "issues_by_status": {
+      "done": 2,
+      "in_progress": 1
+    },
+    "accepted_root_issues": 1
+  },
+  "economy": {
+    "input_tokens": 90657,
+    "output_tokens": 12583,
+    "total_tokens": 103240,
+    "cost_cents": 29,
+    "tokens_per_accepted_root": 103240.0
+  },
+  "coordination": {
+    "runs_by_status": {
+      "completed": 4
+    },
+    "wakeups_by_status": {
+      "finished": 4,
+      "queued": 1
+    },
+    "wakeups_per_issue_avg": 1.67,
+    "wakeups_per_issue_max": 3,
+    "repeated_agent_issue_runs": [
+      {
+        "agent_id": "role:lead",
+        "issue_id": "issue:intake",
+        "runs": 2
+      }
+    ],
+    "fix_issues": 0,
+    "test_failure_reports": 0,
+    "reviewer_rejection_reports": 0,
+    "approvals_contradicted_by_later_test_failure": 0,
+    "terminal_issue_skips": 0,
+    "lead_unblock_attempts": 0
+  },
+  "context": {
+    "workspace_digest_events": 0,
+    "unchanged_digest_reuses": 0,
+    "context_curator_issues": 0
+  },
+  "reports": {
+    "changes_requested": 2
+  },
+  "quorum": {
+    "available": true,
+    "sessions_by_status": {
+      "accepted": 1
+    },
+    "valid_contributions": 2,
+    "invalid_contributions": 0,
+    "accepted_without_provider_diversity": 0,
+    "accepted_with_unresolved_findings": 0,
+    "healthy": true
+  },
+  "liveness": {
+    "nonterminal_runs": 0,
+    "claimed_or_running_wakeups": 0,
+    "stranded_nonterminal_roots": 0,
+    "healthy": true
+  }
+}

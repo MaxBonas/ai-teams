@@ -14,9 +14,18 @@ from pathlib import Path
 from typing import Any
 
 
-def evaluate_summary(source: str, summary: str, rubric: dict[str, Any]) -> dict[str, Any]:
+def evaluate_summary(
+    source: str,
+    summary: str,
+    rubric: dict[str, Any],
+    *,
+    causal_units: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     source_chars = len(source)
+    causal_text = json.dumps(causal_units or [], ensure_ascii=False, separators=(",", ":"))
+    artifact = summary + ("\n" + causal_text if causal_units is not None else "")
     summary_chars = len(summary)
+    causal_index_chars = len(causal_text) if causal_units is not None else 0
     criteria: list[dict[str, Any]] = []
     required_total = 0
     required_retained = 0
@@ -27,7 +36,7 @@ def evaluate_summary(source: str, summary: str, rubric: dict[str, Any]) -> dict[
         minimum = int(item.get("min_matches", 1))
         matched = [
             pattern for pattern in patterns
-            if re.search(pattern, summary, flags=re.IGNORECASE | re.DOTALL)
+            if re.search(pattern, artifact, flags=re.IGNORECASE | re.DOTALL)
         ]
         retained = len(matched) >= minimum
         required = bool(item.get("required", True))
@@ -53,6 +62,10 @@ def evaluate_summary(source: str, summary: str, rubric: dict[str, Any]) -> dict[
         "rubric_id": rubric.get("id"),
         "source_chars": source_chars,
         "summary_chars": summary_chars,
+        "causal_units": len(causal_units or []),
+        "causal_index_chars": causal_index_chars,
+        "artifact_chars": len(artifact),
+        "artifact_ratio": round(len(artifact) / source_chars, 4) if source_chars else 0.0,
         "compression_ratio": round(ratio, 4),
         "max_compression_ratio": max_ratio,
         "within_budget": ratio <= max_ratio,

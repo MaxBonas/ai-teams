@@ -157,29 +157,65 @@ def evaluate_db(path: Path) -> dict[str, Any]:
         terminal_waste = int(conn.execute(
             "SELECT COUNT(*) FROM runs WHERE status='skipped' AND error_code='issue_terminal'"
         ).fetchone()[0])
-        zombie_runs = int(conn.execute(
+        nonterminal_runs = int(conn.execute(
             "SELECT COUNT(*) FROM runs WHERE status IN ('queued','running')"
         ).fetchone()[0])
-        orphan_wakeups = int(conn.execute(
+        stale_nonterminal_runs = int(conn.execute(
+            """
+            SELECT COUNT(*) FROM runs
+            WHERE status IN ('queued','running')
+              AND datetime(COALESCE(started_at, created_at)) < datetime('now', '-30 minutes')
+            """
+        ).fetchone()[0])
+        claimed_or_running_wakeups = int(conn.execute(
             "SELECT COUNT(*) FROM wakeup_requests WHERE status IN ('claimed','running')"
+        ).fetchone()[0])
+        stale_claimed_or_running_wakeups = int(conn.execute(
+            """
+            SELECT COUNT(*) FROM wakeup_requests
+            WHERE status IN ('claimed','running')
+              AND datetime(COALESCE(claimed_at, created_at)) < datetime('now', '-30 minutes')
+            """
         ).fetchone()[0])
         stranded_roots = int(conn.execute(
             """
+            WITH RECURSIVE issue_tree(root_id, issue_id) AS (
+                SELECT id, id
+                FROM issues
+                WHERE parent_id IS NULL
+                UNION
+                SELECT tree.root_id, child.id
+                FROM issue_tree tree
+                JOIN issues child ON child.parent_id = tree.issue_id
+            )
             SELECT COUNT(*)
             FROM issues root
             WHERE root.parent_id IS NULL
               AND root.status NOT IN ('done', 'cancelled')
               AND NOT EXISTS (
-                  SELECT 1 FROM wakeup_requests wake
-                  WHERE wake.status IN ('queued', 'claimed', 'running')
-                    AND COALESCE(
-                        json_extract(wake.payload_json, '$.issue_id'),
-                        json_extract(wake.payload_json, '$.task_id')
-                    ) = root.id
+                  SELECT 1
+                  FROM issue_tree tree
+                  JOIN runs run ON run.issue_id = tree.issue_id
+                  WHERE tree.root_id = root.id
+                    AND run.status IN ('queued', 'running')
               )
               AND NOT EXISTS (
-                  SELECT 1 FROM issue_thread_interactions interaction
-                  WHERE interaction.issue_id = root.id
+                  SELECT 1
+                  FROM issue_tree tree
+                  JOIN wakeup_requests wake
+                    ON COALESCE(
+                        json_extract(wake.payload_json, '$.issue_id'),
+                        json_extract(wake.payload_json, '$.task_id')
+                    ) = tree.issue_id
+                  WHERE tree.root_id = root.id
+                    AND wake.status IN ('queued', 'claimed', 'running')
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM issue_tree tree
+                  JOIN issue_thread_interactions interaction
+                    ON interaction.issue_id = tree.issue_id
+                  WHERE tree.root_id = root.id
                     AND interaction.status NOT IN ('accepted', 'rejected', 'answered', 'cancelled', 'expired')
               )
             """
@@ -225,10 +261,16 @@ def evaluate_db(path: Path) -> dict[str, Any]:
         "reports": report_counts,
         "quorum": quorum,
         "liveness": {
-            "nonterminal_runs": zombie_runs,
-            "claimed_or_running_wakeups": orphan_wakeups,
+            "nonterminal_runs": nonterminal_runs,
+            "stale_nonterminal_runs": stale_nonterminal_runs,
+            "claimed_or_running_wakeups": claimed_or_running_wakeups,
+            "stale_claimed_or_running_wakeups": stale_claimed_or_running_wakeups,
             "stranded_nonterminal_roots": stranded_roots,
-            "healthy": zombie_runs == 0 and orphan_wakeups == 0 and stranded_roots == 0,
+            "healthy": (
+                stale_nonterminal_runs == 0
+                and stale_claimed_or_running_wakeups == 0
+                and stranded_roots == 0
+            ),
         },
     }
 

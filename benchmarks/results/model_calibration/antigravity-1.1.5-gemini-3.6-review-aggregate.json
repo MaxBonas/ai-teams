@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_role_model_calibration_aggregate",
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "source_reports": 4,
+  "samples": 9,
+  "results": [
+    {
+      "role": "coding",
+      "model": "gemini-3.6-flash-high",
+      "baseline": false,
+      "samples": 1,
+      "completed": 0,
+      "contract_passes": 0,
+      "score_median": null,
+      "score_range": null,
+      "wall_seconds_median": null,
+      "wall_seconds_range": null
+    },
+    {
+      "role": "lead",
+      "model": "gemini-3.6-flash-high",
+      "baseline": false,
+      "samples": 1,
+      "completed": 0,
+      "contract_passes": 0,
+      "score_median": null,
+      "score_range": null,
+      "wall_seconds_median": null,
+      "wall_seconds_range": null
+    },
+    {
+      "role": "review",
+      "model": "gemini-3.5-flash-high",
+      "baseline": true,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 100.0,
+      "score_range": [
+        100.0,
+        100.0
+      ],
+      "wall_seconds_median": 8.765,
+      "wall_seconds_range": [
+        8.485,
+        9.407
+      ]
+    },
+    {
+      "role": "review",
+      "model": "gemini-3.6-flash-medium",
+      "baseline": false,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 100.0,
+      "score_range": [
+        100.0,
+        100.0
+      ],
+      "wall_seconds_median": 9.172,
+      "wall_seconds_range": [
+        8.593,
+        13.203
+      ]
+    },
+    {
+      "role": "scout",
+      "model": "gemini-3.6-flash-low",
+      "baseline": false,
+      "samples": 1,
+      "completed": 0,
+      "contract_passes": 0,
+      "score_median": null,
+      "score_range": null,
+      "wall_seconds_median": null,
+      "wall_seconds_range": null
+    }
+  ],
+  "decisions": {
+    "lead": {
+      "baseline": "gemini-3.1-pro-high",
+      "challengers": []
+    },
+    "coding": {
+      "baseline": "gemini-3.5-flash-high",
+      "challengers": []
+    },
+    "review": {
+      "baseline": "gemini-3.5-flash-high",
+      "challengers": [
+        {
+          "model": "gemini-3.6-flash-medium",
+          "disposition": "retain_baseline",
+          "median_score_delta": 0.0,
+          "median_wall_seconds_delta": 0.407
+        }
+      ]
+    },
+    "scout": {
+      "baseline": "gemini-3.5-flash-low",
+      "challengers": []
+    }
+  },
+  "conclusion": {
+    "structural_screening_complete": false,
+    "default_change_allowed": false,
+    "reason": "tres muestras permiten seleccionar follow-ups, pero falta evidencia conductual independiente",
+    "economic_comparison_available": false,
+    "economic_reason": "sin tokens de agy; latencia y numero de runs no equivalen a coste API ni a cuota total",
+    "goodhart_risk": "material"
+  },
+  "quota_observation": {
+    "unit": "runs_and_wall_seconds",
+    "runs": 9,
+    "wall_seconds": 69.578,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  }
+}

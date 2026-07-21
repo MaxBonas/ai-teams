@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_role_model_calibration_aggregate",
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "source_reports": 6,
+  "samples": 27,
+  "results": [
+    {
+      "role": "coding",
+      "model": "claude-sonnet-4-6",
+      "baseline": false,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 81.8,
+      "score_range": [
+        81.8,
+        90.9
+      ],
+      "wall_seconds_median": 21.937,
+      "wall_seconds_range": [
+        20.265,
+        23.672
+      ]
+    },
+    {
+      "role": "coding",
+      "model": "gemini-3.5-flash-high",
+      "baseline": true,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 72.7,
+      "score_range": [
+        72.7,
+        81.8
+      ],
+      "wall_seconds_median": 9.515,
+      "wall_seconds_range": [
+        8.969,
+        9.891
+      ]
+    },
+    {
+      "role": "lead",
+      "model": "claude-opus-4-6-thinking",
+      "baseline": false,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 93.3,
+      "score_range": [
+        93.3,
+        93.3
+      ],
+      "wall_seconds_median": 33.75,
+      "wall_seconds_range": [
+        32.766,
+        34.844
+      ]
+    },
+    {
+      "role": "lead",
+      "model": "gemini-3.1-pro-high",
+      "baseline": true,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 93.3,
+      "score_range": [
+        93.3,
+        93.3
+      ],
+      "wall_seconds_median": 7.672,
+      "wall_seconds_range": [
+        6.672,
+        8.203
+      ]
+    },
+    {
+      "role": "review",
+      "model": "gemini-3.1-pro-low",
+      "baseline": false,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 100.0,
+      "score_range": [
+        90.0,
+        100.0
+      ],
+      "wall_seconds_median": 15.14,
+      "wall_seconds_range": [
+        13.594,
+        17.453
+      ]
+    },
+    {
+      "role": "review",
+      "model": "gemini-3.5-flash-high",
+      "baseline": true,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 100.0,
+      "score_range": [
+        100.0,
+        100.0
+      ],
+      "wall_seconds_median": 8.843,
+      "wall_seconds_range": [
+        8.766,
+        9.235
+      ]
+    },
+    {
+      "role": "review",
+      "model": "gemini-3.5-flash-medium",
+      "baseline": false,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 100.0,
+      "score_range": [
+        100.0,
+        100.0
+      ],
+      "wall_seconds_median": 7.36,
+      "wall_seconds_range": [
+        7.156,
+        7.469
+      ]
+    },
+    {
+      "role": "scout",
+      "model": "gemini-3.5-flash-low",
+      "baseline": true,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 100.0,
+      "score_range": [
+        100.0,
+        100.0
+      ],
+      "wall_seconds_median": 5.594,
+      "wall_seconds_range": [
+        5.485,
+        6.078
+      ]
+    },
+    {
+      "role": "scout",
+      "model": "gpt-oss-120b-medium",
+      "baseline": false,
+      "samples": 3,
+      "completed": 3,
+      "contract_passes": 3,
+      "score_median": 100.0,
+      "score_range": [
+        100.0,
+        100.0
+      ],
+      "wall_seconds_median": 7.594,
+      "wall_seconds_range": [
+        7.234,
+        10.328
+      ]
+    }
+  ],
+  "decisions": {
+    "lead": {
+      "baseline": "gemini-3.1-pro-high",
+      "challengers": [
+        {
+          "model": "claude-opus-4-6-thinking",
+          "disposition": "retain_baseline",
+          "median_score_delta": 0.0,
+          "median_wall_seconds_delta": 26.078
+        }
+      ]
+    },
+    "coding": {
+      "baseline": "gemini-3.5-flash-high",
+      "challengers": [
+        {
+          "model": "claude-sonnet-4-6",
+          "disposition": "candidate_for_behavioral_validation",
+          "median_score_delta": 9.1,
+          "median_wall_seconds_delta": 12.422
+        }
+      ]
+    },
+    "review": {
+      "baseline": "gemini-3.5-flash-high",
+      "challengers": [
+        {
+          "model": "gemini-3.1-pro-low",
+          "disposition": "retain_baseline",
+          "median_score_delta": 0.0,
+          "median_wall_seconds_delta": 6.297
+        },
+        {
+          "model": "gemini-3.5-flash-medium",
+          "disposition": "candidate_for_economy_validation",
+          "median_score_delta": 0.0,
+          "median_wall_seconds_delta": -1.483
+        }
+      ]
+    },
+    "scout": {
+      "baseline": "gemini-3.5-flash-low",
+      "challengers": [
+        {
+          "model": "gpt-oss-120b-medium",
+          "disposition": "retain_baseline",
+          "median_score_delta": 0.0,
+          "median_wall_seconds_delta": 2.0
+        }
+      ]
+    }
+  },
+  "conclusion": {
+    "structural_screening_complete": true,
+    "default_change_allowed": false,
+    "reason": "tres muestras permiten seleccionar follow-ups, pero falta evidencia conductual independiente",
+    "economic_comparison_available": false,
+    "economic_reason": "sin tokens de agy; latencia y numero de runs no equivalen a coste API ni a cuota total",
+    "goodhart_risk": "material"
+  },
+  "quota_observation": {
+    "unit": "runs_and_wall_seconds",
+    "runs": 27,
+    "wall_seconds": 355.485,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  }
+}

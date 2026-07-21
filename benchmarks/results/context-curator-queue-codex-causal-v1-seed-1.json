@@ -1,0 +1,267 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "queue_rollout_causal_v4",
+  "source_chars": 8610,
+  "summary_chars": 1116,
+  "causal_units": [
+    {
+      "id": "obj-rollout-async-billing",
+      "kind": "objective",
+      "statement": "Desplegar el nuevo consumidor de facturación asíncrona sin duplicar facturas y con rollback en menos de 10 minutos.",
+      "links": [
+        "acceptance:no_duplicate_invoices",
+        "acceptance:rollback_under_10_minutes"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "dec-idempotency-key",
+      "kind": "decision",
+      "statement": "Usar clave de idempotencia compuesta por invoice_id y attempt.",
+      "links": [
+        "mechanism:idempotency_key",
+        "fields:invoice_id+attempt"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "dec-flag-shadow-rollout",
+      "kind": "decision",
+      "statement": "Activar el consumidor nuevo por feature flag para una cohorte inicial del 10% y mantener el consumidor antiguo en shadow durante 48 horas.",
+      "links": [
+        "rollout:feature_flag_10_percent",
+        "shadow:old_consumer_48h"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "dec-retry-dlq-policy",
+      "kind": "decision",
+      "statement": "Limitar retries a tres intentos; después enviar el mensaje a DLQ sin confirmarlo como procesado.",
+      "links": [
+        "retry:max_3_attempts",
+        "failure_path:dead_letter_queue",
+        "ack_policy:not_processed"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "ev-platform-replay",
+      "kind": "evidence",
+      "statement": "Platform ejecutó replay de 10.000 mensajes y obtuvo cero facturas duplicadas.",
+      "links": [
+        "actor:Platform",
+        "sample:10000_messages",
+        "result:0_duplicate_invoices"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "acc-engineer-replay-dlq",
+      "kind": "accountability",
+      "statement": "Engineer debe crear scripts/replay_dlq.py como siguiente entregable.",
+      "links": [
+        "owner:Engineer",
+        "deliverable:scripts/replay_dlq.py",
+        "accepted_by:Reviewer"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "acc-reviewer-dry-run",
+      "kind": "accountability",
+      "statement": "Reviewer aceptará la transición únicamente tras reproducir un dry-run de 100 mensajes en staging.",
+      "links": [
+        "owner:Reviewer",
+        "deliverable:dry-run_100_messages_in_staging",
+        "accepted_by:Reviewer"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "risk-out-of-order-webhooks",
+      "kind": "risk",
+      "statement": "Webhooks fuera de orden pueden llegar hasta 20 minutos tarde y reabrir estados ya cerrados.",
+      "links": [
+        "source:out_of_order_webhooks",
+        "delay:up_to_20_minutes",
+        "impact:reopen_closed_states"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "esc-duplicate-rate-threshold",
+      "kind": "escalation",
+      "statement": "Si la tasa de facturas duplicadas supera 0,1% durante 10 minutos, SRE desactiva la feature flag, vuelve al consumidor anterior y escala al Lead.",
+      "links": [
+        "metric:duplicate_invoice_rate",
+        "threshold:>0.1%",
+        "window:10_minutes",
+        "action:SRE_disable_feature_flag_revert_to_old_consumer_escalate_to_Lead"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "scope-exclusions-broker-payments",
+      "kind": "scope",
+      "statement": "Quedan fuera de alcance migrar de broker y cambiar el esquema de pagos.",
+      "links": [
+        "excluded:migrate_broker",
+        "excluded:change_payment_schema"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510"
+      ]
+    },
+    {
+      "id": "rejected-noisy-thread-content",
+      "kind": "rejected_option",
+      "statement": "Saludos, propuestas de nombres, estimaciones antiguas y logs repetidos se descartan como no accionables porque no alteran decisiones, owners ni criterios de aceptación.",
+      "links": [
+        "reason:no_change_to_decisions_owners_acceptance_criteria"
+      ],
+      "source_comment_ids": [
+        "3b2f954f-a1f9-486b-96b5-95c23d586510",
+        "2ee94986-f007-4c6d-8750-65ea00e8ead5"
+      ]
+    }
+  ],
+  "causal_index_chars": 3564,
+  "artifact_chars": 4681,
+  "artifact_ratio": 0.5437,
+  "compression_ratio": 0.1296,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 9,
+  "required_total": 9,
+  "required_retention_rate": 1.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": true,
+  "accepted": true,
+  "criteria": [
+    {
+      "id": "idempotency_key",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "invoice_id.{0,30}attempt"
+      ]
+    },
+    {
+      "id": "cohort_shadow",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cohorte.{0,30}10 ?%|10 ?%.{0,30}cohorte",
+        "shadow.{0,30}48 ?(h|horas)|48 ?(h|horas).{0,30}shadow"
+      ]
+    },
+    {
+      "id": "retry_dlq",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "tres intentos.{0,60}(dead-letter|DLQ)|3 intentos.{0,60}(dead-letter|DLQ)|retries?.{0,30}3.{0,60}(dead-letter|DLQ)"
+      ]
+    },
+    {
+      "id": "replay_evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "10[., ]?000\\s+mensajes.{0,40}(0|cero).{0,30}duplicad"
+      ]
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,80}replay_dlq\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,160}(dry-run|100 mensajes)|(dry-run|100 mensajes).{0,160}Reviewer"
+      ]
+    },
+    {
+      "id": "late_webhook_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "webhooks?.{0,80}(20 ?min|20 minutos).{0,80}(tarde|fuera de orden)|webhooks?.{0,80}fuera de orden.{0,80}(20 ?min|20 minutos)"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0[,.]1 ?%.{0,60}(10 ?min|diez minutos).{0,100}(desactiva|apagar|rollback|consumidor (anterior|previo))"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de (scope|alcance).{0,80}(broker|esquema de pagos)"
+      ]
+    }
+  ],
+  "profile_id": "codex_subscription",
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "gpt-5.5",
+    "channel": "subscription"
+  },
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:3fe0c4fa-a1bf-4bd9-987a-08813c25c31d",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "attempts": 1,
+    "wall_seconds": 54.1,
+    "input_tokens": 26144,
+    "output_tokens": 1993,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\context-canary-queue-causal-v1-seed-1\\.aiteam\\aiteam.db"
+  },
+  "summary": "## Síntesis causal\n\nObjetivo: desplegar el nuevo consumidor de facturación asíncrona sin duplicar facturas y con rollback operativo en menos de 10 minutos.\n\nDecisiones vigentes: idempotencia con clave compuesta `invoice_id` + `attempt`; activación por feature flag solo para cohorte inicial del 10%; consumidor antiguo en shadow durante 48 horas; retry limitado a 3 intentos y envío posterior a DLQ sin marcar como procesado.\n\nEvidencia: Platform ejecutó replay de 10.000 mensajes con 0 facturas duplicadas.\n\nAccountability y estado: Engineer queda como siguiente owner para crear `scripts/replay_dlq.py`. Reviewer solo aceptará la transición tras reproducir un dry-run de 100 mensajes en staging.\n\nRiesgos y escalado: webhooks fuera de orden pueden llegar hasta 20 minutos tarde y reabrir estados cerrados. Si duplicados supera 0,1% durante 10 minutos, SRE desactiva la feature flag, vuelve al consumidor anterior y escala al Lead.\n\nFuera de alcance: migrar de broker y cambiar el esquema de pagos. El resto del slice contiene saludos, nombres descartados, estimaciones antiguas y logs repetidos sin impacto causal."
+}

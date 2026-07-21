@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "benchmark": "live_run_profile_canary",
+  "date": "2026-07-21T20:43:19+0200",
+  "profile": "full_team",
+  "data_class": "internal",
+  "adapter_profile_ids": [
+    "codex_subscription",
+    "antigravity_subscription"
+  ],
+  "seconds": 441.922,
+  "ticks": 10,
+  "tokens_partial": true,
+  "marginal_cost_cents": 0,
+  "checks": {
+    "root_done": false,
+    "engineer_present": true,
+    "reviewer_present": true,
+    "reviewer_approved": true,
+    "test_runner_exit_zero": false,
+    "workspace_written": true,
+    "no_live_runs": true,
+    "no_claimed_wakeups": true
+  },
+  "issues": [
+    {
+      "id": "issue:intake",
+      "parent_id": null,
+      "role": "lead",
+      "status": "in_progress",
+      "assignee_agent_id": "role:lead"
+    },
+    {
+      "id": "ae90cc16-e35f-4943-b8cb-89bc9cf709a6",
+      "parent_id": "issue:intake",
+      "role": "file_scout",
+      "status": "done",
+      "assignee_agent_id": "role:file_scout"
+    },
+    {
+      "id": "cd5b31b2-4a3f-49ab-8f51-598b0b3f7707",
+      "parent_id": "issue:intake",
+      "role": "engineer",
+      "status": "done",
+      "assignee_agent_id": "role:engineer"
+    },
+    {
+      "id": "5f66d38c-adfb-45b3-9390-8c8f7a6c2c62",
+      "parent_id": "issue:intake",
+      "role": "reviewer",
+      "status": "done",
+      "assignee_agent_id": "role:reviewer"
+    },
+    {
+      "id": "e0fb427a-6abd-4b3e-b6a5-13612f5cc301",
+      "parent_id": "issue:intake",
+      "role": "test_designer",
+      "status": "done",
+      "assignee_agent_id": "role:test_designer"
+    }
+  ],
+  "runs": [
+    {
+      "id": "run:a07ff734-1f5b-4311-9bf3-174d57a9b90c",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 27652, \"output_tokens\": 1984, \"reasoning_output_tokens\": 91}"
+    },
+    {
+      "id": "run:1065f916-2275-4366-bb29-d4ee48ccdf1c",
+      "agent_id": "role:file_scout",
+      "issue_id": "ae90cc16-e35f-4943-b8cb-89bc9cf709a6",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 43136, \"input_tokens\": 62799, \"output_tokens\": 911, \"reasoning_output_tokens\": 105}"
+    },
+    {
+      "id": "run:f253744f-c480-4ee2-975d-b944cbbd8db7",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 28230, \"output_tokens\": 1137, \"reasoning_output_tokens\": 78}"
+    },
+    {
+      "id": "run:b5b81fc5-80bf-4636-95cf-6571b933b6ea",
+      "agent_id": "role:test_designer",
+      "issue_id": "e0fb427a-6abd-4b3e-b6a5-13612f5cc301",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 92032, \"input_tokens\": 102810, \"output_tokens\": 1350, \"reasoning_output_tokens\": 351}"
+    },
+    {
+      "id": "run:47332f59-ae2a-4090-bac9-21706d7f6f59",
+      "agent_id": "role:engineer",
+      "issue_id": "cd5b31b2-4a3f-49ab-8f51-598b0b3f7707",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 131328, \"input_tokens\": 145485, \"output_tokens\": 2317, \"reasoning_output_tokens\": 393}"
+    },
+    {
+      "id": "run:44aab5f0-191f-4e9a-924b-0d1119058db8",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 17792, \"input_tokens\": 29204, \"output_tokens\": 808, \"reasoning_output_tokens\": 245}"
+    },
+    {
+      "id": "run:82c1eacf-bb52-4087-8733-59f9482b5896",
+      "agent_id": "role:engineer",
+      "issue_id": "cd5b31b2-4a3f-49ab-8f51-598b0b3f7707",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 86528, \"input_tokens\": 100182, \"output_tokens\": 1861, \"reasoning_output_tokens\": 48}"
+    },
+    {
+      "id": "run:f9506061-c465-42a2-85cd-4e71b0ea2db2",
+      "agent_id": "role:engineer",
+      "issue_id": "cd5b31b2-4a3f-49ab-8f51-598b0b3f7707",
+      "status": "skipped",
+      "provider": null,
+      "model": null,
+      "channel": null,
+      "error_code": "issue_terminal",
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:55be08a9-bfce-48c7-95d2-26743c11c483",
+      "agent_id": "role:reviewer",
+      "issue_id": "5f66d38c-adfb-45b3-9390-8c8f7a6c2c62",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 22723, \"output_tokens\": 1205, \"reasoning_output_tokens\": 67}"
+    },
+    {
+      "id": "run:44f85c97-d3ba-40ff-afef-97e638513e5a",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 28888, \"output_tokens\": 831, \"reasoning_output_tokens\": 272}"
+    }
+  ],
+  "reports": [
+    {
+      "agent_role": "file_scout",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "none",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "engineer",
+      "result": "blocked",
+      "issue_status": "blocked",
+      "evidence": "greeting.py:1-2; tests/test_greeting.py:1-9; pytest failed before collection due missing Python runtime",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "engineer",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "greeting.py:1; tests/test_greeting.py:1; pytest command attempts failed before collection due environment",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "reviewer",
+      "result": "approved",
+      "issue_status": "done",
+      "evidence": "greeting.py:1-2, tests/test_greeting.py:1-8",
+      "valid": 1,
+      "is_assignee": 1
+    }
+  ],
+  "ok": false
+}

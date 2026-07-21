@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "benchmark": "durable_review",
+  "seed": 1,
+  "profile_id": "opencode_zen_free",
+  "provider": "opencode-zen",
+  "channel": "free_gateway",
+  "cli_version": "1.18.4",
+  "model": "opencode/mimo-v2.5-free",
+  "contract": "same_broken_diff_then_same_fix_v1",
+  "reject": {
+    "ok": false,
+    "seconds": 48.829,
+    "report": null
+  },
+  "approve": {
+    "ok": false,
+    "seconds": null,
+    "report": null
+  },
+  "runs": [
+    {
+      "id": "run:45485da2-1deb-47ff-9847-0c6bf825b872",
+      "status": "completed",
+      "error_code": null,
+      "usage_json": "{\"cache_write_tokens\": 0, \"cached_input_tokens\": 25856, \"input_tokens\": 11367, \"output_tokens\": 799, \"provider_session_id\": \"ses_079a151a9ffekHBA4Awcp03qG2\", \"reasoning_output_tokens\": 1055, \"total_tokens\": 39077}",
+      "started_at": "2026-07-21T20:29:38.710090+00:00",
+      "finished_at": "2026-07-21T20:30:27.244354+00:00"
+    },
+    {
+      "id": "run:4b9a4367-77d1-49ce-af9e-fab2e2b4440a",
+      "status": "completed",
+      "error_code": null,
+      "usage_json": "{}",
+      "started_at": "2026-07-21T20:30:27.279860+00:00",
+      "finished_at": "2026-07-21T20:30:27.331876+00:00"
+    }
+  ],
+  "quota_observation": {
+    "provider_calls": 0,
+    "product_runs": 2,
+    "wall_seconds": 48.829,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  },
+  "liveness": {
+    "live_runs": 0,
+    "claimed_wakeups": 0
+  },
+  "ok": false
+}

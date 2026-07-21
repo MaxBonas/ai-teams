@@ -47,6 +47,25 @@ def test_rejects_complete_summary_that_exceeds_context_budget() -> None:
     assert result["accepted"] is False
 
 
+def test_hidden_rubric_evaluates_markdown_and_causal_index_as_one_artifact() -> None:
+    source = "Se decide RS256. Engineer hará rollback. " * 40
+    result = evaluate_summary(
+        source,
+        "Resumen mínimo.",
+        RUBRIC,
+        causal_units=[{
+            "id": "decision-1",
+            "kind": "decision",
+            "statement": "RS256 confirmado; Engineer hará rollback.",
+            "links": ["owner:Engineer", "deliverable:rollback"],
+            "source_comment_ids": ["comment-1"],
+        }],
+    )
+
+    assert result["accepted"] is True
+    assert result["causal_units"] == 1
+
+
 def test_auth_rubric_accepts_compact_units_and_reversed_acceptance_order() -> None:
     rubric = json.loads(
         (CONTEXT_FIXTURES / "auth_migration_rubric.json").read_text(encoding="utf-8")

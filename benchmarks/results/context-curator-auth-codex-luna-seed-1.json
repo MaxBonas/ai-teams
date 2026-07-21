@@ -1,0 +1,108 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "auth_migration_causal_v5",
+  "source_chars": 8501,
+  "summary_chars": 0,
+  "causal_units": [],
+  "causal_index_chars": 2,
+  "artifact_chars": 3,
+  "artifact_ratio": 0.0004,
+  "compression_ratio": 0.0,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 0,
+  "required_total": 9,
+  "required_retention_rate": 0.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": false,
+  "accepted": false,
+  "criteria": [
+    {
+      "id": "jwt_rs256",
+      "kind": "decision",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "dual_validation_24h",
+      "kind": "decision",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "legacy_kid_gate",
+      "kind": "constraint",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "regional_cache_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": false,
+      "matched": []
+    }
+  ],
+  "profile_id": "codex_subscription",
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "gpt-5.6-luna",
+    "channel": "subscription"
+  },
+  "runtime": {
+    "issue_status": "in_progress",
+    "run": {
+      "id": "run:724c7896-db53-4613-bd0c-66683074890a",
+      "status": "failed",
+      "error_code": "subscription_cli_nonzero_exit",
+      "error": "exit code 1",
+      "agent_id": "role:context_curator"
+    },
+    "attempts": 1,
+    "wall_seconds": 29.9,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-codex-luna-seed-1\\.aiteam\\aiteam.db"
+  },
+  "summary": ""
+}

@@ -1,0 +1,47 @@
+{
+  "case": "accessible_checkout_form",
+  "seed": 2,
+  "started_at": "2026-07-19T21:17:12+0200",
+  "workdir": "runtime/bench/accessible-checkout-seed-2-solo-lead",
+  "config": {
+    "harness_version": 3,
+    "rubric_revision": 2,
+    "solo_model": "gpt-5.4",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "team_run_profile": "solo_lead",
+    "max_ticks": 3,
+    "max_minutes": 10.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 122.7,
+      "ticks": 1,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 1,
+      "tokens_in": 166639,
+      "tokens_out": 5650,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 10,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 10,
+        "deliverable_files": [
+          "checkout.js",
+          "checkout.test.js",
+          "index.html",
+          "package.json",
+          "styles.css"
+        ]
+      }
+    }
+  }
+}

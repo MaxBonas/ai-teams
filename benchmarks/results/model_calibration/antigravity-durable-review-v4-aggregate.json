@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_durable_review_aggregate",
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "contract": "same_broken_diff_then_same_fix_v1",
+  "source_reports": 6,
+  "arms": [
+    {
+      "model": "gemini-3.5-flash-high",
+      "samples": 3,
+      "passed": 3,
+      "reject_passed": 3,
+      "approve_passed": 3,
+      "wall_seconds_median": 99.999,
+      "wall_seconds_range": [
+        75.984,
+        108.641
+      ],
+      "provider_calls": 6,
+      "product_runs": 12
+    },
+    {
+      "model": "gemini-3.6-flash-medium",
+      "samples": 3,
+      "passed": 3,
+      "reject_passed": 3,
+      "approve_passed": 3,
+      "wall_seconds_median": 43.078,
+      "wall_seconds_range": [
+        30.359,
+        59.188
+      ],
+      "provider_calls": 6,
+      "product_runs": 12
+    }
+  ],
+  "matrix_balanced": true,
+  "conclusion": {
+    "behavioral_contract_tied": true,
+    "default_change_allowed": false,
+    "decision": "retain_baseline",
+    "baseline": "gemini-3.5-flash-high",
+    "challenger": "gemini-3.6-flash-medium",
+    "median_wall_seconds_delta": -56.921,
+    "reason": "empate conductual 3/3; la latencia aislada no demuestra ventaja económica",
+    "tokens_available": false,
+    "marginal_cost_cents": 0,
+    "goodhart_risk": "residual: una familia de defecto y juez contractual determinista"
+  }
+}

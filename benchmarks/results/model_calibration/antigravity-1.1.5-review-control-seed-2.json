@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_role_model_screening",
+  "started_at": "2026-07-21T09:26:56+0200",
+  "seed": 2,
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "inventory": [
+    "gemini-3.5-flash-medium",
+    "gemini-3.5-flash-high",
+    "gemini-3.5-flash-low",
+    "gemini-3.1-pro-low",
+    "gemini-3.1-pro-high",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6-thinking",
+    "gpt-oss-120b-medium"
+  ],
+  "matrix": [
+    {
+      "model": "gemini-3.5-flash-high",
+      "role": "review",
+      "tier": 2,
+      "baseline": true
+    }
+  ],
+  "evaluation_contract": {
+    "evaluators": [
+      "required_json_shape",
+      "hidden_causal_anchor_coverage",
+      "forbidden_noise"
+    ],
+    "independent_behavioral_evidence": false,
+    "repetitions_per_model": 1
+  },
+  "results": [
+    {
+      "model": "gemini-3.5-flash-high",
+      "role": "review",
+      "tier": 2,
+      "baseline": true,
+      "exit_code": 0,
+      "wall_seconds": 8.843,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"verdict\": \"changes_requested\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"line\": 3,\n      \"cause\": \"Falta de validacion de autorizacion. No se verifica que el actor pertenezca al mismo tenant y sea el agente asignado (assignee_agent_id) de la issue antes de actualizar su estado.\",\n      \"fix\": \"Agregar una validacion previa que compare issue.tenant_id con actor.tenant e issue.assignee_agent_id con actor.agent_id, interrumpiendo el flujo si no coinciden.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"line\": 3,\n      \"cause\": \"Falta de atomicidad entre la actualizacion del estado (status='done') y la insercion en activity_log.\",\n      \"fix\": \"Envolver la actualizacion de issues y la insercion en activity_log dentro de una transaccion de base de datos para asegurar consistencia atomica.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"line\": 7,\n      \"cause\": \"El encolamiento del wakeup no valida que el parent_id no sea nulo y se invoca sin proveer una clave idempotente requerida por la cola durable.\",\n      \"fix\": \"Extraer parent_id del resultado de la consulta de parent, validar que no sea nulo y llamar a enqueue_wakeup con parent_id y una clave idempotente generada a partir del issue_id.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"line\": 8,\n      \"cause\": \"El bloque try-except silencioso con pass descarta errores e impide que la issue se mantenga en un estado coherente, dejando 'done' sin continuacion durable.\",\n      \"fix\": \"Eliminar el bloque try-except silencioso para permitir que cualquier excepcion en la actividad o encolamiento aborte la transaccion y evite el cierre incorrecto de la issue.\"\n    }\n  ],\n  \"required_evidence\": [\n    \"Codigo modificado que implemente transacciones, validaciones de tenant/assignee, chequeo de parent_id no nulo y manejo de excepciones robusto.\",\n    \"Tests que validen el rollback del estado de la issue si falla el insert o el wakeup, y el rechazo de la operacion cuando el actor no tiene autorizacion.\"\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "verdict": "changes_requested",
+        "findings": [
+          {
+            "severity": "high",
+            "line": 3,
+            "cause": "Falta de validacion de autorizacion. No se verifica que el actor pertenezca al mismo tenant y sea el agente asignado (assignee_agent_id) de la issue antes de actualizar su estado.",
+            "fix": "Agregar una validacion previa que compare issue.tenant_id con actor.tenant e issue.assignee_agent_id con actor.agent_id, interrumpiendo el flujo si no coinciden."
+          },
+          {
+            "severity": "high",
+            "line": 3,
+            "cause": "Falta de atomicidad entre la actualizacion del estado (status='done') y la insercion en activity_log.",
+            "fix": "Envolver la actualizacion de issues y la insercion en activity_log dentro de una transaccion de base de datos para asegurar consistencia atomica."
+          },
+          {
+            "severity": "high",
+            "line": 7,
+            "cause": "El encolamiento del wakeup no valida que el parent_id no sea nulo y se invoca sin proveer una clave idempotente requerida por la cola durable.",
+            "fix": "Extraer parent_id del resultado de la consulta de parent, validar que no sea nulo y llamar a enqueue_wakeup con parent_id y una clave idempotente generada a partir del issue_id."
+          },
+          {
+            "severity": "high",
+            "line": 8,
+            "cause": "El bloque try-except silencioso con pass descarta errores e impide que la issue se mantenga en un estado coherente, dejando 'done' sin continuacion durable.",
+            "fix": "Eliminar el bloque try-except silencioso para permitir que cualquier excepcion en la actividad o encolamiento aborte la transaccion y evite el cierre incorrecto de la issue."
+          }
+        ],
+        "required_evidence": [
+          "Codigo modificado que implemente transacciones, validaciones de tenant/assignee, chequeo de parent_id no nulo y manejo de excepciones robusto.",
+          "Tests que validen el rollback del estado de la issue si falla el insert o el wakeup, y el rechazo de la operacion cuando el actor no tiene autorizacion."
+        ]
+      },
+      "evaluation": {
+        "score": 10,
+        "max_score": 10,
+        "score_percent": 100.0,
+        "present_keys": [
+          "verdict",
+          "findings",
+          "required_evidence"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 7,
+        "anchor_total": 7,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    }
+  ],
+  "conclusion": {
+    "policy_change_allowed": false,
+    "reason": "screening de una sola muestra por modelo; requiere varias semillas y baseline comparable",
+    "economic_comparison_available": false,
+    "economic_reason": "agy headless no expone tokens; suscripcion se mide en llamadas y segundos, no como coste API",
+    "role_rankings_directional": {
+      "lead": [],
+      "coding": [],
+      "review": [
+        {
+          "model": "gemini-3.5-flash-high",
+          "score_percent": 100.0,
+          "wall_seconds": 8.843,
+          "status": "completed"
+        }
+      ],
+      "scout": []
+    },
+    "next_gate": "repetir al menos tres semillas para los challengers que igualen o superen al baseline de su rol",
+    "goodhart_risk": "material: rubrica estructural/lexica conocida por el harness, sin juez factual independiente"
+  },
+  "finished_at": "2026-07-21T09:27:04+0200",
+  "quota_observation": {
+    "unit": "runs_and_wall_seconds",
+    "runs": 1,
+    "wall_seconds": 8.843,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  }
+}

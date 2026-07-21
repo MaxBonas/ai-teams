@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "benchmark": "live_run_profile_canary",
+  "date": "2026-07-21T20:45:58+0200",
+  "profile": "full_team",
+  "data_class": "internal",
+  "adapter_profile_ids": [
+    "antigravity_subscription"
+  ],
+  "seconds": 122.5,
+  "ticks": 4,
+  "tokens_partial": true,
+  "marginal_cost_cents": 0,
+  "checks": {
+    "root_done": true,
+    "engineer_present": false,
+    "reviewer_present": false,
+    "reviewer_approved": false,
+    "test_runner_exit_zero": true,
+    "workspace_written": true,
+    "no_live_runs": true,
+    "no_claimed_wakeups": true,
+    "no_queued_wakeups": true
+  },
+  "issues": [
+    {
+      "id": "issue:intake",
+      "parent_id": null,
+      "role": "lead",
+      "status": "done",
+      "assignee_agent_id": "role:lead"
+    },
+    {
+      "id": "9032b6a5-efde-4556-8327-d5f504fc15c1",
+      "parent_id": "issue:intake",
+      "role": "test_runner",
+      "status": "done",
+      "assignee_agent_id": "role:test_runner"
+    }
+  ],
+  "runs": [
+    {
+      "id": "run:faa2c5e0-525e-47a7-b910-dafe6f05a58f",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "google-antigravity",
+      "model": "gemini-3.1-pro-high",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:ece20a7b-2ea9-496c-b1aa-e74916188999",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "google-antigravity",
+      "model": "gemini-3.1-pro-high",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:b59626ea-956b-4c55-b8c0-1cb4c902e129",
+      "agent_id": "role:test_runner",
+      "issue_id": "9032b6a5-efde-4556-8327-d5f504fc15c1",
+      "status": "completed",
+      "provider": "aiteams",
+      "model": "structured-role-runtime",
+      "channel": "local",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:9f8723a4-6544-4a92-9e12-cd495a3e3df1",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "google-antigravity",
+      "model": "gemini-3.1-pro-high",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{}"
+    }
+  ],
+  "reports": [
+    {
+      "agent_role": "lead",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "greeting.py:1-2, tests/test_greeting.py:1-9",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "test_runner",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\venv\\Scripts\\python.exe -m coverage run -m pytest -q tests/test_greeting.py -> exit 0 (pytest); 2 passed in 0.01s; coverage 100%; ruff 1 issue(s)",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "lead",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "greeting.py:1-2, tests/test_greeting.py:1-9, test_runner report (pytest exit 0, 2 passed)",
+      "valid": 1,
+      "is_assignee": 1
+    }
+  ],
+  "ok": false
+}

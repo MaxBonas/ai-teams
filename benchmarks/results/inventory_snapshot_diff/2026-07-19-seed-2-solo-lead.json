@@ -1,0 +1,44 @@
+{
+  "case": "inventory_snapshot_diff",
+  "seed": 2,
+  "started_at": "2026-07-19T22:00:35+0200",
+  "workdir": "runtime/bench/inventory-diff-seed-2-solo-lead",
+  "config": {
+    "harness_version": 3,
+    "rubric_revision": 2,
+    "solo_model": "gpt-5.4",
+    "team_profiles": [
+      "codex_subscription"
+    ],
+    "team_run_profile": "solo_lead",
+    "max_ticks": 3,
+    "max_minutes": 10.0
+  },
+  "arms": {
+    "team": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 178.6,
+      "ticks": 1,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 1,
+      "tokens_in": 296683,
+      "tokens_out": 6248,
+      "cost_cents": 0,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 20,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 20,
+        "deliverable_files": [
+          "inventory_diff.py",
+          "test_inventory_diff.py"
+        ]
+      }
+    }
+  }
+}

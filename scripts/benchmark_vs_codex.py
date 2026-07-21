@@ -7,7 +7,7 @@ tiempo de pared. El juez es un exit code, no una opinión.
 
 Uso (gasta tokens reales — NUNCA corre en la suite de tests):
     venv/Scripts/python.exe scripts/benchmark_vs_codex.py --case benchmarks/cli_conversor
-    venv/Scripts/python.exe scripts/benchmark_vs_codex.py --case ... --arm solo --model gpt-5.4
+    venv/Scripts/python.exe scripts/benchmark_vs_codex.py --case ... --arm solo --model gpt-5.5
 """
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.benchmark_integrity import code_evaluation_contract  # noqa: E402
 
 VENV_PYTHON = sys.executable
 
@@ -231,7 +233,7 @@ def main() -> int:
     parser.add_argument("--case", type=Path, default=REPO_ROOT / "benchmarks" / "cli_conversor")
     parser.add_argument("--arm", choices=["both", "team", "solo"], default="both")
     parser.add_argument("--workdir", type=Path, default=None)
-    parser.add_argument("--model", default="gpt-5.4", help="modelo del brazo solo")
+    parser.add_argument("--model", default="gpt-5.5", help="modelo del brazo solo")
     parser.add_argument("--profiles", default="codex_subscription,openai_api")
     parser.add_argument(
         "--run-profile",
@@ -257,13 +259,14 @@ def main() -> int:
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "workdir": _portable_path(workdir),
         "config": {
-            "harness_version": 3,
+            "harness_version": 4,
             "solo_model": args.model,
             "team_profiles": [p.strip() for p in args.profiles.split(",") if p.strip()],
             "team_run_profile": args.run_profile,
             "max_ticks": args.max_ticks,
             "max_minutes": args.max_minutes,
         },
+        "evaluation_contract": code_evaluation_contract(),
         "arms": {},
     }
     if args.arm in ("both", "team"):

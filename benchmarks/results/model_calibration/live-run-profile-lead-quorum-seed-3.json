@@ -1,0 +1,235 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "provider_failover_v1",
+  "completed": false,
+  "failure": "quorum session b60a2355-9442-4095-98b6-cd6d72696716 has no accepted final plan",
+  "diagnostics": {
+    "session": {
+      "id": "b60a2355-9442-4095-98b6-cd6d72696716",
+      "issue_id": "issue:intake",
+      "status": "degraded",
+      "base_plan_revision_id": "397084a1-45b2-4354-aef6-788dabbaa0cc",
+      "final_plan_revision_id": null,
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": "auditor_report_format_exhausted"
+    },
+    "base": {
+      "score": 19.0,
+      "max_score": 23.0,
+      "score_pct": 82.61,
+      "hard_failures": [],
+      "passes_hard_gate": true,
+      "word_count": 1998,
+      "criteria": [
+        {
+          "id": "objective",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "objetiv"
+          ],
+          "required": false
+        },
+        {
+          "id": "closure",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "criteri.{0,20}(cierre|aceptaci)"
+          ],
+          "required": false
+        },
+        {
+          "id": "decomposition",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "sub-?issue|tarea|fase|paso"
+          ],
+          "required": false
+        },
+        {
+          "id": "ownership",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "owner|responsable|reporta|asignad"
+          ],
+          "required": false
+        },
+        {
+          "id": "evidence",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "evidencia|recibo|artefacto|diff|test"
+          ],
+          "required": false
+        },
+        {
+          "id": "risk",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "riesgo|fallo|rotura|rollback"
+          ],
+          "required": false
+        },
+        {
+          "id": "escalation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "escal|bloque|intervenci.{0,10}human|usuario"
+          ],
+          "required": false
+        },
+        {
+          "id": "continuation",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "siguiente run|continuaci|wakeup|heartbeat|reanud"
+          ],
+          "required": false
+        },
+        {
+          "id": "failure_taxonomy",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "429|rate.limit|timeout|auth|invalid.request"
+          ],
+          "required": true
+        },
+        {
+          "id": "idempotency",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "idempoten|deduplic"
+          ],
+          "required": true
+        },
+        {
+          "id": "circuit_breaker",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "circuit.breaker|cortacircuit"
+          ],
+          "required": true
+        },
+        {
+          "id": "bounded_retries",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+          ],
+          "required": false
+        },
+        {
+          "id": "cost_cap",
+          "weight": 2.0,
+          "passed": true,
+          "matched": [
+            "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+          ],
+          "required": true
+        },
+        {
+          "id": "quality_guard",
+          "weight": 2.0,
+          "passed": false,
+          "matched": [],
+          "required": false
+        },
+        {
+          "id": "observability",
+          "weight": 1.0,
+          "passed": true,
+          "matched": [
+            "telemetr|m[eé]trica|cost_events|run_events"
+          ],
+          "required": false
+        },
+        {
+          "id": "recovery_test",
+          "weight": 2.0,
+          "passed": false,
+          "matched": [],
+          "required": false
+        }
+      ],
+      "penalties": [
+        {
+          "id": "unbounded_fallback",
+          "applied": 0.0,
+          "matched": []
+        }
+      ]
+    },
+    "contributions": [
+      {
+        "ordinal": 2,
+        "provider": "google-antigravity",
+        "model": "gemini-3.1-pro-high",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:15c7ba3a-8660-4521-9fbc-541b5f3e01c6"
+      }
+    ],
+    "auditor_runs": [
+      {
+        "id": "run:15c7ba3a-8660-4521-9fbc-541b5f3e01c6",
+        "agent_id": "role:quorum_auditor_2",
+        "status": "completed",
+        "provider": "google-antigravity",
+        "model": "gemini-3.1-pro-high",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{}"
+      },
+      {
+        "id": "run:868ceb57-bdab-4ddb-bceb-756286d05226",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 24365, \"output_tokens\": 3388, \"reasoning_output_tokens\": 24}"
+      },
+      {
+        "id": "run:e63fd70c-fe09-47b2-b44f-1603aee74b72",
+        "agent_id": "role:quorum_auditor_1",
+        "status": "completed",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "error_code": null,
+        "error": null,
+        "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 24938, \"output_tokens\": 3334, \"reasoning_output_tokens\": 22}"
+      }
+    ]
+  },
+  "provenance": {
+    "runtime": {
+      "arm": "team",
+      "final_status": "in_progress",
+      "wall_seconds": 334.2,
+      "ticks": 6,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": true,
+      "limit_reached": false,
+      "runs": 6,
+      "tokens_in": 106233,
+      "tokens_out": 13717,
+      "cost_cents": 0
+    }
+  }
+}

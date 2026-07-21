@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -18,6 +19,8 @@ from aiteam.adapters.registry import AdapterDescriptor, AdapterRegistry, Executi
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
+from aiteam.project_adapters import write_project_adapter_policy
+from aiteam.user_config import record_model_health, store_secret
 
 
 class _SoloCanaryRuntime:
@@ -41,13 +44,42 @@ class _SoloCanaryRuntime:
 
 
 def run_canary(workdir: Path) -> dict[str, Any]:
+    """Ejecuta el canario con un perfil hermético y evidencia de modelo exacta."""
+    config_dir = workdir / "user-config"
+    previous = os.environ.get("AITEAM_USER_CONFIG_DIR")
+    os.environ["AITEAM_USER_CONFIG_DIR"] = str(config_dir)
+    try:
+        store_secret(provider="openai", name="default", secret="canary-not-a-real-key")
+        record_model_health(
+            "openai_api",
+            "gpt-5.6-sol",
+            available=True,
+            reason="deterministic solo_lead canary fixture",
+        )
+        return _run_canary(workdir)
+    finally:
+        if previous is None:
+            os.environ.pop("AITEAM_USER_CONFIG_DIR", None)
+        else:
+            os.environ["AITEAM_USER_CONFIG_DIR"] = previous
+
+
+def _run_canary(workdir: Path) -> dict[str, Any]:
     workspace = workdir / "project"
     workspace.mkdir(parents=True, exist_ok=True)
+    runtime_dir = workspace / ".aiteam"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    write_project_adapter_policy(runtime_dir, profile_ids=["openai_api"])
     _initialize_project_runtime(
         workspace,
         initial_task="Crea solo_result.txt y cierra la tarea.",
         run_profile="solo_lead",
+        data_class="internal",
     )
+    # El adapter determinista del canario no es un perfil de producto. Retirar
+    # la policy temporal evita que el preflight LLM intente resolverlo como tal;
+    # este canario cubre semántica solo_lead, no catálogo de proveedores.
+    (runtime_dir / "project_config.json").unlink()
     db_path = workspace / ".aiteam" / "aiteam.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(

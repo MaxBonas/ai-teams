@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.5-flash-low",
+  "initial": {
+    "mode": "new_project_print",
+    "duration_seconds": 5.877,
+    "exit_code": 0,
+    "output": "AITEAM-AGY-ID-PROBE",
+    "identity_source": "explicit --log-file",
+    "project_id": "63249f0f-d4f2-4bab-8cad-829e8ac53ad1",
+    "conversation_id": "5997421f-cafc-4d8f-9a0e-20da8a9b7c0e"
+  },
+  "resume": {
+    "mode": "explicit_conversation_id",
+    "duration_seconds": 2.913,
+    "exit_code": 0,
+    "output": "AITEAM-AGY-ID-PROBE",
+    "retains_initial_fact": true
+  },
+  "usage": null,
+  "cost_cents": 0,
+  "conclusion": {
+    "explicit_resume_transport_supported": true,
+    "economic_comparison_available": false,
+    "production_activation_allowed": false,
+    "reason": "agy 1.1.5 no entrega tokens por run comparables en modo headless"
+  }
+}

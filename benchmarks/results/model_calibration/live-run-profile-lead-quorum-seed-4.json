@@ -1,0 +1,426 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "provider_failover_v1",
+  "base": {
+    "score": 21.0,
+    "max_score": 23.0,
+    "score_pct": 91.3,
+    "hard_failures": [],
+    "passes_hard_gate": true,
+    "word_count": 2511,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "objetiv"
+        ],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "criteri.{0,20}(cierre|aceptaci)"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "siguiente run|continuaci|wakeup|heartbeat|reanud"
+        ],
+        "required": false
+      },
+      {
+        "id": "failure_taxonomy",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "429|rate.limit|timeout|auth|invalid.request"
+        ],
+        "required": true
+      },
+      {
+        "id": "idempotency",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "idempoten|deduplic"
+        ],
+        "required": true
+      },
+      {
+        "id": "circuit_breaker",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "circuit.breaker|cortacircuit"
+        ],
+        "required": true
+      },
+      {
+        "id": "bounded_retries",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+        ],
+        "required": false
+      },
+      {
+        "id": "cost_cap",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+        ],
+        "required": true
+      },
+      {
+        "id": "quality_guard",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "quality|calidad|capacidad.{0,20}modelo|equivalencia"
+        ],
+        "required": false
+      },
+      {
+        "id": "observability",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "telemetr|m[eé]trica|cost_events|run_events"
+        ],
+        "required": false
+      },
+      {
+        "id": "recovery_test",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "unbounded_fallback",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "final": {
+    "score": 21.0,
+    "max_score": 23.0,
+    "score_pct": 91.3,
+    "hard_failures": [],
+    "passes_hard_gate": true,
+    "word_count": 1961,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "objetiv"
+        ],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "criteri.{0,20}(cierre|aceptaci)"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "siguiente run|continuaci|wakeup|heartbeat|reanud"
+        ],
+        "required": false
+      },
+      {
+        "id": "failure_taxonomy",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "429|rate.limit|timeout|auth|invalid.request"
+        ],
+        "required": true
+      },
+      {
+        "id": "idempotency",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "idempoten|deduplic"
+        ],
+        "required": true
+      },
+      {
+        "id": "circuit_breaker",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "circuit.breaker|cortacircuit"
+        ],
+        "required": true
+      },
+      {
+        "id": "bounded_retries",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+        ],
+        "required": false
+      },
+      {
+        "id": "cost_cap",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+        ],
+        "required": true
+      },
+      {
+        "id": "quality_guard",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "quality|calidad|capacidad.{0,20}modelo|equivalencia"
+        ],
+        "required": false
+      },
+      {
+        "id": "observability",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "telemetr|m[eé]trica|cost_events|run_events"
+        ],
+        "required": false
+      },
+      {
+        "id": "recovery_test",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "unbounded_fallback",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "delta_score_pct": 0.0,
+  "improved": false,
+  "regressed": false,
+  "hard_gate_improved": false,
+  "evaluation_contract": {
+    "version": 1,
+    "evaluators": [
+      {
+        "id": "hidden_case_rubric",
+        "class": "lexical_coverage",
+        "blind": true
+      },
+      {
+        "id": "plan_depth_contract",
+        "class": "structural_contract",
+        "blind": false
+      }
+    ],
+    "independent_semantic_or_structural": true,
+    "goodhart_risk": "material_no_independent_factual_judge",
+    "base_structural": {
+      "valid": true,
+      "word_count": 2604,
+      "min_words": 300,
+      "dimensions": {
+        "objective_scope": true,
+        "current_state": true,
+        "assumptions_constraints": true,
+        "architecture_approach": true,
+        "phases_dependencies_owners": true,
+        "risks_rollback": true,
+        "verification_evidence": true,
+        "open_questions_escalation": true,
+        "continuation": true
+      },
+      "missing_dimensions": []
+    },
+    "final_structural": {
+      "valid": true,
+      "word_count": 2064,
+      "min_words": 300,
+      "dimensions": {
+        "objective_scope": true,
+        "current_state": true,
+        "assumptions_constraints": true,
+        "architecture_approach": true,
+        "phases_dependencies_owners": true,
+        "risks_rollback": true,
+        "verification_evidence": true,
+        "open_questions_escalation": true,
+        "continuation": true
+      },
+      "missing_dimensions": []
+    }
+  },
+  "provenance": {
+    "session": {
+      "id": "e3e0da51-33d2-4610-98b9-dbae3851994b",
+      "issue_id": "issue:intake",
+      "status": "accepted",
+      "base_plan_revision_id": "1742e3b9-6ea2-4a05-b9f5-d23e719976b2",
+      "final_plan_revision_id": "aa354786-0bb3-4820-b1b6-35191f0d5f85",
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": null
+    },
+    "contributions": [
+      {
+        "ordinal": 1,
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:9702a3d4-1a0b-4d2a-9377-078edf796b05",
+        "input_tokens": 25129,
+        "output_tokens": 3471,
+        "cost_cents": 0
+      },
+      {
+        "ordinal": 2,
+        "provider": "google-antigravity",
+        "model": "gemini-3.1-pro-high",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:f4d9abb3-ad0b-492f-b947-5a057a46244a",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_cents": 0
+      }
+    ],
+    "runtime": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 305.7,
+      "ticks": 4,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 4,
+      "tokens_in": 85856,
+      "tokens_out": 12177,
+      "cost_cents": 0
+    }
+  }
+}

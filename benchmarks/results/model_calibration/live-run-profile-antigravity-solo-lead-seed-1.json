@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "benchmark": "live_run_profile_canary",
+  "date": "2026-07-21T20:09:29+0200",
+  "profile": "solo_lead",
+  "data_class": "internal",
+  "adapter_profile_id": "antigravity_subscription",
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "seconds": 54.656,
+  "tokens": null,
+  "marginal_cost_cents": 0,
+  "checks": {
+    "root_done": true,
+    "single_agent": true,
+    "no_children": true,
+    "workspace_written": true,
+    "verification_passed": true,
+    "no_live_runs": true,
+    "no_claimed_wakeups": true
+  },
+  "runs": [
+    {
+      "id": "run:d7015330-4b60-491c-9b2d-ebd514f793fc",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "error_code": null,
+      "usage_json": "{}"
+    }
+  ],
+  "root_issue": {
+    "status": "done",
+    "metadata_json": "{\"data_class\": \"internal\", \"profile\": \"solo_lead\", \"source\": \"project_bootstrap\", \"wake_reason\": \"new_project\"}"
+  },
+  "ok": true
+}

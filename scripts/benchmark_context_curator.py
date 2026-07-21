@@ -110,18 +110,34 @@ def run_canary(
     )
 
     scheduler = HeartbeatScheduler(db)
-    dispatch = scheduler.dispatch_next(agent_id="role:context_curator")
-    if dispatch is None:
-        raise RuntimeError("curator wakeup was not dispatchable")
     started = time.time()
-    RunExecutor(db, build_default_registry()).execute(dispatch)
+    executor = RunExecutor(db, build_default_registry())
+    attempts = 0
+    for _ in range(2):
+        dispatch = scheduler.dispatch_next(agent_id="role:context_curator")
+        if dispatch is None:
+            break
+        attempts += 1
+        executor.execute(dispatch)
+        with sqlite3.connect(db) as conn:
+            issue_status_now = conn.execute(
+                "SELECT status FROM issues WHERE id='issue:curator'"
+            ).fetchone()[0]
+        if issue_status_now in {"done", "blocked", "cancelled"}:
+            break
+    if attempts == 0:
+        raise RuntimeError("curator wakeup was not dispatchable")
     wall_seconds = round(time.time() - started, 1)
 
     summary_doc = get_context_summary(db, issue_id="issue:intake")
     summary = ""
+    causal_units: list[dict[str, Any]] = []
     if summary_doc and summary_doc.get("blocks"):
-        summary = str(summary_doc["blocks"][-1].get("summary_markdown") or "")
-    evaluation = evaluate_summary(durable_source, summary, rubric)
+        last_block = summary_doc["blocks"][-1]
+        summary = str(last_block.get("summary_markdown") or "")
+        if isinstance(last_block.get("causal_units"), list):
+            causal_units = last_block["causal_units"]
+    evaluation = evaluate_summary(durable_source, summary, rubric, causal_units=causal_units)
     with sqlite3.connect(db) as conn:
         conn.row_factory = sqlite3.Row
         issue_status = conn.execute(
@@ -129,12 +145,12 @@ def run_canary(
         ).fetchone()[0]
         run = dict(conn.execute(
             "SELECT id,status,error_code,error,agent_id FROM runs WHERE issue_id='issue:curator' "
-            "ORDER BY created_at DESC LIMIT 1"
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1"
         ).fetchone())
         usage = conn.execute(
             "SELECT COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),"
-            "COALESCE(SUM(cost_cents),0) FROM cost_events WHERE run_id=?",
-            (run["id"],),
+            "COALESCE(SUM(cost_cents),0) FROM cost_events c "
+            "JOIN runs r ON r.id=c.run_id WHERE r.issue_id='issue:curator'",
         ).fetchone()
     return {
         **evaluation,
@@ -147,6 +163,7 @@ def run_canary(
         "runtime": {
             "issue_status": issue_status,
             "run": run,
+            "attempts": attempts,
             "wall_seconds": wall_seconds,
             "input_tokens": int(usage[0]),
             "output_tokens": int(usage[1]),
@@ -154,6 +171,7 @@ def run_canary(
             "db": str(db),
         },
         "summary": summary,
+        "causal_units": causal_units,
     }
 
 

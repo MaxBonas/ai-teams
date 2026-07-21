@@ -25,6 +25,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from aiteam.quorum_quality import evaluate_plan_depth  # noqa: E402
+from scripts.benchmark_integrity import quorum_evaluation_contract  # noqa: E402
+
 
 GENERAL_CRITERIA = (
     {"id": "objective", "weight": 1, "patterns": [r"objetiv", r"goal|propósito"]},
@@ -184,6 +187,10 @@ def evaluate_pair(base_plan: str, final_plan: str, rubric: dict[str, Any], *, pr
     base = score_plan(base_plan, rubric)
     final = score_plan(final_plan, rubric)
     delta = round(final["score_pct"] - base["score_pct"], 2)
+    evaluation_contract = quorum_evaluation_contract(
+        base_structural=evaluate_plan_depth(base_plan),
+        final_structural=evaluate_plan_depth(final_plan),
+    )
     return {
         "benchmark": "lead_quorum_plan_quality",
         "rubric_id": rubric.get("id"),
@@ -193,6 +200,7 @@ def evaluate_pair(base_plan: str, final_plan: str, rubric: dict[str, Any], *, pr
         "improved": delta > 0,
         "regressed": delta < 0,
         "hard_gate_improved": (not base["passes_hard_gate"]) and final["passes_hard_gate"],
+        "evaluation_contract": evaluation_contract,
         "provenance": provenance or {},
     }
 

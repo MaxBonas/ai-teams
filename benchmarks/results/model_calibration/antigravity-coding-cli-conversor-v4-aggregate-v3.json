@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_coding_behavioral_calibration",
+  "case": "cli_conversor",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "models": {
+    "gemini-3.5-flash-high": {
+      "samples": 3,
+      "done": 2,
+      "hidden_passed": [
+        9,
+        9,
+        9
+      ],
+      "hidden_total": 9,
+      "ruff_issues": [
+        0,
+        1,
+        1
+      ],
+      "attempts": [
+        1,
+        1,
+        1
+      ],
+      "wall_seconds_median": 105.484,
+      "usage_available": false
+    },
+    "claude-sonnet-4-6": {
+      "samples": 3,
+      "done": 3,
+      "hidden_passed": [
+        9,
+        9,
+        9
+      ],
+      "hidden_total": 9,
+      "ruff_issues": [
+        0,
+        0,
+        0
+      ],
+      "attempts": [
+        1,
+        1,
+        1
+      ],
+      "wall_seconds_median": 51.141,
+      "usage_available": false
+    }
+  },
+  "integrity": {
+    "audit": "ab_series_integrity",
+    "cases": [
+      "cli_conversor"
+    ],
+    "required_arms": [
+      "gemini-3.5-flash-high",
+      "claude-sonnet-4-6"
+    ],
+    "seeds": [
+      "1",
+      "2",
+      "3"
+    ],
+    "matched_seed_count": 3,
+    "min_seeds": 3,
+    "missing_cells": [],
+    "duplicate_cells": [],
+    "excluded_unseeded_reports": 0,
+    "evidence_classes": [
+      "deterministic_behavioral",
+      "static_analysis",
+      "independent_semantic_or_structural"
+    ],
+    "goodhart_risk": "residual",
+    "issues": [],
+    "conclusion_allowed": true
+  },
+  "conclusion": {
+    "allowed": true,
+    "disposition": "promote_challenger",
+    "default_change_allowed": true,
+    "economic_comparison_available": false,
+    "quota_note": "sin usage headless comparable; runs y segundos son presión de cuota, no coste API",
+    "goodhart_risk": "residual_hidden_suite_overfit"
+  }
+}

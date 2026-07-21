@@ -1,0 +1,376 @@
+{
+  "benchmark": "lead_quorum_plan_quality",
+  "rubric_id": "provider_failover_v1",
+  "base": {
+    "score": 19.0,
+    "max_score": 23.0,
+    "score_pct": 82.61,
+    "hard_failures": [
+      "circuit_breaker"
+    ],
+    "passes_hard_gate": false,
+    "word_count": 1401,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "objetiv"
+        ],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "criteri.{0,20}(cierre|aceptaci)"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "siguiente run|continuaci|wakeup|heartbeat|reanud"
+        ],
+        "required": false
+      },
+      {
+        "id": "failure_taxonomy",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "429|rate.limit|timeout|auth|invalid.request"
+        ],
+        "required": true
+      },
+      {
+        "id": "idempotency",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "idempoten|deduplic"
+        ],
+        "required": true
+      },
+      {
+        "id": "circuit_breaker",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": true
+      },
+      {
+        "id": "bounded_retries",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+        ],
+        "required": false
+      },
+      {
+        "id": "cost_cap",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+        ],
+        "required": true
+      },
+      {
+        "id": "quality_guard",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "quality|calidad|capacidad.{0,20}modelo|equivalencia"
+        ],
+        "required": false
+      },
+      {
+        "id": "observability",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "telemetr|m[eé]trica|cost_events|run_events"
+        ],
+        "required": false
+      },
+      {
+        "id": "recovery_test",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "unbounded_fallback",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "final": {
+    "score": 21.0,
+    "max_score": 23.0,
+    "score_pct": 91.3,
+    "hard_failures": [],
+    "passes_hard_gate": true,
+    "word_count": 1033,
+    "criteria": [
+      {
+        "id": "objective",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "objetiv"
+        ],
+        "required": false
+      },
+      {
+        "id": "closure",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "criteri.{0,20}(cierre|aceptaci)",
+          "done|completad"
+        ],
+        "required": false
+      },
+      {
+        "id": "decomposition",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "sub-?issue|tarea|fase|paso"
+        ],
+        "required": false
+      },
+      {
+        "id": "ownership",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "owner|responsable|reporta|asignad"
+        ],
+        "required": false
+      },
+      {
+        "id": "evidence",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "evidencia|recibo|artefacto|diff|test"
+        ],
+        "required": false
+      },
+      {
+        "id": "risk",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "riesgo|fallo|rotura|rollback"
+        ],
+        "required": false
+      },
+      {
+        "id": "escalation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "escal|bloque|intervenci.{0,10}human|usuario"
+        ],
+        "required": false
+      },
+      {
+        "id": "continuation",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "siguiente run|continuaci|wakeup|heartbeat|reanud"
+        ],
+        "required": false
+      },
+      {
+        "id": "failure_taxonomy",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "429|rate.limit|timeout|auth|invalid.request"
+        ],
+        "required": true
+      },
+      {
+        "id": "idempotency",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "idempoten|deduplic"
+        ],
+        "required": true
+      },
+      {
+        "id": "circuit_breaker",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "circuit.breaker|cortacircuit"
+        ],
+        "required": true
+      },
+      {
+        "id": "bounded_retries",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "backoff|jitter|reintentos?.{0,20}(m[aá]ximo|l[ií]mite|acot)"
+        ],
+        "required": false
+      },
+      {
+        "id": "cost_cap",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "cap.{0,20}cost|l[ií]mite.{0,20}cost|presupuesto"
+        ],
+        "required": true
+      },
+      {
+        "id": "quality_guard",
+        "weight": 2.0,
+        "passed": true,
+        "matched": [
+          "quality|calidad|capacidad.{0,20}modelo|equivalencia"
+        ],
+        "required": false
+      },
+      {
+        "id": "observability",
+        "weight": 1.0,
+        "passed": true,
+        "matched": [
+          "telemetr|m[eé]trica|cost_events|run_events"
+        ],
+        "required": false
+      },
+      {
+        "id": "recovery_test",
+        "weight": 2.0,
+        "passed": false,
+        "matched": [],
+        "required": false
+      }
+    ],
+    "penalties": [
+      {
+        "id": "unbounded_fallback",
+        "applied": 0.0,
+        "matched": []
+      }
+    ]
+  },
+  "delta_score_pct": 8.69,
+  "improved": true,
+  "regressed": false,
+  "hard_gate_improved": true,
+  "provenance": {
+    "session": {
+      "id": "fb88bef0-f933-4833-b9c0-d572f9069838",
+      "issue_id": "issue:intake",
+      "status": "accepted",
+      "base_plan_revision_id": "e64e2bce-991f-4246-9f89-15ff01afeb75",
+      "final_plan_revision_id": "86642c72-e348-4bed-8235-8b9093d3fd44",
+      "requested_contributions": 2,
+      "min_valid_contributions": 2,
+      "skipped_reason": null
+    },
+    "contributions": [
+      {
+        "ordinal": 1,
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "channel": "subscription",
+        "valid": 1,
+        "run_id": "run:ef1693bf-eda9-45c5-b544-fea0f992965c",
+        "input_tokens": 22193,
+        "output_tokens": 3356,
+        "cost_cents": 0
+      },
+      {
+        "ordinal": 2,
+        "provider": "anthropic",
+        "model": "claude-opus-4-5",
+        "channel": "api",
+        "valid": 1,
+        "run_id": "run:04c5dd10-9fe6-4a19-b17c-9f886f6ccf66",
+        "input_tokens": 7962,
+        "output_tokens": 2223,
+        "cost_cents": 28
+      }
+    ],
+    "runtime": {
+      "arm": "team",
+      "final_status": "done",
+      "wall_seconds": 237.1,
+      "ticks": 4,
+      "dispatch_mode": "bounded_scheduler_executor",
+      "queue_exhausted": false,
+      "limit_reached": false,
+      "runs": 4,
+      "tokens_in": 89588,
+      "tokens_out": 10555,
+      "cost_cents": 28
+    }
+  }
+}

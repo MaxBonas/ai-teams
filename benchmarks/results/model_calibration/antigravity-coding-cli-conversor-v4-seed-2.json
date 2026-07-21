@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_coding_behavioral_calibration",
+  "case": "cli_conversor",
+  "seed": 2,
+  "started_at": "2026-07-21T09:51:00+0200",
+  "evaluation_contract": {
+    "version": 1,
+    "evaluators": [
+      {
+        "id": "hidden_acceptance",
+        "class": "deterministic_behavioral",
+        "blind": true
+      },
+      {
+        "id": "ruff",
+        "class": "static_analysis",
+        "blind": true
+      }
+    ],
+    "independent_semantic_or_structural": true,
+    "goodhart_risk": "residual_hidden_suite_overfit"
+  },
+  "config": {
+    "max_attempts": 2,
+    "stateless": true
+  },
+  "arms": {
+    "gemini-3.5-flash-high": {
+      "model": "gemini-3.5-flash-high",
+      "profile_id": "antigravity_subscription",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "issue_status": "in_progress",
+      "attempts": 1,
+      "runs": [
+        {
+          "id": "run:146256a1-17db-4b91-a4d5-f95cf94a6744",
+          "status": "failed",
+          "error_code": "subscription_cli_parse_error",
+          "liveness_state": "failed"
+        }
+      ],
+      "wall_seconds": 70.344,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_cents": 0,
+      "usage_available": false,
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 9,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 9,
+        "deliverable_files": [
+          "README.md",
+          "conversor.py",
+          "tests/test_conversor.py"
+        ]
+      },
+      "workspace": "runtime/bench/antigravity-coding-v4-seed-2/gemini-3.5-flash-high"
+    },
+    "claude-sonnet-4-6": {
+      "model": "claude-sonnet-4-6",
+      "profile_id": "antigravity_subscription",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "issue_status": "done",
+      "attempts": 1,
+      "runs": [
+        {
+          "id": "run:138509b5-8b52-4c94-8981-05b618766fbb",
+          "status": "completed",
+          "error_code": null,
+          "liveness_state": "advanced"
+        }
+      ],
+      "wall_seconds": 51.141,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_cents": 0,
+      "usage_available": false,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 9,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 9,
+        "deliverable_files": [
+          "README.md",
+          "conversor.py",
+          "tests/__init__.py",
+          "tests/test_conversor.py"
+        ]
+      },
+      "workspace": "runtime/bench/antigravity-coding-v4-seed-2/claude-sonnet-4-6"
+    }
+  },
+  "finished_at": "2026-07-21T09:53:11+0200"
+}

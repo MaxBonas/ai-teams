@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_role_model_screening",
+  "started_at": "2026-07-21T09:26:32+0200",
+  "seed": 1,
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "inventory": [
+    "gemini-3.5-flash-medium",
+    "gemini-3.5-flash-high",
+    "gemini-3.5-flash-low",
+    "gemini-3.1-pro-low",
+    "gemini-3.1-pro-high",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6-thinking",
+    "gpt-oss-120b-medium"
+  ],
+  "matrix": [
+    {
+      "model": "gemini-3.5-flash-high",
+      "role": "review",
+      "tier": 2,
+      "baseline": true
+    }
+  ],
+  "evaluation_contract": {
+    "evaluators": [
+      "required_json_shape",
+      "hidden_causal_anchor_coverage",
+      "forbidden_noise"
+    ],
+    "independent_behavioral_evidence": false,
+    "repetitions_per_model": 1
+  },
+  "results": [
+    {
+      "model": "gemini-3.5-flash-high",
+      "role": "review",
+      "tier": 2,
+      "baseline": true,
+      "exit_code": 0,
+      "wall_seconds": 8.766,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"verdict\": \"changes_requested\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"line\": 2,\n      \"cause\": \"Falta control de acceso: no se valida que el actor.agent_id coincida con issue.assignee_agent_id y que actor.tenant coincida con issue.tenant_id.\",\n      \"fix\": \"Extraer tenant_id y assignee_agent_id de la consulta de issue, y verificar que coincidan con los atributos del actor antes de modificar el estado.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"line\": 3,\n      \"cause\": \"Violacion de atomicidad: la actualizacion de estado a 'done' y la insercion en 'activity_log' ocurren fuera de una transaccion de base de datos.\",\n      \"fix\": \"Envolver la actualizacion de issues y la insercion en activity_log en un bloque transaccional (db.begin() / db.commit() o context manager).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"line\": 7,\n      \"cause\": \"Llamada insegura y no idempotente: enqueue_wakeup puede recibir un parent_id nulo si el issue no tiene padre, y no incluye una clave de idempotencia.\",\n      \"fix\": \"Validar que parent_id no sea nulo y pasar un token de idempotencia unico (por ejemplo, 'wakeup:{issue_id}') a enqueue_wakeup.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"line\": 8,\n      \"cause\": \"Continuacion no durable: el bloque except silencioso permite que el issue quede marcado como 'done' en base de datos aun si falla la actividad o el encolamiento del wakeup.\",\n      \"fix\": \"Hacer que la excepcion provoque un rollback de la transaccion de base de datos para que el estado 'done' no persista sin la continuacion durable.\"\n    }\n  ],\n  \"required_evidence\": [\n    \"Test unitario que valide que la funcion arroja un error de autorizacion si actor.agent_id != issue.assignee_agent_id o actor.tenant != issue.tenant_id.\",\n    \"Test de rollback que asegure que si enqueue_wakeup o activity_log fallan, el estado del issue en DB permanece sin cambios.\",\n    \"Verificacion de que enqueue_wakeup no es llamado cuando parent_id es nulo, y que la clave de idempotencia unica es generada y guardada.\"\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "verdict": "changes_requested",
+        "findings": [
+          {
+            "severity": "high",
+            "line": 2,
+            "cause": "Falta control de acceso: no se valida que el actor.agent_id coincida con issue.assignee_agent_id y que actor.tenant coincida con issue.tenant_id.",
+            "fix": "Extraer tenant_id y assignee_agent_id de la consulta de issue, y verificar que coincidan con los atributos del actor antes de modificar el estado."
+          },
+          {
+            "severity": "high",
+            "line": 3,
+            "cause": "Violacion de atomicidad: la actualizacion de estado a 'done' y la insercion en 'activity_log' ocurren fuera de una transaccion de base de datos.",
+            "fix": "Envolver la actualizacion de issues y la insercion en activity_log en un bloque transaccional (db.begin() / db.commit() o context manager)."
+          },
+          {
+            "severity": "high",
+            "line": 7,
+            "cause": "Llamada insegura y no idempotente: enqueue_wakeup puede recibir un parent_id nulo si el issue no tiene padre, y no incluye una clave de idempotencia.",
+            "fix": "Validar que parent_id no sea nulo y pasar un token de idempotencia unico (por ejemplo, 'wakeup:{issue_id}') a enqueue_wakeup."
+          },
+          {
+            "severity": "high",
+            "line": 8,
+            "cause": "Continuacion no durable: el bloque except silencioso permite que el issue quede marcado como 'done' en base de datos aun si falla la actividad o el encolamiento del wakeup.",
+            "fix": "Hacer que la excepcion provoque un rollback de la transaccion de base de datos para que el estado 'done' no persista sin la continuacion durable."
+          }
+        ],
+        "required_evidence": [
+          "Test unitario que valide que la funcion arroja un error de autorizacion si actor.agent_id != issue.assignee_agent_id o actor.tenant != issue.tenant_id.",
+          "Test de rollback que asegure que si enqueue_wakeup o activity_log fallan, el estado del issue en DB permanece sin cambios.",
+          "Verificacion de que enqueue_wakeup no es llamado cuando parent_id es nulo, y que la clave de idempotencia unica es generada y guardada."
+        ]
+      },
+      "evaluation": {
+        "score": 10,
+        "max_score": 10,
+        "score_percent": 100.0,
+        "present_keys": [
+          "verdict",
+          "findings",
+          "required_evidence"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 7,
+        "anchor_total": 7,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    }
+  ],
+  "conclusion": {
+    "policy_change_allowed": false,
+    "reason": "screening de una sola muestra por modelo; requiere varias semillas y baseline comparable",
+    "economic_comparison_available": false,
+    "economic_reason": "agy headless no expone tokens; suscripcion se mide en llamadas y segundos, no como coste API",
+    "role_rankings_directional": {
+      "lead": [],
+      "coding": [],
+      "review": [
+        {
+          "model": "gemini-3.5-flash-high",
+          "score_percent": 100.0,
+          "wall_seconds": 8.766,
+          "status": "completed"
+        }
+      ],
+      "scout": []
+    },
+    "next_gate": "repetir al menos tres semillas para los challengers que igualen o superen al baseline de su rol",
+    "goodhart_risk": "material: rubrica estructural/lexica conocida por el harness, sin juez factual independiente"
+  },
+  "finished_at": "2026-07-21T09:26:41+0200",
+  "quota_observation": {
+    "unit": "runs_and_wall_seconds",
+    "runs": 1,
+    "wall_seconds": 8.766,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  }
+}

@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "benchmark": "live_run_profile_canary",
+  "date": "2026-07-21T20:58:20+0200",
+  "profile": "full_team",
+  "data_class": "internal",
+  "adapter_profile_ids": [
+    "codex_subscription",
+    "antigravity_subscription"
+  ],
+  "seconds": 635.969,
+  "ticks": 12,
+  "tokens_partial": true,
+  "marginal_cost_cents": 0,
+  "checks": {
+    "root_done": true,
+    "engineer_present": true,
+    "reviewer_present": true,
+    "reviewer_approved": true,
+    "test_runner_exit_zero": true,
+    "workspace_written": true,
+    "no_live_runs": true,
+    "no_claimed_wakeups": true,
+    "no_queued_wakeups": true
+  },
+  "issues": [
+    {
+      "id": "issue:intake",
+      "parent_id": null,
+      "role": "lead",
+      "status": "done",
+      "assignee_agent_id": "role:lead"
+    },
+    {
+      "id": "c8af4728-7771-48aa-9650-bde0fff570d1",
+      "parent_id": "issue:intake",
+      "role": "file_scout",
+      "status": "done",
+      "assignee_agent_id": "role:file_scout"
+    },
+    {
+      "id": "9c710a12-9e24-4739-849b-ef0154a188b9",
+      "parent_id": "issue:intake",
+      "role": "file_scout",
+      "status": "done",
+      "assignee_agent_id": "role:file_scout"
+    },
+    {
+      "id": "c6749068-cc1e-4d8c-9e55-b0e40b2f7a3a",
+      "parent_id": "issue:intake",
+      "role": "engineer",
+      "status": "done",
+      "assignee_agent_id": "role:engineer"
+    },
+    {
+      "id": "a4eb44e1-49d2-42b4-8301-77ef1519447a",
+      "parent_id": "issue:intake",
+      "role": "reviewer",
+      "status": "done",
+      "assignee_agent_id": "role:reviewer"
+    },
+    {
+      "id": "c604b3df-2d7e-460c-b7d3-897ffc69cd64",
+      "parent_id": "issue:intake",
+      "role": "test_designer",
+      "status": "done",
+      "assignee_agent_id": "role:test_designer"
+    },
+    {
+      "id": "8d69d3ab-3db1-4dc5-b4f7-b99b16489721",
+      "parent_id": "issue:intake",
+      "role": "test_runner",
+      "status": "done",
+      "assignee_agent_id": "role:test_runner"
+    }
+  ],
+  "runs": [
+    {
+      "id": "run:9294d85a-b8ef-453a-bad0-d0c3870f5525",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 17792, \"input_tokens\": 27651, \"output_tokens\": 2538, \"reasoning_output_tokens\": 62}"
+    },
+    {
+      "id": "run:3b662650-e314-4216-b137-7e9da3b70a09",
+      "agent_id": "role:file_scout",
+      "issue_id": "c8af4728-7771-48aa-9650-bde0fff570d1",
+      "status": "completed",
+      "provider": "google-antigravity",
+      "model": "gemini-3.5-flash-low",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:f9871d24-5ebb-4326-92e6-42500673d74e",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 2432, \"input_tokens\": 28971, \"output_tokens\": 1381, \"reasoning_output_tokens\": 99}"
+    },
+    {
+      "id": "run:77242e10-24a7-43c1-8c3f-e5d9e46bee4f",
+      "agent_id": "role:file_scout",
+      "issue_id": "9c710a12-9e24-4739-849b-ef0154a188b9",
+      "status": "completed",
+      "provider": "google-antigravity",
+      "model": "gemini-3.5-flash-low",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:551e3ae2-8eda-4db8-b993-6c8a6d43f799",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 17792, \"input_tokens\": 29237, \"output_tokens\": 1134, \"reasoning_output_tokens\": 39}"
+    },
+    {
+      "id": "run:d39c91c5-52c7-4ffd-ba45-8c77a6c2b2fd",
+      "agent_id": "role:engineer",
+      "issue_id": "c6749068-cc1e-4d8c-9e55-b0e40b2f7a3a",
+      "status": "completed",
+      "provider": "google-antigravity",
+      "model": "claude-sonnet-4-6",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:486ac6b6-cab8-4926-b57e-5bc284366cc5",
+      "agent_id": "role:test_designer",
+      "issue_id": "c604b3df-2d7e-460c-b7d3-897ffc69cd64",
+      "status": "completed",
+      "provider": "google-antigravity",
+      "model": "gemini-3.5-flash-high",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:76b9200d-7432-4c6e-bb75-f7a59ea96c55",
+      "agent_id": "role:reviewer",
+      "issue_id": "a4eb44e1-49d2-42b4-8301-77ef1519447a",
+      "status": "completed",
+      "provider": "google-antigravity",
+      "model": "gemini-3.5-flash-high",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:d1da6f46-6066-4a0b-9d31-3951f4d16968",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 17792, \"input_tokens\": 29784, \"output_tokens\": 502, \"reasoning_output_tokens\": 67}"
+    },
+    {
+      "id": "run:9450566b-390f-4547-91b5-ae34f176b64f",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 17792, \"input_tokens\": 29990, \"output_tokens\": 620, \"reasoning_output_tokens\": 22}"
+    },
+    {
+      "id": "run:eb6e3f62-5190-46d7-8c3d-5f339a8bc885",
+      "agent_id": "role:test_runner",
+      "issue_id": "8d69d3ab-3db1-4dc5-b4f7-b99b16489721",
+      "status": "completed",
+      "provider": "aiteams",
+      "model": "structured-role-runtime",
+      "channel": "local",
+      "error_code": null,
+      "usage_json": "{}"
+    },
+    {
+      "id": "run:6389fc9a-4f31-4fd5-ba8c-dca53c41d4c8",
+      "agent_id": "role:lead",
+      "issue_id": "issue:intake",
+      "status": "completed",
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "channel": "subscription",
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 17792, \"input_tokens\": 30371, \"output_tokens\": 628, \"reasoning_output_tokens\": 56}"
+    }
+  ],
+  "reports": [
+    {
+      "agent_role": "file_scout",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "none",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "file_scout",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "none",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "engineer",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "greeting.py:1-2, tests/test_greeting.py:1-9, pytest output: 2 passed",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "engineer",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "greeting.py:1-2, tests/test_greeting.py:1-9, pytest output: 2 passed",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "reviewer",
+      "result": "approved",
+      "issue_status": "done",
+      "evidence": "greeting.py:1-2, tests/test_greeting.py:1-10",
+      "valid": 1,
+      "is_assignee": 1
+    },
+    {
+      "agent_role": "test_runner",
+      "result": "done",
+      "issue_status": "done",
+      "evidence": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\venv\\Scripts\\python.exe -m coverage run -m pytest -q tests/test_acceptance_greeting.py tests/test_greeting.py -> exit 0 (pytest); 6 passed in 0.02s; coverage 100%; ruff 1 issue(s)",
+      "valid": 1,
+      "is_assignee": 1
+    }
+  ],
+  "ok": true
+}

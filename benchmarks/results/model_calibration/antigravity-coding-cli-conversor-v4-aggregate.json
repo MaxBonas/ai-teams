@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_coding_behavioral_calibration",
+  "case": "cli_conversor",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "models": {
+    "gemini-3.5-flash-high": {
+      "samples": 3,
+      "done": 2,
+      "hidden_passed": [
+        9,
+        9,
+        9
+      ],
+      "hidden_total": 9,
+      "ruff_issues": [
+        0,
+        1,
+        1
+      ],
+      "attempts": [
+        1,
+        1,
+        1
+      ],
+      "wall_seconds_median": 105.484,
+      "usage_available": false
+    },
+    "claude-sonnet-4-6": {
+      "samples": 3,
+      "done": 3,
+      "hidden_passed": [
+        9,
+        9,
+        9
+      ],
+      "hidden_total": 9,
+      "ruff_issues": [
+        0,
+        0,
+        0
+      ],
+      "attempts": [
+        1,
+        1,
+        1
+      ],
+      "wall_seconds_median": 51.141,
+      "usage_available": false
+    }
+  },
+  "integrity": {
+    "ok": true,
+    "issues": []
+  },
+  "conclusion": {
+    "allowed": true,
+    "disposition": "retain_baseline",
+    "default_change_allowed": false,
+    "economic_comparison_available": false,
+    "quota_note": "sin usage headless comparable; runs y segundos son presión de cuota, no coste API",
+    "goodhart_risk": "residual_hidden_suite_overfit"
+  }
+}

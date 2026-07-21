@@ -1,0 +1,46 @@
+{
+  "case": "accessible_checkout_form",
+  "seed": 1,
+  "started_at": "2026-07-19T20:50:53+0200",
+  "workdir": "runtime/bench/accessible-checkout-seed-1-direct",
+  "config": {
+    "harness_version": 3,
+    "rubric_revision": 2,
+    "solo_model": "gpt-5.4",
+    "team_profiles": [
+      "codex_subscription",
+      "openai_api"
+    ],
+    "team_run_profile": "full_team",
+    "max_ticks": 30,
+    "max_minutes": 10.0
+  },
+  "arms": {
+    "solo": {
+      "arm": "solo",
+      "final_status": "done",
+      "wall_seconds": 374.8,
+      "runs": 1,
+      "tokens_in": 699317,
+      "tokens_out": 14841,
+      "cost_cents": 0,
+      "model": "gpt-5.4",
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 10,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 10,
+        "rescored_after_observable_link_fix": true,
+        "deliverable_files": [
+          "checkout.js",
+          "index.html",
+          "package.json",
+          "styles.css",
+          "tests/test_checkout.py"
+        ]
+      }
+    }
+  }
+}

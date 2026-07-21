@@ -1,0 +1,153 @@
+{
+  "audit": {
+    "arms": [
+      "stateless",
+      "resumed"
+    ],
+    "beneficial": false,
+    "complete_cells": 4,
+    "goodhart_risk": "material: el canario mide memoria/override/aislamiento, no ausencia universal de contaminación",
+    "issues": [],
+    "kind": "cli_session_continuity",
+    "median_duration_savings_ratio": 0.03743730885248085,
+    "median_input_token_savings_ratio": -0.997473427407203,
+    "production_activation_allowed": false,
+    "providers": [
+      "openai-codex"
+    ],
+    "quality_equal": true,
+    "quality_failures": [],
+    "seeds": [
+      1,
+      2
+    ]
+  },
+  "model": "gpt-5.5",
+  "production_changed": false,
+  "provider": "openai-codex",
+  "reports": [
+    {
+      "arm": "stateless",
+      "cached_input_tokens": 2432,
+      "duration_seconds": 16.828,
+      "error": null,
+      "explicit_session_id": false,
+      "gates": {
+        "applies_new_instruction": true,
+        "retains_initial_fact": true,
+        "revoked_instruction_absent": true
+      },
+      "input_tokens": 22954,
+      "model": "gpt-5.5",
+      "output": "{\"initial_fact\":\"ORBIT-DELTA-731\",\"active_color\":\"cobalt\",\"revoked_color_used\":false}",
+      "output_tokens": 29,
+      "prompt_chars": 6596,
+      "provider": "openai-codex",
+      "scope_match": false,
+      "seed": 1,
+      "session_id": null,
+      "status": "completed",
+      "uncached_input_tokens": 20522
+    },
+    {
+      "arm": "stateless",
+      "cached_input_tokens": 2432,
+      "duration_seconds": 19.329,
+      "error": null,
+      "explicit_session_id": false,
+      "gates": {
+        "applies_new_instruction": true,
+        "retains_initial_fact": true,
+        "revoked_instruction_absent": true
+      },
+      "input_tokens": 22958,
+      "model": "gpt-5.5",
+      "output": "{\"initial_fact\":\"HARBOR-SIGMA-284\",\"active_color\":\"jade\",\"revoked_color_used\":false}",
+      "output_tokens": 29,
+      "prompt_chars": 6597,
+      "provider": "openai-codex",
+      "scope_match": false,
+      "seed": 2,
+      "session_id": null,
+      "status": "completed",
+      "uncached_input_tokens": 20526
+    },
+    {
+      "arm": "resumed",
+      "cached_input_tokens": 24320,
+      "duration_seconds": 16.14,
+      "error": null,
+      "explicit_session_id": true,
+      "gates": {
+        "applies_new_instruction": true,
+        "retains_initial_fact": true,
+        "revoked_instruction_absent": true
+      },
+      "input_tokens": 45850,
+      "model": "gpt-5.5",
+      "output": "{\"initial_fact\":\"ORBIT-DELTA-731\",\"active_color\":\"cobalt\",\"revoked_color_used\":false}",
+      "output_tokens": 41,
+      "prompt_chars": 331,
+      "provider": "openai-codex",
+      "scope_match": true,
+      "seed": 1,
+      "session_id": "019f837c-4dd6-7153-ac00-70636d190487",
+      "status": "completed",
+      "uncached_input_tokens": 21530
+    },
+    {
+      "arm": "resumed",
+      "cached_input_tokens": 24320,
+      "duration_seconds": 18.672,
+      "error": null,
+      "explicit_session_id": true,
+      "gates": {
+        "applies_new_instruction": true,
+        "retains_initial_fact": true,
+        "revoked_instruction_absent": true
+      },
+      "input_tokens": 45858,
+      "model": "gpt-5.5",
+      "output": "{\"initial_fact\":\"HARBOR-SIGMA-284\",\"active_color\":\"jade\",\"revoked_color_used\":false}",
+      "output_tokens": 42,
+      "prompt_chars": 329,
+      "provider": "openai-codex",
+      "scope_match": true,
+      "seed": 2,
+      "session_id": "019f837c-df07-7f32-a5cd-fed888f7f65a",
+      "status": "completed",
+      "uncached_input_tokens": 21538
+    }
+  ],
+  "schema_version": 1,
+  "setup_runs": [
+    {
+      "duration_seconds": 20.453,
+      "error": null,
+      "output": "ACK ORBIT-DELTA-731",
+      "seed": 1,
+      "session_id": "019f837c-4dd6-7153-ac00-70636d190487",
+      "status": "completed",
+      "usage": {
+        "cached_input_tokens": 2432,
+        "input_tokens": 22878,
+        "output_tokens": 12,
+        "reasoning_output_tokens": 0
+      }
+    },
+    {
+      "duration_seconds": 17.906,
+      "error": null,
+      "output": "ACK HARBOR-SIGMA-284",
+      "seed": 2,
+      "session_id": "019f837c-df07-7f32-a5cd-fed888f7f65a",
+      "status": "completed",
+      "usage": {
+        "cached_input_tokens": 2432,
+        "input_tokens": 22881,
+        "output_tokens": 13,
+        "reasoning_output_tokens": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "db": "runtime/bench/inventory-diff-seed-1-full-team/team/.aiteam/aiteam.db",
+  "outcome": {
+    "issues_by_status": {
+      "done": 6,
+      "in_progress": 1
+    },
+    "accepted_root_issues": 0
+  },
+  "economy": {
+    "input_tokens": 1599277,
+    "output_tokens": 27419,
+    "total_tokens": 1626696,
+    "cost_cents": 0,
+    "tokens_per_accepted_root": null
+  },
+  "coordination": {
+    "runs_by_status": {
+      "completed": 11,
+      "skipped": 1
+    },
+    "wakeups_by_status": {
+      "finished": 9,
+      "queued": 2,
+      "skipped": 2
+    },
+    "wakeups_per_issue_avg": 1.86,
+    "wakeups_per_issue_max": 4,
+    "repeated_agent_issue_runs": [
+      {
+        "agent_id": "role:lead",
+        "issue_id": "issue:intake",
+        "runs": 5
+      },
+      {
+        "agent_id": "role:reviewer",
+        "issue_id": "39d31300-7d98-437a-80d2-aa6229722ecd",
+        "runs": 2
+      }
+    ],
+    "fix_issues": 0,
+    "test_failure_reports": 0,
+    "reviewer_rejection_reports": 1,
+    "approvals_contradicted_by_later_test_failure": 0,
+    "terminal_issue_skips": 0,
+    "lead_unblock_attempts": 2
+  },
+  "context": {
+    "workspace_digest_events": 6,
+    "unchanged_digest_reuses": 3,
+    "context_curator_issues": 0
+  },
+  "reports": {
+    "approved": 1,
+    "changes_requested": 1,
+    "done": 3
+  },
+  "quorum": {
+    "available": true,
+    "sessions_by_status": {},
+    "valid_contributions": 0,
+    "invalid_contributions": 0,
+    "accepted_without_provider_diversity": 0,
+    "accepted_with_unresolved_findings": 0,
+    "healthy": true
+  },
+  "liveness": {
+    "nonterminal_runs": 0,
+    "claimed_or_running_wakeups": 0,
+    "stranded_nonterminal_roots": 0,
+    "healthy": true
+  }
+}

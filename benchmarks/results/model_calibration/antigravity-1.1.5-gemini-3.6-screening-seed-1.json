@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_role_model_screening",
+  "started_at": "2026-07-21T16:53:12+0200",
+  "seed": 1,
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "inventory": [
+    "gemini-3.6-flash-high",
+    "gemini-3.6-flash-medium",
+    "gemini-3.6-flash-low",
+    "gemini-3.5-flash-medium",
+    "gemini-3.5-flash-high",
+    "gemini-3.5-flash-low",
+    "gemini-3.1-pro-low",
+    "gemini-3.1-pro-high",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6-thinking",
+    "gpt-oss-120b-medium"
+  ],
+  "matrix": [
+    {
+      "model": "gemini-3.6-flash-high",
+      "role": "lead",
+      "tier": 1,
+      "baseline": false
+    },
+    {
+      "model": "gemini-3.6-flash-high",
+      "role": "coding",
+      "tier": 2,
+      "baseline": false
+    },
+    {
+      "model": "gemini-3.6-flash-medium",
+      "role": "review",
+      "tier": 2,
+      "baseline": false
+    },
+    {
+      "model": "gemini-3.6-flash-low",
+      "role": "scout",
+      "tier": 3,
+      "baseline": false
+    }
+  ],
+  "evaluation_contract": {
+    "evaluators": [
+      "required_json_shape",
+      "hidden_causal_anchor_coverage",
+      "forbidden_noise"
+    ],
+    "independent_behavioral_evidence": false,
+    "repetitions_per_model": 1
+  },
+  "results": [
+    {
+      "model": "gemini-3.6-flash-high",
+      "role": "lead",
+      "tier": 1,
+      "baseline": false,
+      "exit_code": 1,
+      "wall_seconds": 4.187,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "",
+      "stderr": "Error: Agent execution terminated due to error.",
+      "status": "cli_failed",
+      "evaluation": null
+    },
+    {
+      "model": "gemini-3.6-flash-high",
+      "role": "coding",
+      "tier": 2,
+      "baseline": false,
+      "exit_code": 1,
+      "wall_seconds": 5.344,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "",
+      "stderr": "Error: invalid model selection (--model \"gemini-3.6-flash-high\" --effort \"\"): model gemini-3.6-flash-high is not recognized as a known model or custom model in settings\nAvailable models:\n  Gemini 3.5 Flash (Medium)\n  Gemini 3.5 Flash (High)\n  Gemini 3.5 Flash (Low)\n  Gemini 3.1 Pro (Low)\n  Gemini 3.1 Pro (High)\n  Claude Sonnet 4.6 (Thinking)\n  Claude Opus 4.6 (Thinking)\n  GPT-OSS 120B (Medium)",
+      "status": "cli_failed",
+      "evaluation": null
+    },
+    {
+      "model": "gemini-3.6-flash-medium",
+      "role": "review",
+      "tier": 2,
+      "baseline": false,
+      "exit_code": 0,
+      "wall_seconds": 13.203,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"verdict\": \"changes_requested\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"line\": 2,\n      \"cause\": \"Falta de autorizacion: no se valida que el actor coincida con el assignee_agent_id y pertenezca al mismo tenant_id de la issue.\",\n      \"fix\": \"Validar que la issue exista y que actor.tenant == issue.tenant_id y actor.agent_id == issue.assignee_agent_id antes de proceder.\"\n    },\n    {\n      \"severity\": \"critical\",\n      \"line\": 3,\n      \"cause\": \"Falta de atomicidad: la actualizacion del estado a 'done' y la insercion en activity_log no ocurren dentro de una transaccion.\",\n      \"fix\": \"Envolver la operacion completa de base de datos en un bloque transaccional para garantizar consistencia.\"\n    },\n    {\n      \"severity\": \"major\",\n      \"line\": 7,\n      \"cause\": \"Falta de validacion de parent_id no nulo y de una clave de idempotencia en la llamada a enqueue_wakeup.\",\n      \"fix\": \"Validar que parent_id no sea nulo antes de encolar y agregar una clave de idempotencia unica para la ejecucion.\"\n    },\n    {\n      \"severity\": \"critical\",\n      \"line\": 8,\n      \"cause\": \"La captura silenciosa de excepciones (try-except pass) permite que la issue quede en estado 'done' de manera persistente sin garantizar la continuacion durable en caso de fallo en activity_log o enqueue_wakeup.\",\n      \"fix\": \"Eliminar la captura silenciosa de excepciones, propagando el error para hacer rollback de la transaccion y permitir reintentos durables.\"\n    }\n  ],\n  \"required_evidence\": [\n    \"Prueba unitaria que verifique el rechazo del cierre si el actor no es el assignee o no pertenece al mismo tenant.\",\n    \"Prueba de integracion con rollback de transaccion en caso de fallo en activity_log o enqueue_wakeup, validando que el estado no quede en 'done'.\",\n    \"Prueba que demuestre el comportamiento de enqueue_wakeup con parent_id nulo e idempotencia ante ejecuciones duplicadas.\"\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "verdict": "changes_requested",
+        "findings": [
+          {
+            "severity": "critical",
+            "line": 2,
+            "cause": "Falta de autorizacion: no se valida que el actor coincida con el assignee_agent_id y pertenezca al mismo tenant_id de la issue.",
+            "fix": "Validar que la issue exista y que actor.tenant == issue.tenant_id y actor.agent_id == issue.assignee_agent_id antes de proceder."
+          },
+          {
+            "severity": "critical",
+            "line": 3,
+            "cause": "Falta de atomicidad: la actualizacion del estado a 'done' y la insercion en activity_log no ocurren dentro de una transaccion.",
+            "fix": "Envolver la operacion completa de base de datos en un bloque transaccional para garantizar consistencia."
+          },
+          {
+            "severity": "major",
+            "line": 7,
+            "cause": "Falta de validacion de parent_id no nulo y de una clave de idempotencia en la llamada a enqueue_wakeup.",
+            "fix": "Validar que parent_id no sea nulo antes de encolar y agregar una clave de idempotencia unica para la ejecucion."
+          },
+          {
+            "severity": "critical",
+            "line": 8,
+            "cause": "La captura silenciosa de excepciones (try-except pass) permite que la issue quede en estado 'done' de manera persistente sin garantizar la continuacion durable en caso de fallo en activity_log o enqueue_wakeup.",
+            "fix": "Eliminar la captura silenciosa de excepciones, propagando el error para hacer rollback de la transaccion y permitir reintentos durables."
+          }
+        ],
+        "required_evidence": [
+          "Prueba unitaria que verifique el rechazo del cierre si el actor no es el assignee o no pertenece al mismo tenant.",
+          "Prueba de integracion con rollback de transaccion en caso de fallo en activity_log o enqueue_wakeup, validando que el estado no quede en 'done'.",
+          "Prueba que demuestre el comportamiento de enqueue_wakeup con parent_id nulo e idempotencia ante ejecuciones duplicadas."
+        ]
+      },
+      "evaluation": {
+        "score": 10,
+        "max_score": 10,
+        "score_percent": 100.0,
+        "present_keys": [
+          "verdict",
+          "findings",
+          "required_evidence"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 7,
+        "anchor_total": 7,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    },
+    {
+      "model": "gemini-3.6-flash-low",
+      "role": "scout",
+      "tier": 3,
+      "baseline": false,
+      "exit_code": 1,
+      "wall_seconds": 2.422,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "",
+      "stderr": "Error: Agent execution terminated due to error.",
+      "status": "cli_failed",
+      "evaluation": null
+    }
+  ],
+  "conclusion": {
+    "policy_change_allowed": false,
+    "reason": "screening de una sola muestra por modelo; requiere varias semillas y baseline comparable",
+    "economic_comparison_available": false,
+    "economic_reason": "agy headless no expone tokens; suscripcion se mide en llamadas y segundos, no como coste API",
+    "role_rankings_directional": {
+      "lead": [
+        {
+          "model": "gemini-3.6-flash-high",
+          "score_percent": null,
+          "wall_seconds": 4.187,
+          "status": "cli_failed"
+        }
+      ],
+      "coding": [
+        {
+          "model": "gemini-3.6-flash-high",
+          "score_percent": null,
+          "wall_seconds": 5.344,
+          "status": "cli_failed"
+        }
+      ],
+      "review": [
+        {
+          "model": "gemini-3.6-flash-medium",
+          "score_percent": 100.0,
+          "wall_seconds": 13.203,
+          "status": "completed"
+        }
+      ],
+      "scout": [
+        {
+          "model": "gemini-3.6-flash-low",
+          "score_percent": null,
+          "wall_seconds": 2.422,
+          "status": "cli_failed"
+        }
+      ]
+    },
+    "next_gate": "repetir al menos tres semillas para los challengers que igualen o superen al baseline de su rol",
+    "goodhart_risk": "material: rubrica estructural/lexica conocida por el harness, sin juez factual independiente"
+  },
+  "finished_at": "2026-07-21T16:53:37+0200",
+  "quota_observation": {
+    "unit": "runs_and_wall_seconds",
+    "runs": 4,
+    "wall_seconds": 25.156,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  }
+}

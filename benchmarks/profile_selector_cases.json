@@ -24,6 +24,7 @@
   {"id":"critical_migration","family":"data","difficulty":"complex","expected":"full_team","criticality":"critical","ambiguity":"medium","independent_verification":true,"parallel_workstreams":2,"reversible":false},
   {"id":"irreversible_schema","family":"data","difficulty":"complex","expected":"full_team","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":false},
   {"id":"reversible_index_addition","family":"data","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
+  {"id":"inventory_snapshot_diff","family":"data","difficulty":"medium","expected":"solo_lead","criticality":"medium","ambiguity":"low","independent_verification":false,"parallel_workstreams":1,"reversible":true},
   {"id":"backfill_with_rollback","family":"data","difficulty":"complex","expected":"full_team","criticality":"high","ambiguity":"medium","independent_verification":true,"parallel_workstreams":2,"reversible":true},
 
   {"id":"ambiguous_architecture","family":"architecture","difficulty":"complex","expected":"full_team","criticality":"medium","ambiguity":"high","independent_verification":false,"parallel_workstreams":1,"reversible":true},

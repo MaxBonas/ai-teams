@@ -1,0 +1,781 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_role_model_screening",
+  "started_at": "2026-07-21T09:19:00+0200",
+  "seed": 1,
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "inventory": [
+    "gemini-3.5-flash-medium",
+    "gemini-3.5-flash-high",
+    "gemini-3.5-flash-low",
+    "gemini-3.1-pro-low",
+    "gemini-3.1-pro-high",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6-thinking",
+    "gpt-oss-120b-medium"
+  ],
+  "matrix": [
+    {
+      "model": "gemini-3.1-pro-high",
+      "role": "lead",
+      "tier": 1,
+      "baseline": true
+    },
+    {
+      "model": "claude-opus-4-6-thinking",
+      "role": "lead",
+      "tier": 1,
+      "baseline": false
+    },
+    {
+      "model": "gemini-3.5-flash-high",
+      "role": "coding",
+      "tier": 2,
+      "baseline": true
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "role": "coding",
+      "tier": 2,
+      "baseline": false
+    },
+    {
+      "model": "gemini-3.5-flash-medium",
+      "role": "review",
+      "tier": 2,
+      "baseline": true
+    },
+    {
+      "model": "gemini-3.1-pro-low",
+      "role": "review",
+      "tier": 2,
+      "baseline": false
+    },
+    {
+      "model": "gemini-3.5-flash-low",
+      "role": "scout",
+      "tier": 3,
+      "baseline": true
+    },
+    {
+      "model": "gpt-oss-120b-medium",
+      "role": "scout",
+      "tier": 3,
+      "baseline": false
+    }
+  ],
+  "evaluation_contract": {
+    "evaluators": [
+      "required_json_shape",
+      "hidden_causal_anchor_coverage",
+      "forbidden_noise"
+    ],
+    "independent_behavioral_evidence": false,
+    "repetitions_per_model": 1
+  },
+  "results": [
+    {
+      "model": "gemini-3.1-pro-high",
+      "role": "lead",
+      "tier": 1,
+      "baseline": true,
+      "exit_code": 0,
+      "wall_seconds": 7.672,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"objective\": \"Migrar la cola de issues de memoria a SQLite sin detener las runs, garantizando aislamiento multitenant, checkout atómico concurrente, capacidad de rollback y métricas para la decisión go/no-go.\",\n  \"assumptions\": [\n    \"Las runs actuales no pueden detenerse ni pausarse durante la migración.\",\n    \"Cada issue cuenta con un identificador de tenant para mantener el aislamiento.\",\n    \"Dos o más workers pueden intentar realizar checkout simultáneo sobre el mismo issue.\"\n  ],\n  \"work_items\": [\n    {\n      \"owner\": \"Lead\",\n      \"deliverable\": \"Diseño del esquema de SQLite y estrategia de locking/transacción atómica para checkout multitenant.\",\n      \"accepted_by\": \"Lead\",\n      \"depends_on\": []\n    },\n    {\n      \"owner\": \"Engineer\",\n      \"deliverable\": \"Implementación del adapter de SQLite con soporte de doble escritura/lectura conmutable por feature flag.\",\n      \"accepted_by\": \"Lead\",\n      \"depends_on\": [\n        \"Diseño del esquema de SQLite y estrategia de locking/transacción atómica para checkout multitenant.\"\n      ]\n    },\n    {\n      \"owner\": \"QA\",\n      \"deliverable\": \"Suite de pruebas de carga y concurrencia para verificar competencia de checkouts entre workers y recolección de evidencia go/no-go.\",\n      \"accepted_by\": \"Lead\",\n      \"depends_on\": [\n        \"Implementación del adapter de SQLite con soporte de doble escritura/lectura conmutable por feature flag.\"\n      ]\n    }\n  ],\n  \"risks\": [\n    {\n      \"risk\": \"Doble checkout del mismo issue debido a condiciones de carrera entre workers concurrentes.\",\n      \"mitigation\": \"Uso de transacciones explícitas de SQLite con actualización atómica filtrando por estado e ID de tenant.\"\n    },\n    {\n      \"risk\": \"Inconsistencia de datos durante la fase de transición de memoria a SQLite.\",\n      \"mitigation\": \"Estrategia de doble escritura sincrónica con verificación de integridad antes de conmutar la lectura primaria.\"\n    }\n  ],\n  \"rollback\": \"Desactivar la lectura/escritura en SQLite mediante la conmutación del feature flag para retornar el tráfico de la cola a memoria sin interrumpir las runs pasivas.\",\n  \"verification\": [\n    {\n      \"metric\": \"Tasa de checkouts duplicados entre workers\",\n      \"threshold\": \"0%\",\n      \"window\": \"15 minutos\",\n      \"action\": \"Ejecutar rollback inmediato desactivando SQLite.\"\n    },\n    {\n      \"metric\": \"Diferencia de conteo de issues por tenant entre memoria y SQLite\",\n      \"threshold\": \"0\",\n      \"window\": \"10 minutos\",\n      \"action\": \"Pausar avance de migración go/no-go y revisar logs de sincronización.\"\n    }\n  ],\n  \"escalation\": \"Ante la presencia de checkouts duplicados o corrupción en la segregación de tenants en SQLite, el Lead cancela el go-live y activa el plan de rollback.\"\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "objective": "Migrar la cola de issues de memoria a SQLite sin detener las runs, garantizando aislamiento multitenant, checkout atómico concurrente, capacidad de rollback y métricas para la decisión go/no-go.",
+        "assumptions": [
+          "Las runs actuales no pueden detenerse ni pausarse durante la migración.",
+          "Cada issue cuenta con un identificador de tenant para mantener el aislamiento.",
+          "Dos o más workers pueden intentar realizar checkout simultáneo sobre el mismo issue."
+        ],
+        "work_items": [
+          {
+            "owner": "Lead",
+            "deliverable": "Diseño del esquema de SQLite y estrategia de locking/transacción atómica para checkout multitenant.",
+            "accepted_by": "Lead",
+            "depends_on": []
+          },
+          {
+            "owner": "Engineer",
+            "deliverable": "Implementación del adapter de SQLite con soporte de doble escritura/lectura conmutable por feature flag.",
+            "accepted_by": "Lead",
+            "depends_on": [
+              "Diseño del esquema de SQLite y estrategia de locking/transacción atómica para checkout multitenant."
+            ]
+          },
+          {
+            "owner": "QA",
+            "deliverable": "Suite de pruebas de carga y concurrencia para verificar competencia de checkouts entre workers y recolección de evidencia go/no-go.",
+            "accepted_by": "Lead",
+            "depends_on": [
+              "Implementación del adapter de SQLite con soporte de doble escritura/lectura conmutable por feature flag."
+            ]
+          }
+        ],
+        "risks": [
+          {
+            "risk": "Doble checkout del mismo issue debido a condiciones de carrera entre workers concurrentes.",
+            "mitigation": "Uso de transacciones explícitas de SQLite con actualización atómica filtrando por estado e ID de tenant."
+          },
+          {
+            "risk": "Inconsistencia de datos durante la fase de transición de memoria a SQLite.",
+            "mitigation": "Estrategia de doble escritura sincrónica con verificación de integridad antes de conmutar la lectura primaria."
+          }
+        ],
+        "rollback": "Desactivar la lectura/escritura en SQLite mediante la conmutación del feature flag para retornar el tráfico de la cola a memoria sin interrumpir las runs pasivas.",
+        "verification": [
+          {
+            "metric": "Tasa de checkouts duplicados entre workers",
+            "threshold": "0%",
+            "window": "15 minutos",
+            "action": "Ejecutar rollback inmediato desactivando SQLite."
+          },
+          {
+            "metric": "Diferencia de conteo de issues por tenant entre memoria y SQLite",
+            "threshold": "0",
+            "window": "10 minutos",
+            "action": "Pausar avance de migración go/no-go y revisar logs de sincronización."
+          }
+        ],
+        "escalation": "Ante la presencia de checkouts duplicados o corrupción en la segregación de tenants en SQLite, el Lead cancela el go-live y activa el plan de rollback."
+      },
+      "evaluation": {
+        "score": 14,
+        "max_score": 15,
+        "score_percent": 93.3,
+        "present_keys": [
+          "objective",
+          "assumptions",
+          "work_items",
+          "risks",
+          "rollback",
+          "verification",
+          "escalation"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 7,
+        "anchor_total": 8,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    },
+    {
+      "model": "claude-opus-4-6-thinking",
+      "role": "lead",
+      "tier": 1,
+      "baseline": false,
+      "exit_code": 0,
+      "wall_seconds": 32.766,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\"objective\":\"Migrar la cola de issues de memoria a SQLite con cero downtime en las runs activas, aislamiento por tenant y checkout atómico entre workers concurrentes.\",\"assumptions\":[\"Cada issue tiene un campo tenant_id que lo asocia inequívocamente a un tenant\",\"Los workers obtienen issues mediante un patrón checkout (claim exclusivo) que hoy es un lock en memoria\",\"Las runs en curso leen/escriben issues a través de una interfaz que puede intercambiarse (shim/adapter) sin cambiar el caller\",\"El esquema SQLite objetivo ya está definido en docs/MIGRATION_PAPERCLIP.md\",\"El entorno soporta WAL mode en SQLite para lecturas concurrentes sin bloqueo\",\"Se dispone de un feature flag o variable de entorno para alternar entre backend memoria y SQLite\"],\"work_items\":[{\"owner\":\"Engineer-DB\",\"deliverable\":\"Esquema SQLite (tabla issues con tenant_id, status, locked_by, locked_at, versión optimista) + migración idempotente\",\"accepted_by\":\"Lead\",\"depends_on\":[]},{\"owner\":\"Engineer-DB\",\"deliverable\":\"Checkout atómico con UPDATE ... WHERE locked_by IS NULL AND id=? RETURNING * para evitar race conditions entre workers\",\"accepted_by\":\"Lead\",\"depends_on\":[\"Esquema SQLite\"]},{\"owner\":\"Engineer-Backend\",\"deliverable\":\"Adapter/shim que implementa la interfaz actual de la cola y delega a SQLite, activable por feature flag\",\"accepted_by\":\"Lead\",\"depends_on\":[\"Checkout atómico\"]},{\"owner\":\"Engineer-Backend\",\"deliverable\":\"Script de migración en caliente: copia issues en memoria → SQLite, verifica conteo por tenant, activa flag\",\"accepted_by\":\"Lead\",\"depends_on\":[\"Adapter/shim\"]},{\"owner\":\"Engineer-Backend\",\"deliverable\":\"Mecanismo de rollback: flag revierte al backend en memoria y script de rehydrate desde SQLite\",\"accepted_by\":\"Lead\",\"depends_on\":[\"Script de migración en caliente\"]},{\"owner\":\"QA\",\"deliverable\":\"Test de concurrencia: 2+ workers compitiendo por checkout del mismo issue, validar que solo uno gana y el otro recibe null/retry\",\"accepted_by\":\"Lead\",\"depends_on\":[\"Checkout atómico\"]},{\"owner\":\"QA\",\"deliverable\":\"Test de migración bajo carga: runs activas no pierden issues ni cambian de estado durante el switchover\",\"accepted_by\":\"Lead\",\"depends_on\":[\"Script de migración en caliente\"]},{\"owner\":\"Lead\",\"deliverable\":\"Decisión go/no-go documentada con evidencia de métricas y tests en activity_log\",\"accepted_by\":\"Usuario\",\"depends_on\":[\"Test de concurrencia\",\"Test de migración bajo carga\"]}],\"risks\":[{\"risk\":\"Race condition en checkout: dos workers reclaman el mismo issue\",\"mitigation\":\"UPDATE atómico con WHERE locked_by IS NULL + versión optimista; test de concurrencia obligatorio antes de go\"},{\"risk\":\"Pérdida de issues durante migración en caliente\",\"mitigation\":\"Migración en dos fases: 1) copia snapshot + dual-write, 2) corte a SQLite; validar conteo por tenant pre/post\"},{\"risk\":\"Corrupción SQLite por escritura concurrente sin WAL\",\"mitigation\":\"Activar journal_mode=WAL y busy_timeout>=5000 en la conexión; validar en CI\"},{\"risk\":\"Runs activas fallan al cambiar de backend\",\"mitigation\":\"Feature flag por proceso: las runs ya iniciadas terminan con el backend original; solo nuevas runs usan SQLite\"},{\"risk\":\"Rollback incompleto deja estado partido\",\"mitigation\":\"El rollback rehydrata desde SQLite a memoria y desactiva el flag en una transacción; test de rollback incluido en QA\"}],\"rollback\":\"Desactivar el feature flag para revertir al backend en memoria. Ejecutar script de rehydrate que lee issues desde SQLite y los carga en la cola en memoria. Verificar conteo por tenant. Si hay discrepancia, escalar. El rollback es posible mientras no se haya purgado la implementación en memoria del código.\",\"verification\":[{\"metric\":\"issues_migrated_count vs issues_in_memory_count por tenant\",\"threshold\":\"delta = 0\",\"window\":\"inmediato post-migración\",\"action\":\"Si delta != 0, rollback automático\"},{\"metric\":\"checkout_conflict_rate (intentos fallidos / totales)\",\"threshold\":\"< 5%\",\"window\":\"15 min post-switchover\",\"action\":\"Si > 5%, investigar lock contention; si > 15%, rollback\"},{\"metric\":\"run_failure_rate\",\"threshold\":\"no mayor al baseline pre-migración\",\"window\":\"30 min post-switchover\",\"action\":\"Si sube > 2x baseline, rollback\"},{\"metric\":\"p99_checkout_latency_ms\",\"threshold\":\"< 50ms\",\"window\":\"15 min post-switchover\",\"action\":\"Si > 100ms, revisar índices y WAL; si > 500ms, rollback\"}],\"escalation\":\"Si cualquier métrica de verificación dispara rollback dos veces consecutivas, o si se detecta pérdida de issues en cualquier tenant, el Lead pausa el despliegue, documenta evidencia en activity_log y escala al usuario con diagnóstico y opciones antes de reintentar.\"}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "objective": "Migrar la cola de issues de memoria a SQLite con cero downtime en las runs activas, aislamiento por tenant y checkout atómico entre workers concurrentes.",
+        "assumptions": [
+          "Cada issue tiene un campo tenant_id que lo asocia inequívocamente a un tenant",
+          "Los workers obtienen issues mediante un patrón checkout (claim exclusivo) que hoy es un lock en memoria",
+          "Las runs en curso leen/escriben issues a través de una interfaz que puede intercambiarse (shim/adapter) sin cambiar el caller",
+          "El esquema SQLite objetivo ya está definido en docs/MIGRATION_PAPERCLIP.md",
+          "El entorno soporta WAL mode en SQLite para lecturas concurrentes sin bloqueo",
+          "Se dispone de un feature flag o variable de entorno para alternar entre backend memoria y SQLite"
+        ],
+        "work_items": [
+          {
+            "owner": "Engineer-DB",
+            "deliverable": "Esquema SQLite (tabla issues con tenant_id, status, locked_by, locked_at, versión optimista) + migración idempotente",
+            "accepted_by": "Lead",
+            "depends_on": []
+          },
+          {
+            "owner": "Engineer-DB",
+            "deliverable": "Checkout atómico con UPDATE ... WHERE locked_by IS NULL AND id=? RETURNING * para evitar race conditions entre workers",
+            "accepted_by": "Lead",
+            "depends_on": [
+              "Esquema SQLite"
+            ]
+          },
+          {
+            "owner": "Engineer-Backend",
+            "deliverable": "Adapter/shim que implementa la interfaz actual de la cola y delega a SQLite, activable por feature flag",
+            "accepted_by": "Lead",
+            "depends_on": [
+              "Checkout atómico"
+            ]
+          },
+          {
+            "owner": "Engineer-Backend",
+            "deliverable": "Script de migración en caliente: copia issues en memoria → SQLite, verifica conteo por tenant, activa flag",
+            "accepted_by": "Lead",
+            "depends_on": [
+              "Adapter/shim"
+            ]
+          },
+          {
+            "owner": "Engineer-Backend",
+            "deliverable": "Mecanismo de rollback: flag revierte al backend en memoria y script de rehydrate desde SQLite",
+            "accepted_by": "Lead",
+            "depends_on": [
+              "Script de migración en caliente"
+            ]
+          },
+          {
+            "owner": "QA",
+            "deliverable": "Test de concurrencia: 2+ workers compitiendo por checkout del mismo issue, validar que solo uno gana y el otro recibe null/retry",
+            "accepted_by": "Lead",
+            "depends_on": [
+              "Checkout atómico"
+            ]
+          },
+          {
+            "owner": "QA",
+            "deliverable": "Test de migración bajo carga: runs activas no pierden issues ni cambian de estado durante el switchover",
+            "accepted_by": "Lead",
+            "depends_on": [
+              "Script de migración en caliente"
+            ]
+          },
+          {
+            "owner": "Lead",
+            "deliverable": "Decisión go/no-go documentada con evidencia de métricas y tests en activity_log",
+            "accepted_by": "Usuario",
+            "depends_on": [
+              "Test de concurrencia",
+              "Test de migración bajo carga"
+            ]
+          }
+        ],
+        "risks": [
+          {
+            "risk": "Race condition en checkout: dos workers reclaman el mismo issue",
+            "mitigation": "UPDATE atómico con WHERE locked_by IS NULL + versión optimista; test de concurrencia obligatorio antes de go"
+          },
+          {
+            "risk": "Pérdida de issues durante migración en caliente",
+            "mitigation": "Migración en dos fases: 1) copia snapshot + dual-write, 2) corte a SQLite; validar conteo por tenant pre/post"
+          },
+          {
+            "risk": "Corrupción SQLite por escritura concurrente sin WAL",
+            "mitigation": "Activar journal_mode=WAL y busy_timeout>=5000 en la conexión; validar en CI"
+          },
+          {
+            "risk": "Runs activas fallan al cambiar de backend",
+            "mitigation": "Feature flag por proceso: las runs ya iniciadas terminan con el backend original; solo nuevas runs usan SQLite"
+          },
+          {
+            "risk": "Rollback incompleto deja estado partido",
+            "mitigation": "El rollback rehydrata desde SQLite a memoria y desactiva el flag en una transacción; test de rollback incluido en QA"
+          }
+        ],
+        "rollback": "Desactivar el feature flag para revertir al backend en memoria. Ejecutar script de rehydrate que lee issues desde SQLite y los carga en la cola en memoria. Verificar conteo por tenant. Si hay discrepancia, escalar. El rollback es posible mientras no se haya purgado la implementación en memoria del código.",
+        "verification": [
+          {
+            "metric": "issues_migrated_count vs issues_in_memory_count por tenant",
+            "threshold": "delta = 0",
+            "window": "inmediato post-migración",
+            "action": "Si delta != 0, rollback automático"
+          },
+          {
+            "metric": "checkout_conflict_rate (intentos fallidos / totales)",
+            "threshold": "< 5%",
+            "window": "15 min post-switchover",
+            "action": "Si > 5%, investigar lock contention; si > 15%, rollback"
+          },
+          {
+            "metric": "run_failure_rate",
+            "threshold": "no mayor al baseline pre-migración",
+            "window": "30 min post-switchover",
+            "action": "Si sube > 2x baseline, rollback"
+          },
+          {
+            "metric": "p99_checkout_latency_ms",
+            "threshold": "< 50ms",
+            "window": "15 min post-switchover",
+            "action": "Si > 100ms, revisar índices y WAL; si > 500ms, rollback"
+          }
+        ],
+        "escalation": "Si cualquier métrica de verificación dispara rollback dos veces consecutivas, o si se detecta pérdida de issues en cualquier tenant, el Lead pausa el despliegue, documenta evidencia en activity_log y escala al usuario con diagnóstico y opciones antes de reintentar."
+      },
+      "evaluation": {
+        "score": 14,
+        "max_score": 15,
+        "score_percent": 93.3,
+        "present_keys": [
+          "objective",
+          "assumptions",
+          "work_items",
+          "risks",
+          "rollback",
+          "verification",
+          "escalation"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 7,
+        "anchor_total": 8,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    },
+    {
+      "model": "gemini-3.5-flash-high",
+      "role": "coding",
+      "tier": 2,
+      "baseline": true,
+      "exit_code": 0,
+      "wall_seconds": 9.515,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"approach\": \"Parametrizar tenant_id en el query, eliminar la interpolación SQL, y realizar una actualización atómica en un solo paso mediante UPDATE ... RETURNING id. Esto evita la condición de carrera al ejecutarse como una única operación de escritura en SQLite, asegurando que si otro worker ganó la reserva, la consulta no modifique filas y devuelva None.\",\n  \"replacement_function\": \"def checkout(conn, tenant_id, worker_id):\\n    row = conn.execute(\\n        \\\"UPDATE issues SET status='in_progress', lease_owner=? \\\"\\n        \\\"WHERE id = (SELECT id FROM issues WHERE tenant_id=? AND status='todo' ORDER BY priority LIMIT 1) \\\"\\n        \\\"RETURNING id\\\",\\n        (worker_id, tenant_id)\\n    ).fetchone()\\n    return row[0] if row else None\",\n  \"tests\": [\n    \"Caso con múltiples tenants para asegurar que solo se seleccionan e identifican issues del tenant especificado.\",\n    \"Caso de concurrencia donde dos workers llaman a checkout concurrentemente, validando que solo uno gane (devuelve el ID) y el otro reciba None.\",\n    \"Caso donde no existen tareas pendientes (status='todo') para el tenant, validando que retorne None.\"\n  ],\n  \"failure_modes\": [\n    \"Sintaxis RETURNING no soportada si se utiliza una versión de SQLite antigua (inferior a la 3.35.0).\",\n    \"Excepciones de tipo 'sqlite3.OperationalError: database is locked' bajo alta concurrencia de escrituras si la base de datos no está en modo WAL (Write-Ahead Logging) o no tiene un busy_timeout configurado.\"\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "approach": "Parametrizar tenant_id en el query, eliminar la interpolación SQL, y realizar una actualización atómica en un solo paso mediante UPDATE ... RETURNING id. Esto evita la condición de carrera al ejecutarse como una única operación de escritura en SQLite, asegurando que si otro worker ganó la reserva, la consulta no modifique filas y devuelva None.",
+        "replacement_function": "def checkout(conn, tenant_id, worker_id):\n    row = conn.execute(\n        \"UPDATE issues SET status='in_progress', lease_owner=? \"\n        \"WHERE id = (SELECT id FROM issues WHERE tenant_id=? AND status='todo' ORDER BY priority LIMIT 1) \"\n        \"RETURNING id\",\n        (worker_id, tenant_id)\n    ).fetchone()\n    return row[0] if row else None",
+        "tests": [
+          "Caso con múltiples tenants para asegurar que solo se seleccionan e identifican issues del tenant especificado.",
+          "Caso de concurrencia donde dos workers llaman a checkout concurrentemente, validando que solo uno gane (devuelve el ID) y el otro reciba None.",
+          "Caso donde no existen tareas pendientes (status='todo') para el tenant, validando que retorne None."
+        ],
+        "failure_modes": [
+          "Sintaxis RETURNING no soportada si se utiliza una versión de SQLite antigua (inferior a la 3.35.0).",
+          "Excepciones de tipo 'sqlite3.OperationalError: database is locked' bajo alta concurrencia de escrituras si la base de datos no está en modo WAL (Write-Ahead Logging) o no tiene un busy_timeout configurado."
+        ]
+      },
+      "evaluation": {
+        "score": 8,
+        "max_score": 11,
+        "score_percent": 72.7,
+        "present_keys": [
+          "approach",
+          "replacement_function",
+          "tests",
+          "failure_modes"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 4,
+        "anchor_total": 7,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "role": "coding",
+      "tier": 2,
+      "baseline": false,
+      "exit_code": 0,
+      "wall_seconds": 23.672,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "```json\n{\n  \"approach\": \"1) Parametrizar tenant_id en la query para aislar tenants. 2) Eliminar f-string y usar placeholders para evitar SQL injection. 3) Hacer la reserva atomica combinando SELECT y UPDATE en un solo UPDATE ... WHERE status='todo' para eliminar la carrera (TOCTOU). 4) Verificar rowcount para detectar si otro worker ganó y devolver None en ese caso.\",\n  \"replacement_function\": \"def checkout(conn, tenant_id, worker_id):\\n    # Reserva atomica: busca el issue con mayor prioridad del tenant\\n    # y lo marca en un solo UPDATE para evitar carrera entre SELECT y UPDATE.\\n    # SQLite ejecuta esto como una operacion serializada por su bloqueo de escritura.\\n    cur = conn.execute(\\n        \\\"\\\"\\\"\\n        UPDATE issues\\n        SET status = 'in_progress', lease_owner = ?\\n        WHERE id = (\\n            SELECT id\\n            FROM issues\\n            WHERE tenant_id = ?\\n              AND status = 'todo'\\n            ORDER BY priority\\n            LIMIT 1\\n        )\\n        \\\"\\\"\\\",\\n        (worker_id, tenant_id),\\n    )\\n    conn.commit()\\n    if cur.rowcount == 0:\\n        # No habia issues disponibles O otro worker gano la carrera.\\n        return None\\n    # Recuperar el id reservado de forma segura.\\n    row = conn.execute(\\n        \\\"SELECT id FROM issues WHERE lease_owner = ? AND status = 'in_progress' AND tenant_id = ?\\\",\\n        (worker_id, tenant_id),\\n    ).fetchone()\\n    # Nota: si se necesita devolver el id sin un SELECT adicional,\\n    # usar lastrowid (solo fiable en INSERT); para UPDATE en SQLite\\n    # el patron correcto es el SELECT post-UPDATE filtrado por lease_owner.\\n    return row[0] if row else None\",\n  \"tests\": [\n    \"test_checkout_returns_issue_id: dado un issue en status='todo' del tenant correcto, checkout debe devolver su id y cambiar status a 'in_progress'.\",\n    \"test_checkout_aisle_tenant: issues de tenant_id distinto no deben ser seleccionados; checkout debe devolver None si no hay issues del tenant solicitado.\",\n    \"test_checkout_no_issues: cuando no existen issues con status='todo' para el tenant, checkout devuelve None.\",\n    \"test_checkout_race_condition: dos workers llaman a checkout concurrentemente sobre el mismo issue; exactamente uno recibe el id y el otro recibe None (simular con threads y BEGIN IMMEDIATE o conexiones separadas).\",\n    \"test_no_sql_injection: tenant_id con valor \\\"'; DROP TABLE issues; --\\\" no debe causar error ni modificar datos ajenos.\",\n    \"test_commit_persisted: tras checkout exitoso, una segunda conexion debe ver status='in_progress' y lease_owner correcto.\"\n  ],\n  \"failure_modes\": [\n    \"Mezcla de tenants: la query original no filtra por tenant_id, por lo que cualquier worker puede robar issues de otro tenant.\",\n    \"SQL injection: el f-string permite inyectar SQL arbitrario a traves de cualquier variable interpolada en la query.\",\n    \"Carrera SELECT→UPDATE (TOCTOU): entre el fetchone y el UPDATE otro worker puede actualizar el mismo row; ambos creen haber ganado.\",\n    \"Sin verificacion de victoria: el codigo original no comprueba rowcount ni ninguna condicion post-UPDATE, por lo que siempre devuelve el id aunque el UPDATE no haya afectado ninguna fila.\"\n  ]\n}\n```",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "approach": "1) Parametrizar tenant_id en la query para aislar tenants. 2) Eliminar f-string y usar placeholders para evitar SQL injection. 3) Hacer la reserva atomica combinando SELECT y UPDATE en un solo UPDATE ... WHERE status='todo' para eliminar la carrera (TOCTOU). 4) Verificar rowcount para detectar si otro worker ganó y devolver None en ese caso.",
+        "replacement_function": "def checkout(conn, tenant_id, worker_id):\n    # Reserva atomica: busca el issue con mayor prioridad del tenant\n    # y lo marca en un solo UPDATE para evitar carrera entre SELECT y UPDATE.\n    # SQLite ejecuta esto como una operacion serializada por su bloqueo de escritura.\n    cur = conn.execute(\n        \"\"\"\n        UPDATE issues\n        SET status = 'in_progress', lease_owner = ?\n        WHERE id = (\n            SELECT id\n            FROM issues\n            WHERE tenant_id = ?\n              AND status = 'todo'\n            ORDER BY priority\n            LIMIT 1\n        )\n        \"\"\",\n        (worker_id, tenant_id),\n    )\n    conn.commit()\n    if cur.rowcount == 0:\n        # No habia issues disponibles O otro worker gano la carrera.\n        return None\n    # Recuperar el id reservado de forma segura.\n    row = conn.execute(\n        \"SELECT id FROM issues WHERE lease_owner = ? AND status = 'in_progress' AND tenant_id = ?\",\n        (worker_id, tenant_id),\n    ).fetchone()\n    # Nota: si se necesita devolver el id sin un SELECT adicional,\n    # usar lastrowid (solo fiable en INSERT); para UPDATE en SQLite\n    # el patron correcto es el SELECT post-UPDATE filtrado por lease_owner.\n    return row[0] if row else None",
+        "tests": [
+          "test_checkout_returns_issue_id: dado un issue en status='todo' del tenant correcto, checkout debe devolver su id y cambiar status a 'in_progress'.",
+          "test_checkout_aisle_tenant: issues de tenant_id distinto no deben ser seleccionados; checkout debe devolver None si no hay issues del tenant solicitado.",
+          "test_checkout_no_issues: cuando no existen issues con status='todo' para el tenant, checkout devuelve None.",
+          "test_checkout_race_condition: dos workers llaman a checkout concurrentemente sobre el mismo issue; exactamente uno recibe el id y el otro recibe None (simular con threads y BEGIN IMMEDIATE o conexiones separadas).",
+          "test_no_sql_injection: tenant_id con valor \"'; DROP TABLE issues; --\" no debe causar error ni modificar datos ajenos.",
+          "test_commit_persisted: tras checkout exitoso, una segunda conexion debe ver status='in_progress' y lease_owner correcto."
+        ],
+        "failure_modes": [
+          "Mezcla de tenants: la query original no filtra por tenant_id, por lo que cualquier worker puede robar issues de otro tenant.",
+          "SQL injection: el f-string permite inyectar SQL arbitrario a traves de cualquier variable interpolada en la query.",
+          "Carrera SELECT→UPDATE (TOCTOU): entre el fetchone y el UPDATE otro worker puede actualizar el mismo row; ambos creen haber ganado.",
+          "Sin verificacion de victoria: el codigo original no comprueba rowcount ni ninguna condicion post-UPDATE, por lo que siempre devuelve el id aunque el UPDATE no haya afectado ninguna fila."
+        ]
+      },
+      "evaluation": {
+        "score": 10,
+        "max_score": 11,
+        "score_percent": 90.9,
+        "present_keys": [
+          "approach",
+          "replacement_function",
+          "tests",
+          "failure_modes"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 6,
+        "anchor_total": 7,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    },
+    {
+      "model": "gemini-3.5-flash-medium",
+      "role": "review",
+      "tier": 2,
+      "baseline": true,
+      "exit_code": 0,
+      "wall_seconds": 7.156,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"verdict\": \"changes_requested\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"line\": 2,\n      \"cause\": \"Falta la validacion de autorizacion multi-tenant y de asignacion del actor (tenant_id y assignee_agent_id).\",\n      \"fix\": \"Verificar que issue.tenant_id == actor.tenant e issue.assignee_agent_id == actor.agent_id antes de modificar el estado.\"\n    },\n    {\n      \"severity\": \"critical\",\n      \"line\": 3,\n      \"cause\": \"La operacion de cambio de status y el registro en activity_log no se ejecutan de forma atomica.\",\n      \"fix\": \"Envolver la actualizacion de status, insercion de activity_log y encolado dentro de una transaccion de base de datos.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"line\": 7,\n      \"cause\": \"enqueue_wakeup recibe la consulta parent completa en lugar de validar un parent_id no nulo, y omite la clave de idempotencia requerida.\",\n      \"fix\": \"Validar que parent_id no sea None/null y pasar una clave idempotente unica al invocar enqueue_wakeup.\"\n    },\n    {\n      \"severity\": \"critical\",\n      \"line\": 8,\n      \"cause\": \"El bloque except silencia cualquier excepcion, dejando el issue en 'done' sin asegurar la continuacion durable.\",\n      \"fix\": \"Eliminar 'except Exception: pass', hacer rollback de la transaccion y re-lanzar la excepcion si ocurre un fallo.\"\n    }\n  ],\n  \"required_evidence\": [\n    \"Prueba unitaria de autorizacion que verifique que solo el assignee del mismo tenant puede cerrar el issue.\",\n    \"Prueba de transaccionalidad confirmando rollback de status='done' si falla la insercion de activity_log o el enqueue_wakeup.\",\n    \"Prueba de encolado de wakeup verificando la clave de idempotencia y el comportamiento cuando parent_id es nulo vs valido.\"\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "verdict": "changes_requested",
+        "findings": [
+          {
+            "severity": "critical",
+            "line": 2,
+            "cause": "Falta la validacion de autorizacion multi-tenant y de asignacion del actor (tenant_id y assignee_agent_id).",
+            "fix": "Verificar que issue.tenant_id == actor.tenant e issue.assignee_agent_id == actor.agent_id antes de modificar el estado."
+          },
+          {
+            "severity": "critical",
+            "line": 3,
+            "cause": "La operacion de cambio de status y el registro en activity_log no se ejecutan de forma atomica.",
+            "fix": "Envolver la actualizacion de status, insercion de activity_log y encolado dentro de una transaccion de base de datos."
+          },
+          {
+            "severity": "high",
+            "line": 7,
+            "cause": "enqueue_wakeup recibe la consulta parent completa en lugar de validar un parent_id no nulo, y omite la clave de idempotencia requerida.",
+            "fix": "Validar que parent_id no sea None/null y pasar una clave idempotente unica al invocar enqueue_wakeup."
+          },
+          {
+            "severity": "critical",
+            "line": 8,
+            "cause": "El bloque except silencia cualquier excepcion, dejando el issue en 'done' sin asegurar la continuacion durable.",
+            "fix": "Eliminar 'except Exception: pass', hacer rollback de la transaccion y re-lanzar la excepcion si ocurre un fallo."
+          }
+        ],
+        "required_evidence": [
+          "Prueba unitaria de autorizacion que verifique que solo el assignee del mismo tenant puede cerrar el issue.",
+          "Prueba de transaccionalidad confirmando rollback de status='done' si falla la insercion de activity_log o el enqueue_wakeup.",
+          "Prueba de encolado de wakeup verificando la clave de idempotencia y el comportamiento cuando parent_id es nulo vs valido."
+        ]
+      },
+      "evaluation": {
+        "score": 10,
+        "max_score": 10,
+        "score_percent": 100.0,
+        "present_keys": [
+          "verdict",
+          "findings",
+          "required_evidence"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 7,
+        "anchor_total": 7,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    },
+    {
+      "model": "gemini-3.1-pro-low",
+      "role": "review",
+      "tier": 2,
+      "baseline": false,
+      "exit_code": 0,
+      "wall_seconds": 17.453,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"verdict\": \"changes_requested\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"line\": 2,\n      \"cause\": \"Falta validacion de autorizacion. No se verifica que el tenant del actor coincida con el de la issue ni que el actor sea el assignee_agent_id.\",\n      \"fix\": \"Anadir condicional para validar issue['tenant_id'] == actor.tenant y issue['assignee_agent_id'] == actor.agent_id antes de modificar el estado.\"\n    },\n    {\n      \"severity\": \"critical\",\n      \"line\": 3,\n      \"cause\": \"El UPDATE de status y el INSERT en activity_log no son atomicos al no estar agrupados en una transaccion.\",\n      \"fix\": \"Envolver todas las operaciones de escritura (UPDATE, INSERT y encolado de wakeup) dentro de una unica transaccion (ej. db.transaction()).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"line\": 7,\n      \"cause\": \"Se encola wakeup sin verificar que parent_id no sea nulo y no se proporciona la clave idempotente requerida.\",\n      \"fix\": \"Anadir condicional if parent_id is not None: y pasar una clave unica como idempotent_key (ej. f'wakeup_{issue_id}').\"\n    },\n    {\n      \"severity\": \"critical\",\n      \"line\": 8,\n      \"cause\": \"El bloque except captura y silencia excepciones con 'pass', permitiendo que la issue quede en status 'done' si fallan operaciones posteriores, rompiendo la durabilidad de la continuacion.\",\n      \"fix\": \"Realizar rollback de la transaccion en el except y re-lanzar la excepcion, garantizando que o todo se guarda (incluyendo el wakeup) o nada cambia.\"\n    }\n  ],\n  \"required_evidence\": [\n    \"Pruebas unitarias que confirmen el rechazo de peticiones de actores no asignados o de tenants incorrectos.\",\n    \"Comprobacion del uso de transacciones de base de datos agrupando el cambio de status, insercion de actividad y encolado.\",\n    \"Demostracion de que el wakeup no se encola si parent_id es nulo y que se envia una clave idempotente.\"\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "verdict": "changes_requested",
+        "findings": [
+          {
+            "severity": "critical",
+            "line": 2,
+            "cause": "Falta validacion de autorizacion. No se verifica que el tenant del actor coincida con el de la issue ni que el actor sea el assignee_agent_id.",
+            "fix": "Anadir condicional para validar issue['tenant_id'] == actor.tenant y issue['assignee_agent_id'] == actor.agent_id antes de modificar el estado."
+          },
+          {
+            "severity": "critical",
+            "line": 3,
+            "cause": "El UPDATE de status y el INSERT en activity_log no son atomicos al no estar agrupados en una transaccion.",
+            "fix": "Envolver todas las operaciones de escritura (UPDATE, INSERT y encolado de wakeup) dentro de una unica transaccion (ej. db.transaction())."
+          },
+          {
+            "severity": "high",
+            "line": 7,
+            "cause": "Se encola wakeup sin verificar que parent_id no sea nulo y no se proporciona la clave idempotente requerida.",
+            "fix": "Anadir condicional if parent_id is not None: y pasar una clave unica como idempotent_key (ej. f'wakeup_{issue_id}')."
+          },
+          {
+            "severity": "critical",
+            "line": 8,
+            "cause": "El bloque except captura y silencia excepciones con 'pass', permitiendo que la issue quede en status 'done' si fallan operaciones posteriores, rompiendo la durabilidad de la continuacion.",
+            "fix": "Realizar rollback de la transaccion en el except y re-lanzar la excepcion, garantizando que o todo se guarda (incluyendo el wakeup) o nada cambia."
+          }
+        ],
+        "required_evidence": [
+          "Pruebas unitarias que confirmen el rechazo de peticiones de actores no asignados o de tenants incorrectos.",
+          "Comprobacion del uso de transacciones de base de datos agrupando el cambio de status, insercion de actividad y encolado.",
+          "Demostracion de que el wakeup no se encola si parent_id es nulo y que se envia una clave idempotente."
+        ]
+      },
+      "evaluation": {
+        "score": 10,
+        "max_score": 10,
+        "score_percent": 100.0,
+        "present_keys": [
+          "verdict",
+          "findings",
+          "required_evidence"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 7,
+        "anchor_total": 7,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    },
+    {
+      "model": "gemini-3.5-flash-low",
+      "role": "scout",
+      "tier": 3,
+      "baseline": true,
+      "exit_code": 0,
+      "wall_seconds": 5.485,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"decisions\": [\n    {\n      \"id\": \"D1\",\n      \"fact\": \"SQLite sera la unica fuente de verdad\",\n      \"owner\": \"Lead\",\n      \"accepted_by\": \"Reviewer\"\n    }\n  ],\n  \"constraints\": [\n    {\n      \"id\": \"R1\",\n      \"fact\": \"Ninguna run puede perder su wakeup al reiniciar\"\n    }\n  ],\n  \"risks\": [\n    {\n      \"id\": \"K1\",\n      \"fact\": \"Checkout duplicado entre workers\",\n      \"mitigation\": \"Transaccion atomica\"\n    }\n  ],\n  \"gates\": [\n    {\n      \"id\": \"G1\",\n      \"metric\": \"Wakeups perdidos tras 100 reinicios\",\n      \"threshold\": \"0\",\n      \"window\": \"24 horas\",\n      \"action\": \"Rollback\"\n    }\n  ],\n  \"dependencies\": [\n    {\n      \"id\": \"P1\",\n      \"fact\": \"Migracion de runs debe terminar antes de retirar JSONL\"\n    }\n  ],\n  \"blockers\": [\n    {\n      \"id\": \"B1\",\n      \"fact\": \"Falta decidir la ventana de mantenimiento\",\n      \"escalate_to\": \"Owner humano\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"id\": \"E1\",\n      \"fact\": \"Suite oculta y auditoria SQLite deben estar verdes\"\n    }\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "decisions": [
+          {
+            "id": "D1",
+            "fact": "SQLite sera la unica fuente de verdad",
+            "owner": "Lead",
+            "accepted_by": "Reviewer"
+          }
+        ],
+        "constraints": [
+          {
+            "id": "R1",
+            "fact": "Ninguna run puede perder su wakeup al reiniciar"
+          }
+        ],
+        "risks": [
+          {
+            "id": "K1",
+            "fact": "Checkout duplicado entre workers",
+            "mitigation": "Transaccion atomica"
+          }
+        ],
+        "gates": [
+          {
+            "id": "G1",
+            "metric": "Wakeups perdidos tras 100 reinicios",
+            "threshold": "0",
+            "window": "24 horas",
+            "action": "Rollback"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "P1",
+            "fact": "Migracion de runs debe terminar antes de retirar JSONL"
+          }
+        ],
+        "blockers": [
+          {
+            "id": "B1",
+            "fact": "Falta decidir la ventana de mantenimiento",
+            "escalate_to": "Owner humano"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "E1",
+            "fact": "Suite oculta y auditoria SQLite deben estar verdes"
+          }
+        ]
+      },
+      "evaluation": {
+        "score": 16,
+        "max_score": 16,
+        "score_percent": 100.0,
+        "present_keys": [
+          "decisions",
+          "constraints",
+          "risks",
+          "gates",
+          "dependencies",
+          "blockers",
+          "evidence"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 9,
+        "anchor_total": 9,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    },
+    {
+      "model": "gpt-oss-120b-medium",
+      "role": "scout",
+      "tier": 3,
+      "baseline": false,
+      "exit_code": 0,
+      "wall_seconds": 10.328,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"decisions\": [\n    {\n      \"id\": \"D1\",\n      \"fact\": \"SQLite será la única fuente de verdad\",\n      \"owner\": \"Lead\",\n      \"accepted_by\": \"Reviewer\"\n    }\n  ],\n  \"constraints\": [\n    {\n      \"id\": \"R1\",\n      \"fact\": \"ninguna run puede perder su wakeup al reiniciar\"\n    }\n  ],\n  \"risks\": [\n    {\n      \"id\": \"K1\",\n      \"fact\": \"checkout duplicado entre workers\",\n      \"mitigation\": \"transacción atómica\"\n    }\n  ],\n  \"gates\": [\n    {\n      \"id\": \"G1\",\n      \"metric\": \"reinicios\",\n      \"threshold\": \"100\",\n      \"window\": \"24 horas\",\n      \"action\": \"rollback\"\n    }\n  ],\n  \"dependencies\": [\n    {\n      \"id\": \"P1\",\n      \"fact\": \"migración de runs debe terminar antes de retirar JSONL\"\n    }\n  ],\n  \"blockers\": [\n    {\n      \"id\": \"B1\",\n      \"fact\": \"falta decidir la ventana de mantenimiento\",\n      \"escalate_to\": \"owner humano\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"id\": \"E1\",\n      \"fact\": \"suite oculta y auditoría SQLite deben estar verdes\"\n    }\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "decisions": [
+          {
+            "id": "D1",
+            "fact": "SQLite será la única fuente de verdad",
+            "owner": "Lead",
+            "accepted_by": "Reviewer"
+          }
+        ],
+        "constraints": [
+          {
+            "id": "R1",
+            "fact": "ninguna run puede perder su wakeup al reiniciar"
+          }
+        ],
+        "risks": [
+          {
+            "id": "K1",
+            "fact": "checkout duplicado entre workers",
+            "mitigation": "transacción atómica"
+          }
+        ],
+        "gates": [
+          {
+            "id": "G1",
+            "metric": "reinicios",
+            "threshold": "100",
+            "window": "24 horas",
+            "action": "rollback"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "P1",
+            "fact": "migración de runs debe terminar antes de retirar JSONL"
+          }
+        ],
+        "blockers": [
+          {
+            "id": "B1",
+            "fact": "falta decidir la ventana de mantenimiento",
+            "escalate_to": "owner humano"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "E1",
+            "fact": "suite oculta y auditoría SQLite deben estar verdes"
+          }
+        ]
+      },
+      "evaluation": {
+        "score": 16,
+        "max_score": 16,
+        "score_percent": 100.0,
+        "present_keys": [
+          "decisions",
+          "constraints",
+          "risks",
+          "gates",
+          "dependencies",
+          "blockers",
+          "evidence"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 9,
+        "anchor_total": 9,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    }
+  ],
+  "conclusion": {
+    "policy_change_allowed": false,
+    "reason": "screening de una sola muestra por modelo; requiere varias semillas y baseline comparable",
+    "economic_comparison_available": false,
+    "economic_reason": "agy headless no expone tokens; suscripcion se mide en llamadas y segundos, no como coste API",
+    "role_rankings_directional": {
+      "lead": [
+        {
+          "model": "gemini-3.1-pro-high",
+          "score_percent": 93.3,
+          "wall_seconds": 7.672,
+          "status": "completed"
+        },
+        {
+          "model": "claude-opus-4-6-thinking",
+          "score_percent": 93.3,
+          "wall_seconds": 32.766,
+          "status": "completed"
+        }
+      ],
+      "coding": [
+        {
+          "model": "claude-sonnet-4-6",
+          "score_percent": 90.9,
+          "wall_seconds": 23.672,
+          "status": "completed"
+        },
+        {
+          "model": "gemini-3.5-flash-high",
+          "score_percent": 72.7,
+          "wall_seconds": 9.515,
+          "status": "completed"
+        }
+      ],
+      "review": [
+        {
+          "model": "gemini-3.5-flash-medium",
+          "score_percent": 100.0,
+          "wall_seconds": 7.156,
+          "status": "completed"
+        },
+        {
+          "model": "gemini-3.1-pro-low",
+          "score_percent": 100.0,
+          "wall_seconds": 17.453,
+          "status": "completed"
+        }
+      ],
+      "scout": [
+        {
+          "model": "gemini-3.5-flash-low",
+          "score_percent": 100.0,
+          "wall_seconds": 5.485,
+          "status": "completed"
+        },
+        {
+          "model": "gpt-oss-120b-medium",
+          "score_percent": 100.0,
+          "wall_seconds": 10.328,
+          "status": "completed"
+        }
+      ]
+    },
+    "next_gate": "repetir al menos tres semillas para los challengers que igualen o superen al baseline de su rol",
+    "goodhart_risk": "material: rubrica estructural/lexica conocida por el harness, sin juez factual independiente"
+  },
+  "finished_at": "2026-07-21T09:20:54+0200",
+  "quota_observation": {
+    "unit": "runs_and_wall_seconds",
+    "runs": 8,
+    "wall_seconds": 114.047,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  }
+}
