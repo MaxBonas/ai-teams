@@ -267,10 +267,22 @@ protegida por un test explícito.
   Owner: `AI Teams maintainer`. `audit_model_catalog_drift.py` fija la cadencia
   mensual + evento, compara IDs exactos de Antigravity/OpenCode, conserva
   exclusiones con disposición explícita y ejecuta la matriz hermética. El
-  recibo `model-catalog-drift-2026-07-22.json` pasa 3/3 gates: 11 IDs
+  recibo `model-catalog-drift-2026-07-22.json` pasa 5/5 gates: 11 IDs
   Antigravity, cinco Zen declarados —Laguna manual/probe-gated tras fallar 0/3
   review durable—, Big Pickle `rejected` y Codex `cli_update_required` como
   atención separada.
+- [x] **Registrar frescura de calibración por perfil+modelo+rol**.
+  `aiteam.model_calibration` registra las tres promociones históricas exactas:
+  GPT-5.5 para `context_curator` y Sonnet 4.6 para `engineer`/
+  `software_engineer`, cada una con `calibrated_at`, versión del runtime y
+  recibos existentes. El auditor mensual añade dos gates y marca `stale` tras
+  30 días, fecha futura, versión cambiada/no observada o evidencia ausente.
+  Pares no registrados y stale fallan cerrados para una promoción nueva; el
+  reporte conserva `existing_default_action=unchanged`, por lo que no confunde
+  antigüedad con indisponibilidad. El recibo vivo pasa 5/5 gates, registra las
+  tres promociones `fresh` y mantiene aparte la actualización pendiente de
+  Codex CLI. La próxima revisión queda adelantada al `2026-08-19`, antes del
+  primer vencimiento, en vez de esperar hasta completar un mes desde el audit.
 - [x] **Implementar presión y forecast de cuota por perfil de suscripción**.
   `run_adapter_profiles` congela el perfil real por run y
   `subscription_quota_snapshot` agrega runs, duración, usage disponible y
@@ -425,11 +437,11 @@ compatibilidad, (3) enforcement backend/pre-run, (4) proyección en Equipo y
   `subscription_pressure`, las APIs nunca consumen el proxy de runs de una
   suscripción y Equipo etiqueta ambos estados de forma distinta.
 - [x] **Añadir la matriz hermética positiva y negativa por modelo**. El auditor
-  `scripts/audit_model_flow_matrix.py` recorre los 12 perfiles y 46 modelos
+  `scripts/audit_model_flow_matrix.py` recorre los 12 perfiles y 47 modelos
   built-in, valida identidad/metadata, recomendaciones ejecutables, roles
   positivos y negativos, perfiles bloqueados, privacidad fail-closed, MCP API,
-  criticidad y JSON Schema. La matriz actual contiene 334 celdas positivas y
-  402 negativas sin fallos. GET de Equipo y POST de compatibilidad devuelven la
+  criticidad y JSON Schema. La matriz actual contiene 337 celdas positivas y
+  415 negativas sin fallos. GET de Equipo y POST de compatibilidad devuelven la
   misma decisión para cada modelo; onboarding prueba cada modelo API exacto y
   demuestra que no habilita a sus hermanos. Los flujos representativos de
   bootstrap, hiring, edición, dispatch, escritura API, deny OpenCode, retirada,
@@ -740,6 +752,33 @@ sí sola el privilegio de un rol.
 
 ### Mantenimiento no bloqueante
 
+- [x] **Reconciliar la auditoría independiente del 2026-07-22 contra el árbol
+  `65eb862`**. F7/H1, limpieza concurrente, MCP, orientación, paralelismo y
+  coste quedan confirmados. El E2E de orientación ya estaba en la verificación
+  mínima y el drift ya tenía cadencia mensual+evento. Se aceptan como huecos
+  acotados la amplificación aditiva de decisiones, `build`/`lint` condicionales,
+  frescura explícita de calibración y publicación del commit local. La cifra
+  46/334 del informe se rechaza como stale: código, test, recibo y reejecución
+  coinciden en 47 modelos, 337 celdas positivas y 415 negativas.
+- [x] **Medir la amplificación de `dispatch_candidate_decisions` antes de
+  diseñar poda**. El benchmark SQLite hermético ejecuta tres repeticiones con
+  colas 1/25/100/1000 y thresholds congelados antes del resultado. Para 1000:
+  24.700 filas exactas, 24,7 por wakeup, 20,60 MB añadidos, planificación
+  mediana 8,30 ms/p95 17,13 ms y consultas medianas 0,030/0,016 ms. Recibo:
+  `benchmarks/results/dispatch_decision_growth/dispatch-decision-growth-v1.json`.
+- [x] **Definir la decisión de retención por tabla a partir del benchmark**.
+  Ninguno de los límites (25 filas/wakeup, 50 ms de planificación mediana,
+  10 ms de consulta mediana y 32 KiB/wakeup) fue superado. Decisión:
+  `retain_additive_log_and_monitor`; repetir por evento si cambian schema,
+  índices, scheduler o snapshot. `activity_log`, `run_events` y
+  `orientation_events` conservan contratos separados y no entran en un TTL
+  global.
+- [x] **Resolver el gate de implementación de mantenimiento**. El recibo fija
+  `operational_pressure_observed=false` y
+  `retention_implementation_allowed=false`; por contrato no se añade poda ni
+  presión a `loop-health`. Una futura implementación exige superar un threshold,
+  dry-run y pruebas de conservación de trabajo vivo/provenance reciente.
+
 - [x] **Hacer la limpieza de pytest segura ante concurrencia y locks de
   Windows**. Mantener sesiones por PID, aislar también user config por sesión y
   no abortar `pytest_configure` si un directorio stale devuelve
@@ -756,6 +795,9 @@ sí sola el privilegio de un rol.
   `c695661` documentación/retirada legacy. Los 16 commits locales acumulados se
   publicaron en `origin/master`; el árbol quedó limpio. Repetir esta disciplina
   al terminar cada bloque para que Git siga siendo la fuente de verdad.
+- [ ] **Publicar el bloque local actual en GitHub**. `master` está un commit por
+  delante de `origin/master` con `65eb862`; incluir esta reconciliación en un
+  commit temático, repetir los gates proporcionales y hacer push explícito.
 
 - [ ] Eliminar temporales retenidos por Windows después de reinicio o liberación
   de handles, verificando primero rutas exactas. `.pytest-workspace-tmp` y
@@ -765,11 +807,17 @@ sí sola el privilegio de un rol.
   ACL privadas niegan incluso enumeración al owner actual. El borrado exacto fue
   bloqueado por la política del entorno antes de ejecutarse; no se tocó ningún
   archivo ni se deben borrar `.pytest_cache`, `.ruff_cache` o caches de runtime.
+  Se suma `.tmp_dispatch_growth_d_46h9iy`, creado por el primer benchmark: el
+  handle SQLite ya se liberó y el harness incorpora retry acotado, pero la
+  política volvió a bloquear el `Remove-Item` exacto.
 - [x] Reconciliar este documento y `HANDOFF.md` después de cada bloque material.
   Reconciliados el 2026-07-21 tras endurecer el benchmark, auditar temporales,
   evaluar sesiones persistentes y corregir los IDs de Antigravity 1.1.5.
   No crear roadmaps paralelos fechados; reabrir este control en el siguiente
   bloque material.
+- [ ] **Compactar `task.md` en la próxima reconciliación de bloque**, no durante
+  trabajo activo. Mover a `docs/HISTORY.md` solo bloques íntegramente cerrados,
+  conservando aquí criterio de cierre, decisión vigente y enlaces a recibos.
 
 ## Decisiones vigentes
 
@@ -832,8 +880,13 @@ sí sola el privilegio de un rol.
 .\scripts\python_local.bat scripts\e2e_quorum_canary.py
 .\scripts\python_local.bat scripts\e2e_solo_lead_canary.py
 Set-Location ide-frontend
+npm run build
+npm run lint
 npm run test:e2e:orientation
 ```
 
 Ejecutar únicamente la verificación proporcional al cambio durante iteración;
 reservar la suite completa y los canarios relevantes para el cierre del bloque.
+`build`, `lint` y Playwright son obligatorios cuando el diff toca
+`ide-frontend/`; no es necesario pagarlos en un bloque exclusivamente backend o
+documental.

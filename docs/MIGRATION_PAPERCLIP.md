@@ -303,6 +303,12 @@ calidad, estabilidad ni economía. El owner es `AI Teams maintainer`; la
 cadencia mínima es mensual más evento y
 `scripts/audit_model_catalog_drift.py` deja un recibo durable con inventarios
 autenticados, exclusiones explícitas y matriz hermética.
+La evidencia de calidad promovida vive en `aiteam.model_calibration` con
+`calibrated_at`, versión y recibos por par exacto perfil+modelo+rol. El auditor
+mensual bloquea promociones nuevas no registradas o stale y abre atención tras
+30 días, fecha futura, versión cambiada/no observada o recibo ausente. No
+convierte por sí solo un default sano en `manual-only`: esa transición exige
+evidencia separada de catálogo, health o calidad.
 
 ### Fase 6 — Planificacion estructurada
 
@@ -354,6 +360,14 @@ La verificabilidad del control plane incluye también su proceso de entrega:
 tests concurrentes no deben destruir temporales de otra sesión ni abortar por
 locks stale, y cada bloque material debe quedar consolidado en Git después de
 sus gates. `task.md` conserva los pendientes operativos concretos.
+
+La retención se decide por tabla y por obligación, no mediante un TTL global.
+El benchmark v1 de `dispatch_candidate_decisions` mide hasta 1000 wakeups y no
+supera sus thresholds prerregistrados: se conserva el log aditivo y no se
+habilita poda ni cambio de `loop-health`. Debe repetirse ante cambios de schema,
+índices, scheduler o límite. `activity_log`, `run_events` y orientación
+consentida requieren políticas separadas para no borrar evidencia o contradecir
+consentimiento/revocación.
 
 Objetivo: una sola fuente durable de observabilidad.
 

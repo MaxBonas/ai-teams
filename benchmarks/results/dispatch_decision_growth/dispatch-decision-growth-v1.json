@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "benchmark": "dispatch_candidate_decision_growth",
+  "case_version": "dispatch-decision-growth-v1",
+  "generated_at": "2026-07-22T11:39:40.917169+00:00",
+  "environment": {
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "sqlite": "3.49.1"
+  },
+  "contract": {
+    "models_or_network_used": false,
+    "project_databases_read": false,
+    "queue_sizes": [
+      1,
+      25,
+      100,
+      1000
+    ],
+    "repeats": 3,
+    "snapshot_limit": 25,
+    "query_repetitions": 25,
+    "thresholds_preregistered_in_code": {
+      "max_rows_per_wakeup": 25.0,
+      "max_planning_ms_per_dispatch": 50.0,
+      "max_query_median_ms": 10.0,
+      "max_delta_bytes_per_wakeup": 32768.0
+    },
+    "constructs_not_measured": [
+      "long-running workspace fragmentation",
+      "concurrent writer contention",
+      "production hardware outside this machine"
+    ]
+  },
+  "cases": [
+    {
+      "queue_size": 1,
+      "repeats": 3,
+      "decision_rows": 1.0,
+      "rows_per_wakeup": 1.0,
+      "delta_bytes": 0.0,
+      "delta_bytes_per_wakeup": 0.0,
+      "planning_total_ms": 4.6935,
+      "planning_per_dispatch_median_ms": 4.6935,
+      "planning_per_dispatch_p95_ms": 4.6935,
+      "wakeup_history_median_ms": 0.0194,
+      "wakeup_history_p95_ms": 0.0427,
+      "recent_batch_median_ms": 0.0191,
+      "recent_batch_p95_ms": 0.0286,
+      "max_observations_per_wakeup": 1,
+      "checks": {
+        "row_formula_exact": true,
+        "one_batch_per_dispatch": true,
+        "snapshot_bound_respected": true
+      }
+    },
+    {
+      "queue_size": 25,
+      "repeats": 3,
+      "decision_rows": 325.0,
+      "rows_per_wakeup": 13.0,
+      "delta_bytes": 266240.0,
+      "delta_bytes_per_wakeup": 10649.6,
+      "planning_total_ms": 180.0986,
+      "planning_per_dispatch_median_ms": 7.2407,
+      "planning_per_dispatch_p95_ms": 8.1261,
+      "wakeup_history_median_ms": 0.0425,
+      "wakeup_history_p95_ms": 0.0543,
+      "recent_batch_median_ms": 0.0242,
+      "recent_batch_p95_ms": 0.032,
+      "max_observations_per_wakeup": 25,
+      "checks": {
+        "row_formula_exact": true,
+        "one_batch_per_dispatch": true,
+        "snapshot_bound_respected": true
+      }
+    },
+    {
+      "queue_size": 100,
+      "repeats": 3,
+      "decision_rows": 2200.0,
+      "rows_per_wakeup": 22.0,
+      "delta_bytes": 1765376.0,
+      "delta_bytes_per_wakeup": 17653.76,
+      "planning_total_ms": 1220.7855,
+      "planning_per_dispatch_median_ms": 10.6845,
+      "planning_per_dispatch_p95_ms": 17.6714,
+      "wakeup_history_median_ms": 0.0414,
+      "wakeup_history_p95_ms": 0.0532,
+      "recent_batch_median_ms": 0.024,
+      "recent_batch_p95_ms": 0.0336,
+      "max_observations_per_wakeup": 25,
+      "checks": {
+        "row_formula_exact": true,
+        "one_batch_per_dispatch": true,
+        "snapshot_bound_respected": true
+      }
+    },
+    {
+      "queue_size": 1000,
+      "repeats": 3,
+      "decision_rows": 24700.0,
+      "rows_per_wakeup": 24.7,
+      "delta_bytes": 20602880.0,
+      "delta_bytes_per_wakeup": 20602.88,
+      "planning_total_ms": 11727.5752,
+      "planning_per_dispatch_median_ms": 8.2975,
+      "planning_per_dispatch_p95_ms": 17.1293,
+      "wakeup_history_median_ms": 0.0301,
+      "wakeup_history_p95_ms": 0.0333,
+      "recent_batch_median_ms": 0.0163,
+      "recent_batch_p95_ms": 0.0192,
+      "max_observations_per_wakeup": 25,
+      "checks": {
+        "row_formula_exact": true,
+        "one_batch_per_dispatch": true,
+        "snapshot_bound_respected": true
+      }
+    }
+  ],
+  "checks": {
+    "queue_1_row_formula_exact": true,
+    "queue_1_one_batch_per_dispatch": true,
+    "queue_1_snapshot_bound_respected": true,
+    "queue_25_row_formula_exact": true,
+    "queue_25_one_batch_per_dispatch": true,
+    "queue_25_snapshot_bound_respected": true,
+    "queue_100_row_formula_exact": true,
+    "queue_100_one_batch_per_dispatch": true,
+    "queue_100_snapshot_bound_respected": true,
+    "queue_1000_row_formula_exact": true,
+    "queue_1000_one_batch_per_dispatch": true,
+    "queue_1000_snapshot_bound_respected": true,
+    "rows_per_wakeup_within_bound": true,
+    "planning_latency_within_bound": true,
+    "query_latency_within_bound": true,
+    "storage_growth_within_bound": true
+  },
+  "conclusion": {
+    "structural_amplification_bounded": true,
+    "operational_pressure_observed": false,
+    "retention_implementation_allowed": false,
+    "decision": "retain_additive_log_and_monitor",
+    "reason": "la amplificación exacta permanece dentro de los thresholds preregistrados"
+  }
+}

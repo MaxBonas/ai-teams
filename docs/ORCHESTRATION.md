@@ -177,6 +177,18 @@ manual/probe-gated tras fallar 0/3 review durable, Big Pickle como `rejected` y
 la incompatibilidad de versión Codex como atención. Nada de ello promueve
 defaults.
 
+La frescura de catálogo/health y la frescura de calidad son contratos distintos.
+`aiteam.model_calibration` registra por par exacto perfil+modelo+rol la fecha,
+versión y recibos que autorizaron las promociones históricas de GPT-5.5 para
+`context_curator` y Sonnet 4.6 para Engineer. El auditor mensual falla cerrado
+para promociones no registradas y marca `stale` al superar 30 días, encontrar
+fecha futura, cambiar/no observar versión o perder evidencia. El recibo actual
+encuentra las tres entradas frescas y adelanta `next_review_due` al primer
+vencimiento (`2026-08-19`). `stale` abre recalibración, pero conserva
+`existing_default_action=unchanged`: la edad por sí sola no demuestra que un
+default sea inejecutable ni autoriza degradarlo silenciosamente a `manual-only`.
+Eso requiere una regresión de catálogo, health o calidad comparable.
+
 El follow-up durable v4 ejercita el runtime productivo sobre el mismo defecto y
 la misma corrección. Flash High y 3.6 Medium completan 3/3 ciclos
 `changes_requested` → fix materializado por el Lead → `approved`, sin runs ni
@@ -669,6 +681,18 @@ batch. La tabla es aditiva y la aplica el schema idempotente al abrir DB antigua
 Este bloque mejora observabilidad/corrección, pero no prueba beneficio de
 latencia ni autoriza el default paralelo.
 
+El snapshot secuencial observa como máximo 25 candidatos por dispatch: al drenar
+N wakeups el crecimiento queda acotado por `25*N`, no por `N²`, pero sigue siendo
+aditivo. El benchmark hermético v1 midió tres repeticiones de colas 1/25/100/1000.
+En 1000 obtuvo exactamente 24.700 filas, 20,60 MB adicionales, mediana de 8,30 ms
+por planificación y consultas medianas de 0,030/0,016 ms. Ningún threshold
+prerregistrado fue superado, por lo que `retention_implementation_allowed=false`:
+se conserva el log aditivo y se repite el benchmark si cambian schema, índices,
+scheduler o límite de snapshot. Una retención futura será específica por tabla;
+no se aplicará una purga global a `activity_log`, `run_events` u orientación
+consentida, cuyas obligaciones de auditoría y borrado son diferentes. Recibo:
+`benchmarks/results/dispatch_decision_growth/dispatch-decision-growth-v1.json`.
+
 El segundo bloque elimina la inferencia en DB nuevas. Antes de cada reclamación
 secuencial, el loop persiste el prefijo de cola considerado con contrato
 `candidate_queue_prefix_v1`: primer candidato listo seleccionado, restantes
@@ -1038,6 +1062,7 @@ admisible con riesgo residual de sobreajuste a la suite oculta.
 | Hiring | `aiteam/run_profiles.py`, `aiteam/hiring_economics.py` |
 | Adapters | `aiteam/project_adapters.py`, `aiteam/adapters/` (incluye Zen y BYOK OpenAI-compatible) |
 | Provider health | `aiteam/provider_governor.py` |
+| Calibración de modelos | `aiteam/model_calibration.py`, `scripts/audit_model_catalog_drift.py` |
 | MCP gobernado | `aiteam/mcp_runtime.py`, `aiteam/extensions.py`, `aiteam/mcp_catalog.py`, traducción Codex/OpenCode en adapters |
 | Detección MCP | `aiteam/mcp_needs.py`, reconciliación en `aiteam/heartbeat/loop.py` |
 | Context curator | `aiteam/context_curator.py`, proyección en `aiteam/db/wake_payload.py` |

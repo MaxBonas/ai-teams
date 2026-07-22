@@ -232,9 +232,10 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   estados catalogued/verified/rate_limited/retired, y una ausencia de fallback
   crea continuación owner. JSON Object/Qwen queda endurecido con validación
   completa y un único repair que no puede modificar ops/status; Qwen sigue
-  limitado a Tier 3 y criticidad media. La matriz hermética ya audita los 43
-  modelos built-in, paridad Equipo/API y probes exactos de onboarding. El
-  La telemetría de capacidad ya separa API free de suscripción: Groq persiste
+  limitado a Tier 3 y criticidad media. La matriz hermética ya audita los 47
+  modelos built-in —337 celdas positivas y 415 negativas—, paridad Equipo/API
+  y probes exactos de onboarding. La telemetría de capacidad ya separa API free
+  de suscripción: Groq persiste
   RPD/TPM observados en headers por modelo y Gemini queda sin porcentaje cuando
   el proyecto no aporta denominadores. Los canarios vivos de los tres run
   profiles están cerrados; el siguiente frente de P0.3 es calibrar OpenCode Zen
@@ -311,6 +312,28 @@ determinista y recibo 3/3; el bloque activo vuelve a las calibraciones que no
 dependan de credenciales ausentes. No
 mantener una segunda lista de tareas en este handoff.
 
+La auditoría independiente del 2026-07-22 reejecutó 1211 tests, tres canarios,
+matriz, preregistro, Playwright, build y lint en verde. Confirmó los cierres de
+autoridad/MCP/concurrencia y abrió solo mantenimiento: medir primero la
+amplificación acotada de `dispatch_candidate_decisions`, diseñar retención por
+tabla, registrar frescura de calibración y publicar el bloque local. El E2E ya
+estaba en el gate; ahora `build` y `lint` son también obligatorios cuando cambia
+frontend. No aplicar un TTL global a telemetría durable o datos consentidos.
+
+El benchmark posterior cerró el hallazgo de crecimiento sin habilitar poda.
+Tres repeticiones 1/25/100/1000 verifican la fórmula acotada; a 1000 registra
+24.700 decisiones, 20,60 MB, 8,30 ms medianos por planificación y consultas
+≤0,030 ms. Todos los thresholds pasan y el recibo devuelve
+`retention_implementation_allowed=false`; conservar el log aditivo y repetir
+solo ante cambios de schema, índices, scheduler o límite de snapshot.
+
+La frescura de calibración queda implementada sin mezclarse con health. El
+registro canónico contiene tres pares promovidos: GPT-5.5/`context_curator` y
+Sonnet 4.6/`engineer`+`software_engineer`, con fecha, versión y recibos. El
+auditor de drift pasa ahora 5/5 gates y los tres pares están `fresh`; una entrada
+stale o no registrada bloquea solo promociones nuevas y deja el default actual
+sin cambios. Codex `cli_update_required` continúa como atención independiente.
+
 ## Riesgos conocidos
 
 - `RunExecutor` concentra muchas políticas; el orden de preflights y gates requiere tests dirigidos.
@@ -329,7 +352,12 @@ mantener una segunda lista de tareas en este handoff.
   implícita de escritura y la API exige estructura para nuevas revisiones. El
   Markdown de documentos, builtins y adapters antiguos sigue funcionando como
   shim transitorio y se identifica como no estructurado.
-- El supuesto hueco de identidad del Lead en quorum fue refutado: `accept_quorum_synthesis` enlaza la run con la issue y exige `run.agent_id == issue.assignee_agent_id`. Falta un test negativo con un segundo `team_lead`, no otra política duplicada en el executor.
+- El supuesto hueco de identidad del Lead en quorum está cerrado en persistencia:
+  `accept_quorum_synthesis` enlaza run, revisión e issue, exige
+  `run.agent_id == issue.assignee_agent_id` y conserva idempotencia/inmutabilidad
+  terminal. `test_persistence_rejects_second_team_lead_not_assigned_to_issue`
+  protege ya el escenario nominal que antes faltaba; no duplicar la política en
+  el executor.
 - El context curator persiste ahora Markdown más un índice causal v1. Producción
   valida provenance y completitud relacional, no verdad: accountability requiere
   owner/deliverable/accepted_by, escalado metric/threshold/window/action y una

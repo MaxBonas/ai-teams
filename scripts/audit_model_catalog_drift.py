@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from aiteam.model_flow_matrix import audit_builtin_model_flows  # noqa: E402
+from aiteam.model_calibration import audit_promoted_model_calibrations  # noqa: E402
 from aiteam.user_config import (  # noqa: E402
     executable_model_options,
     model_options,
@@ -98,6 +99,25 @@ def build_report(
         row.get("coverage_ok") is True for row in catalog_rows
     )
     flow_ok = flow_report.get("ok") is True
+    observed_versions = {
+        str(row.get("profile_id") or ""): str(row.get("cli_version") or "") or None
+        for row in catalog_rows
+    }
+    observed_versions["codex_subscription"] = (
+        str(codex_catalog.get("installed_version") or "") or None
+    )
+    calibration_report = audit_promoted_model_calibrations(
+        observed_at=observed_at,
+        observed_versions=observed_versions,
+    )
+    calibration_due_dates = [
+        datetime.fromisoformat(entry["calibrated_at"]).date()
+        + timedelta(days=int(entry["max_age_days"]))
+        for entry in calibration_report["entries"]
+    ]
+    cadence_due = (observed_at + timedelta(days=30)).date()
+    calibration_due = min(calibration_due_dates, default=cadence_due)
+    next_review_due = min(cadence_due, max(observed_at.date(), calibration_due))
     attention: list[dict[str, Any]] = []
     for row in catalog_rows:
         if row.get("status") != "current" or row.get("coverage_ok") is not True:
@@ -116,6 +136,17 @@ def build_report(
                 "reason": codex_catalog.get("reason") or codex_catalog.get("status"),
             }
         )
+    for entry in calibration_report["entries"]:
+        if entry["status"] != "fresh":
+            attention.append(
+                {
+                    "profile_id": entry["profile_id"],
+                    "model": entry["model"],
+                    "role": entry["role"],
+                    "reason": "model_calibration_stale",
+                    "stale_reasons": entry["stale_reasons"],
+                }
+            )
     return {
         "schema_version": 1,
         "benchmark": "model_catalog_drift_audit",
@@ -123,7 +154,8 @@ def build_report(
         "policy": {
             "owner": "AI Teams maintainer",
             "cadence": "monthly_and_on_cli_or_provider_change",
-            "next_review_due": (observed_at + timedelta(days=30)).date().isoformat(),
+            "next_review_due": next_review_due.isoformat(),
+            "calibration_next_review_due": calibration_due.isoformat(),
             "triggers": [
                 "cli_version_changed",
                 "provider_catalog_changed",
@@ -131,6 +163,7 @@ def build_report(
                 "preview_or_free_offer_changed",
             ],
             "promotion_rule": "discovery_never_authorizes_defaults",
+            "calibration_rule": "fresh_exact_profile_model_role_evidence_required",
         },
         "catalogs": catalog_rows,
         "codex_catalog": codex_catalog,
@@ -145,14 +178,23 @@ def build_report(
                 "failures",
             )
         },
+        "model_calibration_freshness": calibration_report,
         "gates": {
             "authenticated_inventories_complete": inventory_complete,
             "declared_catalog_coverage": coverage_ok,
             "hermetic_model_flow_matrix": flow_ok,
+            "promoted_model_calibration_registry": calibration_report["registry_valid"],
+            "promoted_model_calibrations_fresh": calibration_report["all_fresh"],
         },
         "attention_required": attention,
         "promotion_allowed": False,
-        "ok": inventory_complete and coverage_ok and flow_ok,
+        "ok": (
+            inventory_complete
+            and coverage_ok
+            and flow_ok
+            and calibration_report["registry_valid"]
+            and calibration_report["all_fresh"]
+        ),
     }
 
 

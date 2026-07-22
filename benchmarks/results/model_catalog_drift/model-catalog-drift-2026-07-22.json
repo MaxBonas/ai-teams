@@ -1,18 +1,20 @@
 {
   "schema_version": 1,
   "benchmark": "model_catalog_drift_audit",
-  "observed_at": "2026-07-22T01:22:59.143951+02:00",
+  "observed_at": "2026-07-22T13:49:40.204691+02:00",
   "policy": {
     "owner": "AI Teams maintainer",
     "cadence": "monthly_and_on_cli_or_provider_change",
-    "next_review_due": "2026-08-21",
+    "next_review_due": "2026-08-19",
+    "calibration_next_review_due": "2026-08-19",
     "triggers": [
       "cli_version_changed",
       "provider_catalog_changed",
       "model_id_added_or_removed",
       "preview_or_free_offer_changed"
     ],
-    "promotion_rule": "discovery_never_authorizes_defaults"
+    "promotion_rule": "discovery_never_authorizes_defaults",
+    "calibration_rule": "fresh_exact_profile_model_role_evidence_required"
   },
   "catalogs": [
     {
@@ -99,10 +101,81 @@
     "negative_cell_count": 415,
     "failures": []
   },
+  "model_calibration_freshness": {
+    "schema_version": 1,
+    "observed_at": "2026-07-22",
+    "max_age_days": 30,
+    "registry_valid": true,
+    "all_fresh": true,
+    "registered_promotions_fresh": true,
+    "unregistered_promotions_allowed": false,
+    "existing_defaults_changed": false,
+    "entries": [
+      {
+        "profile_id": "codex_subscription",
+        "model": "gpt-5.5",
+        "role": "context_curator",
+        "calibrated_at": "2026-07-20",
+        "age_days": 2,
+        "max_age_days": 30,
+        "provider_version": "0.128.0",
+        "observed_provider_version": "0.128.0",
+        "evidence_receipts": [
+          "benchmarks/results/context-curator-codex-senior-seed-1-rubric-v5.json",
+          "benchmarks/results/context-curator-codex-senior-seed-2-rubric-v5.json",
+          "benchmarks/results/context-curator-queue-codex-senior-seed-1-rubric-v4.json"
+        ],
+        "missing_evidence_receipts": [],
+        "status": "fresh",
+        "stale_reasons": [],
+        "new_promotion_allowed": true,
+        "existing_default_action": "unchanged"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "claude-sonnet-4-6",
+        "role": "engineer",
+        "calibrated_at": "2026-07-21",
+        "age_days": 1,
+        "max_age_days": 30,
+        "provider_version": "1.1.5",
+        "observed_provider_version": "1.1.5",
+        "evidence_receipts": [
+          "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-aggregate-v3.json"
+        ],
+        "missing_evidence_receipts": [],
+        "status": "fresh",
+        "stale_reasons": [],
+        "new_promotion_allowed": true,
+        "existing_default_action": "unchanged"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "claude-sonnet-4-6",
+        "role": "software_engineer",
+        "calibrated_at": "2026-07-21",
+        "age_days": 1,
+        "max_age_days": 30,
+        "provider_version": "1.1.5",
+        "observed_provider_version": "1.1.5",
+        "evidence_receipts": [
+          "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-aggregate-v3.json"
+        ],
+        "missing_evidence_receipts": [],
+        "status": "fresh",
+        "stale_reasons": [],
+        "new_promotion_allowed": true,
+        "existing_default_action": "unchanged"
+      }
+    ],
+    "registry_errors": []
+  },
   "gates": {
     "authenticated_inventories_complete": true,
     "declared_catalog_coverage": true,
-    "hermetic_model_flow_matrix": true
+    "hermetic_model_flow_matrix": true,
+    "promoted_model_calibration_registry": true,
+    "promoted_model_calibrations_fresh": true
   },
   "attention_required": [
     {
