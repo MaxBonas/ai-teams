@@ -795,9 +795,10 @@ sí sola el privilegio de un rol.
   `c695661` documentación/retirada legacy. Los 16 commits locales acumulados se
   publicaron en `origin/master`; el árbol quedó limpio. Repetir esta disciplina
   al terminar cada bloque para que Git siga siendo la fuente de verdad.
-- [ ] **Publicar el bloque local actual en GitHub**. `master` está un commit por
-  delante de `origin/master` con `65eb862`; incluir esta reconciliación en un
-  commit temático, repetir los gates proporcionales y hacer push explícito.
+- [x] **Publicar el bloque local actual en GitHub**. `65eb862` y el cierre
+  temático `c9dd733` están publicados en `origin/master`. Antes del push se
+  ejecutaron 1229 tests en verde, `git diff --check` y un escaneo del contenido
+  añadido sin credenciales; el bloque no toca frontend.
 
 - [ ] Eliminar temporales retenidos por Windows después de reinicio o liberación
   de handles, verificando primero rutas exactas. `.pytest-workspace-tmp` y

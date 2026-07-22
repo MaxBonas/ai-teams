@@ -333,6 +333,8 @@ Sonnet 4.6/`engineer`+`software_engineer`, con fecha, versión y recibos. El
 auditor de drift pasa ahora 5/5 gates y los tres pares están `fresh`; una entrada
 stale o no registrada bloquea solo promociones nuevas y deja el default actual
 sin cambios. Codex `cli_update_required` continúa como atención independiente.
+El bloque completo, incluido `65eb862`, quedó publicado en `origin/master`
+mediante `c9dd733` tras 1229 tests en verde y revisión de secretos/diff.
 
 ## Riesgos conocidos
 
