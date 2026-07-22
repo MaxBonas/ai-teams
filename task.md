@@ -615,11 +615,16 @@ sí sola el privilegio de un rol.
   `partial_exact`. Fixtures positivos/negativos cubren calidad, cobertura y
   exclusiones. El recibo histórico v2 conserva 7 DB/75 runs como `approximate`
   y cero trigger exacto: `benchmarks/results/parallel_channels/parallel-channel-capacity-v2.json`.
-- [ ] **Construir un A/B hermético sobre el `HeartbeatLoop` real.** Ejecutar la
-  misma cola determinista con flag off/on, al menos tres raíces, tres pools, un
-  único work slot y una rama que falla. Cierre: solapamiento sólo entre ramas
-  admitidas, fallo aislado, mismos estados terminales y cero wakeups/runs
-  huérfanas; este bloque valida corrección, no beneficio productivo.
+- [x] **Construir un A/B hermético sobre el `HeartbeatLoop` real.** El harness
+  clona cuatro raíces/cuatro pools en flag off/on: Engineer y Reviewer compiten
+  por el único work slot; dos scouts pueden acompañar al primero y uno falla de
+  forma intencional. El brazo secuencial no solapa; el paralelo registra sólo
+  los tres pares del batch admitido, rechaza Reviewer por `second_work_slot`,
+  aísla el fallo y conserva paridad exacta de runs, wakeups e issues terminales.
+  Ambos brazos terminan con cobertura de dispatch 100 % y cero runs, wakeups o
+  checkouts vivos. El recibo niega expresamente conclusión de rendimiento,
+  trigger vivo o cambio de default:
+  `benchmarks/results/parallel_channels/parallel-heartbeat-hermetic-v1.json`.
 - [ ] **Obtener un trigger vivo representativo antes de gastar modelos.** Retener
   al menos un proyecto comparable con múltiples raíces y pools cuya provenance
   exacta muestre espera paralelizable mayor que cero. Sin ese trigger, no abrir

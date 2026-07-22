@@ -46,7 +46,7 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 
 ## Trabajo reciente
 
-- Dos primeros bloques de la validación reabierta de paralelismo completados.
+- Tres primeros bloques de la validación reabierta de paralelismo completados.
   `dispatch_candidate_decisions` persiste cada candidato considerado en modo
   secuencial/paralelo con raíz, pool efectivo, work slot, primera readiness
   observada y razón estable de selección/rechazo. El loop secuencial fotografía
@@ -55,9 +55,13 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   slot exactos, separa espera total/lista/paralelizable, deduplica por wakeup y
   declara cobertura y calidad `exact`/`partial_exact`/`approximate`. Sólo la
   primera puede abrir el trigger. El recibo v2 mantiene las siete DB históricas
-  como aproximadas y sin trigger. Ahora toca el A/B hermético del `HeartbeatLoop`.
-  El default continúa secuencial y el flag opt-in; no se consumieron modelos.
-  Verificación completa: `1192 passed` en 157,02 s; Ruff dirigido limpio.
+  como aproximadas y sin trigger. El A/B hermético del `HeartbeatLoop` clona
+  cuatro raíces/pools, restringe dos roles a un work slot, solapa sólo Engineer
+  con dos scouts, aísla un fallo intencional y deja ambos brazos con estados
+  terminales idénticos y cero huérfanos. El recibo niega cualquier conclusión
+  de rendimiento. Ahora toca obtener un trigger vivo multi-raíz/multi-pool antes
+  de consumir modelos. El default continúa secuencial y el flag opt-in.
+  Verificación completa: `1194 passed` en 140,72 s; Ruff dirigido limpio.
 - OpenCode server permanece experimental. El A/B de transporte v1 con DeepSeek
   pasa 3/3 direct y 3/3 attached, conserva seis sesiones aisladas y reduce la
   mediana 7,50→2,92 s con tokens equivalentes. El servidor está autenticado en

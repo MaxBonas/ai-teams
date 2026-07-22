@@ -689,6 +689,23 @@ cero espera paralelizable inferida. El default permanece secuencial. El próximo
 bloque es el A/B hermético sobre el `HeartbeatLoop`, que valida corrección sin
 consumir proveedores.
 
+El tercer bloque ejecuta ese A/B con `scripts/benchmark_parallel_heartbeat.py`.
+Ambos brazos parten de la misma cola de cuatro raíces y cuatro pools. Engineer
+y Reviewer son los dos candidatos de work slot; dos scouts son ramas de lectura
+y uno falla deliberadamente. El secuencial completa cuatro runs sin solapamiento.
+El paralelo selecciona Engineer más ambos scouts, registra exactamente los tres
+pares de solapamiento de ese batch y rechaza Reviewer por `second_work_slot`;
+después ejecuta Reviewer aunque una rama anterior terminara `failed`.
+
+Los brazos producen los mismos estados terminales: tres runs completadas, una
+fallida, tres wakeups `finished`, una `failed`, tres issues `done` y una
+`blocked`. Ambos conservan cobertura exacta de dispatch del 100 % y cero runs,
+wakeups o checkouts activos. El recibo
+`benchmarks/results/parallel_channels/parallel-heartbeat-hermetic-v1.json`
+marca `correction_validated=true`, pero niega afirmación de rendimiento, trigger
+vivo y cambio de default. El siguiente gate sigue siendo observar contención
+exacta en un proyecto real comparable antes de consumir modelos.
+
 Anthropic describe mejoras grandes en su sistema de research multiagente, pero también un consumo de tokens muy superior y sensibilidad alta a coordinación, prompts y herramientas. Es evidencia de ingeniería de un vendor sobre su sistema, no una garantía general para coding agents. Fuente: [ANTH-2](ORCHESTRATION_SOURCES.md#anth-2-multi-agent-research).
 
 ## Extensiones MCP gobernadas

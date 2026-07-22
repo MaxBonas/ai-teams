@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "benchmark": "parallel_heartbeat_hermetic_ab",
+  "case_version": "parallel-heartbeat-hermetic-v1",
+  "generated_at": "2026-07-22T09:11:31.899615+00:00",
+  "contract": {
+    "models_or_network_used": false,
+    "same_initial_queue": true,
+    "root_count": 4,
+    "capacity_pool_count": 4,
+    "work_slot_candidates": [
+      "root-work-a",
+      "root-work-b"
+    ],
+    "intentional_failure_issue": "root-fail-d"
+  },
+  "arms": {
+    "sequential": {
+      "dispatched_runs": 4,
+      "execution_order": [
+        "root-work-a",
+        "root-work-b",
+        "root-read-c",
+        "root-fail-d"
+      ],
+      "intervals_ms": {
+        "root-work-a": {
+          "started_ms": 28.306,
+          "finished_ms": 78.358
+        },
+        "root-work-b": {
+          "started_ms": 97.274,
+          "finished_ms": 146.259
+        },
+        "root-read-c": {
+          "started_ms": 163.629,
+          "finished_ms": 213.33
+        },
+        "root-fail-d": {
+          "started_ms": 230.37,
+          "finished_ms": 281.23
+        }
+      },
+      "overlap_pairs": [],
+      "run_status_by_issue": {
+        "root-fail-d": "failed",
+        "root-read-c": "completed",
+        "root-work-a": "completed",
+        "root-work-b": "completed"
+      },
+      "run_error_by_issue": {
+        "root-fail-d": "intentional_hermetic_failure",
+        "root-read-c": "",
+        "root-work-a": "",
+        "root-work-b": ""
+      },
+      "wakeup_status_by_issue": {
+        "root-fail-d": "failed",
+        "root-read-c": "finished",
+        "root-work-a": "finished",
+        "root-work-b": "finished"
+      },
+      "issue_status_by_issue": {
+        "root-fail-d": "blocked",
+        "root-read-c": "done",
+        "root-work-a": "done",
+        "root-work-b": "done"
+      },
+      "active_runs": 0,
+      "active_wakeups": 0,
+      "active_checkouts": 0,
+      "first_dispatch_batch": [
+        {
+          "wakeup_request_id": "wakeup-1",
+          "root_issue_id": "root-work-a",
+          "decision": "selected",
+          "reason": "selected",
+          "capacity_pool": "pool-a",
+          "is_work_slot": 1
+        },
+        {
+          "wakeup_request_id": "wakeup-2",
+          "root_issue_id": "root-work-b",
+          "decision": "rejected",
+          "reason": "sequential_mode",
+          "capacity_pool": "pool-b",
+          "is_work_slot": 1
+        },
+        {
+          "wakeup_request_id": "wakeup-3",
+          "root_issue_id": "root-read-c",
+          "decision": "rejected",
+          "reason": "sequential_mode",
+          "capacity_pool": "pool-c",
+          "is_work_slot": 0
+        },
+        {
+          "wakeup_request_id": "wakeup-4",
+          "root_issue_id": "root-fail-d",
+          "decision": "rejected",
+          "reason": "sequential_mode",
+          "capacity_pool": "pool-d",
+          "is_work_slot": 0
+        }
+      ],
+      "audit": {
+        "evidence_quality": "exact",
+        "candidate_snapshot_batches": 4,
+        "selected_run_coverage_ratio": 1.0,
+        "parallelizable_wait_runs": 2,
+        "parallelizable_wait_seconds": 0.338
+      }
+    },
+    "parallel": {
+      "dispatched_runs": 4,
+      "execution_order": [
+        "root-read-c",
+        "root-work-a",
+        "root-fail-d",
+        "root-work-b"
+      ],
+      "intervals_ms": {
+        "root-read-c": {
+          "started_ms": 64.876,
+          "finished_ms": 146.352
+        },
+        "root-work-a": {
+          "started_ms": 80.758,
+          "finished_ms": 163.188
+        },
+        "root-fail-d": {
+          "started_ms": 96.193,
+          "finished_ms": 179.065
+        },
+        "root-work-b": {
+          "started_ms": 195.897,
+          "finished_ms": 246.009
+        }
+      },
+      "overlap_pairs": [
+        [
+          "root-fail-d",
+          "root-read-c"
+        ],
+        [
+          "root-fail-d",
+          "root-work-a"
+        ],
+        [
+          "root-read-c",
+          "root-work-a"
+        ]
+      ],
+      "run_status_by_issue": {
+        "root-fail-d": "failed",
+        "root-read-c": "completed",
+        "root-work-a": "completed",
+        "root-work-b": "completed"
+      },
+      "run_error_by_issue": {
+        "root-fail-d": "intentional_hermetic_failure",
+        "root-read-c": "",
+        "root-work-a": "",
+        "root-work-b": ""
+      },
+      "wakeup_status_by_issue": {
+        "root-fail-d": "failed",
+        "root-read-c": "finished",
+        "root-work-a": "finished",
+        "root-work-b": "finished"
+      },
+      "issue_status_by_issue": {
+        "root-fail-d": "blocked",
+        "root-read-c": "done",
+        "root-work-a": "done",
+        "root-work-b": "done"
+      },
+      "active_runs": 0,
+      "active_wakeups": 0,
+      "active_checkouts": 0,
+      "first_dispatch_batch": [
+        {
+          "wakeup_request_id": "wakeup-1",
+          "root_issue_id": "root-work-a",
+          "decision": "selected",
+          "reason": "selected",
+          "capacity_pool": "pool-a",
+          "is_work_slot": 1
+        },
+        {
+          "wakeup_request_id": "wakeup-2",
+          "root_issue_id": "root-work-b",
+          "decision": "rejected",
+          "reason": "second_work_slot",
+          "capacity_pool": "pool-b",
+          "is_work_slot": 1
+        },
+        {
+          "wakeup_request_id": "wakeup-3",
+          "root_issue_id": "root-read-c",
+          "decision": "selected",
+          "reason": "selected",
+          "capacity_pool": "pool-c",
+          "is_work_slot": 0
+        },
+        {
+          "wakeup_request_id": "wakeup-4",
+          "root_issue_id": "root-fail-d",
+          "decision": "selected",
+          "reason": "selected",
+          "capacity_pool": "pool-d",
+          "is_work_slot": 0
+        }
+      ],
+      "audit": {
+        "evidence_quality": "exact",
+        "candidate_snapshot_batches": 2,
+        "selected_run_coverage_ratio": 1.0,
+        "parallelizable_wait_runs": 0,
+        "parallelizable_wait_seconds": 0
+      }
+    }
+  },
+  "checks": {
+    "same_four_runs_dispatched": true,
+    "terminal_run_parity": true,
+    "terminal_wakeup_parity": true,
+    "terminal_issue_parity": true,
+    "sequential_has_no_overlap": true,
+    "parallel_overlaps_only_admitted_batch": true,
+    "work_slots_never_overlap": true,
+    "second_work_slot_rejected": true,
+    "parallel_first_batch_selection_exact": true,
+    "intentional_failure_isolated": true,
+    "no_orphans": true,
+    "exact_dispatch_coverage": true
+  },
+  "conclusion": {
+    "correction_validated": true,
+    "performance_claim_allowed": false,
+    "live_contention_trigger_satisfied": false,
+    "default_change_allowed": false,
+    "decision": "retain_sequential_default",
+    "reason": "A/B hermético de corrección; no representa latencia, cuota ni calidad de proveedores vivos"
+  }
+}
