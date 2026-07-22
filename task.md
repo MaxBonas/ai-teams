@@ -698,6 +698,19 @@ sí sola el privilegio de un rol.
   inventar precios. El recibo `orientation-flow-v1.json` declara explícitamente
   que adopción y claridad reales siguen sin medirse; mantener este task abierto
   hasta disponer de sesiones observadas o analítica consentida.
+  - [x] Persistencia y API local consentida. `orientation_measurement`,
+    `orientation_sessions` y `orientation_events` guardan solo sesión, flow,
+    evento allowlisted y perfil canónico: no admiten texto libre, rutas, títulos,
+    IDs de issue/workspace ni payload JSON. Sin consentimiento devuelven `409`;
+    revocar cierra la sesión, borrar elimina sesiones y eventos, y el resumen
+    declara que no mide adopción, claridad, satisfacción ni causalidad.
+  - [ ] Añadir en Config el control explícito de consentimiento y borrado, con
+    explicación de almacenamiento local y sin transmisión externa.
+  - [ ] Instrumentar Bandeja, selección/lectura de perfiles y plan aceptado →
+    tarea mediante la allowlist; cerrar sesiones y registrar abandono/error sin
+    capturar contenido del usuario.
+  - [ ] Ejecutar sesiones humanas consentidas y definir previamente muestra y
+    criterio; no convertir conteos observados en conclusiones de comprensión.
 
 ### Mantenimiento no bloqueante
 

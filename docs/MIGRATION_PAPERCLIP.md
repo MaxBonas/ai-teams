@@ -333,6 +333,12 @@ Estado: `issue_thread_interactions` esta implementado en `aiteam/db/interactions
 La presencia de UI no cierra por sí sola la orientación. Bandeja, elección de
 perfil, explicación de coste/riesgo y transición desde un plan aceptado deben
 tener E2E y métricas de comprensión/abandono antes de ampliar superficies.
+El backend local ya dispone de consentimiento, sesiones, eventos con allowlist,
+revocación y borrado en SQLite. El contrato prohíbe texto libre, rutas, títulos,
+IDs de issue/workspace y transmisión externa; su resumen declara explícitamente
+que los conteos no miden adopción, claridad, satisfacción ni causalidad. Falta
+conectar el control visible y los eventos del cockpit antes de observar sesiones
+humanas consentidas.
 
 ### Fase 8 — Consolidar logs
 

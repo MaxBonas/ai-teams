@@ -390,6 +390,38 @@ CREATE TABLE IF NOT EXISTS quorum_contributions (
     UNIQUE(session_id, ordinal)
 );
 
+CREATE TABLE IF NOT EXISTS orientation_sessions (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'completed', 'abandoned', 'revoked')),
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at TEXT
+);
+
+-- Medición local y consentida de los flujos de orientación del cockpit.
+-- No admite texto libre, rutas, títulos, IDs de issue ni payload JSON.
+CREATE TABLE IF NOT EXISTS orientation_measurement (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    current_session_id TEXT REFERENCES orientation_sessions(id) ON DELETE SET NULL,
+    consented_at TEXT,
+    revoked_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS orientation_events (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES orientation_sessions(id) ON DELETE CASCADE,
+    flow TEXT NOT NULL
+        CHECK (flow IN ('inbox', 'profile_selection', 'accepted_plan_to_task')),
+    event TEXT NOT NULL
+        CHECK (event IN ('flow_started', 'flow_completed', 'flow_abandoned',
+                         'profile_selected', 'guidance_viewed', 'ui_error')),
+    profile TEXT
+        CHECK (profile IS NULL OR profile IN ('solo_lead', 'lead_quorum', 'full_team')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency
     ON wakeup_requests(agent_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
@@ -412,3 +444,4 @@ CREATE INDEX IF NOT EXISTS idx_cost_events_run ON cost_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_cost_events_agent_period ON cost_events(agent_id, period);
 CREATE INDEX IF NOT EXISTS idx_quorum_sessions_issue ON quorum_sessions(issue_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_quorum_contributions_session ON quorum_contributions(session_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_orientation_events_session ON orientation_events(session_id, created_at);

@@ -180,7 +180,11 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   Bandeja requiere 1 acción, cada perfil 1 y plan aceptado → tarea adjunta 2;
   Chromium termina sin errores ni abandonos sintéticos. La guía visible compara
   coste operativo y riesgo de los tres perfiles. No tratar este contrato como
-  evidencia de adopción o claridad real; ese task permanece abierto.
+  evidencia de adopción o claridad real. El backend consentido ya persiste solo
+  sesión, flow, evento allowlisted y perfil canónico en SQLite; bloquea eventos
+  sin consentimiento, soporta revocación/borrado y prohíbe texto, rutas e IDs de
+  proyecto. Falta conectar Config y los eventos del cockpit; ese task permanece
+  abierto y sus conteos no autorizan conclusiones de comprensión.
 - El auditor de benchmarks separa conclusión de promoción. Ya no acepta un
   booleano de independencia si las clases de evaluador son solo léxicas, y una
   promoción nueva exige `constructs_not_measured` más riesgo de Goodhart. Los
