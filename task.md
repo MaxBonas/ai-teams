@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-22`): **1186 passed en 135,56 s**.
+Última suite completa registrada (`2026-07-22`): **1189 passed en 133,26 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -596,11 +596,15 @@ sí sola el privilegio de un rol.
   por tanto, cero esperas elegibles solo significa que el histórico no ejercita
   el selector paralelo. Recibo:
   `benchmarks/results/parallel_channels/parallel-channel-capacity-v1.json`.
-- [ ] **Persistir la elegibilidad exacta de cada candidato al despachar.** Para
-  cada wakeup considerada, registrar raíz, pool de capacidad, rol/work slot,
-  instante en que quedó realmente lista y motivo estable de selección o rechazo.
-  Cierre: migración compatible y tests de dependencia, checkout, mismo agente,
-  misma raíz, mismo pool y segundo work slot.
+- [x] **Persistir la elegibilidad exacta de cada candidato al despachar.**
+  `dispatch_candidate_decisions` guarda por batch y wakeup el modo, raíz, pool
+  de capacidad efectivo, rol/work slot, `requested_at`, primera observación
+  `ready_at`, decisión y motivo estable. El mismo contrato cubre dispatch
+  secuencial y paralelo; los rechazos no necesitan crear una run. El scheduler
+  distingue dependencia y checkout activo, y selecciona por pool de capacidad,
+  no por vendor aparente. La tabla es aditiva/idempotente para DB existentes y
+  los tests cubren dependencia, checkout, mismo agente, misma raíz, mismo pool,
+  segundo work slot y estabilidad de `ready_at`.
 - [ ] **Hacer que el auditor consuma esa provenance exacta.** Mantener los DB
   históricos como evidencia `approximate`, separar espera total de espera
   paralelizable y no contar tiempo bloqueado por dependencias o checkout.

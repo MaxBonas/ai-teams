@@ -113,6 +113,35 @@ CREATE TABLE IF NOT EXISTS wakeup_requests (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Snapshot durable de cada candidato realmente considerado por el scheduler.
+-- Vive antes de runs porque los rechazos no llegan a crear una ejecución.
+CREATE TABLE IF NOT EXISTS dispatch_candidate_decisions (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    dispatch_mode TEXT NOT NULL
+        CHECK (dispatch_mode IN ('sequential', 'parallel')),
+    wakeup_request_id TEXT REFERENCES wakeup_requests(id) ON DELETE SET NULL,
+    agent_id TEXT,
+    issue_id TEXT,
+    root_issue_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT '',
+    capacity_pool TEXT NOT NULL,
+    is_work_slot INTEGER NOT NULL DEFAULT 0 CHECK (is_work_slot IN (0, 1)),
+    requested_at TEXT,
+    ready_at TEXT,
+    considered_at TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('selected', 'rejected')),
+    reason TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(batch_id, wakeup_request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dispatch_decisions_wakeup
+    ON dispatch_candidate_decisions(wakeup_request_id, considered_at);
+CREATE INDEX IF NOT EXISTS idx_dispatch_decisions_batch
+    ON dispatch_candidate_decisions(batch_id, considered_at);
+
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,

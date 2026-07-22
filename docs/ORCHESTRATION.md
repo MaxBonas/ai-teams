@@ -653,9 +653,21 @@ pudiera admitir. La validación sigue abierta en bloques pequeños: provenance
 exacta de elegibilidad, auditor sin aproximaciones, A/B hermético de corrección,
 trigger vivo multi-raíz/multi-pool, A/B vivo equivalente y decisión final.
 `AITEAM_PARALLEL_CHANNELS` continúa opt-in, con batch máximo efectivo 3 y los
-invariantes de agente, raíz, proveedor y work slot. Ningún canario vivo consume
-modelos antes de observar contención elegible real. Recibo del baseline:
+invariantes de agente, raíz, pool de capacidad y work slot. Ningún canario vivo
+consume modelos antes de observar contención elegible real. Recibo del baseline:
 `benchmarks/results/parallel_channels/parallel-channel-capacity-v1.json`.
+
+El primer bloque de la validación abierta ya persiste provenance exacta en
+`dispatch_candidate_decisions`. Cada snapshot secuencial o paralelo conserva
+batch, wakeup, raíz, pool de capacidad efectivo, rol/work slot, timestamps,
+decisión y razón estable; un rechazo existe aunque nunca llegue a crear una run.
+`ready_at` significa la primera observación real de readiness por el scheduler:
+es una frontera conservadora para no atribuir a la cola tiempo que pudo estar
+bloqueado antes. Dependencias y checkout activo son `not ready`; entre candidatos
+listos se distinguen mismo agente, raíz, pool, segundo work slot y límite de
+batch. La tabla es aditiva y la aplica el schema idempotente al abrir DB antiguas.
+Este bloque mejora observabilidad/corrección, pero no prueba beneficio de
+latencia ni autoriza el default paralelo.
 
 Anthropic describe mejoras grandes en su sistema de research multiagente, pero también un consumo de tokens muy superior y sensibilidad alta a coordinación, prompts y herramientas. Es evidencia de ingeniería de un vendor sobre su sistema, no una garantía general para coding agents. Fuente: [ANTH-2](ORCHESTRATION_SOURCES.md#anth-2-multi-agent-research).
 

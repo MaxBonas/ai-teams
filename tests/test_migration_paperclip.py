@@ -103,6 +103,7 @@ def test_v2_migration_apply_creates_parallel_control_plane(tmp_path: Path) -> No
     assert _table_exists(db_path, "issues")
     assert _table_exists(db_path, "runs")
     assert _table_exists(db_path, "wakeup_requests")
+    assert _table_exists(db_path, "dispatch_candidate_decisions")
     assert _table_exists(db_path, "team_blueprints")
     assert _count_rows(db_path, "tasks") == 3
     assert _count_rows(db_path, "goals") == 1

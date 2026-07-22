@@ -46,14 +46,14 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 
 ## Trabajo reciente
 
-- Reabierta y dividida la validación de paralelismo por canal. El auditor offline
-  sigue siendo un baseline válido —75 runs registradas, 72 comparables—, pero
-  las siete muestras son de una sola raíz y proveedor y no ejercitan el selector.
-  `task.md` separa ahora provenance exacta, auditor fiel, A/B hermético, trigger
-  vivo, A/B de proveedores y decisión final. El default continúa secuencial y
-  el flag opt-in; no gastar modelos sin observar primero contención elegible.
-  Recibo: `parallel-channel-capacity-v1.json`. Última suite del código sin cambios:
-  `1186 passed` en 135,56 s.
+- Primer bloque de la validación reabierta de paralelismo completado.
+  `dispatch_candidate_decisions` persiste cada candidato considerado en modo
+  secuencial/paralelo con raíz, pool efectivo, work slot, primera readiness
+  observada y razón estable de selección/rechazo. Dependencia, checkout, agente,
+  raíz, pool y segundo work slot tienen cobertura. El baseline histórico sigue
+  siendo aproximado; ahora toca hacer que el auditor consuma esta provenance.
+  El default continúa secuencial y el flag opt-in; no se consumieron modelos.
+  Verificación completa: `1189 passed` en 133,26 s.
 - OpenCode server permanece experimental. El A/B de transporte v1 con DeepSeek
   pasa 3/3 direct y 3/3 attached, conserva seis sesiones aisladas y reduce la
   mediana 7,50→2,92 s con tokens equivalentes. El servidor está autenticado en

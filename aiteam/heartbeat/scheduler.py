@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -8,16 +9,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from aiteam.db.dependencies import unresolved_blockers
 from aiteam.db.runs import create_run
 from aiteam.db.wakeups import claim_next_wakeup, enqueue_wakeup, finish_wakeup
-from aiteam.hiring_economics import estimate_run_economics
+from aiteam.hiring_economics import estimate_run_economics, provider_and_model_for
+from aiteam.policies import WORK_SLOT_ROLES
+from aiteam.provider_identity import capacity_pool_key
+from aiteam.user_config import resolve_adapter_config
 
 
 @dataclass(frozen=True)
 class DispatchResult:
     wakeup_request: dict[str, Any]
     run: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ParallelBatchPlan:
+    batch_id: str
+    candidates: list[dict[str, Any]]
+    decisions: list[dict[str, Any]]
+    selected_wakeup_ids: list[str]
 
 
 class HeartbeatScheduler:
@@ -55,6 +66,7 @@ class HeartbeatScheduler:
         *,
         agent_id: str | None = None,
         wakeup_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+        record_candidate_decision: bool = True,
     ) -> DispatchResult | None:
         """Claim the next queued wakeup and create its durable run.
 
@@ -65,18 +77,36 @@ class HeartbeatScheduler:
             wakeup = claim_next_wakeup(self.db_path, agent_id=agent_id, wakeup_ids=wakeup_ids)
             if wakeup is None:
                 return None
-            payload = _decode_json(wakeup.get("payload_json"))
-            issue_id = _clean_optional(payload.get("issue_id") or payload.get("task_id"))
-            blockers = unresolved_blockers(self.db_path, issue_id=issue_id) if issue_id else []
-            if not blockers:
+            candidate = _candidate_snapshot(self.db_path, wakeup)
+            readiness_reason = str(candidate.get("readiness_reason") or "")
+            if not readiness_reason:
                 break
+            if record_candidate_decision:
+                record_dispatch_decisions(
+                    self.db_path,
+                    batch_id=f"sequential:{uuid.uuid4()}",
+                    dispatch_mode="sequential",
+                    decisions=[{**candidate, "decision": "rejected", "reason": readiness_reason}],
+                )
+            error = (
+                "issue_dependencies_blocked"
+                if readiness_reason == "dependency_blocked"
+                else "issue_checkout_active"
+            )
             finish_wakeup(
                 self.db_path,
                 wakeup_id=wakeup["id"],
                 status="skipped",
-                error="issue_dependencies_blocked",
+                error=error,
             )
-            self._log_blocked_wakeup(wakeup, issue_id=issue_id, blockers=blockers)
+            self._log_unready_wakeup(wakeup, candidate=candidate, error=error)
+        if record_candidate_decision:
+            record_dispatch_decisions(
+                self.db_path,
+                batch_id=f"sequential:{uuid.uuid4()}",
+                dispatch_mode="sequential",
+                decisions=[{**candidate, "decision": "selected", "reason": "selected"}],
+            )
         payload = _decode_json(wakeup.get("payload_json"))
         run_id = str(payload.get("run_id") or f"run:{uuid.uuid4()}")
         issue_id = _clean_optional(payload.get("issue_id") or payload.get("task_id"))
@@ -141,12 +171,12 @@ class HeartbeatScheduler:
         wakeup["run_id"] = run["id"]
         return DispatchResult(wakeup_request=wakeup, run=run)
 
-    def _log_blocked_wakeup(
+    def _log_unready_wakeup(
         self,
         wakeup: dict[str, Any],
         *,
-        issue_id: str | None,
-        blockers: list[dict[str, Any]],
+        candidate: dict[str, Any],
+        error: str,
     ) -> None:
         with contextlib.closing(_connect(self.db_path)) as conn:
             conn.execute(
@@ -154,17 +184,27 @@ class HeartbeatScheduler:
                 INSERT INTO activity_log (
                     id, actor_agent_id, action, target_type, target_id, payload_json
                 )
-                VALUES (?, ?, 'wakeup.skipped_blocked', 'wakeup', ?, ?)
+                VALUES (?, ?, ?, 'wakeup', ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
                     wakeup.get("agent_id"),
+                    (
+                        "wakeup.skipped_blocked"
+                        if error == "issue_dependencies_blocked"
+                        else "wakeup.skipped_checkout"
+                    ),
                     wakeup.get("id"),
                     __import__("json").dumps(
                         {
-                            "issue_id": issue_id,
-                            "blockers": blockers,
-                            "reason": "issue_dependencies_blocked",
+                            "issue_id": candidate.get("issue_id"),
+                            "blockers": (
+                                candidate.get("readiness_details") or {}
+                            ).get("blockers", []),
+                            "checkout_run_id": (
+                                candidate.get("readiness_details") or {}
+                            ).get("checkout_run_id"),
+                            "reason": error,
                         },
                         ensure_ascii=False,
                         sort_keys=True,
@@ -223,7 +263,7 @@ def batch_candidates(db_path: Path, *, limit: int = 25) -> list[dict[str, Any]]:
     with contextlib.closing(_connect(db_path)) as conn:
         rows = conn.execute(
             """
-            SELECT w.id AS wakeup_id, w.agent_id, w.payload_json,
+            SELECT w.id AS wakeup_id, w.agent_id, w.payload_json, w.requested_at,
                    a.role, a.adapter_type, a.adapter_config_json
             FROM wakeup_requests w
             LEFT JOIN agents a ON a.id = w.agent_id
@@ -233,87 +273,283 @@ def batch_candidates(db_path: Path, *, limit: int = 25) -> list[dict[str, Any]]:
             """,
             (limit,),
         ).fetchall()
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            payload = _decode_json(row["payload_json"])
-            issue_id = str(payload.get("issue_id") or payload.get("task_id") or "").strip()
-            root_id = issue_id
-            if issue_id:
-                root_row = conn.execute(
-                    """
-                    WITH RECURSIVE chain(id, parent_id) AS (
-                        SELECT id, parent_id FROM issues WHERE id = ?
-                        UNION ALL
-                        SELECT i.id, i.parent_id FROM issues i JOIN chain c ON i.id = c.parent_id
-                    )
-                    SELECT id FROM chain WHERE parent_id IS NULL LIMIT 1
-                    """,
-                    (issue_id,),
-                ).fetchone()
-                if root_row:
-                    root_id = str(root_row["id"])
-            out.append({
-                "wakeup_id": str(row["wakeup_id"]),
-                "agent_id": str(row["agent_id"] or ""),
-                "role": str(row["role"] or "").strip().lower(),
-                "adapter_type": str(row["adapter_type"] or ""),
-                "adapter_config_json": str(row["adapter_config_json"] or "{}"),
-                "issue_id": issue_id,
-                "root_issue_id": root_id or f"agent:{row['agent_id']}",
-            })
-        return out
+        return [_enrich_candidate(conn, dict(row)) for row in rows]
+
+
+def plan_parallel_batch(db_path: Path, *, max_runs: int, limit: int = 25) -> ParallelBatchPlan:
+    """Evalúa y persiste un snapshot completo antes de reclamar wakeups."""
+    candidates = batch_candidates(db_path, limit=limit)
+    decisions = evaluate_parallel_batch(candidates, max_runs=max_runs)
+    batch_id = f"parallel:{uuid.uuid4()}"
+    record_dispatch_decisions(
+        db_path,
+        batch_id=batch_id,
+        dispatch_mode="parallel",
+        decisions=decisions,
+    )
+    return ParallelBatchPlan(
+        batch_id=batch_id,
+        candidates=candidates,
+        decisions=decisions,
+        selected_wakeup_ids=[
+            str(item["wakeup_id"])
+            for item in decisions
+            if item["decision"] == "selected"
+        ],
+    )
 
 
 def select_parallel_batch(candidates: list[dict[str, Any]], *, max_runs: int) -> list[str]:
     """Selección pura del batch paralelo (testeable sin DB).
 
     Restricciones, en orden de llegada de la cola:
-      1. Proveedores DISTINTOS (el pacing TPM del governor es por proveedor;
-         dos runs del mismo proveedor en paralelo se pisan el presupuesto).
+      1. Pools de capacidad DISTINTOS (dos runs que comparten cuota o pacing
+         no se solapan aunque transporten modelos de vendors distintos).
       2. Agentes distintos y subtrees (raíz) distintos — dos runs del mismo
          subtree comparten estado de issue y se generan comentarios mutuamente.
       3. Como máximo UN rol de slot de trabajo (WORK_SLOT_ROLES): el workspace
          es compartido y la atribución de deltas/evidencia no sobrevive a dos
          editores o verificadores concurrentes.
     """
-    from aiteam.hiring_economics import provider_and_model_for
-    from aiteam.policies import WORK_SLOT_ROLES
-    import json as _json
+    return [
+        str(item["wakeup_id"])
+        for item in evaluate_parallel_batch(candidates, max_runs=max_runs)
+        if item["decision"] == "selected"
+    ]
 
+
+def evaluate_parallel_batch(
+    candidates: list[dict[str, Any]], *, max_runs: int
+) -> list[dict[str, Any]]:
+    """Devuelve una decisión y un motivo estable para cada candidato."""
     selected: list[str] = []
-    providers: set[str] = set()
+    capacity_pools: set[str] = set()
     agents: set[str] = set()
     roots: set[str] = set()
     work_slot_taken = False
+    decisions: list[dict[str, Any]] = []
     for cand in candidates:
-        if len(selected) >= max_runs:
-            break
-        role = cand["role"]
-        try:
-            provider, _ = provider_and_model_for(
-                cand["adapter_type"], _json.loads(cand["adapter_config_json"] or "{}")
-            )
-        except Exception:
-            provider = cand["adapter_type"] or "?"
-        # test_runner se ejecuta como builtin determinista: no consume proveedor.
-        provider_key = "builtin" if role == "test_runner" else (provider or cand["adapter_type"] or "?")
+        role = str(cand.get("role") or "")
+        pool = str(cand.get("capacity_pool") or _candidate_capacity_pool(cand))
         is_work = role in WORK_SLOT_ROLES
-        if cand["agent_id"] in agents:
+        reason = str(cand.get("readiness_reason") or "")
+        if not reason and len(selected) >= max_runs:
+            reason = "batch_limit"
+        if not reason and cand["agent_id"] in agents:
+            reason = "same_agent"
+        if not reason and cand["root_issue_id"] in roots:
+            reason = "same_root_issue"
+        if not reason and pool != "builtin" and pool in capacity_pools:
+            reason = "same_capacity_pool"
+        if not reason and is_work and work_slot_taken:
+            reason = "second_work_slot"
+        if reason:
+            decisions.append({
+                **cand,
+                "capacity_pool": pool,
+                "is_work_slot": is_work,
+                "decision": "rejected",
+                "reason": reason,
+            })
             continue
-        if cand["root_issue_id"] in roots:
-            continue
-        if provider_key != "builtin" and provider_key in providers:
-            continue
-        if is_work and work_slot_taken:
-            continue
-        selected.append(cand["wakeup_id"])
-        agents.add(cand["agent_id"])
-        roots.add(cand["root_issue_id"])
-        if provider_key != "builtin":
-            providers.add(provider_key)
+        selected.append(str(cand["wakeup_id"]))
+        agents.add(str(cand["agent_id"]))
+        roots.add(str(cand["root_issue_id"]))
+        if pool != "builtin":
+            capacity_pools.add(pool)
         if is_work:
             work_slot_taken = True
-    return selected
+        decisions.append({
+            **cand,
+            "capacity_pool": pool,
+            "is_work_slot": is_work,
+            "decision": "selected",
+            "reason": "selected",
+        })
+    return decisions
+
+
+def record_dispatch_decisions(
+    db_path: Path,
+    *,
+    batch_id: str,
+    dispatch_mode: str,
+    decisions: list[dict[str, Any]],
+    considered_at: str | None = None,
+) -> None:
+    """Persiste la provenance de selección sin depender de una run futura."""
+    observed_at = considered_at or datetime.now(timezone.utc).isoformat()
+    with contextlib.closing(_connect(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for item in decisions:
+                wakeup_id = str(item.get("wakeup_id") or "")
+                ready_at = None
+                if not item.get("readiness_reason"):
+                    previous = conn.execute(
+                        """
+                        SELECT MIN(ready_at)
+                        FROM dispatch_candidate_decisions
+                        WHERE wakeup_request_id = ? AND ready_at IS NOT NULL
+                        """,
+                        (wakeup_id,),
+                    ).fetchone()
+                    ready_at = str(previous[0]) if previous and previous[0] else observed_at
+                details = dict(item.get("readiness_details") or {})
+                details["ready_at_semantics"] = "first_scheduler_observation"
+                conn.execute(
+                    """
+                    INSERT INTO dispatch_candidate_decisions (
+                        id, batch_id, dispatch_mode, wakeup_request_id, agent_id,
+                        issue_id, root_issue_id, role, capacity_pool, is_work_slot,
+                        requested_at, ready_at, considered_at, decision, reason,
+                        details_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(batch_id, wakeup_request_id) DO NOTHING
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        batch_id,
+                        dispatch_mode,
+                        wakeup_id or None,
+                        str(item.get("agent_id") or "") or None,
+                        str(item.get("issue_id") or "") or None,
+                        str(
+                            item.get("root_issue_id")
+                            or f"agent:{item.get('agent_id') or 'unknown'}"
+                        ),
+                        str(item.get("role") or ""),
+                        str(item.get("capacity_pool") or _candidate_capacity_pool(item)),
+                        int(bool(item.get("is_work_slot"))),
+                        item.get("requested_at"),
+                        ready_at,
+                        observed_at,
+                        str(item["decision"]),
+                        str(item["reason"]),
+                        json.dumps(details, ensure_ascii=False, sort_keys=True),
+                    ),
+                )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+
+def _candidate_snapshot(db_path: Path, wakeup: dict[str, Any]) -> dict[str, Any]:
+    with contextlib.closing(_connect(db_path)) as conn:
+        return _enrich_candidate(conn, wakeup)
+
+
+def _enrich_candidate(
+    conn: sqlite3.Connection, wakeup: dict[str, Any]
+) -> dict[str, Any]:
+    payload = _decode_json(wakeup.get("payload_json"))
+    wakeup_id = str(wakeup.get("wakeup_id") or wakeup.get("id") or "")
+    agent_id = str(wakeup.get("agent_id") or "")
+    agent = conn.execute(
+        "SELECT role, adapter_type, adapter_config_json FROM agents WHERE id = ?",
+        (agent_id,),
+    ).fetchone()
+    role = str(wakeup.get("role") or (agent["role"] if agent else "") or "").strip().lower()
+    adapter_type = str(
+        wakeup.get("adapter_type") or (agent["adapter_type"] if agent else "") or ""
+    )
+    adapter_config_json = str(
+        wakeup.get("adapter_config_json")
+        or (agent["adapter_config_json"] if agent else "{}")
+        or "{}"
+    )
+    issue_id = str(payload.get("issue_id") or payload.get("task_id") or "").strip()
+    root_id = issue_id or f"agent:{agent_id}"
+    blockers: list[dict[str, Any]] = []
+    checkout_run_id = ""
+    checkout_run_status = ""
+    if issue_id:
+        root_row = conn.execute(
+            """
+            WITH RECURSIVE chain(id, parent_id) AS (
+                SELECT id, parent_id FROM issues WHERE id = ?
+                UNION ALL
+                SELECT i.id, i.parent_id FROM issues i JOIN chain c ON i.id = c.parent_id
+            )
+            SELECT id FROM chain WHERE parent_id IS NULL LIMIT 1
+            """,
+            (issue_id,),
+        ).fetchone()
+        if root_row:
+            root_id = str(root_row["id"])
+        blockers = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT d.depends_on_issue_id AS issue_id, i.status
+                FROM issue_dependencies d
+                JOIN issues i ON i.id = d.depends_on_issue_id
+                WHERE d.issue_id = ? AND i.status NOT IN ('done', 'cancelled')
+                ORDER BY d.created_at, d.depends_on_issue_id
+                """,
+                (issue_id,),
+            ).fetchall()
+        ]
+        checkout = conn.execute(
+            """
+            SELECT i.checkout_run_id, r.status AS run_status
+            FROM issues i
+            LEFT JOIN runs r ON r.id = i.checkout_run_id
+            WHERE i.id = ?
+            """,
+            (issue_id,),
+        ).fetchone()
+        if checkout:
+            checkout_run_id = str(checkout["checkout_run_id"] or "")
+            checkout_run_status = str(checkout["run_status"] or "")
+    payload_run_id = str(payload.get("run_id") or "")
+    active_checkout = bool(
+        checkout_run_id
+        and checkout_run_id != payload_run_id
+        and checkout_run_status in {"queued", "running"}
+    )
+    readiness_reason = ""
+    if blockers:
+        readiness_reason = "dependency_blocked"
+    elif active_checkout:
+        readiness_reason = "checkout_active"
+    candidate = {
+        "wakeup_id": wakeup_id,
+        "agent_id": agent_id,
+        "role": role,
+        "adapter_type": adapter_type,
+        "adapter_config_json": adapter_config_json,
+        "issue_id": issue_id,
+        "root_issue_id": root_id,
+        "requested_at": wakeup.get("requested_at"),
+        "readiness_reason": readiness_reason,
+        "readiness_details": {
+            "blockers": blockers,
+            "checkout_run_id": checkout_run_id or None,
+            "checkout_run_status": checkout_run_status or None,
+        },
+    }
+    candidate["capacity_pool"] = _candidate_capacity_pool(candidate)
+    candidate["is_work_slot"] = role in WORK_SLOT_ROLES
+    return candidate
+
+
+def _candidate_capacity_pool(candidate: dict[str, Any]) -> str:
+    if str(candidate.get("role") or "").strip().lower() == "test_runner":
+        return "builtin"
+    adapter_type = str(candidate.get("adapter_type") or "")
+    config = _decode_json(candidate.get("adapter_config_json"))
+    try:
+        provider, _ = provider_and_model_for(adapter_type, config)
+        effective_config = resolve_adapter_config(adapter_type, config)
+        return capacity_pool_key(
+            profile_id=str(config.get("profile_id") or ""),
+            provider=provider or adapter_type,
+            config=effective_config,
+        )
+    except Exception:
+        return capacity_pool_key(provider=adapter_type) or "unknown"
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:

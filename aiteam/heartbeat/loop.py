@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from aiteam.adapters.registry import AdapterRegistry
 from aiteam.autonomy import auto_resolve_operational_interactions
@@ -200,24 +200,28 @@ class HeartbeatLoop:
         return dispatched
 
     async def _drain_parallel(self, loop: asyncio.AbstractEventLoop) -> int:
-        """Drena la cola en batches concurrentes por proveedor (opt-in).
+        """Drena la cola en batches concurrentes por pool de capacidad (opt-in).
 
         Cada batch respeta las restricciones de ``select_parallel_batch``
-        (proveedores/agentes/subtrees distintos, un solo slot de trabajo). Los
+        (pools/agentes/subtrees distintos, un solo slot de trabajo). Los
         batches se ejecutan con gather y se espera el batch COMPLETO antes de
         formar el siguiente — sin solapamiento entre batches, la invariante de
         "un editor a la vez" se mantiene globalmente.
         """
-        from aiteam.heartbeat.scheduler import batch_candidates, select_parallel_batch
+        from aiteam.heartbeat.scheduler import plan_parallel_batch
         from aiteam.policies import parallel_batch_max
 
         dispatched = 0
         while True:
             try:
-                candidates = await loop.run_in_executor(
-                    None, lambda: batch_candidates(self.db_path)
+                plan = await loop.run_in_executor(
+                    None,
+                    lambda: plan_parallel_batch(
+                        self.db_path,
+                        max_runs=parallel_batch_max(),
+                    ),
                 )
-                chosen = select_parallel_batch(candidates, max_runs=parallel_batch_max())
+                chosen = plan.selected_wakeup_ids
             except Exception:
                 logger.exception("parallel batch selection failed — falling back to single dispatch")
                 chosen = []
@@ -239,7 +243,11 @@ class HeartbeatLoop:
             for wakeup_id in chosen:
                 try:
                     result = await loop.run_in_executor(
-                        None, lambda wid=wakeup_id: self._scheduler.dispatch_next(wakeup_ids={wid})
+                        None,
+                        lambda wid=wakeup_id: self._scheduler.dispatch_next(
+                            wakeup_ids={wid},
+                            record_candidate_decision=False,
+                        ),
                     )
                 except Exception:
                     logger.exception("dispatch_next failed for wakeup %s", wakeup_id)
