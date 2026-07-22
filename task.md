@@ -629,6 +629,14 @@ sí sola el privilegio de un rol.
   al menos un proyecto comparable con múltiples raíces y pools cuya provenance
   exacta muestre espera paralelizable mayor que cero. Sin ese trigger, no abrir
   el A/B de proveedores y mantener la tarea pendiente sin cambiar política.
+  Inventario read-only del 2026-07-22: 71 SQLite descubiertas, 70 auditables y
+  una vacía; cero errores de discovery y cero fuentes `exact` porque todas las
+  runs retenidas preceden la instrumentación. `audit_parallel_trigger_inventory.py`
+  descarta evidencia aproximada, menos de dos raíces/pools, espera nula y
+  adapters herméticos. Resultado: cero candidatos, `live_ab_allowed=false` y
+  tarea correctamente abierta; `--require-trigger` falla cerrado como gate del
+  futuro A/B. Recibo:
+  `benchmarks/results/parallel_channels/parallel-live-trigger-inventory-v1.json`.
 - [ ] **Ejecutar el A/B vivo secuencial/paralelo.** Sólo tras el trigger anterior:
   misma cola y workspace inicial, varias semillas y canales ejecutables distintos.
   Comparar makespan, espera, calidad/aceptación, runs, tokens/coste disponible,

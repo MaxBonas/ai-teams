@@ -151,6 +151,7 @@ def _base_metrics(path: Path, runs: list[dict[str, Any]], recorded_runs: int) ->
         "excluded_untimed_runs": recorded_runs - len(runs),
         "root_count": len({run["root_issue_id"] for run in runs}),
         "provider_count": len({_provider_key(run) for run in runs if _provider_key(run) != "builtin"}),
+        "capacity_pool_count": None,
         "work_slot_runs": sum(run["role"] in WORK_SLOT_ROLES for run in runs),
         "total_queue_wait_samples": len(waits),
         "total_queue_wait_seconds": round(sum(waits), 3),
@@ -301,6 +302,11 @@ def _audit_exact(
     coverage_ratio = round(len(covered_runs) / len(runs), 4) if runs else None
     return {
         **base,
+        "capacity_pool_count": len({
+            item["capacity_pool"]
+            for item in decisions
+            if item["capacity_pool"] != "builtin"
+        }),
         "evidence_quality": quality,
         "ready_wait_samples": len(ready_waits),
         "ready_wait_seconds": round(sum(ready_waits), 3),

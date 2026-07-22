@@ -706,6 +706,23 @@ marca `correction_validated=true`, pero niega afirmación de rendimiento, trigge
 vivo y cambio de default. El siguiente gate sigue siendo observar contención
 exacta en un proyecto real comparable antes de consumir modelos.
 
+El cuarto bloque no se puede fabricar a partir del fixture anterior. El
+inventario read-only `scripts/audit_parallel_trigger_inventory.py` recorre el
+runtime retenido, poda únicamente directorios efímeros conocidos y conserva
+errores de discovery/DB como diagnóstico. Una fuente sólo abre el A/B vivo si
+tiene snapshots `exact`, al menos dos raíces y dos pools, espera paralelizable
+positiva y ningún adapter hermético.
+
+La ejecución del 2026-07-22 descubre 71 SQLite: 70 son auditables, una está
+vacía y no hay errores de discovery. Las 70 fuentes útiles son `approximate`;
+ninguna contiene snapshots porque todas las runs reales retenidas son anteriores
+a la instrumentación. Por tanto el recibo
+`benchmarks/results/parallel_channels/parallel-live-trigger-inventory-v1.json`
+devuelve cero candidatos y `live_ab_allowed=false`. Este resultado no cierra el
+trigger: evita gastar modelos sobre contención inventada. La tarea permanece
+abierta hasta que una ejecución natural posterior deje provenance multi-raíz y
+multi-pool positiva.
+
 Anthropic describe mejoras grandes en su sistema de research multiagente, pero también un consumo de tokens muy superior y sensibilidad alta a coordinación, prompts y herramientas. Es evidencia de ingeniería de un vendor sobre su sistema, no una garantía general para coding agents. Fuente: [ANTH-2](ORCHESTRATION_SOURCES.md#anth-2-multi-agent-research).
 
 ## Extensiones MCP gobernadas

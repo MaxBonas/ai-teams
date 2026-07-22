@@ -217,6 +217,7 @@ def test_exact_provenance_separates_wait_and_excludes_not_ready(tmp_path: Path) 
     aggregate = audit_databases([database])
 
     assert source["evidence_quality"] == "exact"
+    assert source["capacity_pool_count"] == 4
     assert source["total_queue_wait_seconds"] == 10.0
     assert source["ready_wait_seconds"] == 8.0
     assert source["parallelizable_wait_runs"] == 1

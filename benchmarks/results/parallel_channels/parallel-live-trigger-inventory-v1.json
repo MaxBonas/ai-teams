@@ -1,0 +1,1452 @@
+{
+  "schema_version": 1,
+  "audit": "parallel_live_trigger_inventory",
+  "generated_at": "2026-07-22T09:57:51.295244+00:00",
+  "root": "runtime",
+  "contract": {
+    "read_only": true,
+    "models_or_network_used": false,
+    "required_evidence_quality": "exact",
+    "minimum_roots": 2,
+    "minimum_capacity_pools": 2,
+    "positive_parallelizable_wait_required": true,
+    "hermetic_sources_allowed": false,
+    "fail_closed_cli_option": "--require-trigger"
+  },
+  "summary": {
+    "discovered_database_count": 71,
+    "audited_database_count": 70,
+    "invalid_database_count": 1,
+    "discovery_error_count": 0,
+    "pruned_ephemeral_directory_count": 107,
+    "quality_counts": {
+      "exact": 0,
+      "partial_exact": 0,
+      "approximate": 70
+    },
+    "source_kind_counts": {
+      "runtime_project": 4,
+      "live_canary": 4,
+      "benchmark": 62,
+      "hermetic": 0
+    },
+    "trigger_candidate_count": 0
+  },
+  "trigger_candidates": [],
+  "sources": [
+    {
+      "database": "runtime/bench/accessible-checkout-seed-1-full-team/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 12,
+      "timed_runs": 12,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-1-solo-lead-rerun/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-1-solo-lead/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-2-full-team/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 10,
+      "timed_runs": 10,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-2-solo-lead/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-seed-1/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-seed-1/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v2-seed-1/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v2-seed-1/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v3-seed-1/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v3-seed-1/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-1/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-1/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-2/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-2/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-3/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-3/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-1-retry-2/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-1-retry/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-1/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-2/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-3/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-codex-luna-seed-1/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-seed-1/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-seed-2/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-seed-3/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-seed-4/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-senior-seed-1/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-senior-seed-2/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-antigravity-seed-1/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-mini-seed-1/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-mini-seed-2-retry/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-mini-seed-2/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-mini-seed-3/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-senior-seed-1/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-1-solo-lead/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-1/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-2-full-team/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 10,
+      "timed_runs": 10,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-2-solo-lead/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-1-full-team/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-1-solo-lead/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-2-full-team/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-2-solo-lead/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/live-run-profile-lead-quorum-20260721-seed2/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "live_canary",
+      "evidence_quality": "approximate",
+      "recorded_runs": 5,
+      "timed_runs": 5,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/live-run-profile-lead-quorum-20260721-seed3/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "live_canary",
+      "evidence_quality": "approximate",
+      "recorded_runs": 6,
+      "timed_runs": 6,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/live-run-profile-lead-quorum-20260721-seed4/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "live_canary",
+      "evidence_quality": "approximate",
+      "recorded_runs": 4,
+      "timed_runs": 4,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/live-run-profile-lead-quorum-20260721/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "live_canary",
+      "evidence_quality": "approximate",
+      "recorded_runs": 6,
+      "timed_runs": 6,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-multitenant-anthropic-seed-1/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 6,
+      "timed_runs": 6,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-multitenant-anthropic-seed-2/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 4,
+      "timed_runs": 4,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-multitenant-anthropic-seed-3/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 4,
+      "timed_runs": 4,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-multitenant-seed-4/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 4,
+      "timed_runs": 4,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-1/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-2/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 6,
+      "timed_runs": 6,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-3/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 5,
+      "timed_runs": 5,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-4/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 4,
+      "timed_runs": 4,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-5/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 5,
+      "timed_runs": 5,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-gemma-seed-1/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 4,
+      "timed_runs": 4,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-seed-6/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 4,
+      "timed_runs": 4,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-1/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 5,
+      "timed_runs": 4,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-2/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 5,
+      "timed_runs": 5,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-3/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 5,
+      "timed_runs": 5,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-4/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 6,
+      "timed_runs": 6,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-5/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 6,
+      "timed_runs": 6,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-6/lead_quorum/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 5,
+      "timed_runs": 5,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/release-notes-seed-1-full-team/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 7,
+      "timed_runs": 7,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/bench/release-notes-seed-1-solo/team/.aiteam/aiteam.db",
+      "source_kind": "benchmark",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/context-canary-auth-causal-v1-seed-2/.aiteam/aiteam.db",
+      "source_kind": "runtime_project",
+      "evidence_quality": "approximate",
+      "recorded_runs": 2,
+      "timed_runs": 2,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/context-canary-auth-causal-v1-seed-3/.aiteam/aiteam.db",
+      "source_kind": "runtime_project",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/context-canary-auth-causal-v1/.aiteam/aiteam.db",
+      "source_kind": "runtime_project",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    },
+    {
+      "database": "runtime/context-canary-queue-causal-v1-seed-1/.aiteam/aiteam.db",
+      "source_kind": "runtime_project",
+      "evidence_quality": "approximate",
+      "recorded_runs": 1,
+      "timed_runs": 1,
+      "root_count": 1,
+      "capacity_pool_count": null,
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "candidate_snapshot_batches": 0,
+      "selected_run_coverage_ratio": 0.0,
+      "exclusions": [
+        "evidence_not_exact",
+        "fewer_than_two_roots",
+        "fewer_than_two_capacity_pools",
+        "no_positive_parallelizable_wait"
+      ],
+      "trigger_candidate": false
+    }
+  ],
+  "invalid_databases": [
+    {
+      "database": "runtime/aiteam.db",
+      "error": "empty_database"
+    }
+  ],
+  "discovery_errors": [],
+  "conclusion": {
+    "live_contention_trigger_satisfied": false,
+    "live_ab_allowed": false,
+    "default_change_allowed": false,
+    "decision": "wait_for_natural_contention",
+    "reason": "ninguna SQLite real retenida satisface todavía el contrato exacto del trigger"
+  }
+}

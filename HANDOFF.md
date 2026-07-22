@@ -60,8 +60,12 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   con dos scouts, aísla un fallo intencional y deja ambos brazos con estados
   terminales idénticos y cero huérfanos. El recibo niega cualquier conclusión
   de rendimiento. Ahora toca obtener un trigger vivo multi-raíz/multi-pool antes
-  de consumir modelos. El default continúa secuencial y el flag opt-in.
-  Verificación completa: `1194 passed` en 140,72 s; Ruff dirigido limpio.
+  de consumir modelos. El inventario read-only ya examina automáticamente todo
+  `runtime`: 71 DB descubiertas, 70 auditables, una vacía, cero errores y cero
+  provenance exacta porque las runs retenidas son anteriores a la instrumentación.
+  El trigger queda correctamente abierto y el A/B vivo bloqueado; no crear una
+  señal sintética para cerrarlo. El default continúa secuencial y el flag opt-in.
+  Verificación completa: `1200 passed` en 154,36 s; Ruff dirigido limpio.
 - OpenCode server permanece experimental. El A/B de transporte v1 con DeepSeek
   pasa 3/3 direct y 3/3 attached, conserva seis sesiones aisladas y reduce la
   mediana 7,50→2,92 s con tokens equivalentes. El servidor está autenticado en
