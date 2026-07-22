@@ -186,8 +186,12 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   proyecto. Config ya ofrece opt-in, revocación, borrado y resumen; el cockpit
   instrumenta Bandeja, perfiles y plan → tarea. El E2E registra 11 eventos
   sintéticos sin campos fuera de `flow`, `event` y `profile` opcional. Falta la
-  observación humana consentida; esos conteos no autorizan conclusiones de
-  comprensión.
+  observación humana consentida. Su protocolo v1 ya está prerregistrado con ocho
+  sesiones, dos estratos, órdenes contrabalanceados, rúbrica, gates y parada por
+  privacidad; un auditor rechaza cambios post hoc y el template de resultados
+  sigue vacío. Ahora toca reclutar/ejecutar la muestra sin exponer participantes
+  a la UI o al protocolo de antemano. Los conteos no autorizan conclusiones de
+  comprensión universal.
 - El auditor de benchmarks separa conclusión de promoción. Ya no acepta un
   booleano de independencia si las clases de evaluador son solo léxicas, y una
   promoción nueva exige `constructs_not_measured` más riesgo de Goodhart. Los

@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "protocol": "frontend_orientation_human_study",
+  "protocol_version": 1,
+  "frozen_at": "2026-07-22",
+  "status": "preregistered_no_sessions_observed",
+  "documentation": "docs/FRONTEND_ORIENTATION_STUDY.md",
+  "study_kind": "formative_usability",
+  "sample": {
+    "required_completed_sessions": 8,
+    "maximum_recruited_sessions": 10,
+    "strata": [
+      {
+        "name": "agentic_tools_monthly_or_less",
+        "required_completed_sessions": 4
+      },
+      {
+        "name": "agentic_tools_weekly_or_more",
+        "required_completed_sessions": 4
+      }
+    ],
+    "must_be_new_to_tested_orientation_ui": true,
+    "performance_based_exclusion_allowed": false,
+    "allowed_exclusion_categories": [
+      "participant_withdrew",
+      "technical_failure_before_first_task",
+      "prior_exposure_to_tested_ui",
+      "protocol_violation"
+    ]
+  },
+  "participant_orders": {
+    "P01": ["inbox", "profile_selection", "accepted_plan_to_task"],
+    "P02": ["inbox", "accepted_plan_to_task", "profile_selection"],
+    "P03": ["profile_selection", "inbox", "accepted_plan_to_task"],
+    "P04": ["profile_selection", "accepted_plan_to_task", "inbox"],
+    "P05": ["accepted_plan_to_task", "inbox", "profile_selection"],
+    "P06": ["accepted_plan_to_task", "profile_selection", "inbox"],
+    "P07": ["inbox", "profile_selection", "accepted_plan_to_task"],
+    "P08": ["profile_selection", "accepted_plan_to_task", "inbox"]
+  },
+  "privacy": {
+    "explicit_opt_in_required": true,
+    "participant_activates_control": true,
+    "storage": "local_project_sqlite",
+    "external_transmission": false,
+    "audio_or_video_recording": false,
+    "free_text_or_quotes_retained": false,
+    "participant_code_stored_in_product": false,
+    "product_event_fields": ["flow", "event", "profile"],
+    "withdraw_revoke_and_delete_available": true
+  },
+  "tasks": {
+    "inbox": {
+      "time_limit_seconds": 180,
+      "minimum_path_actions": 1,
+      "success": "open_inbox_and_identify_pending_decision_without_assistance"
+    },
+    "profile_selection": {
+      "time_limit_seconds": 360,
+      "scenarios": [
+        {"id": "bounded_reversible_change", "correct_profile": "solo_lead"},
+        {"id": "ambiguous_critical_authorization_plan", "correct_profile": "lead_quorum"},
+        {"id": "accepted_plan_implementation_with_review", "correct_profile": "full_team"}
+      ],
+      "selection_pass_score": 3,
+      "cost_risk_statement_count": 6,
+      "comprehension_pass_score": 5,
+      "dangerous_misconceptions": [
+        "solo_lead_has_independent_review",
+        "lead_quorum_implements_the_plan"
+      ]
+    },
+    "accepted_plan_to_task": {
+      "time_limit_seconds": 180,
+      "minimum_path_actions_from_plan": 2,
+      "success": "create_full_team_task_with_accepted_plan_reference_without_manual_copy"
+    }
+  },
+  "observer_fields": [
+    "participant_code",
+    "experience_stratum",
+    "assigned_order",
+    "completed",
+    "assisted",
+    "actions",
+    "unnecessary_actions",
+    "ui_error",
+    "abandoned",
+    "profile_choices_correct",
+    "cost_risk_statements_correct",
+    "dangerous_misconception"
+  ],
+  "gates": {
+    "inbox_min_unassisted_completions": 7,
+    "inbox_max_median_actions": 2,
+    "accepted_plan_min_unassisted_completions": 7,
+    "accepted_plan_max_median_actions": 3,
+    "profile_min_participants_passing": 6,
+    "max_participants_with_dangerous_misconception": 1,
+    "max_abandonments_per_block": 1,
+    "max_ui_errors": 0,
+    "max_browser_errors": 0,
+    "max_privacy_schema_violations": 0
+  },
+  "decision_states": [
+    "ready_for_bounded_frontend_expansion",
+    "iterate_and_repeat_with_new_preregistration",
+    "privacy_stop_delete_and_investigate",
+    "inconclusive_technical_failure"
+  ],
+  "constructs_not_measured": [
+    "market_adoption",
+    "retention",
+    "general_satisfaction",
+    "productivity",
+    "causal_improvement",
+    "universal_clarity"
+  ],
+  "results_must_be_written_to_separate_receipt": true
+}

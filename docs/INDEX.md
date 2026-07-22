@@ -1,6 +1,6 @@
 # Índice y autoridad documental
 
-Actualizado: `2026-07-20`
+Actualizado: `2026-07-22`
 
 Este índice distingue contratos activos e historial. Objetivos, pendientes y
 orden de ejecución viven juntos en `../task.md`; no existen planes paralelos.
@@ -16,6 +16,7 @@ orden de ejecución viven juntos en `../task.md`; no existen planes paralelos.
 | `ORCHESTRATION_SOURCES.md` | Registro fechado de fuentes primarias, calidad, cifras y limitaciones. |
 | `MODELOS_GRATUITOS_OPENCODE.md` | Evaluación, tiers, gobierno y contrato de integración de OpenCode Zen Free. |
 | `RUN_PROBLEMS_REGISTRY.md` | Registro operativo de fallos observados y mitigaciones aplicadas. |
+| `FRONTEND_ORIENTATION_STUDY.md` | Protocolo humano prerregistrado para Bandeja, perfiles y plan aceptado → tarea. |
 | `PROMPT_HANDOFF_QUORUM_PROFUNDO.md` | Prompt reutilizable para continuar el contrato Lead-owned de quorum profundo. |
 | `../task.md` | Backlog vivo y estado de fases. |
 | `../HANDOFF.md` | Punto de entrada para continuar una sesion. |

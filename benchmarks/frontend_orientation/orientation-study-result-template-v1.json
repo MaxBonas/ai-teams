@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "receipt": "frontend_orientation_human_study",
+  "status": "awaiting_human_sessions",
+  "protocol_ref": "benchmarks/frontend_orientation/orientation-study-prereg-v1.json",
+  "protocol_version": 1,
+  "protocol_commit": null,
+  "observed_at": null,
+  "recruitment": {
+    "recruited": null,
+    "completed": null,
+    "excluded_by_category": {}
+  },
+  "aggregates": {
+    "inbox": {
+      "unassisted_completions": null,
+      "median_actions": null,
+      "abandonments": null
+    },
+    "profile_selection": {
+      "participants_passing": null,
+      "dangerous_misconceptions": null,
+      "abandonments": null
+    },
+    "accepted_plan_to_task": {
+      "unassisted_completions": null,
+      "median_actions": null,
+      "abandonments": null
+    },
+    "quality": {
+      "ui_errors": null,
+      "browser_errors": null,
+      "privacy_schema_violations": null
+    }
+  },
+  "gate_results": {},
+  "decision": null,
+  "individual_rows_included": false,
+  "free_text_or_quotes_included": false,
+  "constructs_not_measured": [
+    "market_adoption",
+    "retention",
+    "general_satisfaction",
+    "productivity",
+    "causal_improvement",
+    "universal_clarity"
+  ]
+}

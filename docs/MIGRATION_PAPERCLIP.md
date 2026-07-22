@@ -340,7 +340,11 @@ que los conteos no miden adopción, claridad, satisfacción ni causalidad. Falta
 observar sesiones humanas consentidas: Config ya ofrece opt-in, revocación,
 borrado y resumen local, y el cockpit instrumenta los tres flujos mediante la
 allowlist. El E2E Chromium verifica 11 eventos sintéticos sin campos extra; esta
-evidencia sigue siendo técnica, no una prueba de comprensión.
+evidencia sigue siendo técnica, no una prueba de comprensión. El estudio humano
+v1 queda prerregistrado antes de observar datos: ocho sesiones, dos estratos,
+orden contrabalanceado, rúbrica categórica, gates y reglas de parada congelados.
+El resultado se escribirá en otro recibo; no se modificarán estos umbrales tras
+ver la muestra.
 
 ### Fase 8 — Consolidar logs
 

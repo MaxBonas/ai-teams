@@ -716,8 +716,18 @@ sí sola el privilegio de un rol.
     inicia el flujo; crear la tarea lo completa, quitar el plan registra abandono
     y un error de creación solo registra `ui_error`. `pagehide` cierra la sesión
     como completada o abandonada sin bloquear la acción principal.
-  - [ ] Ejecutar sesiones humanas consentidas y definir previamente muestra y
-    criterio; no convertir conteos observados en conclusiones de comprensión.
+  - [x] Prerregistrar muestra y criterio antes de observar sesiones. El protocolo
+    v1 fija ocho sesiones completadas (4 uso de agentes mensual o menor, 4
+    semanal o mayor), órdenes contrabalanceados, tres tareas, rúbrica sin texto,
+    umbrales discretos, exclusiones, reglas de parada y límites de interpretación.
+    `audit_orientation_study_prereg.py` rechaza cambios post hoc en gates o
+    campos privados; el template de resultados permanece vacío.
+  - [ ] Reclutar y ejecutar las ocho sesiones humanas consentidas siguiendo
+    `docs/FRONTEND_ORIENTATION_STUDY.md`; no usar participantes expuestos a esta
+    UI/protocolo ni excluir bajo rendimiento.
+  - [ ] Agregar solo conteos/medianas en un recibo separado, evaluar todos los
+    gates congelados y mantener adopción, retención, productividad, satisfacción,
+    causalidad y claridad universal fuera de las conclusiones.
 
 ### Mantenimiento no bloqueante
 
