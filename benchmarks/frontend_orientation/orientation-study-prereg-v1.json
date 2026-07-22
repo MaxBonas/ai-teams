@@ -4,6 +4,14 @@
   "protocol_version": 1,
   "frozen_at": "2026-07-22",
   "status": "preregistered_no_sessions_observed",
+  "amendments_before_observation": [
+    {
+      "date": "2026-07-22",
+      "reason": "define_participant_flow_row_unit_before_recruitment",
+      "thresholds_changed": false,
+      "sessions_observed_before_amendment": 0
+    }
+  ],
   "documentation": "docs/FRONTEND_ORIENTATION_STUDY.md",
   "study_kind": "formative_usability",
   "sample": {
@@ -76,8 +84,15 @@
       "success": "create_full_team_task_with_accepted_plan_reference_without_manual_copy"
     }
   },
+  "observer_row_contract": {
+    "unit": "participant_flow",
+    "rows_per_completed_session": 3,
+    "required_flows": ["inbox", "profile_selection", "accepted_plan_to_task"],
+    "unique_key": ["participant_code", "flow"]
+  },
   "observer_fields": [
     "participant_code",
+    "flow",
     "experience_stratum",
     "assigned_order",
     "completed",

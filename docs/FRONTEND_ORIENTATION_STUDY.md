@@ -4,6 +4,10 @@ Estado: `preregistered_no_sessions_observed`
 
 Congelado: `2026-07-22`
 
+Enmienda previa a observación (`2026-07-22`, cero sesiones vistas): se hizo
+explícita la unidad de fila participante×flujo. No cambió muestra, tareas,
+umbrales ni exclusiones.
+
 Contrato machine-readable:
 `../benchmarks/frontend_orientation/orientation-study-prereg-v1.json`
 
@@ -132,8 +136,13 @@ acciones desde Chat restablecido: mediana ≤ 3.
 - `cost_risk_statements_correct`: 0–6.
 - `dangerous_misconception`: booleano.
 
-La hoja del observador contiene solo código, estrato, orden y estas columnas
-cerradas. El recibo final agrega conteos y medianas; no publica filas
+La hoja del observador contiene exactamente una fila por participante y flujo:
+24 filas para ocho sesiones completas. Su clave única es
+`participant_code + flow`; `flow` solo admite `inbox`, `profile_selection` y
+`accepted_plan_to_task`. Código, estrato y orden se repiten en las tres filas.
+Las métricas generales se rellenan por bloque; las tres métricas de comprensión
+de perfiles se rellenan solo en `profile_selection` y quedan nulas en los otros
+dos flujos. El recibo final agrega conteos y medianas; no publica filas
 individuales.
 
 ## Gates congelados

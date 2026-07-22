@@ -13,7 +13,6 @@ EVENTS = frozenset({
     "flow_completed",
     "flow_abandoned",
     "profile_selected",
-    "guidance_viewed",
     "ui_error",
 })
 PROFILES = frozenset({"solo_lead", "lead_quorum", "full_team"})
@@ -105,7 +104,7 @@ def record_orientation_event(
         raise ValueError("orientation_profile_not_allowed")
     if normalized_event == "profile_selected" and normalized_profile is None:
         raise ValueError("orientation_profile_required")
-    if normalized_event in {"profile_selected", "guidance_viewed"} and normalized_flow != "profile_selection":
+    if normalized_event == "profile_selected" and normalized_flow != "profile_selection":
         raise ValueError("orientation_event_flow_mismatch")
     if normalized_flow == "inbox" and normalized_profile is not None:
         raise ValueError("orientation_profile_not_applicable")
@@ -177,6 +176,8 @@ def erase_orientation_measurement(db_path: Path) -> dict[str, int | bool]:
 
 
 def orientation_summary(db_path: Path) -> dict[str, Any]:
+    allowed_events = tuple(sorted(EVENTS))
+    placeholders = ", ".join("?" for _ in allowed_events)
     with contextlib.closing(_connect(db_path)) as conn:
         state = conn.execute(
             "SELECT enabled, current_session_id, consented_at, revoked_at FROM orientation_measurement WHERE id = 1"
@@ -185,9 +186,23 @@ def orientation_summary(db_path: Path) -> dict[str, Any]:
             "SELECT status, COUNT(*) AS count FROM orientation_sessions GROUP BY status"
         ).fetchall()
         event_rows = conn.execute(
-            "SELECT flow, event, COUNT(*) AS count FROM orientation_events GROUP BY flow, event ORDER BY flow, event"
+            f"""
+            SELECT flow, event, COUNT(*) AS count
+            FROM orientation_events
+            WHERE event IN ({placeholders})
+            GROUP BY flow, event
+            ORDER BY flow, event
+            """,
+            allowed_events,
         ).fetchall()
-        event_count = int(conn.execute("SELECT COUNT(*) FROM orientation_events").fetchone()[0])
+        event_count = int(conn.execute(
+            f"SELECT COUNT(*) FROM orientation_events WHERE event IN ({placeholders})",
+            allowed_events,
+        ).fetchone()[0])
+        retired_event_count = int(conn.execute(
+            f"SELECT COUNT(*) FROM orientation_events WHERE event NOT IN ({placeholders})",
+            allowed_events,
+        ).fetchone()[0])
     sessions = {status: 0 for status in ("active", "completed", "abandoned", "revoked")}
     for row in session_rows:
         sessions[str(row["status"])] = int(row["count"])
@@ -198,6 +213,7 @@ def orientation_summary(db_path: Path) -> dict[str, Any]:
         "consent": _state(state),
         "sessions": sessions,
         "event_count": event_count,
+        "retired_event_count": retired_event_count,
         "flows": flows,
         "privacy": {
             "storage": "local_project_sqlite",

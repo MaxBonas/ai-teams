@@ -53,7 +53,9 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
   const browserErrors: string[] = [];
   let orientationEnabled = false;
   let orientationSessionId: string | null = null;
+  let orientationSessionSequence = 0;
   const orientationEvents: Array<Record<string, unknown>> = [];
+  const orientationSessionEnds: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) {
@@ -85,7 +87,7 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
       interactions: [],
       plan_document: planDocument,
     };
-    else if (path === `/api/issues/${encodeURIComponent(issue.id)}/quorum`) body = quorum;
+    else if (path.endsWith('/quorum')) body = quorum;
     else if (path === '/api/chat') body = { messages: [] };
     else if (path === '/api/workspace/files') body = { files: [] };
     else if (path === '/api/projects') body = { projects: [] };
@@ -115,7 +117,7 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
     };
     else if (path === '/api/orientation-measurement/consent' && method === 'POST') {
       orientationEnabled = Boolean((route.request().postDataJSON() as { enabled?: boolean }).enabled);
-      orientationSessionId = orientationEnabled ? 'orientation:test' : null;
+      orientationSessionId = orientationEnabled ? `orientation:test:${++orientationSessionSequence}` : null;
       body = { success: true, consent: { enabled: orientationEnabled, current_session_id: orientationSessionId } };
     }
     else if (path === '/api/orientation-measurement/events' && method === 'POST') {
@@ -129,9 +131,17 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
       }
     }
     else if (path === '/api/orientation-measurement/session/end' && method === 'POST') {
+      orientationSessionEnds.push((route.request().postDataJSON() as { status: string }).status);
       orientationSessionId = null;
-      body = { success: true, session: { status: (route.request().postDataJSON() as { status: string }).status } };
+      body = { success: true, session: { status: orientationSessionEnds.at(-1) } };
     }
+    else if (path === '/api/issues' && method === 'POST') body = {
+      success: true,
+      issue: { ...issue, id: 'issue:execution', title: 'Ejecutar plan aceptado', metadata_json: '{}' },
+    };
+    else if (path === '/api/issues/issue%3Aexecution/comments' && method === 'POST') body = { success: true, comment: { id: 'comment:execution' } };
+    else if (path === '/api/wakeup-requests' && method === 'POST') body = { success: true, wakeup: { id: 'wakeup:execution' } };
+    else if (path === '/api/control-plane/run-once' && method === 'POST') body = { success: true, dispatched: 1 };
     else if (path === '/api/orientation-measurement' && method === 'DELETE') {
       orientationEnabled = false;
       orientationSessionId = null;
@@ -156,6 +166,8 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
   await expect(page.getByTestId('orientation-consent-toggle')).toHaveAttribute('aria-pressed', 'false');
   await page.getByTestId('orientation-consent-toggle').click();
   await expect(page.getByTestId('orientation-consent-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  await expect.poll(() => orientationSessionEnds).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath('orientation-consent.png'), fullPage: true });
 
   const metrics = {
@@ -195,6 +207,8 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
   await expect(page.getByTestId('attached-plan')).toContainText('Plan aceptado adjunto');
   await expect(page.getByTestId('new-task-draft')).toHaveValue(/Ejecuta el plan aceptado/);
   await expect(page.getByTestId('task-profile-full_team')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('create-task-button').click();
+  await expect(page.getByTestId('new-task-draft')).toHaveValue('');
   metrics.flows.accepted_plan_to_task.completed = true;
 
   for (const [name, flow] of Object.entries(metrics.flows)) {
@@ -207,10 +221,35 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
     'lead_quorum',
     'full_team',
   ]);
-  await expect.poll(() => orientationEvents.length).toBeGreaterThanOrEqual(11);
+  await expect.poll(() => orientationEvents.length).toBe(9);
   expect(orientationEvents.every((event) => Object.keys(event).every((key) => ['flow', 'event', 'profile'].includes(key)))).toBe(true);
+  expect(orientationEvents.some((event) => event.event === 'guidance_viewed')).toBe(false);
   expect(orientationEvents).toContainEqual({ flow: 'inbox', event: 'flow_completed' });
   expect(orientationEvents).toContainEqual({ flow: 'accepted_plan_to_task', event: 'flow_started', profile: 'full_team' });
+  expect(orientationEvents).toContainEqual({ flow: 'accepted_plan_to_task', event: 'flow_completed', profile: 'full_team' });
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow')));
+  await expect.poll(() => orientationSessionEnds).toEqual(['completed']);
+  await expect.poll(() => orientationSessionId).toBe('orientation:test:2');
+  await page.getByTestId('plan-tab').click();
+  await page.getByTestId('accepted-plan-cta').click();
+  await expect.poll(() => orientationEvents.length).toBe(10);
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  await expect.poll(() => orientationSessionEnds).toEqual(['completed', 'abandoned']);
+
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow')));
+  await expect.poll(() => orientationSessionId).toBe('orientation:test:3');
+  await page.getByTestId('plan-tab').click();
+  await page.getByTestId('accepted-plan-cta').click();
+  await page.getByTitle('Quitar el plan adjunto').click();
+  await expect.poll(() => orientationEvents.length).toBe(12);
+  expect(orientationEvents.at(-1)).toEqual({
+    flow: 'accepted_plan_to_task',
+    event: 'flow_abandoned',
+    profile: 'full_team',
+  });
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  await expect.poll(() => orientationSessionEnds).toEqual(['completed', 'abandoned', 'abandoned']);
 
   await writeFile(testInfo.outputPath('orientation-metrics.json'), JSON.stringify(metrics, null, 2));
   await page.screenshot({ path: testInfo.outputPath('orientation.png'), fullPage: true });

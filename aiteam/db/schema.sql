@@ -416,7 +416,7 @@ CREATE TABLE IF NOT EXISTS orientation_events (
         CHECK (flow IN ('inbox', 'profile_selection', 'accepted_plan_to_task')),
     event TEXT NOT NULL
         CHECK (event IN ('flow_started', 'flow_completed', 'flow_abandoned',
-                         'profile_selected', 'guidance_viewed', 'ui_error')),
+                         'profile_selected', 'ui_error')),
     profile TEXT
         CHECK (profile IS NULL OR profile IN ('solo_lead', 'lead_quorum', 'full_team')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

@@ -39,7 +39,6 @@ class OrientationEventRequest(BaseModel):
         "flow_completed",
         "flow_abandoned",
         "profile_selected",
-        "guidance_viewed",
         "ui_error",
     ]
     profile: Literal["solo_lead", "lead_quorum", "full_team"] | None = None

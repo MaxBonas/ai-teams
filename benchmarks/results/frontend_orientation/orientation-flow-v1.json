@@ -10,8 +10,14 @@
     "surface": "Config > Privacidad y medición",
     "default_enabled": false,
     "synthetic_opt_in_completed": true,
-    "local_session_count": 1,
-    "recorded_event_count": 11,
+    "local_session_count": 3,
+    "session_end_statuses": ["completed", "abandoned", "abandoned"],
+    "empty_session_end_count": 0,
+    "recorded_event_count": 12,
+    "primary_flow_event_count": 9,
+    "session_abandonment_probe_event_count": 3,
+    "cognitive_events_inferred": false,
+    "empty_session_counted_as_completed": false,
     "event_payload_fields": [
       "flow",
       "event",
@@ -47,6 +53,11 @@
   },
   "browser_errors": [],
   "synthetic_abandoned_flows": [],
+  "session_lifecycle_probes": {
+    "empty_session_remains_active": true,
+    "active_flow_closes_abandoned": true,
+    "explicit_flow_abandonment_closes_abandoned": true
+  },
   "limits": {
     "real_user_adoption_measured": false,
     "real_user_clarity_measured": false,

@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-22`): **1189 passed en 133,26 s**.
+Última suite completa registrada (`2026-07-22`): **1211 passed en 151,03 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -693,8 +693,9 @@ sí sola el privilegio de un rol.
   presencia de componentes; registrar abandono, errores y pasos innecesarios.
   Progreso: `orientation-flow.spec.ts` añade un contrato Playwright reproducible
   con API simulada. Chromium pasa Bandeja en 1 acción, cada perfil en 1 acción y
-  plan aceptado → tarea adjunta en 2 acciones, con 0 errores y 0 abandonos
-  sintéticos. La UI expone guía cualitativa de coste operativo y riesgo sin
+  plan aceptado → tarea adjunta en 2 acciones, con 0 errores y 0 abandonos en
+  el recorrido principal. Dos probes adicionales verifican el cierre abandonado.
+  La UI expone guía cualitativa de coste operativo y riesgo sin
   inventar precios. El recibo `orientation-flow-v1.json` declara explícitamente
   que adopción y claridad reales siguen sin medirse; mantener este task abierto
   hasta disponer de sesiones observadas o analítica consentida.
@@ -708,20 +709,28 @@ sí sola el privilegio de un rol.
     explicación de almacenamiento local y sin transmisión externa.
     Cerrado con una consola local opt-in, apagada por defecto, que expone estado,
     sesiones, abandonos, eventos, garantías de privacidad, revocación y borrado.
-  - [x] Instrumentar Bandeja, selección/lectura de perfiles y plan aceptado →
+  - [x] Instrumentar Bandeja, selección/presentación de perfiles y plan aceptado →
     tarea mediante la allowlist; cerrar sesiones y registrar abandono/error sin
     capturar contenido del usuario.
-    El E2E Chromium activa consentimiento, recorre los tres flujos y observa 11
-    eventos cuyos únicos campos son `flow`, `event` y `profile` opcional. El CTA
-    inicia el flujo; crear la tarea lo completa, quitar el plan registra abandono
-    y un error de creación solo registra `ui_error`. `pagehide` cierra la sesión
-    como completada o abandonada sin bloquear la acción principal.
+    El E2E Chromium activa consentimiento, recorre los tres flujos y observa 9
+    eventos primarios y 3 adicionales en dos pruebas de abandono controlado;
+    sus únicos campos son `flow`, `event` y `profile` opcional. El CTA inicia el
+    flujo; crear la tarea lo completa, quitar el plan registra abandono
+    y un error de creación solo registra `ui_error`. No se infiere lectura:
+    seleccionar registra presentación/selección, mientras la comprensión queda
+    exclusivamente en la rúbrica humana. Las filas históricas
+    `guidance_viewed` se conservan como retiradas, fuera de los conteos vigentes.
+    `pagehide` no cierra sesiones vacías;
+    solo marca completada una sesión con algún flujo completado y abandonada una
+    que conserva un flujo activo.
   - [x] Prerregistrar muestra y criterio antes de observar sesiones. El protocolo
     v1 fija ocho sesiones completadas (4 uso de agentes mensual o menor, 4
     semanal o mayor), órdenes contrabalanceados, tres tareas, rúbrica sin texto,
     umbrales discretos, exclusiones, reglas de parada y límites de interpretación.
     `audit_orientation_study_prereg.py` rechaza cambios post hoc en gates o
-    campos privados; el template de resultados permanece vacío.
+    campos privados; el template de resultados permanece vacío. Antes de observar
+    sesiones se enmendó la unidad de la hoja a participante×flujo, tres filas por
+    sesión y clave única `participant_code + flow`, sin cambiar ningún threshold.
   - [ ] Reclutar y ejecutar las ocho sesiones humanas consentidas siguiendo
     `docs/FRONTEND_ORIENTATION_STUDY.md`; no usar participantes expuestos a esta
     UI/protocolo ni excluir bajo rendimiento.

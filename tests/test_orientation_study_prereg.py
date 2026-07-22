@@ -34,3 +34,15 @@ def test_validator_rejects_post_hoc_threshold_or_private_field() -> None:
 
     assert "inbox_gate_changed" in errors
     assert "observer_fields_include_private_content" in errors
+
+
+def test_validator_requires_unambiguous_participant_flow_rows() -> None:
+    prereg = _load(PREREG)
+    template = _load(TEMPLATE)
+    prereg["observer_fields"].remove("flow")
+    prereg["observer_row_contract"]["unique_key"] = ["participant_code"]
+
+    errors = validate_preregistration(prereg, template)
+
+    assert "observer_rubric_incomplete" in errors
+    assert "observer_row_unique_key_invalid" in errors

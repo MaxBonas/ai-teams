@@ -62,12 +62,34 @@ def validate_preregistration(prereg: dict[str, Any], template: dict[str, Any]) -
     if observer_fields & FORBIDDEN_OBSERVER_FIELDS:
         errors.append("observer_fields_include_private_content")
     required_observer_fields = {
-        "completed", "assisted", "actions", "unnecessary_actions", "ui_error",
+        "flow", "completed", "assisted", "actions", "unnecessary_actions", "ui_error",
         "abandoned", "profile_choices_correct", "cost_risk_statements_correct",
         "dangerous_misconception",
     }
     if not required_observer_fields.issubset(observer_fields):
         errors.append("observer_rubric_incomplete")
+    row_contract = prereg.get("observer_row_contract") if isinstance(
+        prereg.get("observer_row_contract"), dict
+    ) else {}
+    if row_contract.get("unit") != "participant_flow":
+        errors.append("observer_row_unit_must_be_participant_flow")
+    if int(row_contract.get("rows_per_completed_session") or 0) != len(EXPECTED_FLOWS):
+        errors.append("observer_row_count_mismatch")
+    if set(row_contract.get("required_flows") or []) != EXPECTED_FLOWS:
+        errors.append("observer_row_flows_incomplete")
+    if row_contract.get("unique_key") != ["participant_code", "flow"]:
+        errors.append("observer_row_unique_key_invalid")
+
+    amendments = prereg.get("amendments_before_observation")
+    if not isinstance(amendments, list) or not amendments:
+        errors.append("pre_observation_amendment_missing")
+    elif any(
+        not isinstance(item, dict)
+        or item.get("thresholds_changed") is not False
+        or item.get("sessions_observed_before_amendment") != 0
+        for item in amendments
+    ):
+        errors.append("pre_observation_amendment_invalid")
 
     gates = prereg.get("gates") if isinstance(prereg.get("gates"), dict) else {}
     if int(gates.get("inbox_min_unassisted_completions") or 0) != 7:

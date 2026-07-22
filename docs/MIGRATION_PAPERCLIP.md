@@ -339,7 +339,9 @@ IDs de issue/workspace y transmisión externa; su resumen declara explícitament
 que los conteos no miden adopción, claridad, satisfacción ni causalidad. Falta
 observar sesiones humanas consentidas: Config ya ofrece opt-in, revocación,
 borrado y resumen local, y el cockpit instrumenta los tres flujos mediante la
-allowlist. El E2E Chromium verifica 11 eventos sintéticos sin campos extra; esta
+allowlist. El E2E Chromium verifica 9 eventos del recorrido y 3 adicionales en
+dos pruebas de abandono controlado, todos sin campos extra; no infiere lectura
+desde la selección ni cuenta sesiones vacías como completadas; esta
 evidencia sigue siendo técnica, no una prueba de comprensión. El estudio humano
 v1 queda prerregistrado antes de observar datos: ocho sesiones, dos estratos,
 orden contrabalanceado, rúbrica categórica, gates y reglas de parada congelados.

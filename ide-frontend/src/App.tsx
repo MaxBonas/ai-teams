@@ -1063,7 +1063,12 @@ export default function App() {
   const [orientationBusy, setOrientationBusy] = useState(false);
   const orientationWorkspaceRef = useRef('');
   const orientationConsentRef = useRef<{ enabled: boolean; sessionId: string | null }>({ enabled: false, sessionId: null });
-  const orientationPlanFlowActiveRef = useRef(false);
+  const orientationSessionEndPromiseRef = useRef<Promise<unknown> | null>(null);
+  const orientationSessionProgressRef = useRef<{
+    activeFlows: Set<'inbox' | 'profile_selection' | 'accepted_plan_to_task'>;
+    completedAnyFlow: boolean;
+    abandonedAnyFlow: boolean;
+  }>({ activeFlows: new Set(), completedAnyFlow: false, abandonedAnyFlow: false });
   // Workspace files browser
   const [wsFiles, setWsFiles] = useState<Array<{ path: string; size_bytes: number; mime: string }>>([]);
   const [wsSelectedFile, setWsSelectedFile] = useState<string | null>(null);
@@ -1449,7 +1454,9 @@ export default function App() {
       });
       const json = (await res.json()) as { detail?: string };
       if (!res.ok) throw new Error(json.detail || `orientation-consent:${res.status}`);
-      if (!enabled) orientationPlanFlowActiveRef.current = false;
+      if (!enabled) {
+        orientationSessionProgressRef.current = { activeFlows: new Set(), completedAnyFlow: false, abandonedAnyFlow: false };
+      }
       await loadOrientationMeasurement();
     } catch (consentError) {
       setError(consentError instanceof Error ? consentError.message : 'orientation_consent_failed');
@@ -1466,7 +1473,7 @@ export default function App() {
       const res = await apiFetch('/api/orientation-measurement', { method: 'DELETE' });
       const json = (await res.json()) as { detail?: string };
       if (!res.ok) throw new Error(json.detail || `orientation-delete:${res.status}`);
-      orientationPlanFlowActiveRef.current = false;
+      orientationSessionProgressRef.current = { activeFlows: new Set(), completedAnyFlow: false, abandonedAnyFlow: false };
       await loadOrientationMeasurement();
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : 'orientation_delete_failed');
@@ -1477,22 +1484,32 @@ export default function App() {
 
   const recordOrientationEvent = async (
     flow: 'inbox' | 'profile_selection' | 'accepted_plan_to_task',
-    event: 'flow_started' | 'flow_completed' | 'flow_abandoned' | 'profile_selected' | 'guidance_viewed' | 'ui_error',
+    event: 'flow_started' | 'flow_completed' | 'flow_abandoned' | 'profile_selected' | 'ui_error',
     profile?: string,
   ) => {
     if (!orientationConsentRef.current.enabled || !orientationConsentRef.current.sessionId) return;
+    const progress = orientationSessionProgressRef.current;
+    if (event === 'flow_started') progress.activeFlows.add(flow);
+    if (event === 'flow_completed') {
+      progress.activeFlows.delete(flow);
+      progress.completedAnyFlow = true;
+    }
+    if (event === 'flow_abandoned') {
+      progress.activeFlows.delete(flow);
+      progress.abandonedAnyFlow = true;
+    }
     try {
-      await apiFetch('/api/orientation-measurement/events', {
+      const response = await apiFetch('/api/orientation-measurement/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ flow, event, ...(profile ? { profile } : {}) }),
       });
+      if (!response.ok) return;
     } catch { /* la telemetría local nunca interrumpe una acción del usuario */ }
   };
 
   const recordProfileOrientation = async (profile: string) => {
     await recordOrientationEvent('profile_selection', 'profile_selected', profile);
-    await recordOrientationEvent('profile_selection', 'guidance_viewed', profile);
     await recordOrientationEvent('profile_selection', 'flow_completed', profile);
   };
 
@@ -1807,6 +1824,7 @@ export default function App() {
   useEffect(() => {
     if (!workspaceConfigured || !workspace || orientationWorkspaceRef.current === workspace) return;
     orientationWorkspaceRef.current = workspace;
+    orientationSessionProgressRef.current = { activeFlows: new Set(), completedAnyFlow: false, abandonedAnyFlow: false };
     void loadOrientationMeasurement();
     // Se reinicia únicamente al cambiar de proyecto; no en cada poll del cockpit.
   }, [workspaceConfigured, workspace]);
@@ -1814,21 +1832,34 @@ export default function App() {
   useEffect(() => {
     const finishObservedSession = () => {
       if (!orientationConsentRef.current.enabled || !orientationConsentRef.current.sessionId) return;
-      void apiFetch('/api/orientation-measurement/session/end', {
+      const progress = orientationSessionProgressRef.current;
+      if (progress.activeFlows.size === 0 && !progress.completedAnyFlow && !progress.abandonedAnyFlow) return;
+      const status = progress.activeFlows.size > 0 || progress.abandonedAnyFlow ? 'abandoned' : 'completed';
+      orientationSessionProgressRef.current = { activeFlows: new Set(), completedAnyFlow: false, abandonedAnyFlow: false };
+      const ending = apiFetch('/api/orientation-measurement/session/end', {
         method: 'POST',
         keepalive: true,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: orientationPlanFlowActiveRef.current ? 'abandoned' : 'completed' }),
+        body: JSON.stringify({ status }),
+      }).catch(() => undefined);
+      const trackedEnding = ending.finally(() => {
+        if (orientationSessionEndPromiseRef.current === trackedEnding) {
+          orientationSessionEndPromiseRef.current = null;
+        }
       });
+      orientationSessionEndPromiseRef.current = trackedEnding;
     };
-    const resumeObservedSession = () => {
-      if (orientationWorkspaceRef.current) void loadOrientationMeasurement();
+    const resumeObservedSession = async () => {
+      await orientationSessionEndPromiseRef.current;
+      orientationSessionProgressRef.current = { activeFlows: new Set(), completedAnyFlow: false, abandonedAnyFlow: false };
+      if (orientationWorkspaceRef.current) await loadOrientationMeasurement();
     };
+    const resumeObservedSessionListener = () => { void resumeObservedSession(); };
     window.addEventListener('pagehide', finishObservedSession);
-    window.addEventListener('pageshow', resumeObservedSession);
+    window.addEventListener('pageshow', resumeObservedSessionListener);
     return () => {
       window.removeEventListener('pagehide', finishObservedSession);
-      window.removeEventListener('pageshow', resumeObservedSession);
+      window.removeEventListener('pageshow', resumeObservedSessionListener);
     };
   }, []);
 
@@ -2132,7 +2163,10 @@ export default function App() {
   const createTask = async () => {
     const task = newTaskDraft.trim();
     if (!task) return;
-    const observedPlanFlow = Boolean(pendingPlanRef && orientationPlanFlowActiveRef.current);
+    const observedPlanFlow = Boolean(
+      pendingPlanRef
+      && orientationSessionProgressRef.current.activeFlows.has('accepted_plan_to_task')
+    );
     const title = task.split(/\r?\n/).find((line) => line.trim())?.trim().slice(0, 160) || 'Nueva tarea';
     setLoading(true);
     setError('');
@@ -2198,7 +2232,6 @@ export default function App() {
       setViewMode('chat');
       setLastResult({ issue: issueJson, comment: commentJson, wakeup: wakeupJson, run_once: runOnceJson });
       if (observedPlanFlow) {
-        orientationPlanFlowActiveRef.current = false;
         void recordOrientationEvent('accepted_plan_to_task', 'flow_completed', newTaskProfile);
       }
       await loadProjectData(issue.id);
@@ -3490,10 +3523,9 @@ export default function App() {
                 <button
                   className="attached-plan-clear"
                   onClick={() => {
-                    if (orientationPlanFlowActiveRef.current) {
+                    if (orientationSessionProgressRef.current.activeFlows.has('accepted_plan_to_task')) {
                       void recordOrientationEvent('accepted_plan_to_task', 'flow_abandoned', newTaskProfile);
                     }
-                    orientationPlanFlowActiveRef.current = false;
                     setPendingPlanRef(null);
                   }}
                   title="Quitar el plan adjunto"
@@ -3532,6 +3564,7 @@ export default function App() {
             )}
             <button
               className="sidebar-create-btn"
+              data-testid="create-task-button"
               onClick={() => void createTask()}
               disabled={loading || !newTaskDraft.trim()}
               title={PROFILE_OPTIONS.find((p) => p.value === newTaskProfile)?.desc}
@@ -3740,7 +3773,6 @@ export default function App() {
                 onCreateExecutionTask={() => {
                   const revisionId = quorum?.session.final_plan_revision_id;
                   if (!revisionId) return;
-                  orientationPlanFlowActiveRef.current = true;
                   void recordOrientationEvent('accepted_plan_to_task', 'flow_started', 'full_team');
                   setPendingPlanRef({ revisionId, sourceIssueId: quorum.session.issue_id });
                   setNewTaskDraft(

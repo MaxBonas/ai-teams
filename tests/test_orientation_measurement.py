@@ -47,7 +47,9 @@ def test_events_require_explicit_consent_and_closed_vocabulary(tmp_path: Path) -
     with pytest.raises(ValueError, match="flow_not_allowed"):
         record_orientation_event(db, flow="arbitrary", event="flow_started")
     with pytest.raises(ValueError, match="event_flow_mismatch"):
-        record_orientation_event(db, flow="inbox", event="guidance_viewed")
+        record_orientation_event(db, flow="inbox", event="profile_selected", profile="solo_lead")
+    with pytest.raises(ValueError, match="event_not_allowed"):
+        record_orientation_event(db, flow="profile_selection", event="guidance_viewed", profile="solo_lead")
 
 
 def test_revoke_end_and_erase_are_auditable(tmp_path: Path) -> None:
@@ -97,13 +99,33 @@ def test_summary_exposes_counts_and_denies_product_conclusions(tmp_path: Path) -
             "flow_abandoned",
             "flow_completed",
             "flow_started",
-            "guidance_viewed",
             "profile_selected",
             "ui_error",
         ],
     }
     assert summary["interpretation"]["conclusion_allowed"] is False
     assert "clarity" in summary["interpretation"]["constructs_not_measured"]
+
+
+def test_summary_excludes_retired_cognitive_event_from_current_counts(tmp_path: Path) -> None:
+    db = _database(tmp_path)
+    consent = set_measurement_consent(db, enabled=True)
+    with sqlite3.connect(db) as conn:
+        conn.execute("PRAGMA ignore_check_constraints = ON")
+        conn.execute(
+            """
+            INSERT INTO orientation_events (id, session_id, flow, event, profile)
+            VALUES ('legacy:viewed', ?, 'profile_selection', 'guidance_viewed', 'solo_lead')
+            """,
+            (consent["current_session_id"],),
+        )
+        conn.execute("PRAGMA ignore_check_constraints = OFF")
+
+    summary = orientation_summary(db)
+
+    assert summary["event_count"] == 0
+    assert summary["retired_event_count"] == 1
+    assert "guidance_viewed" not in summary["flows"]["profile_selection"]
 
 
 def test_orientation_api_rejects_unconsented_and_extra_content(tmp_path: Path) -> None:

@@ -178,20 +178,25 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   y promedió 5,38× tiempo/6,61× entrada. La run abierta conserva continuación.
 - El baseline de orientación frontend ya tiene un E2E Playwright hermético:
   Bandeja requiere 1 acción, cada perfil 1 y plan aceptado → tarea adjunta 2;
-  Chromium termina sin errores ni abandonos sintéticos. La guía visible compara
+  Chromium termina el recorrido principal sin errores ni abandonos; dos probes
+  adicionales validan abandono activo y explícito. La guía visible compara
   coste operativo y riesgo de los tres perfiles. No tratar este contrato como
   evidencia de adopción o claridad real. El backend consentido ya persiste solo
   sesión, flow, evento allowlisted y perfil canónico en SQLite; bloquea eventos
   sin consentimiento, soporta revocación/borrado y prohíbe texto, rutas e IDs de
   proyecto. Config ya ofrece opt-in, revocación, borrado y resumen; el cockpit
-  instrumenta Bandeja, perfiles y plan → tarea. El E2E registra 11 eventos
-  sintéticos sin campos fuera de `flow`, `event` y `profile` opcional. Falta la
-  observación humana consentida. Su protocolo v1 ya está prerregistrado con ocho
-  sesiones, dos estratos, órdenes contrabalanceados, rúbrica, gates y parada por
-  privacidad; un auditor rechaza cambios post hoc y el template de resultados
-  sigue vacío. Ahora toca reclutar/ejecutar la muestra sin exponer participantes
-  a la UI o al protocolo de antemano. Los conteos no autorizan conclusiones de
-  comprensión universal.
+  instrumenta Bandeja, perfiles y plan → tarea. El E2E registra 9 eventos del
+  recorrido y 3 adicionales en dos pruebas de abandono controlado, sin campos
+  fuera de `flow`, `event` y `profile` opcional ni atribuir lectura o
+  comprensión al clic. Las filas históricas `guidance_viewed` quedan fuera de
+  los conteos vigentes sin borrado silencioso. Una sesión
+  vacía tampoco se marca completada. La observación humana consentida conserva
+  esa frontera. Su protocolo v1 ya está prerregistrado con ocho sesiones, dos
+  estratos, órdenes contrabalanceados, rúbrica, gates y parada por privacidad;
+  la enmienda previa a observación fija una fila participante×flujo y el auditor
+  rechaza cambios post hoc. El template de resultados sigue vacío. Ahora toca
+  reclutar/ejecutar la muestra sin exponer participantes a la UI o al protocolo
+  de antemano. Los conteos no autorizan conclusiones de comprensión universal.
 - El auditor de benchmarks separa conclusión de promoción. Ya no acepta un
   booleano de independencia si las clases de evaluador son solo léxicas, y una
   promoción nueva exige `constructs_not_measured` más riesgo de Goodhart. Los
