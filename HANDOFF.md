@@ -46,6 +46,14 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 
 ## Trabajo reciente
 
+- Cerrada la revisión de paralelismo por canal sin cambiar el default. El auditor
+  offline inspecciona siete SQLite `full_team`: 75 runs registradas, 72 con
+  tiempos comparables, cero esperas o solapamientos elegibles y cero rate limits.
+  Las siete muestras tienen una sola raíz y un solo proveedor, por lo que no
+  justifican activar paralelismo ni demuestran que nunca ayude. El flag continúa
+  opt-in y el gate exige contención real más A/B equivalente. Recibo:
+  `parallel-channel-capacity-v1.json`. Verificación completa: `1186 passed` en
+  135,56 s.
 - OpenCode server permanece experimental. El A/B de transporte v1 con DeepSeek
   pasa 3/3 direct y 3/3 attached, conserva seis sesiones aisladas y reduce la
   mediana 7,50→2,92 s con tokens equivalentes. El servidor está autenticado en

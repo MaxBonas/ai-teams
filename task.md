@@ -32,7 +32,7 @@ canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
 cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
 orquestador legacy.
 
-Última suite completa registrada (`2026-07-22`): **1182 passed en 128,71 s**.
+Última suite completa registrada (`2026-07-22`): **1186 passed en 135,56 s**.
 Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
 cambio material lo justifique.
 
@@ -587,8 +587,15 @@ sí sola el privilegio de un rol.
   conversation UUID explícito y conserva el marcador, pero carece de usage
   comparable. Decisión: mantener producción stateless; el harness conserva
   `production_enabled=false` y no se usan `--last`/`--continue`.
-- [ ] **Revisar paralelismo por canal** únicamente con evidencia de cuello de
-  botella; conservar límites, governor y semántica durable de checkout/wakeups.
+- [x] **Revisar paralelismo por canal** únicamente con evidencia de cuello de
+  botella. El auditor offline revisa siete SQLite `full_team`: 75 runs
+  registradas, 72 temporizadas y tres excluidas por carecer de intervalo válido.
+  Todas las muestras son de una sola raíz y proveedor; observa cero esperas
+  seriales elegibles, solapamientos elegibles y rate limits. Se conserva el
+  default secuencial y `AITEAM_PARALLEL_CHANNELS` opt-in, batch máximo 3,
+  governor y semántica durable. Reabrir solo ante contención multi-raíz/
+  multi-proveedor real y A/B equivalente sin regresiones. Recibo:
+  `benchmarks/results/parallel_channels/parallel-channel-capacity-v1.json`.
 - [x] **Fortalecer el instrumento de benchmark antes de conclusiones nuevas**.
   `scripts/benchmark_integrity.py` audita offline la matriz brazo×semilla,
   duplicados, suites comparables, evidencia independiente, muestra, providers,

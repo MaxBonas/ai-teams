@@ -641,6 +641,19 @@ Paralelizar por independencia informativa, no por disponibilidad de roles:
 
 No ejecutar en paralelo agentes que escriban la misma superficie sin aislamiento. Cada rama necesita owner, scope, evidencia y aceptación.
 
+La auditoría offline del 2026-07-22 conserva el default secuencial. El instrumento
+`scripts/audit_parallel_channels.py` inspeccionó siete SQLite `full_team`: 75
+runs registradas, 72 con intervalo temporal comparable y tres excluidas por no
+tenerlo. Las siete muestras son de una sola raíz y un solo proveedor; no aparece
+espera serial elegible entre raíces/proveedores distintos, solapamiento elegible
+ni error de rate limit. Esto no demuestra que el paralelismo carezca de valor:
+demuestra que el histórico retenido no contiene el cuello de botella necesario
+para justificar un cambio. `AITEAM_PARALLEL_CHANNELS` continúa opt-in, con batch
+máximo efectivo 3 y los invariantes de agente, raíz, proveedor y work slot. La
+decisión solo se reabre ante contención elegible real y un A/B con la misma cola,
+sin regresiones de checkout, evidencia, cuota o liveness. Recibo:
+`benchmarks/results/parallel_channels/parallel-channel-capacity-v1.json`.
+
 Anthropic describe mejoras grandes en su sistema de research multiagente, pero también un consumo de tokens muy superior y sensibilidad alta a coordinación, prompts y herramientas. Es evidencia de ingeniería de un vendor sobre su sistema, no una garantía general para coding agents. Fuente: [ANTH-2](ORCHESTRATION_SOURCES.md#anth-2-multi-agent-research).
 
 ## Extensiones MCP gobernadas

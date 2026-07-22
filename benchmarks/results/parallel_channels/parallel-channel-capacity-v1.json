@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "audit": "parallel_channel_capacity",
+  "policy": {
+    "default_enabled": false,
+    "environment_override_active": false,
+    "batch_max": 3,
+    "constraints": [
+      "distinct_agents",
+      "distinct_root_issues",
+      "distinct_non_builtin_providers",
+      "at_most_one_workspace_work_slot"
+    ]
+  },
+  "sources": [
+    {
+      "database": "runtime/bench/accessible-checkout-seed-1-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 12,
+      "timed_runs": 12,
+      "excluded_untimed_runs": 0,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 6,
+      "queue_wait_samples": 12,
+      "queue_wait_seconds_median": 0.568,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "rate_limit_errors": 0
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-2-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 10,
+      "timed_runs": 10,
+      "excluded_untimed_runs": 0,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 5,
+      "queue_wait_samples": 10,
+      "queue_wait_seconds_median": 0.749,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "rate_limit_errors": 0
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-1/team/.aiteam/aiteam.db",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "excluded_untimed_runs": 1,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 6,
+      "queue_wait_samples": 11,
+      "queue_wait_seconds_median": 0.86,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "rate_limit_errors": 0
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-2-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 10,
+      "timed_runs": 10,
+      "excluded_untimed_runs": 0,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 5,
+      "queue_wait_samples": 10,
+      "queue_wait_seconds_median": 1.06,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "rate_limit_errors": 0
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-1-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "excluded_untimed_runs": 1,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 6,
+      "queue_wait_samples": 11,
+      "queue_wait_seconds_median": 0.804,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "rate_limit_errors": 0
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-2-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "excluded_untimed_runs": 1,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 6,
+      "queue_wait_samples": 11,
+      "queue_wait_seconds_median": 0.794,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "rate_limit_errors": 0
+    },
+    {
+      "database": "runtime/bench/release-notes-seed-1-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 7,
+      "timed_runs": 7,
+      "excluded_untimed_runs": 0,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 5,
+      "queue_wait_samples": 7,
+      "queue_wait_seconds_median": 0.626,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "rate_limit_errors": 0
+    }
+  ],
+  "aggregate": {
+    "database_count": 7,
+    "recorded_runs": 75,
+    "timed_runs": 72,
+    "excluded_untimed_runs": 3,
+    "single_root_databases": 7,
+    "single_provider_databases": 7,
+    "eligible_serial_wait_runs": 0,
+    "eligible_serial_wait_seconds": 0,
+    "eligible_overlap_pairs": 0,
+    "rate_limit_errors": 0
+  },
+  "conclusion": {
+    "contention_trigger_observed": false,
+    "evidence_sufficient_for_default_enable": false,
+    "default_change_allowed": false,
+    "decision": "retain_sequential_default",
+    "reason": "la muestra no contiene espera entre raíces y proveedores que el selector pudiera solapar",
+    "reopen_when": [
+      "eligible_serial_wait_runs > 0 en proyectos reales comparables",
+      "A/B secuencial-paralelo con misma cola y resultados",
+      "sin regresión de checkout, evidencia, cuota ni liveness"
+    ]
+  },
+  "limitations": [
+    "el proveedor persistido aproxima la clave de capacidad usada por el scheduler",
+    "el histórico retenido puede no representar proyectos multi-raíz y multi-proveedor",
+    "sin A/B secuencial-paralelo no se puede autorizar un cambio de default"
+  ]
+}
