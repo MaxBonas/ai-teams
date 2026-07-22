@@ -587,15 +587,42 @@ sí sola el privilegio de un rol.
   conversation UUID explícito y conserva el marcador, pero carece de usage
   comparable. Decisión: mantener producción stateless; el harness conserva
   `production_enabled=false` y no se usan `--last`/`--continue`.
-- [x] **Revisar paralelismo por canal** únicamente con evidencia de cuello de
-  botella. El auditor offline revisa siete SQLite `full_team`: 75 runs
-  registradas, 72 temporizadas y tres excluidas por carecer de intervalo válido.
-  Todas las muestras son de una sola raíz y proveedor; observa cero esperas
-  seriales elegibles, solapamientos elegibles y rate limits. Se conserva el
-  default secuencial y `AITEAM_PARALLEL_CHANNELS` opt-in, batch máximo 3,
-  governor y semántica durable. Reabrir solo ante contención multi-raíz/
-  multi-proveedor real y A/B equivalente sin regresiones. Recibo:
+**Paralelismo por canal — validación reabierta.** El default secuencial y
+`AITEAM_PARALLEL_CHANNELS` opt-in no cambian hasta completar estos bloques:
+
+- [x] **Registrar el baseline histórico sin inferir promoción.** El auditor
+  offline revisó siete SQLite `full_team`: 75 runs registradas, 72 temporizadas
+  y tres excluidas. Todas las muestras tenían una sola raíz y un solo proveedor;
+  por tanto, cero esperas elegibles solo significa que el histórico no ejercita
+  el selector paralelo. Recibo:
   `benchmarks/results/parallel_channels/parallel-channel-capacity-v1.json`.
+- [ ] **Persistir la elegibilidad exacta de cada candidato al despachar.** Para
+  cada wakeup considerada, registrar raíz, pool de capacidad, rol/work slot,
+  instante en que quedó realmente lista y motivo estable de selección o rechazo.
+  Cierre: migración compatible y tests de dependencia, checkout, mismo agente,
+  misma raíz, mismo pool y segundo work slot.
+- [ ] **Hacer que el auditor consuma esa provenance exacta.** Mantener los DB
+  históricos como evidencia `approximate`, separar espera total de espera
+  paralelizable y no contar tiempo bloqueado por dependencias o checkout.
+  Cierre: fixtures positivos/negativos y JSON que declare cobertura y calidad de
+  evidencia.
+- [ ] **Construir un A/B hermético sobre el `HeartbeatLoop` real.** Ejecutar la
+  misma cola determinista con flag off/on, al menos tres raíces, tres pools, un
+  único work slot y una rama que falla. Cierre: solapamiento sólo entre ramas
+  admitidas, fallo aislado, mismos estados terminales y cero wakeups/runs
+  huérfanas; este bloque valida corrección, no beneficio productivo.
+- [ ] **Obtener un trigger vivo representativo antes de gastar modelos.** Retener
+  al menos un proyecto comparable con múltiples raíces y pools cuya provenance
+  exacta muestre espera paralelizable mayor que cero. Sin ese trigger, no abrir
+  el A/B de proveedores y mantener la tarea pendiente sin cambiar política.
+- [ ] **Ejecutar el A/B vivo secuencial/paralelo.** Sólo tras el trigger anterior:
+  misma cola y workspace inicial, varias semillas y canales ejecutables distintos.
+  Comparar makespan, espera, calidad/aceptación, runs, tokens/coste disponible,
+  errores de cuota, checkout, wakeups y liveness; publicar mediana y rango.
+- [ ] **Decidir y documentar la política final.** Activar o ampliar límites sólo
+  si el A/B muestra mejora consistente sin regresiones de calidad, cuota,
+  aislamiento o liveness. En cualquier otro resultado conservar el opt-in y
+  cerrar con evidencia negativa explícita.
 - [x] **Fortalecer el instrumento de benchmark antes de conclusiones nuevas**.
   `scripts/benchmark_integrity.py` audita offline la matriz brazo×semilla,
   duplicados, suites comparables, evidencia independiente, muestra, providers,
