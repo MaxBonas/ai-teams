@@ -22,7 +22,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from aiteam.model_flow_matrix import audit_builtin_model_flows  # noqa: E402
 from aiteam.model_calibration import audit_promoted_model_calibrations  # noqa: E402
+from aiteam.model_tiers import audit_model_tier_matrix  # noqa: E402
 from aiteam.user_config import (  # noqa: E402
+    DEFAULT_ADAPTER_PROFILES,
+    MODEL_OPTIONS_BY_PROFILE,
     executable_model_options,
     model_options,
 )
@@ -99,6 +102,10 @@ def build_report(
         row.get("coverage_ok") is True for row in catalog_rows
     )
     flow_ok = flow_report.get("ok") is True
+    tier_report = audit_model_tier_matrix(
+        DEFAULT_ADAPTER_PROFILES, MODEL_OPTIONS_BY_PROFILE
+    )
+    tier_ok = tier_report.get("ok") is True
     observed_versions = {
         str(row.get("profile_id") or ""): str(row.get("cli_version") or "") or None
         for row in catalog_rows
@@ -116,8 +123,13 @@ def build_report(
         for entry in calibration_report["entries"]
     ]
     cadence_due = (observed_at + timedelta(days=30)).date()
-    calibration_due = min(calibration_due_dates, default=cadence_due)
-    next_review_due = min(cadence_due, max(observed_at.date(), calibration_due))
+    scheduled_calibration_due = min(calibration_due_dates, default=cadence_due)
+    calibration_due = (
+        observed_at.date()
+        if calibration_report["all_fresh"] is not True
+        else max(observed_at.date(), scheduled_calibration_due)
+    )
+    next_review_due = min(cadence_due, calibration_due)
     attention: list[dict[str, Any]] = []
     for row in catalog_rows:
         if row.get("status") != "current" or row.get("coverage_ok") is not True:
@@ -147,6 +159,14 @@ def build_report(
                     "stale_reasons": entry["stale_reasons"],
                 }
             )
+    if not tier_ok:
+        attention.append(
+            {
+                "profile_id": "builtin_model_catalog",
+                "reason": "model_tier_matrix_incomplete",
+                "failures": tier_report.get("failures") or [],
+            }
+        )
     return {
         "schema_version": 1,
         "benchmark": "model_catalog_drift_audit",
@@ -178,11 +198,16 @@ def build_report(
                 "failures",
             )
         },
+        "model_tier_matrix": {
+            key: tier_report.get(key)
+            for key in ("ok", "policy_version", "models_audited", "failures", "rows")
+        },
         "model_calibration_freshness": calibration_report,
         "gates": {
             "authenticated_inventories_complete": inventory_complete,
             "declared_catalog_coverage": coverage_ok,
             "hermetic_model_flow_matrix": flow_ok,
+            "model_tier_matrix_complete": tier_ok,
             "promoted_model_calibration_registry": calibration_report["registry_valid"],
             "promoted_model_calibrations_fresh": calibration_report["all_fresh"],
         },
@@ -192,6 +217,7 @@ def build_report(
             inventory_complete
             and coverage_ok
             and flow_ok
+            and tier_ok
             and calibration_report["registry_valid"]
             and calibration_report["all_fresh"]
         ),

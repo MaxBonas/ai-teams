@@ -47,7 +47,7 @@ def _expanded_thread(source: str, *, min_chars: int) -> str:
 
 def run_canary(
     *, source: str, rubric: dict[str, Any], profile_id: str, workspace: Path, min_chars: int,
-    model: str | None = None,
+    model: str | None = None, reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     runtime = workspace / ".aiteam"
     runtime.mkdir(parents=True, exist_ok=True)
@@ -64,6 +64,8 @@ def run_canary(
     if model:
         adapter_config["model"] = model
         selection["model"] = model
+    if reasoning_effort:
+        adapter_config["model_reasoning_effort"] = reasoning_effort
     create_agent(
         db,
         agent_id="role:context_curator",
@@ -183,6 +185,12 @@ def main() -> int:
     parser.add_argument("--rubric", type=Path, required=True)
     parser.add_argument("--profile", default="codex_subscription")
     parser.add_argument("--model", default=None, help="override de modelo dentro del perfil")
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh", "max"),
+        default=None,
+        help="override explícito de razonamiento para Codex",
+    )
     parser.add_argument("--workdir", type=Path, required=True)
     parser.add_argument("--min-chars", type=int, default=8_500)
     parser.add_argument("--output", type=Path)
@@ -194,6 +202,7 @@ def main() -> int:
         workspace=args.workdir.resolve(),
         min_chars=max(8_000, args.min_chars),
         model=args.model,
+        reasoning_effort=args.reasoning_effort,
     )
     serialized = json.dumps(report, indent=2, ensure_ascii=False)
     print(serialized)

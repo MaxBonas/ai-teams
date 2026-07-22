@@ -256,7 +256,7 @@ def _arm_report(
     scope_match: bool,
     prompt_chars: int,
     session_id: str | None = None,
-    model: str = "gpt-5.5",
+    model: str = "gpt-5.6-sol",
 ) -> dict[str, Any]:
     parsed = _parse_json_object(str(run.get("output") or ""))
     usage = run.get("usage") if isinstance(run.get("usage"), dict) else {}
@@ -342,7 +342,7 @@ def resume_existing_codex_arms(
     timeout_sec: int,
 ) -> dict[str, Any]:
     payload = json.loads(checkpoint.read_text(encoding="utf-8"))
-    model = str(payload.get("model") or "gpt-5.5")
+    model = str(payload.get("model") or "gpt-5.6-sol")
     executable = shutil.which("codex.cmd") or shutil.which("codex")
     if not executable:
         raise RuntimeError("Codex CLI no está instalado")
@@ -387,7 +387,7 @@ def resume_existing_codex_arms(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Canario real y acotado stateless vs Codex resume")
     parser.add_argument("--seeds", default="1,2")
-    parser.add_argument("--model", default="gpt-5.5")
+    parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--timeout-sec", type=int, default=240)
     parser.add_argument(
         "--resume-existing",
@@ -397,7 +397,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=REPO_ROOT / "benchmarks" / "results" / "cli_sessions" / "codex-gpt-5.5-seeds-1-2.json",
+        default=REPO_ROOT / "benchmarks" / "results" / "cli_sessions" / "codex-gpt-5.6-sol-seeds-1-2.json",
     )
     args = parser.parse_args()
     seeds = [int(value) for value in str(args.seeds).split(",") if value.strip()]

@@ -97,7 +97,7 @@ def role_status(role: str) -> str:
 # (scouts/curator). Enforced via CLI read-only sandbox, the preventive
 # file_ops gate, and the role.violation audit.
 NON_EDITING_ROLES = frozenset({
-    "lead", "team_lead", "file_scout", "web_scout", "context_curator",
+    "lead", "team_lead", "worker", "file_scout", "web_scout", "context_curator",
     "quorum_auditor", "quorum_senior",
 })
 
@@ -187,7 +187,7 @@ def cross_provider_review_enforced() -> bool:
 # MÁXIMO UN rol de "slot de trabajo" (edita o verifica el workspace); los
 # roles de lectura tolerante (lead-tier, scouts) pueden acompañarlo.
 WORK_SLOT_ROLES = frozenset({
-    "engineer", "software_engineer", "worker", "qa", "qa_engineer",
+    "engineer", "software_engineer", "qa", "qa_engineer",
     "reviewer", "code_reviewer", "test_runner", "test_designer",
 })
 

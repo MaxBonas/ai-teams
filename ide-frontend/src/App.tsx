@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ThreadView } from './components/ThreadView';
+import { ModelCatalog } from './components/ModelCatalog';
+import { ModelRoleSelector } from './components/ModelRoleSelector';
 import {
   Activity,
   AlertCircle,
   ArrowDown,
   Bell,
+  Boxes,
   CheckCircle2,
   Clock3,
   Code2,
@@ -811,7 +814,7 @@ const TIMELINE_TYPE_LABELS: Record<TimelineType, string> = {
   tool: 'Herramientas',
 };
 
-type ViewMode = 'timeline' | 'issue' | 'plan' | 'runs' | 'chat' | 'inbox' | 'files' | 'team' | 'config';
+type ViewMode = 'timeline' | 'issue' | 'plan' | 'runs' | 'chat' | 'inbox' | 'files' | 'team' | 'models' | 'config';
 
 // Secciones del panel de configuración, agrupadas por ámbito.
 type ConfigSection =
@@ -1028,10 +1031,22 @@ export default function App() {
   const [agentDraft, setAgentDraft] = useState<Partial<Agent>>({});
   // Agent config modal (team panel)
   const [configModalAgent, setConfigModalAgent] = useState<Agent | null>(null);
+  const [catalogHire, setCatalogHire] = useState<{
+    roleId: string;
+    roleDef: RoleDef;
+    profileId: string;
+    model: string;
+    candidateId: string;
+  } | null>(null);
   // Hiring panel — editable team proposal per pending suggest_tasks interaction
   const [hiringDrafts, setHiringDrafts] = useState<Record<string, ProposedTeamMember[]>>({});
   // Free-text note per request_confirmation interaction (cleared after submit)
   const [interactionNotes, setInteractionNotes] = useState<Record<string, string>>({});
+  const [fallbackSelections, setFallbackSelections] = useState<Record<string, {
+    profileId: string;
+    model: string;
+    candidateId: string;
+  }>>({});
   // Tool capability catalog
   const [capabilityCatalog, setCapabilityCatalog] = useState<Record<string, CapabilityEntry>>({});
   const [adapterProfiles, setAdapterProfiles] = useState<AdapterProfile[]>([]);
@@ -1043,6 +1058,8 @@ export default function App() {
   const [secretValue, setSecretValue] = useState('');
   const [selectedProjectAdapterIds, setSelectedProjectAdapterIds] = useState<string[]>([]);
   const [leadAdapterProfileId, setLeadAdapterProfileId] = useState('');
+  const [leadModel, setLeadModel] = useState('');
+  const [leadCandidateId, setLeadCandidateId] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState('');
   // Project initialization loading state
   const [projectInitializing, setProjectInitializing] = useState(false);
@@ -2024,6 +2041,8 @@ export default function App() {
           initial_task: initialTask,
           adapter_profile_ids: selectedProjectAdapterIds,
           lead_adapter_profile_id: leadAdapterProfileId,
+          lead_model: leadModel,
+          lead_candidate_id: leadCandidateId,
           run_profile: newProjectRunProfile,
           data_class: newProjectDataClass,
         }),
@@ -2415,43 +2434,37 @@ export default function App() {
         <div className="agent-form-section">
           <div className="agent-form-section-title">Adapter</div>
 
-          {/* Single adapter selector */}
+          {/* Selector canónico modelo + adapter, compartido con hiring. */}
           <div className="agent-form-field">
             <label className="agent-form-label">
-              Adapter <InfoTip tip={FIELD_TIPS.adapter} wide />
+              Modelo + adapter <InfoTip tip={`${FIELD_TIPS.adapter} ${FIELD_TIPS.model}`} wide />
             </label>
-            <select
-              className="agent-form-input"
-              value={currentProfileId}
-              onChange={(e) => {
-                const val = e.target.value;
-                const profile = adapterProfiles.find((p) => p.id === val);
+            <ModelRoleSelector
+              role={agent.role || ''}
+              issueId={selectedIssue?.id || ''}
+              profileId={currentProfileId}
+              model={currentModel}
+              {...issueCompatibilityContext(selectedIssue)}
+              requiredCapabilities={draftCaps}
+              onChange={({ profileId, model, candidateId }) => {
+                const profile = adapterProfiles.find((p) => p.id === profileId);
                 setAgentDraft((d) => ({
                   ...d,
                   adapter_type: profile?.adapter_type ?? d.adapter_type ?? agent.adapter_type ?? 'manual',
-                  adapter_config: { ...(d.adapter_config || {}), profile_id: val, model: '' },
+                  adapter_config: {
+                    ...(d.adapter_config || {}),
+                    profile_id: profileId,
+                    model,
+                    selection_intent: {
+                      schema_version: 'model_selection_intent_v1',
+                      mode: 'owner_explicit',
+                      source: 'model_role_selector',
+                      candidate_id: candidateId,
+                    },
+                  },
                 }));
               }}
-            >
-              <option value="">— Sin adapter (sin ejecución automática)</option>
-              {adapterProfiles.map((profile) => {
-                const pState = profileState(profile);
-                const options = roleModelOptions[modelOptionCacheKey(profile.id, agent.role || '', selectedIssue)];
-                const profileDenied = Boolean(options?.length) && options.every(
-                  (option) => option.selectable === false || option.available === false || option.compatibility?.allowed === false,
-                );
-                const denyReason = options?.find((option) => option.compatibility?.allowed === false)?.compatibility?.reason;
-                const statusPrefix = pState.connected ? '● ' : '○ ';
-                const statusSuffix = !pState.connected ? ` — ${pState.label}` : '';
-                return (
-                  <option key={profile.id} value={profile.id} disabled={profileDenied}>
-                    {statusPrefix}{profile.label}{statusSuffix}{profileDenied ? ` — incompatible: ${denyReason || 'sin modelo válido para este rol'}` : ''}
-                  </option>
-                );
-              })}
-              <option value="" disabled>──────────────────────────</option>
-              <option value="__custom__" disabled>⚙ Adapter personalizado — próximamente</option>
-            </select>
+            />
 
             {/* Derived info: show technical type + channel as read-only chips */}
             {selectedProfile && (
@@ -2465,32 +2478,8 @@ export default function App() {
             )}
           </div>
 
-          {/* Model override */}
+          {/* Compatibilidad legacy visible hasta retirar el endpoint por perfil. */}
           <div className="agent-form-field">
-            <label className="agent-form-label">
-              Modelo <InfoTip tip={FIELD_TIPS.model} wide />
-            </label>
-            <select
-              className="agent-form-input"
-              value={currentModel || String(activeModelProfile?.config?.model || '')}
-              onChange={(e) => setAgentDraft((d) => ({
-                ...d,
-                adapter_config: { ...(d.adapter_config || {}), model: e.target.value },
-              }))}
-            >
-              <option value="">Default del adapter</option>
-              {modelOptions.map((option) => {
-                const disabled = option.selectable === false || option.available === false || option.compatibility?.allowed === false;
-                const reason = option.selectable === false || option.available === false
-                  ? option.availability_reason || 'sin verificar'
-                  : option.compatibility?.reason;
-                return (
-                  <option key={option.value} value={option.value} disabled={disabled}>
-                    {option.label}{disabled ? ` — ${reason || 'incompatible'}` : ''}
-                  </option>
-                );
-              })}
-            </select>
             {activeModelProfile?.model_catalog?.status === 'cli_update_required' && (
               <small className="field-warning">
                 Codex CLI {activeModelProfile.model_catalog.installed_version || '?'} no puede usar el catálogo {activeModelProfile.model_catalog.catalog_client_version || '?'}; actualiza el CLI y vuelve a probar el adapter.
@@ -2627,24 +2616,55 @@ export default function App() {
     );
   }
 
-  async function hireCatalogRole(roleId: string, roleDef: RoleDef) {
+  function hireCatalogRole(roleId: string, roleDef: RoleDef) {
+    setCatalogHire({ roleId, roleDef, profileId: '', model: '', candidateId: '' });
+  }
+
+  async function confirmCatalogHire() {
+    if (!catalogHire?.profileId || !catalogHire.model || !catalogHire.candidateId) return;
     setLoading(true);
     try {
-      if (roleId === 'role:quorum_auditor_1' || roleId === 'role:quorum_auditor_2') {
-        const response = await apiFetch('/api/agents/quorum/reconcile', { method: 'POST' });
+      const profile = adapterProfiles.find((item) => item.id === catalogHire.profileId);
+      if (catalogHire.roleId === 'role:quorum_auditor_1' || catalogHire.roleId === 'role:quorum_auditor_2') {
+        const response = await apiFetch('/api/agents/quorum/reconcile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent_id: catalogHire.roleId,
+            profile_id: catalogHire.profileId,
+            model: catalogHire.model,
+            candidate_id: catalogHire.candidateId,
+          }),
+        });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || `quorum_hire:${response.status}`);
-        await loadProjectData(selectedIssueId);
-        return;
+      } else {
+        const lead = agents.find((agent) => agent.role === 'lead' || agent.role === 'role:lead');
+        const response = await apiFetch('/api/agents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: catalogHire.roleId.replace(/^role:/, ''),
+            name: catalogHire.roleDef.title,
+            seniority: catalogHire.roleDef.seniority,
+            adapter_type: profile?.adapter_type || 'manual',
+            adapter_config: {
+              profile_id: catalogHire.profileId,
+              model: catalogHire.model,
+              selection_intent: {
+                schema_version: 'model_selection_intent_v1',
+                mode: 'owner_explicit',
+                source: 'model_role_selector',
+                candidate_id: catalogHire.candidateId,
+              },
+            },
+            supervisor_agent_id: lead?.id || null,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || `agent_hire:${response.status}`);
       }
-      await apiFetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Contrata un agente con rol \`${roleId}\` (${roleDef.title}). ${roleDef.desc} Crea el issue correspondiente y asígnalo al agente apropiado.`,
-          profile: 'full_team',
-        }),
-      });
+      setCatalogHire(null);
       await loadProjectData(selectedIssueId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'hire_failed');
@@ -2672,6 +2692,8 @@ export default function App() {
         body.resolution_data = { user_note: note?.trim() || '' };
       } else if (intent === 'accept' && hiringTeam && interaction.kind === 'suggest_tasks') {
         body.resolution_data = { proposed_team: hiringTeam };
+      } else if (intent === 'accept' && fallbackSelections[interaction.id]) {
+        body.resolution_data = { model_selection: fallbackSelections[interaction.id] };
       } else if (intent === 'accept' && note && note.trim() && interaction.kind !== 'suggest_tasks') {
         // Carry the user's free-text answer so the Lead can read it from result.resolution_data.user_note
         body.resolution_data = { user_note: note.trim() };
@@ -2685,6 +2707,7 @@ export default function App() {
       if (!response.ok) throw new Error(apiDetailText(json.detail, `interaction:${response.status}`));
       // Clear the note after successful submission
       setInteractionNotes((prev) => { const next = { ...prev }; delete next[interaction.id]; return next; });
+      setFallbackSelections((prev) => { const next = { ...prev }; delete next[interaction.id]; return next; });
       const runOnceJson = await runControlPlane();
       setLastResult({ interaction: json, run_once: runOnceJson });
       await loadProjectData(interaction.issue_id || selectedIssueId);
@@ -2701,11 +2724,14 @@ export default function App() {
     setSelectedProjectAdapterIds((current) => {
       if (current.includes(profileId)) {
         const next = current.filter((id) => id !== profileId);
-        if (leadAdapterProfileId === profileId) setLeadAdapterProfileId(next[0] || '');
+        if (leadAdapterProfileId === profileId) {
+          setLeadAdapterProfileId('');
+          setLeadModel('');
+          setLeadCandidateId('');
+        }
         return next;
       }
       const next = [...current, profileId];
-      if (!leadAdapterProfileId) setLeadAdapterProfileId(profileId);
       return next;
     });
   };
@@ -2738,35 +2764,33 @@ export default function App() {
     }
   };
 
-  const updateHiringMemberProfile = async (interactionId: string, team: ProposedTeamMember[], idx: number, profileId: string) => {
-    const profile = adapterProfiles.find((p) => p.id === profileId);
-    const role = team[idx]?.role || '';
-    const interaction = interactions.find((item) => item.id === interactionId);
-    const interactionIssue = issues.find((item) => item.id === interaction?.issue_id) || selectedIssue;
-    const opts = await fetchRoleModelOptions(profileId, role, interactionIssue);
-    const defaultModel = String(
-      opts.find((option) => option.selectable !== false && option.available !== false && option.compatibility?.allowed !== false)?.value
-      || profile?.model_options?.find((option) => option.selectable !== false && option.available !== false)?.value
-      || profile?.config?.model
-      || '',
-    );
-    const updated = team.map((member, i) => i === idx ? {
+  const updateHiringMemberSelection = (
+    interactionId: string,
+    team: ProposedTeamMember[],
+    idx: number,
+    profileId: string,
+    model: string,
+    candidateId: string,
+  ) => {
+    const profile = adapterProfiles.find((item) => item.id === profileId);
+    const updated = team.map((member, memberIndex) => memberIndex === idx ? {
       ...member,
       adapter_type: profile?.adapter_type || member.adapter_type || 'manual',
       adapter_profile_id: profileId,
-      adapter_config: { ...(member.adapter_config || {}), profile_id: profileId, ...(defaultModel ? { model: defaultModel } : {}) },
-      model: defaultModel,
-    } : member);
-    setHiringDrafts((d) => ({ ...d, [interactionId]: updated }));
-  };
-
-  const updateHiringMemberModel = (interactionId: string, team: ProposedTeamMember[], idx: number, model: string) => {
-    const updated = team.map((member, i) => i === idx ? {
-      ...member,
       model,
-      adapter_config: { ...(member.adapter_config || {}), model },
+      adapter_config: {
+        ...(member.adapter_config || {}),
+        profile_id: profileId,
+        model,
+        selection_intent: {
+          schema_version: 'model_selection_intent_v1',
+          mode: 'owner_explicit',
+          source: 'model_role_selector',
+          candidate_id: candidateId,
+        },
+      },
     } : member);
-    setHiringDrafts((d) => ({ ...d, [interactionId]: updated }));
+    setHiringDrafts((drafts) => ({ ...drafts, [interactionId]: updated }));
   };
 
   const loadRunDetail = async (id: string) => {
@@ -2979,30 +3003,22 @@ export default function App() {
             })()}
             <label>
               Lead del proyecto
-              <select
-                value={leadAdapterProfileId}
-                onChange={(event) => setLeadAdapterProfileId(event.target.value)}
-              >
-                <option value="">Selecciona el proveedor/modelo base del Lead</option>
-                {adapterProfiles
-                  .filter((profile) => selectedProjectAdapterIds.includes(profile.id))
-                  .map((profile) => {
-                    const options = roleModelOptions[
-                      modelOptionCacheKey(profile.id, 'lead', onboardingCompatibilityIssue)
-                    ];
-                    const denied = Boolean(options?.length) && options.every(
-                      (option) => option.selectable === false || option.available === false || option.compatibility?.allowed === false,
-                    );
-                    const reason = options?.find(
-                      (option) => option.compatibility?.allowed === false,
-                    )?.compatibility?.reason;
-                    return (
-                      <option key={profile.id} value={profile.id} disabled={denied}>
-                        {profile.label}{denied ? ` — ${reason || 'sin Lead compatible'}` : ''}
-                      </option>
-                    );
-                  })}
-              </select>
+              <ModelRoleSelector
+                role="lead"
+                profileId={leadAdapterProfileId}
+                model={leadModel}
+                runProfile={newProjectRunProfile}
+                criticality="medium"
+                dataClass={newProjectDataClass || 'public'}
+                onChange={({ profileId, model, candidateId }) => {
+                  setLeadAdapterProfileId(profileId);
+                  setLeadModel(model);
+                  setLeadCandidateId(candidateId);
+                  setSelectedProjectAdapterIds((current) => current.includes(profileId)
+                    ? current
+                    : [...current, profileId]);
+                }}
+              />
             </label>
             <p className="hint">
               Este agente será la autoridad Lead y redactará Plan A y Plan B. Podrás cambiar su adapter y modelo después en Equipo; Codex también puede actuar como senior del quorum.
@@ -3131,7 +3147,7 @@ export default function App() {
             </div>
           </div>
           <div className="actions">
-            <button onClick={() => void createProject()} disabled={loading || !projectName.trim() || selectedProjectAdapterIds.length === 0 || !leadAdapterProfileId || Boolean(onboardingLeadBlockReason)}>
+            <button onClick={() => void createProject()} disabled={loading || !projectName.trim() || selectedProjectAdapterIds.length === 0 || !leadAdapterProfileId || !leadModel || Boolean(onboardingLeadBlockReason)}>
               Crear proyecto
             </button>
           </div>
@@ -3615,6 +3631,15 @@ export default function App() {
               {agents.length > 0 ? <span className="tab-badge">{agents.length}</span> : null}
             </button>
             <button
+              data-testid="models-tab"
+              className={viewMode === 'models' ? 'tab active tab-models' : 'tab tab-models'}
+              onClick={() => setViewMode('models')}
+              title="Catálogo universal de modelos y proveedores"
+            >
+              <Boxes size={16} />
+              Modelos
+            </button>
+            <button
               data-testid="config-tab"
               className={viewMode === 'config' ? 'tab active tab-config' : 'tab tab-config'}
               onClick={() => setViewMode('config')}
@@ -3937,6 +3962,7 @@ export default function App() {
                 const currentOutcome = String(current?.result?.outcome || '');
                 const payload = (current?.payload || {}) as Record<string, unknown>;
                 const isExtension = String(payload.reason || '') === 'extension_install_requested';
+                const isModelFallback = String(payload.reason || '') === 'model_fallback_required';
                 const proposedTeam: ProposedTeamMember[] = (payload.proposed_team as ProposedTeamMember[]) || [];
                 const suggestedIssues = (payload.suggested_issues as Array<Record<string, unknown>>) || [];
                 const hiringProfile = String(payload.profile || 'full_team');
@@ -4026,6 +4052,30 @@ export default function App() {
                             </div>
                           )}
 
+                          {isModelFallback && (
+                            <div className="agent-form-field">
+                              <label className="agent-form-label">
+                                Fallback dentro de {String(payload.profile_id || 'adapter actual')}
+                              </label>
+                              <ModelRoleSelector
+                                role={String(payload.agent_role || '')}
+                                issueId={current.issue_id || ''}
+                                profileId={fallbackSelections[current.id]?.profileId || String(payload.profile_id || '')}
+                                model={fallbackSelections[current.id]?.model || String(payload.proposed_model || '')}
+                                restrictProfileId={String(payload.profile_id || '')}
+                                {...issueCompatibilityContext(currentIssue)}
+                                disabled={!isPending}
+                                onChange={({ profileId, model, candidateId }) => setFallbackSelections((prev) => ({
+                                  ...prev,
+                                  [current.id]: { profileId, model, candidateId },
+                                }))}
+                              />
+                              <small className="field-warning">
+                                Recovery no cambia de adapter; para cambiar de canal edita primero el agente en Equipo.
+                              </small>
+                            </div>
+                          )}
+
                           {isHiring && isDirect && (
                             <p className="hiring-direct">Solo Lead — ejecutará directamente sin contratar equipo.</p>
                           )}
@@ -4043,57 +4093,23 @@ export default function App() {
                                       const interactionIssue = issues.find((item) => item.id === current?.issue_id) || selectedIssue;
                                       const roleKey = modelOptionCacheKey(pId, member.role || '', interactionIssue);
                                       const roleOpts = roleModelOptions[roleKey];
-                                      const flatOpts = adapterProfiles.find((p) => p.id === pId)?.model_options || [];
-                                      const displayOpts: RoleModelOption[] = roleOpts ?? flatOpts;
                                       const topRec = roleOpts?.find((o) => o.recommended);
                                       return (
                                         <tr key={member.id}>
                                           <td className="hiring-table-role">{member.role}</td>
                                           <td className="hiring-table-name">{member.name}</td>
-                                          <td>
-                                            <select
-                                              value={pId}
-                                              onChange={(e) => isPending && void updateHiringMemberProfile(current.id, hiringTeam, idx, e.target.value)}
+                                          <td colSpan={2}>
+                                            <ModelRoleSelector
+                                              role={member.role || ''}
+                                              issueId={interactionIssue?.id || ''}
+                                              profileId={pId}
+                                              model={String(member.model || (member.adapter_config || {}).model || '')}
+                                              {...issueCompatibilityContext(interactionIssue)}
                                               disabled={!isPending}
-                                            >
-                                              <option value="">Sin perfil</option>
-                                              {adapterProfiles.filter((p) => p.status !== 'blocked_by_provider').map((profile) => {
-                                                const options = roleModelOptions[
-                                                  modelOptionCacheKey(profile.id, member.role || '', interactionIssue)
-                                                ];
-                                                const denied = Boolean(options?.length) && options.every(
-                                                  (option) => option.selectable === false || option.available === false || option.compatibility?.allowed === false,
-                                                );
-                                                const reason = options?.find(
-                                                  (option) => option.compatibility?.allowed === false,
-                                                )?.compatibility?.reason;
-                                                return (
-                                                  <option key={profile.id} value={profile.id} disabled={denied}>
-                                                    {profile.label}{denied ? ` — ${reason || 'sin modelo compatible'}` : ''}
-                                                  </option>
-                                                );
-                                              })}
-                                            </select>
-                                          </td>
-                                          <td>
-                                            <select
-                                              value={String(member.model || (member.adapter_config || {}).model || '')}
-                                              onChange={(e) => isPending && updateHiringMemberModel(current.id, hiringTeam, idx, e.target.value)}
-                                              disabled={!isPending}
-                                            >
-                                              <option value="">Modelo default</option>
-                                              {displayOpts.map((option) => {
-                                                const disabled = option.selectable === false || option.available === false || option.compatibility?.allowed === false;
-                                                const reason = option.selectable === false || option.available === false
-                                                  ? option.availability_reason || 'sin verificar'
-                                                  : option.compatibility?.reason;
-                                                return (
-                                                  <option key={option.value} value={option.value} disabled={disabled}>
-                                                    {option.recommended ? '★ ' : ''}{option.label}{option.price_note ? ` (${option.price_note})` : ''}{disabled ? ` — ${reason || 'incompatible'}` : ''}
-                                                  </option>
-                                                );
-                                              })}
-                                            </select>
+                                              onChange={({ profileId, model, candidateId }) => updateHiringMemberSelection(
+                                                current.id, hiringTeam, idx, profileId, model, candidateId,
+                                              )}
+                                            />
                                           </td>
                                           <td className="hiring-table-why">{topRec?.fit_reason || member.rationale || '—'}</td>
                                         </tr>
@@ -5049,6 +5065,8 @@ export default function App() {
               )}
             </section>
           ) : null}
+
+          {viewMode === 'models' ? <ModelCatalog /> : null}
         </section>
 
       </section>
@@ -5080,6 +5098,55 @@ export default function App() {
             </div>
             <div className="modal-body">
               {agentFormJSX(configModalAgent)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {catalogHire && (
+        <div
+          className="modal-overlay"
+          onClick={() => setCatalogHire(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Contratar ${catalogHire.roleDef.title}`}
+        >
+          <div className="modal-card agent-config-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-header-info">
+                <h3 className="modal-title">Contratar {catalogHire.roleDef.title}</h3>
+                <div className="modal-subtitle">
+                  <span className={`tier-badge tier${catalogHire.roleDef.tier}`}>T{catalogHire.roleDef.tier}</span>
+                  <code>{catalogHire.roleId}</code>
+                </div>
+              </div>
+              <button className="modal-close" onClick={() => setCatalogHire(null)} aria-label="Cerrar">✕</button>
+            </div>
+            <div className="modal-body agent-form-v2">
+              <p>{catalogHire.roleDef.desc}</p>
+              <div className="agent-form-field">
+                <label className="agent-form-label">Modelo + adapter</label>
+                <ModelRoleSelector
+                  role={catalogHire.roleId}
+                  issueId={selectedIssue?.id || ''}
+                  profileId={catalogHire.profileId}
+                  model={catalogHire.model}
+                  {...issueCompatibilityContext(selectedIssue)}
+                  onChange={({ profileId, model, candidateId }) => setCatalogHire((current) => current ? ({
+                    ...current, profileId, model, candidateId,
+                  }) : current)}
+                />
+              </div>
+              <div className="modal-actions">
+                <button className="secondary-btn" onClick={() => setCatalogHire(null)}>Cancelar</button>
+                <button
+                  className="primary-btn"
+                  disabled={loading || !catalogHire.profileId || !catalogHire.model}
+                  onClick={() => void confirmCatalogHire()}
+                >
+                  {loading ? 'Contratando…' : 'Confirmar contratación'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

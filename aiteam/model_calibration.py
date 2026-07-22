@@ -15,14 +15,18 @@ CALIBRATION_MAX_AGE_DAYS = 30
 PROMOTED_MODEL_CALIBRATIONS: tuple[dict[str, Any], ...] = (
     {
         "profile_id": "codex_subscription",
-        "model": "gpt-5.5",
+        "model": "gpt-5.6-luna",
         "role": "context_curator",
-        "calibrated_at": "2026-07-20",
-        "provider_version": "0.128.0",
+        "calibrated_at": "2026-07-22",
+        "provider_version": "0.145.0",
         "evidence_receipts": (
-            "benchmarks/results/context-curator-codex-senior-seed-1-rubric-v5.json",
-            "benchmarks/results/context-curator-codex-senior-seed-2-rubric-v5.json",
-            "benchmarks/results/context-curator-queue-codex-senior-seed-1-rubric-v4.json",
+            "benchmarks/results/model_calibration/context-curator-gpt-tier3-cli-0.145.0-aggregate-v3.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json",
         ),
     },
     {

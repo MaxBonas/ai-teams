@@ -158,6 +158,35 @@ Objetivo: fijar el plan rector y reducir ruido legacy.
 
 Estado: completada y reforzada con limpieza agresiva el `2026-05-04`.
 
+### Fase 0.7 — Portabilidad, distribución e integración poliglota
+
+Objetivo: que AI Teams pueda descargarse, configurarse y verificarse en una
+máquina nueva sin conocimiento tribal, y que los equipos operen repositorios de
+distintos lenguajes mediante capacidades demostradas.
+
+- La portabilidad es un contrato de producto, no una afirmación genérica:
+  plataformas y toolchains se clasifican como `verified`, `preview`, `planned` o
+  `unsupported`, con recibo fechado para cada promoción.
+- Git y los artefactos versionados transportan código y defaults; `runtime/`,
+  `venv/`, `node_modules/`, bases activas, sesiones CLI y secretos son estado
+  local y nunca se trasladan como parte de la instalación.
+- Un comando `doctor` read-only debe publicar un manifiesto JSON de OS,
+  arquitectura, runtimes, toolchains, adapters y bloqueos sin revelar secretos.
+- El bootstrap debe ser idempotente y tener frontends Windows/POSIX equivalentes;
+  no instalará runtimes o CLIs globales ni dependerá de asociaciones de shell.
+- El soporte de lenguajes se modelará mediante descriptores versionados de
+  detección, manifests, comandos permitidos, artefactos y requisitos. Reconocer
+  archivos no equivale a soportar un ecosistema: se exige fixture build/test por
+  OS y recepción durable.
+- Lead, hiring, prompts, tools y gates consumirán el mismo perfil de proyecto;
+  una carencia se expresa como `capability_gap`, no mediante comandos inventados.
+- `docs/INSTALLATION_AND_INTEGRATION.md` es el onboarding canónico para personas
+  y agentes de IA y separa estrictamente lo operativo hoy de los objetivos.
+
+Estado: contrato documental creado el `2026-07-22`; implementación pendiente y
+desglosada en `task.md` P0.I. Windows es el único bootstrap actualmente
+verificado; Linux/macOS y la matriz poliglota no se consideran cerrados.
+
 ### Fase 1 — Schema v2 paralelo
 
 Objetivo: introducir tablas nuevas sin cambiar comportamiento.
@@ -310,6 +339,49 @@ mensual bloquea promociones nuevas no registradas o stale y abre atención tras
 convierte por sí solo un default sano en `manual-only`: esa transición exige
 evidencia separada de catálogo, health o calidad.
 
+### Fase 5.7 — Catálogo universal y selección explicable de modelos
+
+Objetivo: hacer del catálogo multi-proveedor una capacidad de producto y la
+fuente única de ranking para creación/edición de equipos, sin reintroducir el
+router multifactor opaco retirado.
+
+- Construir una proyección provider-neutral de todos los modelos declarados,
+  descubiertos, configurados o históricos, incluidos inactivos y bloqueados.
+- Conservar separadas identidad del modelo, fabricante/perspectiva,
+  organización proveedora, adapter profile, canal/pool y slug ejecutable.
+- Derivar estados ortogonales de catálogo, configuración, health, verificación,
+  compatibilidad, calibración, frescura y elegibilidad automática.
+- Sustituir el `role_score` heurístico por `model_role_score_v1`, versionado y
+  explicable, alimentado por calidad del rol, capacidad, fiabilidad, economía y
+  velocidad; publicar confianza/provenance aparte y aplicar hard gates antes.
+- Persistir snapshot, candidatos, breakdown, score version y razón de toda
+  contratación automática. Un override del owner es estable y prevalece.
+- Exponer una API global por rol y una pestaña `Modelos` con matriz visual,
+  filtros, comparación, estados y drilldown de recibos/estadísticas.
+- Reutilizar esa API en onboarding, Equipo, hiring, edición, Lead/quorum y
+  lifecycle. Los modelos no elegibles se muestran con causa, no desaparecen.
+- Desplegar shadow → recomendación → default solo para plazas nuevas sin pin;
+  no migrar agentes existentes ni cruzar adapters silenciosamente.
+
+Criterio de cierre: 100 % del inventario conocido es visible o está excluido con
+causa; cada ruta automática usa un candidato verde, compatible y con evidencia
+fresca, y su decisión se puede reproducir desde SQLite/recibos. La fórmula,
+desglose, confianza y unidades de economía son idénticos en backend, API,
+catálogo visual y Equipo. El backlog ejecutable M.1–M.8 vive en `task.md`.
+
+Estado intermedio `2026-07-22`: M.1–M.5 están implementados en shadow. La
+identidad, scorer, read model, snapshots hasheados, API canónica y pestaña
+`Modelos` existen. El
+auditor local base proyecta 46 candidatos/124 pares sin fallos ni candidatos
+automáticos; la API suma el histórico de la SQLite activa y en el smoke actual
+expone 48 candidatos/12 perfiles-canal. `/api/model-catalog` filtra inventario y
+estados; `/api/model-catalog/candidates` ordena por rol sin recalcular gates. El
+endpoint legacy por perfil delega identidad, score y orden manteniendo su
+contrato. La UI global compara proveedores/canales y pares por rol, conserva
+unknown/bloqueados y abre breakdown, evidencia, receipts y hard gates sin
+reimplementar el score. Crear/editar equipos y activar defaults permanecen en
+M.6–M.7.
+
 ### Fase 6 — Planificacion estructurada
 
 Objetivo: matar el parser ciego de `[WORKFLOW_PLAN]`.
@@ -434,7 +506,7 @@ contrato estructurado demostrado.
 
 La compatibilidad se gobierna por modelo además de por perfil. Provisionalmente,
 Nemotron cubre Lead/arquitectura/quorum read-only; DeepSeek/MiMo, review/QA;
-North Mini, scouts/curator. Gemini 3.5 Flash Free y GPT-OSS 120B se limitan a
+North Mini, scouts/curator. Gemini 3.6 Flash Free y GPT-OSS 120B se limitan a
 review/QA, y Flash-Lite/Qwen/GPT-OSS 20B a scouts/curator, hasta calibración.
 Zen queda excluido de cualquier rol de escritura y de Lead `solo_lead`; los
 adapters API sí pueden materializar ops de archivo bajo RBAC, pero carecen de

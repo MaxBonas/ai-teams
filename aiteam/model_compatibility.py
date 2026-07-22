@@ -21,8 +21,8 @@ MODEL_CAPABILITIES = frozenset({
     "coding", "reasoning", "synthesis", "long_ctx", "multimodal",
 })
 
-_WRITE_ROLES = frozenset({"lead_executor", "engineer", "test_designer"})
-_READ_ROLES = frozenset({"file_scout", "reviewer", "qa", "context_curator", "architect"})
+_WRITE_ROLES = frozenset({"lead_executor", "engineer", "qa", "test_designer"})
+_READ_ROLES = frozenset({"file_scout", "reviewer", "context_curator", "architect"})
 
 _REASONS = {
     "compatible": "La selección cumple el contrato efectivo del rol.",

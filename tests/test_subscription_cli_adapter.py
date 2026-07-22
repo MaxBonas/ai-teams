@@ -449,6 +449,22 @@ def test_codex_quorum_auditor_prompt_treats_lead_as_owner_and_forbids_implementa
     assert "---QUORUM-AUDIT---" in prompt
 
 
+def test_codex_context_curator_prompt_requires_full_causal_coverage_pass():
+    prompt = _build_codex_prompt(
+        {
+            "AITEAM_AGENT_ROLE": "context_curator",
+            "AITEAM_WAKE_PAYLOAD_JSON": json.dumps(
+                {"context_curation_target": {"target_issue_id": "issue:root"}}
+            ),
+        },
+        {"issue_id": "issue:curator"},
+    )
+
+    assert "pasada de cobertura sobre todo el slice" in prompt
+    assert "límite de alcance" in prompt
+    assert "regla de retry/recovery" in prompt
+
+
 def test_user_directives_are_presented_after_project_skill_and_override_it():
     marker = "SKILL-LOCAL: usa siempre la opción A"
     prompt = _build_codex_prompt(
@@ -522,13 +538,21 @@ class TestParseCodexOutput:
 # ---------------------------------------------------------------------------
 
 
-def _make_runtime(*, model: str | None = None, oss: bool = False, local_provider: str | None = None, cwd: Path | None = None) -> ClaudeSubscriptionCliRuntime:
+def _make_runtime(
+    *,
+    model: str | None = None,
+    model_reasoning_effort: str | None = None,
+    oss: bool = False,
+    local_provider: str | None = None,
+    cwd: Path | None = None,
+) -> ClaudeSubscriptionCliRuntime:
     descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
     return ClaudeSubscriptionCliRuntime(
         descriptor=descriptor,
         cli_kind="codex",
         command=["codex"],
         model=model,
+        model_reasoning_effort=model_reasoning_effort,
         oss=oss,
         local_provider=local_provider,
         cwd=cwd,
@@ -662,6 +686,11 @@ class TestBuildCodexPrompt:
         assert "solo lectura" in prompt.lower()
         assert "set_status" in prompt
 
+    def test_worker_prompt_is_read_only_and_closes(self):
+        prompt = _build_codex_prompt(self._env("worker"), {"issue_id": "issue:x"})
+        assert "solo lectura" in prompt.lower()
+        assert "set_status" in prompt
+
 
 class TestBuildCodexCommand:
     def test_no_ask_for_approval_flag(self):
@@ -710,6 +739,14 @@ class TestBuildCodexCommand:
         rt = _make_runtime(model="gemma-3-4b-it", local_provider="lmstudio")
         cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
         assert "--model" in cmd
+
+    def test_codex_reasoning_effort_is_explicit_when_configured(self):
+        rt = _make_runtime(model="gpt-5.6-luna", model_reasoning_effort="medium")
+        cmd = rt._build_codex_command(
+            "task", schema_path="/s.json", output_path="/o.json", effective_cwd=None
+        )
+
+        assert 'model_reasoning_effort="medium"' in cmd
 
     def test_cd_passed_when_effective_cwd_set(self, tmp_path):
         rt = _make_runtime()

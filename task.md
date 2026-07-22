@@ -1,893 +1,686 @@
 # Plan y trabajo vigente
 
-Fecha: `2026-07-22`
+Actualizado: `2026-07-22`
 
-Este es el único documento de objetivos, backlog y orden de ejecución. El plan
-rector arquitectónico está en `docs/MIGRATION_PAPERCLIP.md`; las decisiones ya
-cerradas viven en `docs/HISTORY.md`.
+Este archivo contiene solo backlog vivo, bloqueadores, criterios de cierre y
+orden de ejecución. Los cierres detallados viven en `docs/HISTORY.md`; los
+contratos activos, en `docs/MIGRATION_PAPERCLIP.md` y `docs/ORCHESTRATION.md`.
 
 ## Objetivo del producto
 
-AI Teams debe ser un control plane Paperclip-like para equipos de programación:
+Construir un control plane Paperclip-like sobre SQLite para equipos de
+programación:
 
-- SQLite como fuente durable única para issues, runs, wakeups, interactions,
-  reports, costes, actividad y recovery;
-- Lead-first: el usuario entrega un objetivo y el Lead lo mantiene vivo hasta
-  cerrarlo o solicitar una decisión humana real;
-- perfiles `solo_lead`, `lead_quorum` y `full_team` elegidos de forma
-  proporcional al riesgo y a la necesidad de accountability;
-- hiring dinámico y económico, reservando modelos fuertes para planificación,
-  supervisión y alto riesgo;
-- evidencia y revisión suficientes para reducir riesgo, sin burocracia en
-  tareas simples;
-- adapters API y suscripción independientes, con coste, provenance, health y
-  recuperación observables.
+- Lead-first y hiring dinámico;
+- issues, runs, wakeups, interactions y telemetría durables;
+- perfiles canónicos `solo_lead`, `lead_quorum` y `full_team`;
+- planificación, accountability, liveness y recovery explícitos;
+- routing económico por capacidad demostrada, nunca por marca o discovery;
+- catálogo universal y visual de proveedores/modelos, con evaluación y ranking
+  explicable por rol sobre evidencia durable;
+- distribución reproducible entre máquinas, sin rutas, secretos ni estado local
+  embebidos en el repositorio;
+- integración poliglota extensible, capaz de detectar y operar toolchains de
+  distintos lenguajes sin asumir que todo proyecto es Python o JavaScript;
+- creación y edición de equipos que propongan el mejor par modelo+canal
+  realmente configurado, compatible y saludable, siempre con override del owner;
+- adapters API, suscripción y local independientes;
+- gates proporcionales al riesgo y bajo ruido operativo.
 
-## Estado de partida
+No reintroducir parser `[WORKFLOW_PLAN]`, rondas `process_once()`/
+`run_until_idle()`, router multifactor legacy, JSONL primario ni prompts raíz de
+proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
 
-La migración estructural está completada. El camino activo es
-`HeartbeatLoop` → `HeartbeatScheduler` → `RunExecutor` sobre SQLite. Checkout,
-dependencias, wakeups, interactions, hiring, reports, gates, cockpit v2,
-canarios y benchmarks existen. El trabajo actual es calibrar cuándo compensa
-cada perfil, endurecer puntos concretos y terminar extensiones sin reabrir el
-orquestador legacy.
+## Estado actual
 
-Última suite completa registrada (`2026-07-22`): **1211 passed en 151,03 s**.
-Esta cifra es evidencia histórica; volver a ejecutar y actualizarla cuando un
-cambio material lo justifique.
+- El backend/pre-run de compatibilidad perfil+modelo+rol está cerrado y gobierna
+  bootstrap, Equipo, hiring, dispatch, fallback y recovery.
+- Los tres run profiles tienen canario vivo cerrado.
+- La matriz hermética cubre 46 modelos, 321 decisiones positivas y 415
+  negativas.
+- Sonnet 4.6 está promovido solo para Engineer de Antigravity; Luna conserva
+  `context_curator` con esfuerzo `medium`; Flash High conserva review/QA.
+- OpenCode Zen sigue read-only y sin promociones automáticas. Gemini 3.6 sigue
+  manual/probe-gated.
+- Codex CLI 0.145.0 enumera Sol/Terra/Luna. El A/B causal auth+queue deja
+  GPT-5.5 como control histórico 6/6 y promueve Luna `medium` 6/6 como Tier 3;
+  el auditor pasa sus 6/6 gates, incluida la matriz capacidad+economía+velocidad.
+- Paralelismo continúa opt-in; no existe trigger vivo representativo.
+- El informe de coste y las conclusiones de orientación esperan volumen real.
 
-## Plan de ejecución
+## Orden de ejecución
 
-### P0 — Calibración antes de cambiar política
+1. Cerrar el contrato y la proyección de catálogo/ranking `model_role_score_v1`
+   antes de ampliar canarios: identidad exacta, componentes, confianza, hard
+   gates, provenance y paridad entre API, Equipo y hiring; todavía en shadow.
+2. Cerrar el contrato de instalación portable, diagnóstico de máquina y registro
+   poliglota antes de declarar nuevas plataformas o lenguajes como soportados.
+3. Calibrar únicamente pares modelo+rol cuyo canal y credencial estén realmente
+   disponibles e ingerir sus recibos en esa proyección; no crear perfiles decorativos.
+4. Construir la pestaña Modelos y conectar creación/edición de equipos al mismo
+   ranking, primero como recomendación explicable y después como default gated.
+5. Ejecutar los estudios condicionados solo cuando aparezca su trigger real:
+   entregas, paralelismo, señales de cuota o participantes humanos.
+6. Repetir drift/calibraciones por evento y en la fecha programada.
 
-- [x] **Ampliar benchmarks del selector** con al menos otra familia media
-  reversible y otra compleja de distinta naturaleza, usando varias semillas.
-  Comparar calidad oculta, convergencia, runs, tokens, coste y tiempo. Progreso:
-  `accessible_checkout_form` añade frontend multisuperficie con dos semillas e
-  `inventory_snapshot_diff` añade datos medios reversibles con dos semillas.
-- [x] **Decidir con evidencia si relajar el default conservador**: se mantiene.
-  No inferir `independent_verification` solo por complejidad aparente;
-  conservarla cuando sea requisito explícito de accountability. Las nuevas
-  familias no muestran mejora de calidad del equipo y sí sobrecoste/rework.
-- [x] **Ampliar el benchmark real de quorum** con Codex subscription y
-  Anthropic API: `provider_failover` suma cuatro sesiones aceptadas y
-  `multitenant_authorization_v2` tres. Las runs degradadas y la familia SQLite,
-  que aún no alcanza la muestra mínima, permanecen como evidencia separada de
-  disponibilidad/liveness y no entran en el delta A/B.
-- [x] **Establecer criterio de suficiencia estadística** antes de modificar
-  thresholds: mínimo tres sesiones aceptadas por familia, dos proveedores
-  válidos con provenance completa, degradaciones fuera del delta A/B y reporte
-  de mediana más rango. No cambiar política si el signo es inestable, aparece
-  efecto techo o el Plan B no supera consistentemente los hard gates.
+## P0.I — Distribución portable e integración poliglota
 
-Decisión: mantener thresholds. En `provider_failover` la mediana del delta es
-`+6,52` puntos pero el rango es `-8,70..+8,70`; en
-`multitenant_authorization_v2` la mediana es `+8,69` y el rango `0..+8,70`, pero
-solo dos de tres Plan B superan el hard gate. La aceptación durable del quorum
-demuestra coordinación y provenance, no calidad semántica suficiente por sí
-sola.
+- [ ] **I.1 Definir la matriz de soporte y el contrato de instalación**.
+  - [ ] Separar `verified`, `preview`, `planned` y `unsupported` por combinación
+    de OS, arquitectura, versión de Python/Node y modo de distribución. Windows
+    nativo es el único bootstrap verificado hoy; Linux y macOS son objetivo hasta
+    tener recibos en máquinas limpias.
+  - [ ] Publicar requisitos mínimos y recomendados desde una única fuente
+    comprobable; los scripts, CI, packaging y documentación deben consumirla o
+    validarla para impedir drift.
+  - [ ] Definir Git y artefacto de release versionado como vías de descarga,
+    con checksum, versión, notas de migración y política de actualización/
+    rollback. Un contenedor puede ser opción adicional, no sustituto de los CLI
+    y credenciales que viven en el host.
+  - Cierre: instalación desde cero y actualización verificadas por plataforma,
+    sin pasos implícitos ni afirmaciones de soporte sin evidencia fechada.
 
-Criterio de cierre P0: existe evidencia multi-familia suficiente para mantener
-o cambiar el selector, y la decisión queda reflejada en tests, documentación y
-telemetría sin convertir un caso aislado en regla universal.
+- [ ] **I.2 Hacer portable la configuración y el estado por máquina**.
+  - [ ] Formalizar capas: defaults versionados, `config/*.example.json`, ajustes
+    de usuario por OS, variables de entorno, secrets locales y overrides por
+    proyecto bajo `.aiteam/`; documentar precedencia y ownership.
+  - [ ] Añadir export/import redacted de configuración operativa. Nunca incluir
+    keys, tokens, sesiones CLI, `runtime/`, `venv/`, `node_modules/`, DB activas
+    ni rutas absolutas de otra máquina.
+  - [ ] Auditar rutas, separadores, encoding, permisos, case sensitivity, señales
+    y lanzamiento de procesos; aislar las diferencias de OS detrás de helpers.
+  - Cierre: un checkout limpio reconstruye el entorno y una mudanza conserva
+    intención/configuración no secreta sin copiar estado local.
 
-### P0.1 — Correcciones de la auditoría independiente
+- [ ] **I.3 Crear un `doctor` de máquina seguro y legible por humanos/IA**.
+  - [ ] Inventariar OS/arquitectura, Python, Node/npm, Git, SQLite, puertos,
+    permisos, toolchains, CLIs/adapters y health; discovery siempre read-only y
+    sin imprimir secretos.
+  - [ ] Ofrecer salida humana y `--json` con estado, versión observada, fuente,
+    bloqueo y siguiente acción. Distinguir ausente, no autenticado, incompatible,
+    no verificado y degradado.
+  - [ ] No instalar runtimes, paquetes globales ni CLIs automáticamente. Cualquier
+    mutación requiere comando explícito y conserva un recibo reproducible.
+  - Cierre: una IA puede decidir si la máquina está lista usando solo el JSON y
+    puede explicar cada bloqueo sin inferirlo de logs libres.
 
-Antes de continuar con nuevas capacidades P2, cerrar en este orden los huecos
-confirmados por la auditoría del `2026-07-20`:
+- [ ] **I.4 Unificar bootstrap y ciclo de vida cross-platform**.
+  - [ ] Extraer la lógica de `prepare_dev_env.bat`/PowerShell a un contrato
+    idempotente con frontends Windows y POSIX equivalentes; mantener comandos de
+    start, stop, test y migrate por plataforma.
+  - [ ] Usar entorno local del repo, locks/versiones reproducibles y procesos
+    hijos explícitos; no depender de asociaciones de `.ps1`, shell interactiva,
+    PATH mutable ni instalaciones globales accidentales.
+  - [ ] Probar espacios y Unicode en rutas, puertos ocupados, dependencia ausente,
+    ejecución repetida, interrupción y limpieza/recovery.
+  - Cierre: segunda ejecución no rompe ni reinstala innecesariamente; todo fallo
+    deja diagnóstico accionable y no una instalación parcial silenciosa.
 
-- [x] **Separar actividad viva de liveness defectuoso en `loop-health`**. Una
-  run `queued/running` o wakeup `claimed/running` reciente es trabajo normal,
-  no un zombi. Aplicar una antigüedad coherente con lease/heartbeat/recovery y
-  conservar `stranded_nonterminal_roots` como señal pura. Añadir tests de run
-  reciente sin alerta y run antigua con alerta.
-- [x] **Cerrar la autorización MCP frente a inventarios no confiables o
-  cambiantes**. `readOnlyHint` es información para revisión, no una frontera de
-  seguridad. Persistir una allowlist positiva aprobada por el owner; tools
-  nuevas/no aprobadas quedan denegadas incluso con `repo_write`. Exigir
-  enforcement positivo del adapter o denegar el servidor para esa run. Añadir
-  TTL de health, pero no tratarlo como sustituto de la allowlist ni como defensa
-  completa frente a cambios entre health y ejecución.
-- [x] **Corregir el contrato HTTP de health MCP**: inexistente `404`, aún no
-  aprobado `409`, contrato inválido `400/422` y probe fallido como resultado
-  estructurado/auditado. Cubrir todos los caminos negativos del endpoint.
-- [x] **Pinear la identidad del artefacto MCP ejecutado**, no solo la versión
-  auto-reportada ni únicamente el binario intérprete. La identidad debe cubrir
-  ejecutable resuelto, contrato de argumentos y script/paquete verificable;
-  un cambio invalida health y grant hasta nueva aprobación.
-- [x] **Documentar por test la identidad del Lead en quorum**. El hallazgo F7
-  fue refutado: la capa durable `aiteam.db.quorum_sessions` exige que el agente
-  de `synthesis_run_id` sea `issues.assignee_agent_id`; el executor no duplica
-  esa política. `test_persistence_rejects_synthesis_not_owned_by_configured_lead`
-  protege la invariante con un agente no asignado y una reproducción temporal
-  confirma que un segundo `team_lead` tampoco puede aceptar la sesión.
-- [x] **Añadir la regresión nominal con un segundo `team_lead` no asignado**.
-  No corrige una vulnerabilidad abierta —la persistencia ya lo rechaza—, pero
-  alinea el nombre del escenario auditado con la evidencia automatizada y evita
-  que una futura refactorización confíe solo en el rol. Cerrado por
-  `test_persistence_rejects_second_team_lead_not_assigned_to_issue`.
+- [ ] **I.5 Construir un registro extensible de ecosistemas/toolchains**.
+  - [ ] Definir descriptor versionado por ecosistema: detectores, manifests,
+    extensiones, binarios/versiones, comandos permitidos de build/test/lint/
+    typecheck, cwd/env, artefactos y capacidades requeridas.
+  - [ ] Priorizar fixtures para Python; JS/TS; Java/Kotlin; Go; Rust; C/C++;
+    .NET; PHP; Ruby; Swift; web/mobile y repos con Docker/devcontainers. Añadir
+    otros lenguajes mediante plugins/descriptores, no condicionales dispersos.
+  - [ ] Separar detectar de ejecutar: la detección es read-only; instalar
+    runtimes/dependencias o ejecutar scripts del proyecto requiere política,
+    sandbox, timeout y autorización acordes al riesgo.
+  - [ ] Proyectar el stack detectado al Lead, hiring, prompts, tools y gates para
+    que cada rol reciba únicamente comandos y capacidades compatibles.
+  - Cierre: ningún lenguaje obtiene etiqueta `supported` solo por reconocer una
+    extensión; debe completar fixture de ciclo build/test y recibo por OS.
 
-Criterio de cierre P0.1: la operación normal no genera fatiga de alertas, una
-tool MCP no puede ampliar permisos mediante hints o cambios de inventario, los
-errores de activación tienen contrato HTTP estable y la identidad del Lead queda
-protegida por un test explícito.
+- [ ] **I.6 Validar proyectos poliglotas y entornos heterogéneos**.
+  - [ ] Crear fixtures mínimos, monorepo y multi-language con tests de detección,
+    selección de comandos, quoting, timeouts, artefactos y errores esperados.
+  - [ ] Ejecutar matriz CI por OS/toolchain sin credenciales; reservar canarios
+    vivos de adapters para entornos controlados y registrar provenance separada.
+  - [ ] Cuando falte soporte, devolver `capability_gap` con descriptor, owner y
+    acción; nunca improvisar comandos destructivos ni declarar éxito parcial.
+  - Cierre: matriz pública de cobertura, recibos fechados y regresión automática
+    para cada celda anunciada como soportada.
 
-### P0.2 — Renovación de modelos y economía por canal
+- [x] **I.7 Crear onboarding canónico para personas y agentes de IA**.
+  - [x] Corregir el README raíz: URL real, bootstrap vigente, modelos no
+    hardcodeados y límites de plataforma explícitos.
+  - [x] Añadir `docs/INSTALLATION_AND_INTEGRATION.md` con configuración,
+    traslado entre máquinas, arranque, validación y protocolo de integración IA.
+  - [x] Enlazar la guía desde el índice vivo y registrar el contrato en plan y
+    handoff. La documentación describe el estado actual; no da por cerrados
+    `doctor`, POSIX, releases ni soporte poliglota todavía no implementados.
 
-- [x] **Investigar e integrar el catálogo gratuito actual de OpenCode Zen**.
-  `docs/MODELOS_GRATUITOS_OPENCODE.md` puntúa y clasifica Nemotron 3 Ultra
-  (86/Tier 1), DeepSeek V4 Flash (82/Tier 2), MiMo V2.5 (80/Tier 2) y North
-  Mini Code (74/Tier 3). El perfil built-in `opencode_zen_free` reutiliza la
-  sesión del CLI, descubre IDs con `opencode models opencode` y nunca embebe ni
-  copia credenciales. La integración es read-only y solo admite roles de
-  planificación, auditoría, review/QA y scouts; Engineer queda excluido.
-- [x] **Calibrar OpenCode Zen Free en ejecución real antes de promoverlo a
-  política automática**. OpenCode `1.18.4` está instalado y la sesión OAuth
-  local enumera cinco IDs vivos, incluido el nuevo `laguna-s-2.1-free`. El
-  screening público de una semilla ya valida transporte, contrato y usage para
-  Nemotron, DeepSeek, MiMo y Laguna; North diagnostica el defecto pero devuelve
-  cero ops y todavía no supera el cierre durable. El canario durable v1 de
-  reviewer descarta la promoción: Nemotron falla el parseo en seed 1, MiMo no
-  produce rechazo durable, North queda correctamente denegado por rol y
-  DeepSeek pasa seed 1 pero no aprueba la corrección en seeds 2–3. La matriz
-  final añade Laguna: 0/3 ciclos completos, un rechazo correcto, dos fallos de
-  parseo y un timeout de aprobación; mediana 236,094 s frente a 61,375 s de
-  DeepSeek. Ningún modelo alcanza 3/3. Laguna queda visible manual-only y
-  probe-gated, sin routing automático; el agregado
-  `opencode-durable-review-v1-laguna-vs-deepseek-aggregate.json` conserva
-  `default_change_allowed=false`. Repetir solo tras cambio de catálogo/modelo,
-  CLI o contrato. Los datos siguen siendo públicos/no confidenciales.
-- [x] **Integrar OpenCode en los afinamientos de gobierno existentes**. El
-  runtime ya falla cerrado sin `--auto`, traduce grants MCP a una allowlist
-  positiva por tool, bloquea MCP ajenos y conserva roles read-only. El JSONL
-  agrega input/output, razonamiento, caché, total e ID de sesión; quota pressure
-  registra tokens/runs/duración/429 bajo el perfil exacto sin convertir cero
-  coste marginal en consumo ilimitado. Engineer continúa excluido: tool
-  permissions no equivalen a un sandbox de sistema operativo.
-- [x] **Evaluar el transporte OpenCode server/SDK frente al CLI efímero**.
-  Medir salida JSON Schema, cancelación, hangs, health MCP, continuidad por ID y
-  aislamiento entre issues. No activar reanudación ni daemon compartido hasta
-  superar varias semillas de memoria/override/contaminación y recovery; no
-  considerar esta mejora una solución al sandbox de escritura. Progreso:
-  `benchmark_opencode_transport.py` completa un A/B 3×2 con DeepSeek y datos
-  públicos: ambos brazos pasan 3/3, seis sesiones son distintas y attached baja
-  la mediana de 7,50 s a 2,92 s con tokens equivalentes (~4,84k). El servidor
-  loopback usa Basic Auth, policy sin tools y teardown verificado.
-  `benchmark_opencode_server_resilience.py` valida además el SDK oficial 1.18.4:
-  observa `busy`, aborta en 260 ms, vuelve a `idle`, conserva health, completa
-  una inferencia posterior en la misma sesión, la borra y cierra el servidor.
-  JSON Schema falla con `StructuredOutputError` aunque el texto sea JSON válido.
-  `benchmark_opencode_server_faults.py` suspende el proceso nativo: el puerto
-  queda abierto pero health expira en 532 ms; tras terminarlo, reinicia en el
-  mismo puerto, recupera el mismo ID `idle` y completa el marcador en 6,172 s.
-  El fixture MCP local completa `initialize` y `tools/list`, conserva dos tools
-  en inventario, permite exactamente la aprobada, deniega la otra y no deja
-  procesos. La matriz final añade tres semillas de memoria/override y sesión
-  fresca: pasa 3/3 con seis IDs únicos, historial aislado, revocación correcta y
-  borrado. El mismo schema falla en DeepSeek, Laguna, MiMo, Nemotron y North:
-  todos devuelven `StructuredOutputError`, ninguno rellena `info.structured`.
-  Se conserva CLI efímero y no se diseña supervisor productivo: el transporte
-  queda evaluado con decisión negativa, no pendiente de más runs idénticas.
-  Recibo final: `opencode-session-isolation-v1.json`.
-  El primer harness terminaba solo el shim `.cmd` y dejó dos procesos hijo;
-  quedó corregido usando el binario nativo y gate de puerto cerrado.
-- [x] **Comparar Zen con APIs gratuitas BYOK**. La decisión es híbrida, no una
-  migración total: una API directa ofrece mejor provenance, usage, cuota y
-  control de tools, pero DeepSeek V4 y MiMo V2.5 directos son de pago, Cohere es
-  evaluación y NVIDIA no publica una capacidad gratuita estable verificable.
-  Conservar Zen para esos endpoints; priorizar Gemini API Free y Groq Free,
-  dejar GitHub Models/OpenRouter exacto como fallback de baja frecuencia y
-  descartar el router aleatorio y Hugging Face Free como capacidad base.
-- [x] **Implementar la base `free_api_byok`**. `gemini_api_free` y
-  `groq_api_free` son perfiles built-in separados de pago/CLI; usan referencias
-  del vault, health real, modelos exactos, privacy label, usage, 429 y quota
-  pressure por perfil. El runtime `openai_compatible_api` soporta JSON Schema
-  estricto para GPT-OSS y JSON Object Mode validado para Qwen. Equipo permite
-  guardar las keys Groq y Google Free en slots distintos de los perfiles
-  pagados; una credencial no activa ambos canales por inferencia.
-  `actual_cost_cents=0` no elimina tokens, runs ni duración.
+- [ ] **I.8 Preparar release y aceptación en máquina limpia**.
+  - [ ] Automatizar artefactos, checksums, SBOM/licencias, smoke tests y notas de
+    upgrade; excluir secretos y estado local mediante test del contenido final.
+  - [ ] Definir checklist de aceptación humana/IA: clone/download, doctor,
+    prepare, test mínimo, start/stop, proyecto temporal y desinstalación/rollback.
+  - [ ] Probar al menos Windows, Linux y macOS en runners limpios y después una
+    máquina real por plataforma antes de promover de `preview` a `verified`.
+  - Cierre: una persona o IA sin contexto previo instala siguiendo solo la guía,
+    obtiene los mismos checks y deja un recibo auditable de éxito o bloqueo.
+
+## P0 — Modelos, catálogos y promociones
+
+- [ ] **Mantener actualizado y evaluar todo el catálogo modelo+rol**.
+  - [x] Baseline `2026-07-22`: defaults, opciones, prompts y scripts activos
+    usan las familias vigentes; GPT-5.5 queda solo como control histórico y las
+    tarifas antiguas solo como compatibilidad FinOps de runs ya persistidas.
+  - [x] Las 46 opciones activas exponen banda de capacidad, economía específica
+    del canal y clase/fuente de velocidad bajo
+    `capability_economy_speed_v1`; un dato desconocido queda explícito y no se
+    sustituye por una estimación.
+  - [x] La matriz hermética perfil+modelo+rol verifica capacidades, privacidad,
+    workspace, salida estructurada, MCP gobernado y roles deterministas. Tier y
+    `best_for` orientan ranking, pero nunca conceden herramientas o autoridad.
+  - [x] Generar un inventario durable de cobertura conductual por par exacto
+    perfil+modelo+rol: `calibrated`, `partial`, `requires_canary`,
+    `requires_tool_fixture`, `manual_candidate` o `blocked`. Baseline actual:
+    46 modelos/131 destinos semánticos; 8 calibrados, 5 parciales, 32 canarios
+    ejecutables pendientes, 4 fixtures de tools pendientes, 3 candidatos
+    manuales y 79 bloqueados por canal/health. Recibo:
+    `benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-22.json`.
+  - [ ] **Lote A — Codex subscription (13 destinos)**: Luna para scouts/worker;
+    Terra para Engineer/MCP/QA/review/test design; Sol para Lead/arquitectura/
+    quorum. Reutilizar harnesses por familia de contrato y registrar por rol
+    semántico, sin contar aliases dos veces.
+    - [x] A.1 Alinear `worker` como Tier 3 de solo lectura en políticas, tools,
+      sandbox, contrato y scheduler; no ocupa work slots de implementación.
+    - [x] A.2 Impedir cierre `done` de worker/scouts/test runner sin
+      `AGENT-REPORT` válido: un reintento correctivo y bloqueo+escalado durable
+      al segundo fallo; 121 tests dirigidos pasan.
+    - [x] A.3 Screening Luna `file_scout` y `worker`, seed 1, esfuerzos low y
+      medium. File scout conserva 3/6 anclas en ambos esfuerzos; worker conserva
+      7/7, pero low usa un `result` inválido y medium omite el informe. No ampliar a tres
+      semillas ni promover; los cuatro recibos negativos quedan registrados sin
+      ocultar la deuda `requires_canary`.
+    - [x] A.4 Construir fixture MCP gobernado para Luna `web_scout`; discovery
+      o acceso web nativo no sustituyen el grant `external_mcp`. Tres semillas
+      conservan 8/8 anclas y respetan allow/deny de tools; solo 2/3 cierran en
+      una run, mediana 31,094 s (21,641–48,187), por lo que queda `partial` y no
+      se promueve.
+    - [x] A.5 Calibrar Terra por contratos Tier 2, reutilizando primero
+      harnesses durables existentes.
+      - [x] `reviewer`: 3/3 ciclos `changes_requested` → fix → `approved`;
+        mediana 64,0 s (62,844–93,094), 113.509 tokens input y 8.230 output.
+      - [x] `engineer`: 3/3, 27/27 tests ocultos, Ruff limpio y una run por
+        semilla; mediana 62,921 s (50,563–70,797), 116.800 input/8.812 output.
+      - [x] Corregir capacidades explícitas: `test_designer` recibe escritura+
+        LSP; `mcp_operator`, `external_mcp`+skill. El fallback `repo_read` no
+        podía representar sus contratos.
+      - [x] Restaurar skills vigentes para QA condicional, Test Designer y MCP
+        Operator. QA recibe `repo_write` para materializar solo tests
+        adversariales; OpenCode read-only deja de recomendar QA.
+      - [x] `qa`: 3/3 ciclos adversariales y 30/30 checks; materializa tests
+        que fallan antes del fix, no toca producción, persiste
+        `changes_requested` y aprueba/limpia después. Mediana 116,048 s
+        (115,953–133,938), 773.932 input/12.946 output. El fallo pre-fix del
+        contrato `add_comment` se conserva en recibo separado.
+      - [x] `test_designer`: 3/3 suites independientes, 24/24 checks y 15/15
+        ejecuciones mutantes ocultas; solo crea el test acordado y no toca
+        producción. Mediana 73,172 s (71,235–92,328), 404.062 input/7.956 output.
+      - [x] `mcp_operator`: 3/3 y 36/36 checks con allow read, deny write,
+        llamada real, fallo de versión 0.9.0 frente al pin 1.0.0 y recovery
+        `active`; mediana 42,359 s (27,859–49,593), 342.171 input/4.424 output.
+        El contrato pre-fix inválido y la reevaluación determinista de seed 2
+        quedan preservados sin repetir inferencia.
+    - [ ] A.6 Calibrar Sol por contratos Tier 1: Lead, arquitectura y quorum,
+      sin extrapolar el canario de un rol a sus aliases semánticamente distintos.
+  - [ ] **Lote B — Antigravity (12 pendientes + 3 parciales)**: conservar Flash
+    High Reviewer como calibrado durable; completar contratos exactos que el
+    screening genérico de Lead/scout no demuestra. No repetir review 3/3 ni
+    coding Sonnet sin cambio de CLI/modelo/contrato.
+  - [ ] **Lote C — locales instalados (8 destinos)**: Gemma 4 E4B/26B y Qwen
+    2.5 Coder 14B; medir calidad, latencia/throughput y RAM/VRAM. No descargar
+    Qwen3 Coder ni modelos LM Studio ausentes para completar una matriz.
+  - [ ] **Lote D — OpenCode (12 destinos)**: reutilizar los canarios durables;
+    DeepSeek Reviewer queda parcial 1/3. Mantener read-only y no reabrir el
+    transporte server/SDK sin cambio relevante.
+  - [ ] **Lote E — APIs/Claude bloqueados (79 destinos en total junto con otros
+    no ejecutables)**: esperar key, CLI, instalación o health exacto; discovery
+    comercial no autoriza consumo ni selección.
+  - [ ] Ejecutar un canario reproducible de tres semillas por cada destino
+    automático `best_for`, contra baseline simple del mismo contrato; registrar
+    calidad, mediana+rango, tokens/precio o presión de cuota, duración, liveness
+    y riesgo de Goodhart.
+  - [ ] Medir velocidad local/canal para las opciones cuyo `speed_source` siga
+    `requires_channel_specific_measurement`; no comparar tokens/s oficiales de
+    un proveedor con latencia end-to-end de otro como si fueran equivalentes.
+  - [ ] Probar las herramientas necesarias del rol por transporte: ops
+    estructuradas/workspace, JSON Schema o JSON Object, privacidad y MCP
+    gobernado. Una tool nativa del proveedor no equivale a un grant MCP.
+  - [ ] Evaluar candidatos manuales/probe-gated solo antes de promoverlos; no
+    consumir cuota para demostrar combinaciones que no entrarán en routing.
+  - [ ] Repetir inventario y calibraciones cada 30 días y ante cambios de CLI,
+    catálogo, precio, cuota, modelo, prompt, contrato de rol o herramientas.
+  - Regla de conservación: no retirar un modelo solo por antigüedad. Mantenerlo
+    mientras siga disponible y aporte coste, capacidad, velocidad, compatibilidad
+    o fallback útiles; bloquear/retirar únicamente con evidencia negativa clara
+    de disponibilidad, seguridad, calidad, coste o redundancia sin valor.
+  - Cierre: cada ruta automática tiene identidad actual, health exacto,
+    compatibilidad de herramientas y evidencia conductual fresca; el auditor
+    enumera explícitamente cualquier hueco restante.
+
+- [ ] **P0.M — Catálogo universal, scoring por rol y selección de equipos**.
+  Objetivo: convertir el inventario y los benchmarks en una superficie de
+  producto única que catalogue todos los proveedores/modelos conocidos, muestre
+  sus estadísticas por rol y gobierne las recomendaciones y defaults de Equipo.
+  No crear una segunda verdad: la proyección consume catálogos, health,
+  compatibilidad, pricing/cuota/recursos, runs y recibos ya canónicos.
+  - [x] **M.1 Contrato de identidad y estados**.
+    - [x] Enumerar todo modelo declarado, descubierto, configurado o visto en
+      runs históricas, aunque esté inactivo, bloqueado, retirado o manual-only.
+      `build_model_catalog_identity_projection` acepta las cuatro fuentes y
+      conserva perfiles históricos ya ausentes; conectarlo a SQLite pertenece
+      a M.3, no a este contrato puro.
+    - [x] Identificar por separado fabricante/perspectiva del modelo,
+      organización proveedora, perfil, canal/pool y slug exacto. Un mismo modelo
+      vía API y suscripción son dos candidatos operativos distintos.
+    - [x] Definir estados no colapsables: `catalogued`, `configured`,
+      `adapter_green`, `model_verified`, `selectable`, `compatible`,
+      `calibrated`, `stale`, `manual_only`, `blocked` y `retired`, cada uno con
+      razón, fuente, versión y fecha.
+    - Cierre: `model_catalog_identity_v1` documentado y cubierto por fixtures
+      API, suscripción, local y free gateway; discovery no prueba ejecución,
+      estados dependientes de rol quedan `unknown` y ningún `available`
+      autoritativo aparece en la proyección. 5 tests dirigidos pasan.
+  - [x] **M.2 Métricas y puntuación versionada por rol**.
+    - [x] Crear `model_role_score_v1` para el par exacto perfil+modelo+rol, con
+      desglose 0–100: calidad conductual/idoneidad del rol 40 %, capacidad y
+      headroom del contrato 15 %, fiabilidad/liveness 15 %, economía 20 % y
+      velocidad 10 %. Son pesos iniciales prerregistrados: validar en shadow
+      antes de permitir que cambien defaults.
+    - [x] Publicar por separado `confidence` y estado de evidencia usando clase
+      del juez, número de semillas/casos, frescura, versión, cobertura de tools,
+      constructos no medidos y riesgo de Goodhart. No ocultar incertidumbre en
+      la nota compuesta; `confidence` es gate, no multiplicador secreto.
+    - [x] Normalizar economía según canal sin fingir equivalencias: precio API
+      por tarea aceptada, presión de cuota para suscripción y recursos+
+      throughput para local. Un valor desconocido queda `unknown`, reduce
+      confianza/auto-elegibilidad y nunca se interpreta como gratis.
+    - [x] Mantener hard gates fuera de la fórmula: privacidad, tools, workspace,
+      structured output, health y ejecutabilidad pueden excluir aunque el score
+      sea alto.
+    - [x] Definir desempate estable: mayor evidencia/calidad del rol, menor
+      carga económica comparable, menor latencia y finalmente identidad estable.
+    - Cierre: `aiteam.model_role_scoring` es puro, determinista y `shadow_only`;
+      score incompleto publica rango en vez de imputar unknowns, confidence queda
+      separada y 13 tests cubren pesos, canales, stale, hard gates, unidades no
+      comparables y empates. No cambia defaults ni el `role_score` transitorio.
+  - [x] **M.3 Read model, persistencia y auditoría**.
+    - [x] Crear una proyección backend única que una `model_options`, tiers,
+      compatibilidad, provider identity, catálogo/health exacto,
+      `model_evaluation_coverage`, pricing/cuota, runs y `cost_events`.
+    - [x] Migrar gradualmente `MODEL_ROLE_EVALUATION_EVIDENCE` a registros
+      consultables con provenance de recibos sin perder Git como fuente durable;
+      conservar diagnósticos negativos y resultados pre-fix.
+    - [x] Persistir snapshots/version/hash del score usado en cada contratación
+      automática para poder explicar y reproducir por qué ganó un candidato.
+      La tabla/repositorio exige set completo, ganador perteneciente y elegible,
+      hash e idempotencia; la primera escritura productiva se conecta al activar
+      selección automática en M.7, que hoy sigue deshabilitada.
+    - [x] Extender el auditor para detectar proveedores/modelos/roles ausentes,
+      scores sin evidencia, métricas stale, recibos perdidos y divergencia entre
+      catálogo, endpoint, Equipo e hiring.
+    - Cierre: `model_catalog_read_model_v1` integra las fuentes sin convertir
+      coste/latencia crudos en scores; acepta SQLite parcial/legacy, conserva
+      hashes y expone auditor CLI. Baseline local: 46 candidatos, 124 pares,
+      cero candidatos automáticos, cero fallos y 20 warnings de deuda visible.
+      Los 8 tests nuevos y 77 dirigidos pasan.
+  - [x] **M.4 API canónica del catálogo**.
+    - [x] Exponer inventario de proveedores/canales, modelos y matriz por rol,
+      con filtros de rol, proveedor, canal, tier, estado y configuración.
+    - [x] Exponer breakdown, confianza, métricas observadas, muestras, fechas,
+      versiones, recibos, bloqueos y `selection_reason`; no solo la nota final.
+    - [x] Crear un endpoint global de candidatos por rol que ordene pares
+      modelo+perfil de todos los adapters y reutilice exactamente los hard gates
+      de compatibilidad/pre-run.
+    - [x] Mantener compatibilidad del endpoint actual por perfil, delegándolo a
+      la nueva proyección hasta retirar su `role_score` heurístico.
+    - Cierre: `/api/model-catalog` y `/api/model-catalog/candidates` proyectan
+      `model_catalog_read_model_v1`, con contratos OpenAPI, filtros y caché local
+      invalidable. El endpoint por perfil conserva sus campos legacy pero ordena
+      y anota desde la proyección canónica. Smoke real: 48 candidatos al sumar
+      históricos de la SQLite activa, 12 perfiles/canales, 13 pares reviewer y
+      0 auto-elegibles. Pasan 77 tests API, 60 dirigidos de catálogo/flujo y la
+      suite completa de 1288 tests; se retiró además una ruta OpenAPI duplicada.
+  - [x] **M.5 Nueva pestaña `Modelos`**.
+    - [x] Añadir navegación propia, no esconderla dentro de Config o Equipo.
+    - [x] Mostrar proveedores y canales con estado configurado/verde, cuota o
+      coste disponible, privacidad y recuentos de modelos activos/bloqueados.
+    - [x] Mostrar tabla/heatmap modelo×rol con score, confianza, tier, economía,
+      velocidad, calidad, estado y badges de evidencia; permitir comparar y
+      abrir detalle con breakdown y recibos.
+    - [x] Diferenciar visualmente “catalogado”, “disponible”, “configurado”,
+      “compatible”, “calibrado” y “seleccionable”; los inactivos siguen visibles.
+    - [x] Añadir filtros, orden accesible, estados vacío/error/loading y diseño
+      responsive; no codificar scoring de nuevo en React.
+    - Cierre: pestaña global `Modelos` implementada como observatorio técnico con
+      tarjetas de proveedor/canal, filtros, matriz desplazable modelo×rol y ficha
+      accesible de score, confianza, breakdown, evidencia, recibos, estados y
+      hard gates. Al filtrar por rol consume el orden de la API; React no puntúa
+      ni desempata. El read model añade metadata redacted de privacidad,
+      workspace y economía para evitar una segunda fuente. Build y lint pasan;
+      3 E2E pasan (loading/error/empty, filtros, orden backend, detalle bloqueado,
+      adapter verde y responsive) y la suite Python conserva 1288 tests verdes.
+  - [ ] **M.6 Crear y editar equipos con ranking global por rol**.
+    - [x] Crear `POST /api/model-catalog/selection` y una proyección pura que
+      recalcula compatibilidad/hard gates antes de ordenar, incluye también pares
+      sin score exacto y no inventa un ganador cuando no hay auto-elegibles.
+      El score base queda inmutable y el rollout continúa `shadow_only`.
+    - [x] Para edición de agente y hiring propuesto mostrar todos los pares
+      modelo+adapter mediante un componente compartido, agrupados por
+      proveedor/canal y ordenados por `selection_score`; no limitar primero al
+      perfil elegido. Los no elegibles aparecen deshabilitados con causa.
+    - [x] La opción “Default” resuelve desde backend candidato, score, confianza
+      y ventaja frente al siguiente; si no existe ganador seguro exige owner. El
+      owner puede fijar cualquier alternativa compatible/selectable, incluso si
+      no es auto-elegible.
+    - [x] **M.6.1 Completar contexto y explicación del selector**.
+      - [x] Mostrar breakdown resumido del ganador y la razón legible por la que
+        supera al siguiente, incluidos empates por evidencia/identidad.
+      - [x] Derivar en backend presión de cuota/capacidad desde
+        `subscription_quota_snapshot` y el presupuesto diario API desde
+        `cost_events`+política. Agotamiento observado/límite alcanzado bloquea;
+        `capacity_unknown` no se convierte en permiso ni en cero.
+      - [x] Sustituir el componente economía únicamente cuando una política de
+        cuota del owner aporta utilización normalizada para el perfil exacto;
+        conservar base, provenance y pesos. Presupuesto API agotado actúa como
+        hard gate y no penaliza canales de suscripción de coste marginal cero.
+      - [x] Incorporar tools requeridas por la issue/hiring además de las
+        capacidades canónicas del rol y las del agente editado.
+      - [x] Añadir E2E del orden backend, candidato bloqueado, ausencia de default
+        y cambio owner del par completo.
+      - Cierre: contexto de issue y economía se resuelven en backend; 19 tests
+        dirigidos y 2 E2E protegen gates, orden, explicación y selección owner.
+    - [ ] **M.6.2 Unificar todos los consumidores**.
+      - [x] Edición de agente y hiring propuesto usan el mismo componente y POST.
+      - [x] Onboarding usa el selector global y bootstrap Lead persiste el par
+        exacto elegido con `owner_explicit`; clientes antiguos sin modelo siguen
+        usando la compatibilidad transitoria.
+      - [x] Conectar alta desde catálogo de Equipo, quorum y fallbacks
+        presentados al owner a la misma función backend. `contextual_model_selection`
+        compone catálogo, issue, tools, cuota y presupuesto una sola vez; alta
+        directa persiste el par `owner_explicit`, quorum valida el candidato exacto
+        y conserva diversidad de perspectiva, y recovery restringe el selector al
+        adapter actual antes de aplicar la elección aprobada.
+        - Evidencia dirigida: 170 tests Python verdes; TypeScript y ESLint verdes.
+      - [ ] Retirar los defaults residuales que aún eligen el primer modelo del
+        perfil y delegar gradualmente el endpoint legacy por perfil.
+        - [x] Inventariar call sites y separar falsos positivos: los `[0]` de
+          “Probar conexión” solo inicializan un probe manual y el de onboarding
+          solo explica un rechazo; no asignan agentes.
+        - [ ] Sustituir `_choose_model`/`choose_adapter_for_role` en creación
+          automática (`_ensure_role_agent`, liveness, Tier 3 y quorum sin pin)
+          por el ganador contextual M.7; mientras no haya auto-elegible debe
+          conservarse el shim o exigir owner, nunca tomar el primer candidato.
+        - [ ] Llevar enforcement cross-provider y recovery cross-adapter a una
+          propuesta contextual explícita; no mutar canal/modelo silenciosamente.
+        - [ ] Retirar `GET /api/user-adapters/models` de los consumidores una vez
+          que probes/config legacy tengan contrato propio y el POST global cubra
+          todas las asignaciones. No confundir inventario local con ranking global.
+        - Dependencia explícita: el smoke real del 2026-07-22 tiene 0 candidatos
+          auto-elegibles; eliminar el shim antes de M.7 rompería bootstrap en vez
+          de mejorar la selección.
+    - [ ] **M.6.3 Persistencia de la intención del owner**.
+      - [x] Etiquetar la elección del selector como `owner_explicit` mediante
+        `model_selection_intent_v1` dentro del contrato durable de adapter; el
+        modo `default` se añadirá cuando M.7 pueda resolverlo de forma segura.
+      - [ ] Distinguir selección `default` frente a `owner_explicit` en el contrato
+        durable de asignación, sin inferirlo solo por presencia de `model`.
+        - [x] Normalizar todos los flujos owner mediante
+          `model_selection_intent_v1/owner_explicit`, vincular `candidate_id` al
+          par canónico exacto y rechazar intentos `default` desde APIs owner.
+        - [ ] Persistir `mode=default` únicamente desde M.7 con ganador
+          auto-elegible y snapshot reproducible; ningún cliente puede fabricarlo.
+      - [ ] Probar create/update, aceptación de hiring, reconcile y reload: una
+        selección explícita nunca se reemplaza y una default solo se resuelve
+        cuando existe candidato auto-elegible.
+        - [x] Reconcile preserva byte a byte el par y
+          `model_selection_intent_v1` de un agente no-placeholder.
+        - [x] Cubrir create/update, materialización del hiring y reload de UI;
+          PATCH del mismo par hereda la marca byte a byte y candidate IDs
+          falsificados fallan antes de persistir. Evidencia: 186 tests dirigidos,
+          3 E2E del selector, TypeScript, ESLint y Ruff verdes.
+    - [x] La opción “Default” final muestra candidato ganador, score,
+      confianza, breakdown resumido y por qué supera al siguiente; el owner
+      puede fijar cualquier alternativa compatible.
+    - [x] Usar todo el contexto de proyecto/issue: run profile, criticidad, data class,
+      tools, presupuesto y presión de cuota. La nota base del catálogo no cambia;
+      el `selection_score` contextual sí puede hacerlo y queda explicado.
+    - [x] Aplicar finalmente el mismo componente y endpoint en onboarding, hiring propuesto,
+      edición de agente, bootstrap Lead, quorum y fallbacks presentados al owner.
+    - Cierre: la primera opción visible coincide con la decisión backend y una
+      selección explícita sobrevive reconcile sin ser sobrescrita.
+  - [ ] **M.7 Default automático y rollout seguro**.
+    - [x] Elegibilidad previa al ranking: adapter conectado+verde, modelo exacto
+      verificado/selectable, compatibilidad completa, política automática y
+      evidencia exacta `calibrated` y no stale. `partial`, sin test,
+      `manual_only`, datos/tools incompatibles o cuota agotada quedan fuera del
+      default aunque continúen visibles para comparación o selección manual.
+      La proyección contextual eleva este resultado verificable al snapshot; no
+      deriva elegibilidad de rank, score alto ni presencia en catálogo.
+    - [x] Ejecutar primero shadow ranking contra defaults actuales y registrar
+      divergencias, calidad esperada, coste/cuota y razones sin cambiar equipos.
+      `POST /api/model-catalog/selection/shadow` persiste el set completo con
+      hash e idempotencia. Smoke local: 6 roles × 48 candidatos, 6 `no_winner`,
+      0 mutaciones y agentes byte a byte intactos; recibo
+      `benchmarks/results/model_default_rollout/model-default-shadow-2026-07-22.json`.
+    - [ ] Activar después solo para nuevas plazas sin modelo fijado; nunca mutar
+      agentes existentes ni cambiar de adapter silenciosamente. Sin candidato
+      elegible, conservar default explícito o pedir owner, no inventar fallback.
+      - [x] Construir `selection_intent/mode=default` solo desde snapshot
+        `auto_applied`, ganador elegible y hash recalculado; un snapshot shadow o
+        manipulado falla cerrado.
+      - [ ] Añadir flag/rollback, promoción shadow → recommend → auto y conectar
+        únicamente creación de plazas nuevas sin pin.
+    - [ ] Validar con canarios de todos los roles y al menos dos canales,
+      incluyendo adapter rojo, score alto incompatible, precio desconocido,
+      quota pressure, evidencia stale, tie y override manual.
+    - Cierre: una única función de selección compartida por bootstrap, hiring,
+      Equipo y dispatch; snapshot durable y rollback/flag de desactivación.
+  - [ ] **M.8 Cobertura completa y mantenimiento continuo**.
+    - [ ] Hacer que los lotes A–E alimenten las métricas normalizadas para todos
+      los proveedores y roles; una celda sin test permanece visible como deuda,
+      no recibe una puntuación de calidad inventada.
+    - [ ] Para cada modelo enumerar todos los roles canónicos: las celdas
+      incompatibles quedan explicadas y sin score; cada celda compatible que
+      pueda entrar en selección automática recibe fixture/canario exacto y
+      valoración propia. No extrapolar una prueba de Engineer a Reviewer/Lead.
+    - [ ] Separar benchmarks de capacidad general de los canarios exactos por
+      rol/tools y usar varias familias de casos para reducir overfitting.
+    - [ ] Recalcular por evento de modelo/CLI/precio/cuota/prompt/tool/contrato y
+      mensualmente; conservar histórico y tendencias sin retirar por edad sola.
+    - Cierre: 100 % del inventario visible, 100 % de rutas automáticas con
+      evidencia fresca y cada hueco restante con owner/bloqueador/próxima acción.
+
+- [x] **Desbloquear y probar Luna como `context_curator`**.
+  - [x] Codex CLI actualizado de 0.128.0 a 0.145.0; cache autenticado con
+    `client_version=0.145.0` y probe efímero read-only `LUNA_OK` completado.
+  - [x] Comparar Luna con GPT-5.5 en auth y queue, tres semillas por caso,
+    mismas anclas, ratio total, runs y duración.
+  - [x] GPT-5.5 control `low`: 6/6; Luna `low`: 3/6; prompt v2: 4/6;
+    Luna `medium` v3: 6/6, 36,55 s medianos y menos tokens medianos que control.
+  - [x] Recibo agregado:
+    `benchmarks/results/model_calibration/context-curator-gpt-tier3-cli-0.145.0-aggregate-v3.json`.
+  - Cierre: matriz completa, juez causal/determinista, recibo agregado y decisión
+    explícita. Un fallo de versión o catálogo es diagnóstico, no calidad.
+  - Evidencia previa:
+    `benchmarks/results/context-curator-auth-codex-luna-seed-1.json`.
+
+- [ ] **Completar calibraciones nuevas por perfil+modelo+rol**.
+  - Sol/Terra/Luna, Opus/Sonnet/Haiku y Pro/Flash/Flash-Lite se comparan contra
+    baselines locales antes de cambiar gates o cascadas.
+  - Antigravity ya completó 27 runs: Pro High, Flash High y Flash Low conservan
+    defaults; Sonnet 4.6 superó el canario conductual de coding; Flash Medium no
+    se promovió por falta de telemetría económica comparable.
+  - Gemini 3.6 High/Low fueron catalogados pero no ejecutables; Medium completó
+    review sin superar al baseline. No repetir runs idénticas sin cambio de
+    modelo, CLI, catálogo o contrato.
+  - Cierre por candidato: tres semillas mínimas, contrato de rol exacto,
+    evidencia independiente, liveness, mediana+rango y gate de promoción.
+
+- [ ] **Calibrar promociones gratuitas provisionales**.
+  - Gemini Free 3.5 Flash y GPT-OSS 120B: review/QA/test design.
+  - Flash-Lite, Qwen 3.6 y GPT-OSS 20B: scouts/context curator.
+  - Mantener bloqueados Lead/quorum, review crítico Tier 3, MCP externo y datos
+    no compatibles hasta superar canarios exactos de contrato, criticidad y
+    recovery.
+  - OpenCode no se reabre salvo cambio de catálogo/modelo, CLI o contrato: sus
+    canarios actuales no autorizaron promoción.
+
 - [ ] **Extender BYOK gratuito solo con catálogo ejecutable demostrado**.
-  Evaluar GitHub Models y OpenRouter por ID exacto, nunca router aleatorio;
-  descubrir modelos con la key real, verificar salida estructurada y persistir
-  límites observados. Añadir rate-limit headers de API a la telemetría cuando el
-  helper HTTP pueda conservarlos sin exponer secretos. Calibrar Gemini/Groq por
-  rol antes de ampliar `supported_roles` o hacerlos defaults. Auditoría local
-  del 2026-07-22: no existen keys de esos cuatro perfiles; los tokens de `gh`
-  carecen de `models:read`. No se crean perfiles decorativos. El helper ya
-  conserva los headers oficiales RPD/TPM de Groq y normaliza los hosts futuros
-  de GitHub Models/OpenRouter para governor y telemetría; catálogo, schema y
-  límites propios siguen bloqueados hasta disponer de credenciales válidas.
-- [x] **Reinvestigar los catálogos actuales con fuentes oficiales y probes
-  locales**. OpenAI queda en Sol/Terra/Luna; Anthropic en Opus 4.8/Sonnet
-  5/Haiku 4.5 con Fable 5 como escalado; Gemini en 3.1 Pro Preview/3.5
-  Flash/3.1 Flash-Lite. `agy 1.1.5 models` confirma 11 IDs catalogados: los
-  ocho anteriores de Gemini/Claude 4.6/GPT-OSS y tres Gemini 3.6 sujetos a
-  probe exacto; Equipo conserva etiquetas legibles aparte.
-- [x] **Actualizar selección, defaults y FinOps por adapter**. Los tiers se
-  resuelven por rol dentro del canal configurado; API conserva precio marginal
-  y tramos de contexto, suscripción/local registran 0 céntimos marginales. Los
-  adapters locales mantienen el modelo instalado/configurado y nunca descargan
-  ni autoascienden por catálogo.
-- [x] **Impedir una promoción automática insegura a Fable 5**. Permanece
-  visible para selección manual, pero el default Anthropic Tier 1 es Opus 4.8
-  hasta gobernar retención obligatoria, refusals/fallback, elegibilidad y coste.
-- [x] **Hacer que el catálogo de Equipo represente capacidad ejecutable**.
-  Cada opción conserva su nombre exacto por adapter, pero queda deshabilitada
-  si el CLI/runtime no la enumera, el perfil está bloqueado o una run devolvió
-  `model_unavailable`. Las runs completadas verifican el par perfil+modelo; el
-  hiring automático y el guardado de Equipo usan esa misma evidencia. `agy
-  models` aporta 11 opciones actuales; las tres Gemini 3.6 permanecen
-  manual-only/probe-gated y las otras ocho incluyen `Gemini 3.1 Pro (Low)`.
-  Ollama/LM Studio solo habilitan modelos instalados.
-- [ ] **Calibrar los modelos nuevos por contrato de rol**, no con benchmarks de
-  vendor: Sol/Terra/Luna, Opus/Sonnet/Haiku y Pro/Flash/Flash-Lite deben
-  compararse con los baselines locales en tareas de Lead, coding, review y
-  scouts antes de modificar gates o cascadas. Progreso: Antigravity 1.1.5 ya
-  completa el screening estructural con **27 runs**, tres muestras por par y
-  control contra el baseline real de review. Se mantienen Pro High, Flash High
-  y Flash Low. Sonnet 4.6/coding pasó después su prueba conductual y es ya el
-  default de Engineer; Flash Medium/review (empate, -1,48 s) pasa a validación
-  económica. Opus 4.6, Pro Low y GPT-OSS no mejoran sus baselines. El agregado
-  declara `default_change_allowed=false`: falta validar esos dos candidatos con
-  evidencia conductual independiente y completar el resto de adapters. El
-  inventario vivo del `2026-07-21` añadió Gemini 3.6 Flash High/Medium/Low.
-  High y Low fueron enumerados pero rechazados por submit; quedan visibles,
-  manual-only y no seleccionables hasta un probe exacto. Medium completó review 3/3 con 100 %, igual
-  que 3.5 High, pero fue 0,407 s más lento en mediana. Se conserva 3.5 High y
-  3.6 Medium pasa al canario durable sin promoción automática; discovery por sí
-  solo tampoco lo habilita en Equipo y un probe exacto verificado sí.
-- [x] **Validar Sonnet 4.6 contra Flash High en coding conductual**. Ambos pasan
-  9/9 tests ocultos en tres semillas. Sonnet cierra 3/3, Ruff limpio 3/3 y
-  mediana 51,14 s; Flash cierra 2/3, Ruff limpio 1/3 y mediana 105,48 s. El
-  agregado v3 supera la auditoría canónica de matriz y promociona Sonnet para
-  `engineer`/`software_engineer` de Antigravity. El primer A/B se repitió tras
-  corregir envelopes `text + ops`/stdout ruidoso; esos intentos son diagnóstico
-  de transporte y no evidencia de calidad.
-- [x] **Validar Flash Medium contra Flash High en review durable** sobre defectos
-  causales y aceptación/rechazo real. Exigir al menos tres semillas, mismo diff
-  y mismo juez. Medir runs y duración como presión de cuota; no inventar tokens
-  ni coste API. Cerrado con el canario v4: ambos brazos rechazan el defecto,
-  materializan el fix mediante el Lead y aprueban la corrección en 3/3 semillas.
-  Flash Medium tarda 43,078 s medianos frente a 99,999 s de Flash High, pero sin
-  tokens ni denominador de cuota la latencia aislada no autoriza promoción; se
-  conserva Flash High. Recibo: `antigravity-durable-review-v4-aggregate.json`.
-- [ ] **Probar Luna como `context_curator` contra el baseline causal GPT-5.5**
-  en auth y queue, con varias semillas, anclas, ratio total, runs y tiempo.
-  El primer canario auth del 2026-07-20 no alcanzó la evaluación: Codex CLI
-  `0.128.0` rechazó `gpt-5.6-luna` porque el catálogo local requiere un cliente
-  `0.145.0`. Se conserva como evidencia diagnóstica, no como resultado A/B, en
-  `benchmarks/results/context-curator-auth-codex-luna-seed-1.json`. Hasta
-  actualizar el CLI y superar auth+queue, Codex curator conserva `gpt-5.5`
-  aunque sea un rol Tier 3.
-- [x] **Asignar cadencia y owner al drift de catálogos/modelos**. Ejecutar
-  inventario autenticado y matriz hermética al cambiar versión de CLI/provider
-  y, como mínimo, en una revisión mensual mientras existan modelos preview o
-  gratuitos temporales. Un alta, retirada o cambio de ID debe abrir calibración
-  por par perfil+modelo+rol; discovery nunca autoriza defaults por sí solo.
-  Owner: `AI Teams maintainer`. `audit_model_catalog_drift.py` fija la cadencia
-  mensual + evento, compara IDs exactos de Antigravity/OpenCode, conserva
-  exclusiones con disposición explícita y ejecuta la matriz hermética. El
-  recibo `model-catalog-drift-2026-07-22.json` pasa 5/5 gates: 11 IDs
-  Antigravity, cinco Zen declarados —Laguna manual/probe-gated tras fallar 0/3
-  review durable—, Big Pickle `rejected` y Codex `cli_update_required` como
-  atención separada.
-- [x] **Registrar frescura de calibración por perfil+modelo+rol**.
-  `aiteam.model_calibration` registra las tres promociones históricas exactas:
-  GPT-5.5 para `context_curator` y Sonnet 4.6 para `engineer`/
-  `software_engineer`, cada una con `calibrated_at`, versión del runtime y
-  recibos existentes. El auditor mensual añade dos gates y marca `stale` tras
-  30 días, fecha futura, versión cambiada/no observada o evidencia ausente.
-  Pares no registrados y stale fallan cerrados para una promoción nueva; el
-  reporte conserva `existing_default_action=unchanged`, por lo que no confunde
-  antigüedad con indisponibilidad. El recibo vivo pasa 5/5 gates, registra las
-  tres promociones `fresh` y mantiene aparte la actualización pendiente de
-  Codex CLI. La próxima revisión queda adelantada al `2026-08-19`, antes del
-  primer vencimiento, en vez de esperar hasta completar un mes desde el audit.
-- [x] **Implementar presión y forecast de cuota por perfil de suscripción**.
-  `run_adapter_profiles` congela el perfil real por run y
-  `subscription_quota_snapshot` agrega runs, duración, usage disponible y
-  errores `subscription_cli_usage_limit`. El forecast solo aparece si el owner
-  configura `config.subscription_quota` con `unit`, `limit` y `window_hours`;
-  si falta capacidad demostrada devuelve `capacity_unknown`, sin porcentaje ni
-  ETA inventados. Codex puede usar tokens durables; Claude hace lo mismo cuando
-  su recibo los expone; Antigravity usa únicamente runs/segundos como proxy
-  explícito del owner. `loop-health` eleva agotamiento observado o presión
-  configurada y lleva a Runs. Ninguna señal se convierte a coste API ni se
-  comparten pesos entre perfiles. OpenCode añade tokens/caché/razonamiento desde
-  `step_finish` y conserva coste marginal cero; `free_gateway` se normaliza como
-  canal durable de suscripción conservando profile/provider/model exactos, sin
-  reconstruir la restricción SQLite existente.
-- [x] **Cerrar el ciclo de lifecycle de modelos preview/retirados**. Health
-  valida el ID, registra `model_unavailable`, impide nuevas selecciones y evita
-  que hiring las fije. La issue queda bloqueada y el control plane propone el
-  fallback ejecutable menos disruptivo dentro del mismo perfil: preserva
-  familia antes que tier, excluye modelos manual-only y explicita ambos cambios.
-  Una interacción idempotente exige decisión del owner; aceptar actualiza el
-  agente y reencola la issue sin otra llamada LLM, rechazar conserva el bloqueo.
-  Si no existe candidato, se despierta al supervisor sin cambiar de adapter.
+  - GitHub Models y OpenRouter requieren credencial real, discovery por ID,
+    salida estructurada, probe exacto y límites observados.
+  - Calibrar Gemini/Groq por rol antes de ampliar `supported_roles` o defaults.
+  - Persistir rate-limit headers sin secretos cuando el helper pueda conservarlos.
+  - Bloqueo actual: no hay keys de esos cuatro perfiles y `gh` carece de
+    `models:read`; no crear perfiles hasta resolverlo.
 
-Criterio de cierre P0.2: cada rol recibe un modelo ejecutable y calibrado en su
-canal; API y cuota de suscripción se predicen con unidades separadas; ningún
-modelo preview, local no instalado o Fable no gobernado entra silenciosamente.
-El lifecycle queda cerrado; la calibración multi-modelo y el canario Luna tras
-actualizar Codex CLI siguen siendo trabajo de evaluación, no deuda del fallback.
+- [x] **Cerrar el drift abierto por Codex 0.145.0**. El registro apunta al par
+  exacto Luna/`context_curator`, CLI 0.145.0 y seis recibos v3 más el agregado.
+  El auditor confirma catálogo, flujo, tiers y frescura: 6/6 gates.
 
-### P0.3 — Compatibilidad efectiva adapter × modelo × rol
+### Criterio de cierre P0
 
-Bloque activo y previo a ampliar catálogos o promover nuevos defaults. La
-auditoría del `2026-07-21` confirma que `supported_roles` filtra perfiles en el
-hiring automático, pero `best_for` solo ordena modelos. Crear/editar agentes,
-el selector de Equipo, la edición de una propuesta y el fallback validan
-ejecutabilidad, no compatibilidad dura con el rol. Además, un perfil de Lead
-explícito pero incompatible puede acabar silenciosamente en `lead_builtin`.
+Cada opción habilitada debe tener identidad exacta, catálogo vigente, probe o
+run ejecutable, compatibilidad de rol y calibración suficiente para cualquier
+promoción. Discovery, tier o health de un hermano nunca conceden capacidad.
+Además, cada contratación automática debe resolver desde la proyección común el
+mejor candidato elegible del rol, persistir score/breakdown/confianza/provenance
+y coincidir con lo que muestran Modelos y Equipo.
 
-Orden interno: (1) vocabulario e identidad, (2) decisión pura de
-compatibilidad, (3) enforcement backend/pre-run, (4) proyección en Equipo y
-(5) catálogo vivo/E2E. No se ampliarán defaults antes de cerrar 1–3.
+## P1 — Endurecimiento condicionado por evidencia
 
-- [x] **Unificar la taxonomía de roles sin romper proyectos persistidos**.
-  `aiteam.policies` es fuente canónica de aliases, tier y estado. `worker` queda
-  inequívocamente en Tier 3; `qa` es un guardrail condicional, no miembro del
-  `full_team`; `test_runner` es determinista; `researcher` y `quorum_senior`
-  quedan legibles como legacy. Ranking y API normalizan aliases sin reescribir
-  la identidad almacenada.
-- [x] **Separar proveedor, perspectiva y capacidad**. La identidad derivada
-  distingue organización del canal, vendor del modelo, transporte, perspectiva
-  y pool de cuota. Quorum y review crítico exigen vendor/perspectiva distintos:
-  Codex + OpenAI API sobre GPT ya no cuenta como diversidad; Antigravity sobre
-  Claude tampoco es independiente de Anthropic. Cuota/rate-limit conserva el
-  perfil/key como pool separado y los registros históricos se interpretan sin
-  migración destructiva.
-- [x] **Dar metadata de gobernanza a perfiles personalizados**. La API conserva
-  y valida `supported_roles`, `data_policy`, `privacy_note`, `capabilities`,
-  `workspace_mode`, `mcp_transport` y `structured_output`, y proyecta identidad
-  normalizada. Los aliases se canonicalizan y un rol desconocido se rechaza.
+- [ ] **Mantener telemetría comparable para Antigravity** antes de usarlo en
+  comparaciones de coste. `agy 1.1.5` no expone tokens headless por run; no
+  parsear la TUI ni inventar estimaciones.
+- [ ] **Robustecer clasificación de cuotas de suscripción** cuando exista señal
+  estructurada o variantes reales. Añadir solo fixtures observados; conservar
+  fallback seguro y no reintentar cuota agotada.
+- [ ] **Extraer políticas de quorum solo si vuelven a crecer** y aparece una
+  frontera funcional verificable. No dividir mecánicamente `RunExecutor`.
 
-- [x] **Crear una única decisión pura de compatibilidad y proyectarla por API**
-  para `(profile_id, model, role, run_profile, criticality,
-  data_class, required_capabilities)`. Debe devolver `allowed`, código estable,
-  explicación en español, roles/modos permitidos y alternativas ejecutables.
-  `aiteam.model_compatibility` no consulta DB/red y separa tier, capacidades,
-  workspace, MCP, salida estructurada, criticidad y datos. El catálogo y
-  `POST /api/user-adapters/compatibility` exponen la misma decisión y alternativas
-  sin colapsarla en `available`. La metadata admite allow/deny por rol,
-  criticidad máxima, salida estructurada y modos de run; `best_for` sigue siendo
-  solo recomendación. Perfiles custom pueden declarar un catálogo gobernado.
-- [x] **Aplicar el gate en todas las rutas de mutación y justo antes de una
-  run**: bootstrap del Lead, `POST/PATCH /api/agents`, aceptación/editado de
-  hiring, reconcile, selección automática y lifecycle/fallback. Una selección
-  explícita incompatible responde HTTP 422 con el código específico de la
-  dimensión fallida (`model_role_incompatible`, `model_tier_insufficient`,
-  `workspace_write_required`, etc.; 400 queda reservado a configuración malformada),
-  con causa y alternativas; nunca degradar a builtin, cambiar de adapter ni
-  esperar a que falle la run. Auditar también configuraciones antiguas al
-  cargarlas y bloquear la issue con continuación owner si ya no son válidas.
-  Implementado mediante `aiteam.compatibility_service`: el contexto durable se
-  hereda por la jerarquía de issues, las propuestas editadas se validan antes
-  de abrir su transacción y el preflight registra interaction, actividad y
-  `tool_access=denied` sin invocar el modelo.
-- [x] **Hacer que Equipo informe en vez de ocultar**. Perfiles y modelos
-  incompatibles permanecen visibles pero deshabilitados, con razón concreta
-  (`solo lectura`, `sin MCP gobernado`, `no calibrado para criticidad alta`,
-  `datos confidenciales`, `modelo ausente`, etc.). El picker de Lead debe
-  considerar también `solo_lead`/`lead_quorum`; el de cada miembro debe usar la
-  misma respuesta que valida el guardado. Corregir el cache al cambiar rol,
-  perfil, criticidad o modo del proyecto. El catálogo por rol conserva también
-  modelos no ejecutables, anota compatibilidad sin pisar health y la UI cachea
-  por perfil+rol+run profile+criticidad+clasificación. Equipo e hiring muestran
-  cada opción deshabilitada con su motivo e impiden guardar/aceptar un deny
-  conocido; el backend vuelve a resolverlo como autoridad final.
-- [x] **Resolver la semántica real de escritura y MCP por transporte**. Las
-  APIs actuales sí materializan `write_file`/`append_file`/`delete_file` bajo
-  RBAC, por lo que el warning legacy “API-only no puede escribir” contradice al
-  executor y debe retirarse o convertirse en un check de capacidad real. Retirar
-  también la penalización fija `-30` y el reconcile que migra juniors de API a
-  CLI solo por tipo de transporte; coste/cuota y capacidad se rankean después
-  del hard gate. En cambio, OpenCode Zen continúa read-only y queda prohibido para Engineer,
-  Worker y Lead en `solo_lead`. Los adapters API no reciben MCP externo hoy:
-  bloquear `mcp_operator` o cualquier asignación que requiera `external_mcp`
-  hasta implementar un loop gobernado, sin confundir tools del proveedor con
-  grants de AI Teams.
-- [x] **Codificar la matriz provisional de perfiles gratuitos**:
-  Nemotron puede optar a Lead/arquitectura/quorum y revisión read-only;
-  DeepSeek V4 Flash y MiMo V2.5 a review/QA; North Mini a scouts/curator.
-  Gemini 3.5 Flash Free y GPT-OSS 120B a review/QA; Gemini Flash-Lite, Qwen
-  3.6 y GPT-OSS 20B a scouts/curator. Hasta superar canarios locales, bloquear
-  Lead/quorum en Gemini/Groq Free y review crítico en los modelos Tier 3. Una
-  categoría Tier 1/2/3 describe capacidad/coste, pero no concede por sí sola
-  un rol, escritura, MCP ni acceso a datos.
-- [ ] **Calibrar con canarios vivos las promociones gratuitas provisionales**.
-  Mantener bloqueos actuales hasta demostrar por par exacto perfil+modelo+rol
-  que el contrato, la criticidad y la recuperación funcionan; un health del
-  perfil o un benchmark de otro transporte no sirve como evidencia.
-- [x] **Cerrar catálogo y health por modelo visible**. Los perfiles API no
-  deben marcar todo su catálogo como ejecutable solo por ser un ID estático:
-  descubrir con la key del owner cuando el proveedor lo permita, intersectar
-  con la allowlist aprobada y ejecutar un probe estructurado por modelo antes
-  de prometer que funciona. Conservar estados distintos `catalogued`,
-  `verified`, `rate_limited`, `retired` e `incompatible`; una prueba del modelo
-  default no verifica los demás. Discovery autenticado y probe estructurado se
-  persisten por separado; `available` expresa presencia y `selectable` exige
-  evidencia ejecutable exacta. OpenAI, Anthropic, Gemini y Groq enumeran con la
-  key del owner y paginación acotada; la allowlist viva se intersecta con el
-  catálogo gobernado. Equipo permite probar cada modelo y el preflight bloquea
-  sin consumo, con continuación owner, si falta evidencia.
-- [x] **Endurecer modelos con contrato estructurado parcial**. El boundary API
-  valida recursivamente `submit_work` completo: tipos, enums, requeridos,
-  mínimos y propiedades extra; recuperar un objeto JSON ya no demuestra el
-  contrato. Qwen/JSON Object dispone de un único repair acotado a 12 KB, suma
-  el usage de ambos intentos y solo se acepta si conserva exactamente `ops` y
-  `status`; nunca puede inventar autoridad. Un segundo fallo queda
-  `tool_parse_error`, 429/model removal del repair conservan su clase real y
-  los modelos strict nunca reintentan. Qwen permanece limitado a Tier 3 y
-  criticidad máxima media.
-- [x] **Hacer que fallback, cuota y privacidad respeten el mismo gate**. El
-  fallback dentro del perfil debe excluir candidatos incompatibles aunque
-  coincidan familia/tier. Groq debe capturar límites por modelo y unidades
-  RPM/RPD/TPM/TPD en vez de tratar 1.000 runs/día como capacidad completa;
-  Gemini conserva capacidad desconocida si no hay denominador. Separar en UI
-  cuota API gratuita de suscripción. `non_confidential_only` y los términos de
-  free tier requieren clasificación/confirmación antes de enviar datos, no una
-  nota decorativa. El filtrado de fallback y la clasificación fail-closed ya
-  consumen el gate común. Groq captura los headers oficiales RPD/TPM por run y
-  modelo, incluidos 429, sin congelar cuotas
-  comerciales; Gemini declara RPM/TPM/RPD/TPD como dimensiones posibles pero
-  conserva `capacity_unknown` porque el denominador efectivo pertenece al
-  proyecto en AI Studio. El snapshot separa `api_rate_limit` de
-  `subscription_pressure`, las APIs nunca consumen el proxy de runs de una
-  suscripción y Equipo etiqueta ambos estados de forma distinta.
-- [x] **Añadir la matriz hermética positiva y negativa por modelo**. El auditor
-  `scripts/audit_model_flow_matrix.py` recorre los 12 perfiles y 47 modelos
-  built-in, valida identidad/metadata, recomendaciones ejecutables, roles
-  positivos y negativos, perfiles bloqueados, privacidad fail-closed, MCP API,
-  criticidad y JSON Schema. La matriz actual contiene 337 celdas positivas y
-  415 negativas sin fallos. GET de Equipo y POST de compatibilidad devuelven la
-  misma decisión para cada modelo; onboarding prueba cada modelo API exacto y
-  demuestra que no habilita a sus hermanos. Los flujos representativos de
-  bootstrap, hiring, edición, dispatch, escritura API, deny OpenCode, retirada,
-  429 y fallback permanecen cubiertos por las suites de workspace/executor.
-- [x] **Completar canarios vivos por modelo y run profile**. Ejecutar con las
-  keys/CLIs del owner creación real en `solo_lead`, `lead_quorum` y `full_team`,
-  registrando versión de adapter/modelo, contrato, privacidad, consumo/cuota y
-  causa de cualquier deny. Mantener estos recibos fuera de la suite hermética;
-  una indisponibilidad externa no debe romper CI. Cada recibo registra versión
-  de CLI/API, modelo exacto, rol y fecha; la suite hermética conserva
-  catálogo→discovery→probe, bloqueo pre-consumo, ejecución, rate-limit,
-  retirada y fallback con o sin candidato.
-  Progreso `2026-07-21`: nueve submits estructurales y doce inferencias de review
-  durable de Antigravity produjeron una
-  matriz review 3×2 completa y tres diagnósticos de catálogo 3.6. Los recibos
-  viven en `benchmarks/results/model_calibration/antigravity-1.1.5-gemini-3.6-*`.
-  La matriz durable valida rechazo→fix del Lead→aprobación en 3×2, sin runs ni
-  wakeups tomados al terminar. Creación viva `solo_lead` pasa con Antigravity
-  Pro High en una run y 54,656 s: un agente, archivo materializado, verificación
-  de máquina, raíz cerrada y cero trabajo vivo residual. `full_team` pasa en la
-  semilla 3 con 12 runs/635,969 s: Lead Codex GPT-5.5, Sonnet Engineer, Flash
-  High Reviewer/Test Designer, Flash Low Scout y test runner determinista; la
-  raíz cierra tras deny previo a exit 0 y no queda cola. `lead_quorum` cierra en
-  seed 4 con 4 runs/305,7 s, Plan A y Plan B estructuralmente válidos, dos
-  contribuciones cross-provider válidas y sesión `accepted`.
-  Tres canarios quorum degradaron correctamente: seed 1 por auditoría
-  Antigravity sin findings, seed 2 tras dos Plan B cuya narrative quedó por
-  debajo de 300 palabras y seed 3 por AGENT-REPORT Codex inválido dos veces.
-  La instrucción final ahora nombra explícitamente `plan.narrative_markdown` y
-  seed 4 valida en vivo la corrección. Los tres perfiles quedan demostrados;
-  las promociones de modelos gratuitos conservan su ítem separado y sus gates.
+### Criterio de cierre P1
 
-Criterio de cierre P0.3: no existe ninguna ruta que guarde, contrate, ejecute o
-proponga como fallback una pareja modelo/rol que el catálogo de Equipo marca
-incompatible; toda denegación explica causa y alternativa. Cada opción visible
-como habilitada tiene inventario y contrato de ejecución demostrados, y los
-tres perfiles de run conservan un Lead realmente capaz de cumplir su contrato.
+Cada extracción reduce una política mutable sin cambiar semántica; cada señal
+nueva conduce a una acción operativa demostrable.
 
-### P1 — Endurecimiento oportunista
+## P2 — Estudios que requieren datos reales
 
-- [x] **Convertir el plan durable en contrato API/SQLite estructurado**. El
-  formato `aiteam.plan.v1+json` versiona objetivo, alcance, supuestos,
-  arquitectura, work items con reporting/aceptación/evidencia, riesgos y
-  rollback, verificación, escalado y riesgos de la siguiente run. Sigue usando
-  `issue_documents` y sus revisiones optimistas: no existe una segunda tabla ni
-  estado específico de proveedor. `update_plan` acepta el contrato estructurado,
-  el cockpit lo proyecta y la API valida que cualquier `run_id` pertenezca al
-  Lead asignado. Los comentarios dejaron de materializar planes implícitamente;
-  las nuevas revisiones por API exigen estructura. Markdown queda como shim
-  transitorio, visible como `legacy_unstructured_plan`, para documentos y
-  adapters antiguos mientras se migra su emisión sin romper runs activas.
-- [x] **Extraer el contrato de context curator de `RunExecutor`**. El módulo
-  `aiteam/context_curator.py` concentra el slice durable, la evaluación del
-  presupuesto efectivo, idempotencia del trigger, validación y persistencia del
-  artefacto, offsets parciales y transición retry → escalado. `RunExecutor`
-  conserva únicamente la integración con la delegación general de issues. Hay
-  tests directos del módulo y canarios de integración para payload, recovery,
-  auditoría y contratación automática.
-- [ ] **Extraer políticas de quorum solo si vuelven a crecer**. No hacer una
-  partición mecánica de las 7.608 líneas sin una frontera funcional verificable.
-- [x] **Consumir `orchestrator_evals` en el cockpit** mediante el endpoint
-  aditivo `loop-health`: raíces stranded elevan atención y llevan a issues
-  abiertas; runs/wakeups activos o quorum inconsistente llevan a Runs. No se
-  añadió un panel genérico ni se duplicaron las definiciones del harness.
-- [ ] **Mantener telemetría comparable para Antigravity** antes de incluir ese
-  canal en comparaciones de coste. Verificado de nuevo el `2026-07-21` con
-  `agy 1.1.5`: `--help`, `--print` y el changelog no exponen recibos headless
-  de tokens por run. La cuota visible en TUI no se parsea ni se sustituye por
-  estimaciones sin provenance.
-- [x] **Reforzar la fidelidad semántica del context curator sin confundir
-  estructura con verdad**. Cada bloque conserva Markdown y un índice causal v1
-  con unidades tipadas, provenance por comentario y relaciones compactas. El
-  gate verifica forma y enlaces críticos: accountability exige
-  owner/deliverable/accepted_by; escalado exige metric/threshold/window/action;
-  una opción descartada exige reason. Se mantienen slice, offsets, recovery y
-  ratio Markdown ≤30 %; el índice tiene tope independiente de 4 KiB y se mide
-  su coste efectivo. La rúbrica oculta evalúa ambos artefactos. Spot-checks
-  reales nuevos con `codex_subscription/gpt-5.5`: auth 9/9, Markdown 12,77 %,
-  índice 2.956 chars y cierre en una run; queue 9/9, 12,96 %, índice 3.564 chars
-  y cierre en una run. El ratio efectivo total fue 47,56 % y 54,37 %: mejora
-  trazabilidad, pero no es compresión gratuita ni autoriza cambios de routing.
-- [ ] **Robustecer la clasificación de cuotas de suscripción** cuando exista
-  señal estructurada del CLI o aparezcan variantes reales. Conservar el fallback
-  seguro y añadir fixtures de mensajes/idiomas observados, sin perseguir strings
-  hipotéticos ni reintentar una cuota agotada.
+### Coste por entrega/proyecto
 
-Criterio de cierre P1: cada extracción reduce una política mutable del executor
-sin cambiar semántica, y cada dato nuevo de UI conduce a una acción operativa.
+- [ ] Repetir `scripts/audit_cost_report_readiness.py` cuando una misma SQLite
+  acumule cinco entregas terminales comparables por perfil, ≥80 % de runs
+  temporizadas, ≥80 % con provenance de coste y ≥80 % con señal de calidad.
+- [ ] Solo si el gate pasa, implementar API/UI por entrega y proyecto,
+  separando coste real de ahorro estimado.
 
-### P2 — Completar auto-extensión gobernada
+Estado: el recibo
+`benchmarks/results/cost_reporting/cost-report-readiness-v1.json` auditó 70 de
+71 DB y no encontró ningún proyecto listo.
 
-Bloque completado sobre skills por proyecto, registry, propuestas Lead-only,
-approval/rejection y auditoría:
+### Paralelismo por canal
 
-- [x] **MCP runtime mínimo**: contrato neutral al proveedor con versión pineada,
-  handshake `initialize` obligatorio, grants por rol+`external_mcp` y recibos en
-  `tool_access`. Codex recibe overrides efímeros; Claude recibe
-  `--strict-mcp-config` efímero. Antigravity conserva rol/autoridad pero deniega
-  el grant de forma auditable hasta ofrecer inyección aislada por run.
-- [x] **Base de seguridad MCP**: secretos fuera del registry/prompt, health y
-  `tools/list` con timeout/cap, idempotencia por contrato+versión, cero shell o
-  auto-install y denegación de tools no declaradas como lectura. Esta base no
-  convierte `readOnlyHint`, `serverInfo.version` ni un inventario cacheado en
-  evidencia confiable: el endurecimiento por allowlist aprobada, identidad de
-  artefacto y frescura vive en P0.1. Cada decisión se registra por tool.
-- [x] **Detección de necesidad**: `capability_gap` explícito o un bloqueo
-  realmente no verificable genera sugerencia; señales ambiguas requieren dos
-  runs distintas de la misma capacidad. El reconciler agrupa por raíz+capacidad,
-  persiste evidencia como comentario, reutiliza la ruta viva del Lead y crea una
-  wakeup solo si hace falta. Es una sugerencia: el Lead investiga y el owner
-  conserva los gates de propuesta, health, allowlist y activación.
-- [x] **Skills aprendidas gobernadas**: el Lead puede proponer conocimiento
-  reutilizable solo con evidencia y queda `proposed`, fuera del prompt, hasta
-  aprobación del owner. Se aplican topes de 24 skills vivas, 8 aprendidas,
-  8 KB por aprendida y 48 KB de presupuesto activo. Config expone origen,
-  evidencia y consumo; el owner puede corregir, activar, retirar o borrar sin
-  perder provenance. Las directivas del usuario conservan precedencia explícita
-  y comprobada sobre cualquier skill local.
-- [x] **Health y retiro operables**: endpoint y UI permiten probar/activar,
-  aprobar tools, retirar y reactivar. El loop ejecuta como máximo un probe
-  vencido por tick, aplica backoff y retira tras tres fallos consecutivos. Un
-  contrato rechazado o ya existente suprime propuestas repetidas con comentario
-  correctivo y auditoría; reactivar vuelve a `approved` y exige health nuevo.
-- [x] **Catálogo curado inicial**: tres descriptores oficiales revisados
-  (`github-readonly`, `playwright-browser`, `filesystem-workspace`) nombran solo
-  ejecutables ya instalados, con versiones exactas, riesgos y fuentes. El Lead
-  puede referenciarlos por `catalog_id`; el control plane rellena y bloquea el
-  contrato antes de crear la interacción normal. En paquetes Node resuelve el
-  entrypoint real y verifica `package.json`, evitando sellar solo el shim. El catálogo no instala,
-  ejecuta, aprueba ni autoriza tools y cualquier sustitución del descriptor se
-  deniega de forma auditable.
+- [ ] Obtener un trigger vivo con múltiples raíces y pools y espera
+  paralelizable exacta mayor que cero. No fabricar evidencia con fixtures.
+- [ ] Tras el trigger, ejecutar A/B secuencial/paralelo con misma cola y
+  workspace, varias semillas y canales distintos. Medir makespan, espera,
+  calidad, runs, usage disponible, cuota, checkout y liveness.
+- [ ] Activar o ampliar límites solo con mejora consistente sin regresiones; de
+  lo contrario mantener el opt-in y cerrar con evidencia negativa.
 
-Criterio de cierre P2: una extensión aprobada puede pasar propuesta → pin →
-health → grant → uso auditado → retiro, y ninguna extensión puede ampliar por
-sí sola el privilegio de un rol.
+Estado: el inventario vivo no encontró candidatos y
+`parallel-live-trigger-inventory-v1.json` conserva `live_ab_allowed=false`.
 
-### P3 — Economía y rendimiento posteriores
+### Orientación del usuario
 
-- [ ] **Informe de coste por entrega/proyecto**: coste real, ahorro estimado,
-  latencia y calidad por perfil; solo construirlo cuando haya volumen suficiente
-  para no presentar estimaciones como hechos.
-  - [x] Definir y automatizar el gate previo sin construir el informe. Cada
-    entrega es un issue raíz y su subárbol; por perfil se exigen al menos cinco
-    entregas terminales dentro de la misma SQLite, 80 % de runs temporizadas,
-    80 % con provenance de coste en `cost_events` y 80 % de entregas con señal
-    de calidad procedente del último report válido del assignee Reviewer/QA/
-    Test Runner. `scripts/audit_cost_report_readiness.py` es read-only y falla
-    cerrado con `--require-ready`.
-  - [x] Inventariar la evidencia retenida. El recibo
-    `benchmarks/results/cost_reporting/cost-report-readiness-v1.json` revisa 71
-    DB, audita 70 y no encuentra ningún proyecto listo. Hay 2 entregas
-    terminales `full_team`, 9 `lead_quorum` y 8 `solo_lead`, pero ninguna SQLite
-    contiene más de una del mismo perfil; no se pueden sumar semillas de
-    proyectos distintos para fabricar volumen.
-  - [ ] Repetir el gate cuando un proyecto real acumule cinco entregas
-    terminales comparables por perfil y cierre las coberturas exigidas.
-  - [ ] Solo entonces implementar API/UI por entrega y total de proyecto,
-    manteniendo coste real y ahorro estimado como magnitudes separadas.
-- [x] **Evaluar sesiones persistentes de CLI** con un experimento acotado. Las
-  columnas `session_id_before/after` existen, pero solo activar reanudación si
-  reduce re-derivación sin introducir contaminación de contexto o recovery
-  frágil. Instrumentación offline completada: `aiteam/session_continuity.py`
-  exige opt-in e identidad exacta de agente+issue+adapter+perfil+provider+modelo+
-  canal+workspace; prohíbe `--last`/`--continue` y extrae el ID explícito de
-  Codex. `scripts/benchmark_cli_sessions.py` prueba capacidades sin consumo y
-  audita A/B stateless/resumed con memoria, override, contaminación, tokens y
-  duración. Probe real: Codex 0.128.0 y Antigravity 1.1.5 soportan ID explícito;
-  Claude no está instalado. Canario Codex GPT-5.5 completado con dos semillas:
-  ambos brazos conservan memoria, override y ausencia de la instrucción
-  revocada, pero resumed casi duplica tokens brutos (mediana de ahorro
-  `-99,75 %`) y solo mejora `3,74 %` la duración. Antigravity 1.1.5 reanuda por
-  conversation UUID explícito y conserva el marcador, pero carece de usage
-  comparable. Decisión: mantener producción stateless; el harness conserva
-  `production_enabled=false` y no se usan `--last`/`--continue`.
-**Paralelismo por canal — validación reabierta.** El default secuencial y
-`AITEAM_PARALLEL_CHANNELS` opt-in no cambian hasta completar estos bloques:
+- [ ] Reclutar y ejecutar ocho sesiones humanas consentidas según
+  `docs/FRONTEND_ORIENTATION_STUDY.md`, con órdenes contrabalanceados y sin
+  excluir bajo rendimiento.
+- [ ] Agregar únicamente conteos y medianas en un recibo separado y evaluar los
+  gates prerregistrados. No concluir adopción, retención, productividad,
+  satisfacción, causalidad o claridad universal.
 
-- [x] **Registrar el baseline histórico sin inferir promoción.** El auditor
-  offline revisó siete SQLite `full_team`: 75 runs registradas, 72 temporizadas
-  y tres excluidas. Todas las muestras tenían una sola raíz y un solo proveedor;
-  por tanto, cero esperas elegibles solo significa que el histórico no ejercita
-  el selector paralelo. Recibo:
-  `benchmarks/results/parallel_channels/parallel-channel-capacity-v1.json`.
-- [x] **Persistir la elegibilidad exacta de cada candidato al despachar.**
-  `dispatch_candidate_decisions` guarda por batch y wakeup el modo, raíz, pool
-  de capacidad efectivo, rol/work slot, `requested_at`, primera observación
-  `ready_at`, decisión y motivo estable. El mismo contrato cubre dispatch
-  secuencial y paralelo; los rechazos no necesitan crear una run. El scheduler
-  distingue dependencia y checkout activo, y selecciona por pool de capacidad,
-  no por vendor aparente. La tabla es aditiva/idempotente para DB existentes y
-  los tests cubren dependencia, checkout, mismo agente, misma raíz, mismo pool,
-  segundo work slot y estabilidad de `ready_at`.
-- [x] **Hacer que el auditor consuma esa provenance exacta.** El loop secuencial
-  fotografía el prefijo completo de candidatos antes de reclamar: el primero
-  listo queda `selected`, los demás listos `sequential_mode`, y dependencia o
-  checkout permanecen `not ready`. El auditor v2 separa espera total, espera
-  desde readiness y espera paralelizable; usa raíz/pool/work slot persistidos,
-  deduplica por wakeup y sólo una fuente `exact` puede abrir el trigger. DB sin
-  decisiones son `approximate` y batches singleton anteriores al contrato son
-  `partial_exact`. Fixtures positivos/negativos cubren calidad, cobertura y
-  exclusiones. El recibo histórico v2 conserva 7 DB/75 runs como `approximate`
-  y cero trigger exacto: `benchmarks/results/parallel_channels/parallel-channel-capacity-v2.json`.
-- [x] **Construir un A/B hermético sobre el `HeartbeatLoop` real.** El harness
-  clona cuatro raíces/cuatro pools en flag off/on: Engineer y Reviewer compiten
-  por el único work slot; dos scouts pueden acompañar al primero y uno falla de
-  forma intencional. El brazo secuencial no solapa; el paralelo registra sólo
-  los tres pares del batch admitido, rechaza Reviewer por `second_work_slot`,
-  aísla el fallo y conserva paridad exacta de runs, wakeups e issues terminales.
-  Ambos brazos terminan con cobertura de dispatch 100 % y cero runs, wakeups o
-  checkouts vivos. El recibo niega expresamente conclusión de rendimiento,
-  trigger vivo o cambio de default:
-  `benchmarks/results/parallel_channels/parallel-heartbeat-hermetic-v1.json`.
-- [ ] **Obtener un trigger vivo representativo antes de gastar modelos.** Retener
-  al menos un proyecto comparable con múltiples raíces y pools cuya provenance
-  exacta muestre espera paralelizable mayor que cero. Sin ese trigger, no abrir
-  el A/B de proveedores y mantener la tarea pendiente sin cambiar política.
-  Inventario read-only del 2026-07-22: 71 SQLite descubiertas, 70 auditables y
-  una vacía; cero errores de discovery y cero fuentes `exact` porque todas las
-  runs retenidas preceden la instrumentación. `audit_parallel_trigger_inventory.py`
-  descarta evidencia aproximada, menos de dos raíces/pools, espera nula y
-  adapters herméticos. Resultado: cero candidatos, `live_ab_allowed=false` y
-  tarea correctamente abierta; `--require-trigger` falla cerrado como gate del
-  futuro A/B. Recibo:
-  `benchmarks/results/parallel_channels/parallel-live-trigger-inventory-v1.json`.
-- [ ] **Ejecutar el A/B vivo secuencial/paralelo.** Sólo tras el trigger anterior:
-  misma cola y workspace inicial, varias semillas y canales ejecutables distintos.
-  Comparar makespan, espera, calidad/aceptación, runs, tokens/coste disponible,
-  errores de cuota, checkout, wakeups y liveness; publicar mediana y rango.
-- [ ] **Decidir y documentar la política final.** Activar o ampliar límites sólo
-  si el A/B muestra mejora consistente sin regresiones de calidad, cuota,
-  aislamiento o liveness. En cualquier otro resultado conservar el opt-in y
-  cerrar con evidencia negativa explícita.
-- [x] **Fortalecer el instrumento de benchmark antes de conclusiones nuevas**.
-  `scripts/benchmark_integrity.py` audita offline la matriz brazo×semilla,
-  duplicados, suites comparables, evidencia independiente, muestra, providers,
-  provenance, hard gates, estabilidad del signo, mediana+rango y riesgo de
-  Goodhart. Las runs incompletas quedan fuera del delta sin perderse como
-  liveness. El harness de código v4 declara suite oculta+Ruff y usa GPT-5.5 como
-  baseline por defecto; quorum añade el contrato estructural de profundidad sin
-  alterar su score léxico. La auditoría histórica acepta
-  `accessible_checkout_form` (2×2 balanceado) y niega una conclusión nueva en
-  `provider_failover`: cuatro sesiones aceptadas y dos incompletas, mediana
-  `+6,52`, rango `-8,70..+8,70`, signo inestable y resultados legacy sin
-  contrato estructural. La evidencia previa sigue siendo direccional.
-- [x] **Reducir dependencia de rúbricas léxicas en familias nuevas**. Conservar
-  los scores históricos solo para comparabilidad; cada promoción nueva debe
-  añadir al menos una evidencia independiente ejecutable o causal —hidden
-  tests, invariantes de estado, análisis estático, juez determinista o revisión
-  humana muestreada— y declarar explícitamente los constructos que no mide.
-  Cerrado: `audit_evaluation_contract` deriva la independencia de una allowlist
-  de clases de evaluador y ya no confía en un booleano autorreportado. El auditor
-  separa `conclusion_allowed` de `promotion_allowed`: evidencia legacy con suite
-  oculta conserva valor direccional, pero no puede cambiar defaults sin contrato
-  explícito, riesgo de Goodhart y `constructs_not_measured`. Los tres recibos
-  conductuales de Sonnet ya declaran esos límites; el agregado canónico conserva
-  su promoción acotada con ambos gates en `true`.
-- [ ] **Medir los flujos de orientación del usuario antes de ampliar frontend**.
-  Definir una prueba E2E y una métrica mínima para Bandeja, selección consciente
-  de `solo_lead`/`lead_quorum`/`full_team`, lectura del coste/riesgo y CTA desde
-  plan aceptado a nueva tarea. No inferir adopción o claridad por la mera
-  presencia de componentes; registrar abandono, errores y pasos innecesarios.
-  Progreso: `orientation-flow.spec.ts` añade un contrato Playwright reproducible
-  con API simulada. Chromium pasa Bandeja en 1 acción, cada perfil en 1 acción y
-  plan aceptado → tarea adjunta en 2 acciones, con 0 errores y 0 abandonos en
-  el recorrido principal. Dos probes adicionales verifican el cierre abandonado.
-  La UI expone guía cualitativa de coste operativo y riesgo sin
-  inventar precios. El recibo `orientation-flow-v1.json` declara explícitamente
-  que adopción y claridad reales siguen sin medirse; mantener este task abierto
-  hasta disponer de sesiones observadas o analítica consentida.
-  - [x] Persistencia y API local consentida. `orientation_measurement`,
-    `orientation_sessions` y `orientation_events` guardan solo sesión, flow,
-    evento allowlisted y perfil canónico: no admiten texto libre, rutas, títulos,
-    IDs de issue/workspace ni payload JSON. Sin consentimiento devuelven `409`;
-    revocar cierra la sesión, borrar elimina sesiones y eventos, y el resumen
-    declara que no mide adopción, claridad, satisfacción ni causalidad.
-  - [x] Añadir en Config el control explícito de consentimiento y borrado, con
-    explicación de almacenamiento local y sin transmisión externa.
-    Cerrado con una consola local opt-in, apagada por defecto, que expone estado,
-    sesiones, abandonos, eventos, garantías de privacidad, revocación y borrado.
-  - [x] Instrumentar Bandeja, selección/presentación de perfiles y plan aceptado →
-    tarea mediante la allowlist; cerrar sesiones y registrar abandono/error sin
-    capturar contenido del usuario.
-    El E2E Chromium activa consentimiento, recorre los tres flujos y observa 9
-    eventos primarios y 3 adicionales en dos pruebas de abandono controlado;
-    sus únicos campos son `flow`, `event` y `profile` opcional. El CTA inicia el
-    flujo; crear la tarea lo completa, quitar el plan registra abandono
-    y un error de creación solo registra `ui_error`. No se infiere lectura:
-    seleccionar registra presentación/selección, mientras la comprensión queda
-    exclusivamente en la rúbrica humana. Las filas históricas
-    `guidance_viewed` se conservan como retiradas, fuera de los conteos vigentes.
-    `pagehide` no cierra sesiones vacías;
-    solo marca completada una sesión con algún flujo completado y abandonada una
-    que conserva un flujo activo.
-  - [x] Prerregistrar muestra y criterio antes de observar sesiones. El protocolo
-    v1 fija ocho sesiones completadas (4 uso de agentes mensual o menor, 4
-    semanal o mayor), órdenes contrabalanceados, tres tareas, rúbrica sin texto,
-    umbrales discretos, exclusiones, reglas de parada y límites de interpretación.
-    `audit_orientation_study_prereg.py` rechaza cambios post hoc en gates o
-    campos privados; el template de resultados permanece vacío. Antes de observar
-    sesiones se enmendó la unidad de la hoja a participante×flujo, tres filas por
-    sesión y clave única `participant_code + flow`, sin cambiar ningún threshold.
-  - [ ] Reclutar y ejecutar las ocho sesiones humanas consentidas siguiendo
-    `docs/FRONTEND_ORIENTATION_STUDY.md`; no usar participantes expuestos a esta
-    UI/protocolo ni excluir bajo rendimiento.
-  - [ ] Agregar solo conteos/medianas en un recibo separado, evaluar todos los
-    gates congelados y mantener adopción, retención, productividad, satisfacción,
-    causalidad y claridad universal fuera de las conclusiones.
+Estado: persistencia, consentimiento, revocación/borrado, UI, E2E y preregistro
+están cerrados. El recibo sintético `orientation-flow-v1.json` no sustituye
+sesiones humanas.
 
-### Mantenimiento no bloqueante
+## Mantenimiento no bloqueante
 
-- [x] **Reconciliar la auditoría independiente del 2026-07-22 contra el árbol
-  `65eb862`**. F7/H1, limpieza concurrente, MCP, orientación, paralelismo y
-  coste quedan confirmados. El E2E de orientación ya estaba en la verificación
-  mínima y el drift ya tenía cadencia mensual+evento. Se aceptan como huecos
-  acotados la amplificación aditiva de decisiones, `build`/`lint` condicionales,
-  frescura explícita de calibración y publicación del commit local. La cifra
-  46/334 del informe se rechaza como stale: código, test, recibo y reejecución
-  coinciden en 47 modelos, 337 celdas positivas y 415 negativas.
-- [x] **Medir la amplificación de `dispatch_candidate_decisions` antes de
-  diseñar poda**. El benchmark SQLite hermético ejecuta tres repeticiones con
-  colas 1/25/100/1000 y thresholds congelados antes del resultado. Para 1000:
-  24.700 filas exactas, 24,7 por wakeup, 20,60 MB añadidos, planificación
-  mediana 8,30 ms/p95 17,13 ms y consultas medianas 0,030/0,016 ms. Recibo:
-  `benchmarks/results/dispatch_decision_growth/dispatch-decision-growth-v1.json`.
-- [x] **Definir la decisión de retención por tabla a partir del benchmark**.
-  Ninguno de los límites (25 filas/wakeup, 50 ms de planificación mediana,
-  10 ms de consulta mediana y 32 KiB/wakeup) fue superado. Decisión:
-  `retain_additive_log_and_monitor`; repetir por evento si cambian schema,
-  índices, scheduler o snapshot. `activity_log`, `run_events` y
-  `orientation_events` conservan contratos separados y no entran en un TTL
-  global.
-- [x] **Resolver el gate de implementación de mantenimiento**. El recibo fija
-  `operational_pressure_observed=false` y
-  `retention_implementation_allowed=false`; por contrato no se añade poda ni
-  presión a `loop-health`. Una futura implementación exige superar un threshold,
-  dry-run y pruebas de conservación de trabajo vivo/provenance reciente.
-
-- [x] **Hacer la limpieza de pytest segura ante concurrencia y locks de
-  Windows**. Mantener sesiones por PID, aislar también user config por sesión y
-  no abortar `pytest_configure` si un directorio stale devuelve
-  `PermissionError`: conservarlo con warning para limpieza posterior. Añadir
-  tests de sesión hermana viva y árbol stale bloqueado. Unificar el wrapper
-  canónico con las garantías ya presentes en `pytest_local_stable.py`. Cerrado:
-  el probe Windows usa `OpenProcess`/`GetExitCodeProcess` en vez de
-  `os.kill(pid, 0)`, workspace y user config comparten un ID de sesión por PID,
-  los locks stale solo generan warning y dos suites concurrentes terminan 9/9 y
-  5/5 sin eliminarse entre sí. Ambos wrappers conservan el exit code.
-- [x] **Consolidar Git al cerrar cada bloque material**. Cerrado el 2026-07-21
-  tras barrido de secretos/tamaños/runtime, `1161 passed` y tres commits
-  temáticos: `1b3650e` runtime/control plane, `66304c8` benchmarks/recibos y
-  `c695661` documentación/retirada legacy. Los 16 commits locales acumulados se
-  publicaron en `origin/master`; el árbol quedó limpio. Repetir esta disciplina
-  al terminar cada bloque para que Git siga siendo la fuente de verdad.
-- [x] **Publicar el bloque local actual en GitHub**. `65eb862` y el cierre
-  temático `c9dd733` están publicados en `origin/master`. Antes del push se
-  ejecutaron 1229 tests en verde, `git diff --check` y un escaneo del contenido
-  añadido sin credenciales; el bloque no toca frontend.
-
-- [ ] Eliminar temporales retenidos por Windows después de reinicio o liberación
-  de handles, verificando primero rutas exactas. `.pytest-workspace-tmp` y
-  `.pytest-user-config-tmp` ya no existen. Quedan solo
-  `.tmp_pytest/tmpi0cx_njg` y `.tmp_pytest/tmpmzgfjkhr`, creados el 2026-04-02:
-  son directorios temporales ignorados, ordinarios y sin reparse point, pero sus
-  ACL privadas niegan incluso enumeración al owner actual. El borrado exacto fue
-  bloqueado por la política del entorno antes de ejecutarse; no se tocó ningún
-  archivo ni se deben borrar `.pytest_cache`, `.ruff_cache` o caches de runtime.
-  Se suma `.tmp_dispatch_growth_d_46h9iy`, creado por el primer benchmark: el
-  handle SQLite ya se liberó y el harness incorpora retry acotado, pero la
-  política volvió a bloquear el `Remove-Item` exacto.
-- [x] Reconciliar este documento y `HANDOFF.md` después de cada bloque material.
-  Reconciliados el 2026-07-21 tras endurecer el benchmark, auditar temporales,
-  evaluar sesiones persistentes y corregir los IDs de Antigravity 1.1.5.
-  No crear roadmaps paralelos fechados; reabrir este control en el siguiente
-  bloque material.
-- [ ] **Compactar `task.md` en la próxima reconciliación de bloque**, no durante
-  trabajo activo. Mover a `docs/HISTORY.md` solo bloques íntegramente cerrados,
-  conservando aquí criterio de cierre, decisión vigente y enlaces a recibos.
+- [ ] Eliminar, solo tras liberar handles o corregir ACL, los temporales exactos
+  `.tmp_pytest/tmpi0cx_njg`, `.tmp_pytest/tmpmzgfjkhr` y
+  `.tmp_dispatch_growth_d_46h9iy`. No tocar caches o runtime ajenos.
+- [x] Compactar `task.md`: cierres trasladados a `docs/HISTORY.md`; el backlog
+  conserva orden, bloqueadores, criterios, decisiones y recibos canónicos.
+- [x] Publicar el bloque anterior: `65eb862`, `c9dd733` y `f1227e4` están en
+  `origin/master` después de 1229 tests y revisión de secretos/diff.
 
 ## Decisiones vigentes
 
-- `lead_quorum` solo se activa por perfil explícito; nunca mediante
-  `AITEAM_AUTO_QUORUM` ni scoring oculto.
-- Una tarea simple no requiere quorum ni review pesado.
-- Un quorum de un solo senior es degradación disponible, no equivalencia a dos
-  proveedores.
-- Compresión de contexto no implica retención semántica; se mide por familia.
-- `readOnlyHint` y `serverInfo.version` son declaraciones del servidor MCP, no
-  fronteras de confianza. El owner aprueba la allowlist y la identidad del
-  artefacto; cada adapter debe imponerlas o denegar el grant.
-- `RunExecutor` se divide por fronteras funcionales, no por objetivo de líneas.
-- No reintroducir `[WORKFLOW_PLAN]`, rondas, router multifactor, JSONL primario,
-  `TaskBoard` ni prompts raíz de proveedor. `lead_executor` sigue activo como
-  brazo Tier 1 del Lead para ejecución directa y hereda siempre su adapter.
-- AI Teams nunca crea `AGENTS.md`, `CLAUDE.md` o `GEMINI.md` en proyectos
-  externos; usa `.aiteam/instructions.md`.
-- Lead, Engineer, Reviewer y demás roles son autoridades del producto, no
-  aliases de proveedor. Un adapter puede carecer temporalmente de un transporte
-  MCP sin perder ownership ni ser sustituido silenciosamente por otro.
-- El modelo se elige dentro del adapter del rol. API optimiza coste por token;
-  suscripción optimiza capacidad frente a presión de cuota; local optimiza
-  capacidad frente a health/recursos. `test_runner` no consume un LLM.
-- Fable 5 es escalado manual, no default Tier 1. Antigravity con un modelo
-  Claude sigue siendo el mismo canal/cuota Antigravity y no cuenta por sí solo
-  como diversidad independiente de proveedor.
+- `lead_quorum` solo se activa por perfil explícito; una tarea simple no exige
+  quorum ni review pesado.
+- Lead es autoridad, no proveedor. Plan A, síntesis y Plan B pertenecen al Lead
+  asignado.
+- El default es secuencial; `AITEAM_PARALLEL_CHANNELS` sigue opt-in.
+- API, suscripción y local son canales distintos; diversidad de pool no implica
+  diversidad de perspectiva.
+- Una opción visible no es seleccionable hasta demostrar ejecutabilidad exacta.
+- OpenCode es read-only; sus permisos de tools no constituyen sandbox.
+- APIs pueden materializar ops bajo RBAC, pero no reciben MCP externo gobernado.
+- `actual_cost_cents=0` no significa cuota o tokens ilimitados.
+- Context curator usa Luna con esfuerzo `medium` tras superar auth+queue 6/6;
+  GPT-5.5 queda solo como control histórico.
+- Sonnet 4.6 es Engineer de Antigravity; Flash High conserva review/QA.
+- Gemini 3.6 y modelos gratuitos provisionales no se promocionan por discovery.
+- Una calibración stale bloquea promociones nuevas, no cambia defaults por sí sola.
+- No implementar poda de `dispatch_candidate_decisions` mientras su benchmark
+  permanezca bajo thresholds; no aplicar TTL global a telemetría durable.
 
-## Evidencia ya disponible
+## Evidencia canónica
 
-- Selector determinista: 31/31 sobre siete familias etiquetadas; mide
-  consistencia de política, no optimalidad LLM.
-- `sqlite_job_queue`: equipo 10/10 frente a `solo_lead` 9/10, con 1,84× tokens
-  y 1,73× tiempo.
-- `config_redactor`: empate 3/3; `solo_lead` fue más caro/lento que Codex directo.
-- `release_notes_indexer`: empate 7/7; `full_team` consumió muchas más runs y no
-  convergió dentro de 15 minutos.
-- `deployment_wave_planner`: ambos 16/16 en dos semillas; equipo cerró 1/2 y
-  consumió bastante más tiempo y entrada.
-- `tenant_authorizer`: `full_team` 2/5 frente a Codex directo 4/5.
-- `accessible_checkout_form`, dos semillas: `solo_lead` y `full_team` pasan
-  siempre 10/10. Solo cierra 2/2 en una run (122,7–147,8 s; 143.026–166.639
-  tokens de entrada); equipo cierra 1/2 en 10–12 runs (629,1–826,5 s;
-  787.619–1.259.330 tokens). Equipo promedia 5,38× el tiempo y 6,61× la entrada.
-  La run incompleta conserva continuación durable y liveness sano. Codex directo
-  tiene una semilla 10/10 de 374,8 s/699.317 tokens.
-- `inventory_snapshot_diff`, dos semillas: ambos perfiles pasan siempre 20/20.
-  `solo_lead` cierra 2/2 en una run (178,6–283,8 s; 296.683–864.627 tokens de
-  entrada); `full_team` cierra 0/2 dentro de 12 runs (517,1–832,6 s;
-  623.564–1.599.277 tokens), promedia 2,92× tiempo/1,91× entrada y deja un F401
-  en la segunda semilla. Codex directo obtiene 20/20 en 159,3 s/241.922 tokens.
-- Quorum Anthropic aceptado: cambios observados +4,35, −8,70 y +8,70; la media
-  pequeña y la varianza no justifican todavía una política de calidad.
+- Plan rector: `docs/MIGRATION_PAPERCLIP.md`.
+- Orquestación: `docs/ORCHESTRATION.md`.
+- Estado operativo: `HANDOFF.md`.
+- Historial cerrado: `docs/HISTORY.md`.
+- Drift/calibraciones:
+  `benchmarks/results/model_catalog_drift/model-catalog-drift-2026-07-22.json`.
+- Crecimiento de decisiones:
+  `benchmarks/results/dispatch_decision_growth/dispatch-decision-growth-v1.json`.
+- Canarios de perfiles y calibración de modelos:
+  `benchmarks/results/model_calibration/`.
+- Context curator: `benchmarks/results/context_curator*.json` y variantes
+  `context-curator-*`.
+- Paralelismo: `benchmarks/results/parallel_channels/`.
+- Coste: `benchmarks/results/cost_reporting/`.
+- Orientación: `benchmarks/results/frontend_orientation/`.
 
 ## Verificación mínima por bloque
 
+Backend/documentación:
+
 ```powershell
 .\scripts\pytest_local.bat tests -q --tb=short
-.\scripts\python_local.bat scripts\e2e_canary.py
+.\scripts\python_local.bat scripts\audit_model_flow_matrix.py
+.\scripts\python_local.bat scripts\audit_model_catalog_drift.py
+```
+
+Canarios de perfiles, solo cuando cambie runtime/orquestación:
+
+```powershell
+.\scripts\python_local.bat scripts\e2e_full_team_canary.py
 .\scripts\python_local.bat scripts\e2e_quorum_canary.py
 .\scripts\python_local.bat scripts\e2e_solo_lead_canary.py
+```
+
+Frontend, solo si el diff toca `ide-frontend/`:
+
+```powershell
 Set-Location ide-frontend
 npm run build
 npm run lint
 npm run test:e2e:orientation
 ```
 
-Ejecutar únicamente la verificación proporcional al cambio durante iteración;
-reservar la suite completa y los canarios relevantes para el cierre del bloque.
-`build`, `lint` y Playwright son obligatorios cuando el diff toca
-`ide-frontend/`; no es necesario pagarlos en un bloque exclusivamente backend o
-documental.
+Durante iteración usar gates proporcionales; reservar suite completa y canarios
+relevantes para cerrar un bloque material.

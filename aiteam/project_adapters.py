@@ -26,7 +26,7 @@ PROJECT_CONFIG_NAME = "project_config.json"
 # aliases kept here for existing imports.
 from aiteam.policies import (  # noqa: E402
     AUTONOMY_MODES,
-    JUNIOR_ROLES,
+    JUNIOR_ROLES as JUNIOR_ROLES,
     SENIOR_ROLES,
     TIER3_ROLES,
     cost_policy_enforced as _cost_policy_enforced,
@@ -124,6 +124,7 @@ def choose_adapter_for_role(
     criticality: str = "medium",
     data_class: str = "",
     required_capabilities: list[str] | None = None,
+    preferred_model: str | None = None,
 ) -> dict[str, Any] | None:
     if not profiles:
         return None
@@ -164,6 +165,10 @@ def choose_adapter_for_role(
                 required_capabilities=required_capabilities or [],
                 role_profile=role_profile,
             ).get("allowed")
+            and (
+                not str(preferred_model or "").strip()
+                or str(item.get("value") or "") == str(preferred_model).strip()
+            )
         ]
         if compatible_options:
             executable_profiles.append({**candidate, "model_options": compatible_options})
@@ -194,7 +199,10 @@ def choose_adapter_for_role(
             for item in runtime_options
             if isinstance(item, dict) and model_is_selectable(item)
         }
-    model = _choose_model(
+    preferred = str(preferred_model or "").strip()
+    model = preferred if preferred and (
+        selectable_models is None or preferred in selectable_models
+    ) else _choose_model(
         str(profile.get("id") or ""),
         role=role_key,
         needs_senior=needs_senior,
@@ -205,6 +213,16 @@ def choose_adapter_for_role(
     config = {"profile_id": profile.get("id")}
     if model:
         config["model"] = model
+        selected_option = next(
+            (
+                item for item in model_options().get(str(profile.get("id") or ""), [])
+                if str(item.get("value") or "") == model
+            ),
+            {},
+        )
+        efforts = selected_option.get("reasoning_effort_by_role")
+        if isinstance(efforts, dict) and efforts.get(role_key):
+            config["model_reasoning_effort"] = str(efforts[role_key])
     return {
         "adapter_type": profile.get("adapter_type"),
         "adapter_config": config,
@@ -403,7 +421,6 @@ def _profile_score(profile: dict[str, Any], *, needs_senior: bool) -> int:
     profile_id = str(profile.get("id") or "").lower()
     provider = str(profile.get("provider") or "").lower()
     channel = str(profile.get("channel") or "").lower()
-    adapter_type = str(profile.get("adapter_type") or "").lower()
     health_status = str((profile.get("health") or {}).get("status") or "").lower()
     score = 0
     if health_status == "ok":
@@ -450,15 +467,6 @@ def _choose_model(
     if str(channel or "").strip().lower() == "local" and configured_model:
         return configured_model if selectable_models is None or configured_model in selectable_models else None
 
-    # Calibración causal 2026-07-18: Codex mini obtuvo 0/3 en auth mientras
-    # gpt-5.5 logró 2/2 y también 1/1 en queue. Como el gate productivo no
-    # conoce las anclas semánticas ocultas, no puede escalar tras una pérdida
-    # silenciosa. Promovemos solo este perfil; Haiku mantuvo 3/3 en auth.
-    if role == "context_curator" and profile_id == "codex_subscription":
-        options = model_options().get(profile_id, [])
-        calibrated = next((item for item in options if item.get("value") == "gpt-5.5"), None)
-        if calibrated and (selectable_models is None or str(calibrated["value"]) in selectable_models):
-            return str(calibrated["value"])
     if role:
         options = model_options_for_role(profile_id, role)
         if selectable_models is not None:
@@ -504,7 +512,13 @@ def senior_model_for_profile(profile_id: str) -> str | None:
     )
 
 
-def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> list[str]:
+def ensure_quorum_agents(
+    db_path: Path,
+    *,
+    profiles: list[dict[str, Any]],
+    explicit_selections: dict[str, dict[str, Any]] | None = None,
+    target_agent_ids: list[str] | None = None,
+) -> list[str]:
     """Create quorum auditor agents if they do not already exist.
 
     Called automatically when a ``lead_quorum`` task is created so the Lead can
@@ -513,7 +527,11 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
 
     Returns the list of agent IDs that were inserted (empty if all existed).
     """
-    quorum_ids = ["role:quorum_auditor_1", "role:quorum_auditor_2"]
+    canonical_ids = ["role:quorum_auditor_1", "role:quorum_auditor_2"]
+    quorum_ids = target_agent_ids or canonical_ids
+    if any(agent_id not in canonical_ids for agent_id in quorum_ids):
+        raise ValueError("unknown quorum auditor id")
+    explicit_by_id = explicit_selections or {}
     created: list[str] = []
     profiles_by_id = {str(profile.get("id") or ""): profile for profile in profiles}
     used_profile_ids: set[str] = set()
@@ -522,6 +540,24 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         lead_id = _lead_agent_id(conn)
+        for existing in conn.execute(
+            "SELECT id, adapter_config_json FROM agents WHERE id IN (?, ?)", canonical_ids
+        ).fetchall():
+            if str(existing["id"]) in quorum_ids:
+                continue
+            try:
+                existing_config = json.loads(str(existing["adapter_config_json"] or "{}"))
+            except (TypeError, ValueError):
+                existing_config = {}
+            existing_profile_id = str(existing_config.get("profile_id") or "")
+            existing_profile = profiles_by_id.get(existing_profile_id, {})
+            if existing_profile_id:
+                used_profile_ids.add(existing_profile_id)
+            if existing_profile:
+                used_perspectives.add(profile_perspective_key(
+                    existing_profile,
+                    selected_model=str(existing_config.get("model") or ""),
+                ))
         for agent_id in quorum_ids:
             existing = conn.execute(
                 "SELECT id, adapter_config_json FROM agents WHERE id = ?", (agent_id,)
@@ -541,19 +577,47 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
                         selected_model=str(existing_config.get("model") or ""),
                     ))
                 continue
-            # Independencia por construcción: el segundo auditor intenta primero
-            # otro proveedor y después, si no existe, al menos otro perfil/canal.
-            candidates = [
-                profile for profile in profiles
-                if profile_perspective_key(profile) not in used_perspectives
-            ] or [
-                profile for profile in profiles
-                if str(profile.get("id") or "") not in used_profile_ids
-            ] or profiles
-            selection = choose_adapter_for_role("quorum_auditor", "senior", candidates)
+            explicit = explicit_by_id.get(agent_id)
+            if explicit:
+                selected_profile_id = str(explicit.get("profile_id") or "")
+                selected_profile = profiles_by_id.get(selected_profile_id)
+                if selected_profile is None:
+                    raise ValueError(f"unknown quorum profile: {selected_profile_id}")
+                selected_model = str(explicit.get("model") or "")
+                perspective = profile_perspective_key(
+                    selected_profile, selected_model=selected_model
+                )
+                if perspective in used_perspectives:
+                    raise ValueError("quorum selection must preserve provider perspective diversity")
+                selection = {
+                    "adapter_type": selected_profile.get("adapter_type") or "manual",
+                    "adapter_profile_id": selected_profile_id,
+                    "adapter_config": {
+                        **dict(selected_profile.get("config") or {}),
+                        "profile_id": selected_profile_id,
+                        "model": selected_model,
+                        "selection_intent": {
+                            "schema_version": "model_selection_intent_v1",
+                            "mode": "owner_explicit",
+                            "source": "model_role_selector",
+                            "candidate_id": explicit.get("candidate_id"),
+                        },
+                    },
+                }
+            else:
+                # Independencia por construcción: el segundo auditor intenta primero
+                # otro proveedor y después, si no existe, al menos otro perfil/canal.
+                candidates = [
+                    profile for profile in profiles
+                    if profile_perspective_key(profile) not in used_perspectives
+                ] or [
+                    profile for profile in profiles
+                    if str(profile.get("id") or "") not in used_profile_ids
+                ] or profiles
+                selection = choose_adapter_for_role("quorum_auditor", "senior", candidates)
+                selected_profile_id = str((selection or {}).get("adapter_profile_id") or "")
+                selected_profile = profiles_by_id.get(selected_profile_id, {})
             adapter_type = str((selection or {}).get("adapter_type") or "openai_api")
-            selected_profile_id = str((selection or {}).get("adapter_profile_id") or "")
-            selected_profile = profiles_by_id.get(selected_profile_id, {})
             adapter_config = json.dumps(
                 (selection or {}).get("adapter_config") or {}, ensure_ascii=False, sort_keys=True
             )
@@ -592,7 +656,9 @@ def ensure_quorum_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> li
                 if selected_profile:
                     used_perspectives.add(profile_perspective_key(
                         selected_profile,
-                        selected_model=str((selection or {}).get("model") or ""),
+                        selected_model=str(
+                            ((selection or {}).get("adapter_config") or {}).get("model") or ""
+                        ),
                     ))
         conn.commit()
     return created

@@ -104,9 +104,23 @@ def test_default_reviewer():
     assert "repo_write" not in caps
 
 
+def test_default_worker_is_explicitly_read_only():
+    assert default_capabilities_for_role("worker") == ["repo_read"]
+
+
+def test_tier2_specialists_have_explicit_contract_capabilities():
+    assert default_capabilities_for_role("test_designer") == [
+        "repo_read", "repo_write", "lsp_symbols", "lsp_references",
+    ]
+    assert default_capabilities_for_role("mcp_operator") == [
+        "repo_read", "external_mcp", "skill_run",
+    ]
+
+
 def test_default_qa():
     caps = default_capabilities_for_role("qa")
     assert "browser_test" in caps
+    assert "repo_write" in caps
 
 
 def test_default_unknown_role():

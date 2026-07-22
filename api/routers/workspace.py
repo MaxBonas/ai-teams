@@ -5,14 +5,11 @@ import os
 import shutil
 import sqlite3
 import uuid
-from typing import Literal
-
-logger = logging.getLogger(__name__)
+from pathlib import Path
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
-from pathlib import Path
 
 # Absolute import if possible, but assuming api package exists
 from api.utils import (
@@ -44,6 +41,8 @@ from aiteam.db.comments import create_comment
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.tools.catalog import default_capabilities_for_role
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 class WorkspacePath(BaseModel):
@@ -54,6 +53,8 @@ class NewProjectRequest(BaseModel):
     initial_task: str | None = None
     adapter_profile_ids: list[str] = Field(default_factory=list)
     lead_adapter_profile_id: str | None = None
+    lead_model: str | None = None
+    lead_candidate_id: str | None = None
     run_profile: Literal["solo_lead", "lead_quorum", "full_team"] = FULL_TEAM
     data_class: Literal["", "public", "internal", "confidential", "restricted"] = ""
 
@@ -168,6 +169,7 @@ async def create_project(payload: NewProjectRequest, request: Request):
         run_profile=run_profile,
         criticality="medium",
         data_class=payload.data_class,
+        preferred_model=payload.lead_model,
     )
     if not lead_selection:
         decisions: list[dict[str, Any]] = []
@@ -220,6 +222,8 @@ async def create_project(payload: NewProjectRequest, request: Request):
         initial_task=payload.initial_task,
         run_profile=run_profile,
         lead_adapter_profile_id=payload.lead_adapter_profile_id,
+        lead_model=payload.lead_model,
+        lead_candidate_id=payload.lead_candidate_id,
         data_class=payload.data_class,
     )
     # VCS del workspace: solo en proyectos RECIÉN creados por la app (un
@@ -440,6 +444,8 @@ def _initialize_project_runtime(
     initial_task: str | None = None,
     run_profile: str = FULL_TEAM,
     lead_adapter_profile_id: str | None = None,
+    lead_model: str | None = None,
+    lead_candidate_id: str | None = None,
     data_class: str = "",
 ) -> None:
     run_profile = normalize_run_profile(run_profile)
@@ -463,11 +469,20 @@ def _initialize_project_runtime(
         run_profile=run_profile,
         criticality="medium",
         data_class=data_class,
+        preferred_model=lead_model,
     )
     if not lead_adapter:
         raise ValueError("No compatible Lead adapter/model selection")
     lead_adapter_type = str((lead_adapter or {}).get("adapter_type") or "lead_builtin")
-    lead_adapter_config = json.dumps((lead_adapter or {}).get("adapter_config") or {}, ensure_ascii=False, sort_keys=True)
+    lead_config = dict((lead_adapter or {}).get("adapter_config") or {})
+    if lead_model:
+        lead_config["selection_intent"] = {
+            "schema_version": "model_selection_intent_v1",
+            "mode": "owner_explicit",
+            "source": "onboarding_model_role_selector",
+            "candidate_id": lead_candidate_id,
+        }
+    lead_adapter_config = json.dumps(lead_config, ensure_ascii=False, sort_keys=True)
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.execute("PRAGMA foreign_keys = ON")

@@ -17,6 +17,7 @@ from typing import Any
 
 from aiteam.policies import canonical_role
 from aiteam.model_compatibility import compatibility_decision
+from aiteam.model_tiers import annotate_model_tier
 
 
 DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
@@ -98,7 +99,7 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "adapter_type": "gemini_api",
         "channel": "api",
         "provider": "google",
-        "config": {"model": "gemini-3.5-flash", "api_key_ref": "secret:google:default"},
+        "config": {"model": "gemini-3.6-flash", "api_key_ref": "secret:google:default"},
     },
     {
         "id": "gemini_api_free",
@@ -113,7 +114,7 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "data_policy": "provider_free_tier",
         "privacy_note": "El free tier puede usar prompts y respuestas para mejorar productos de Google.",
         "config": {
-            "model": "gemini-3.5-flash",
+            "model": "gemini-3.6-flash",
             "api_key_ref": "secret:google-free:default",
             "api_key_env": "GEMINI_API_KEY",
             "free_tier": True,
@@ -226,7 +227,7 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "best_for": ["lead", "team_lead", "architect", "quorum_auditor"],
             "allowed_roles": [
                 "lead", "team_lead", "architect", "quorum_auditor",
-                "reviewer", "qa", "file_scout", "web_scout",
+                "reviewer", "file_scout", "web_scout",
                 "context_curator",
             ],
             "price_note": "Gratis temporal · Tier 1 por capacidad · solo datos no confidenciales",
@@ -239,8 +240,8 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "tier": "standard",
             "research_score": 82,
             "caps": ["coding", "reasoning", "synthesis", "long_ctx"],
-            "best_for": ["reviewer", "code_reviewer", "qa"],
-            "allowed_roles": ["reviewer", "qa"],
+            "best_for": ["reviewer", "code_reviewer"],
+            "allowed_roles": ["reviewer"],
             "price_note": "Gratis temporal · Tier 2 read-only · solo datos no confidenciales",
             "temporary": True,
             "confidential_data_allowed": False,
@@ -251,8 +252,8 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "tier": "standard",
             "research_score": 80,
             "caps": ["coding", "reasoning", "synthesis", "long_ctx", "multimodal"],
-            "best_for": ["reviewer", "qa", "web_scout"],
-            "allowed_roles": ["reviewer", "qa", "web_scout"],
+            "best_for": ["reviewer", "web_scout"],
+            "allowed_roles": ["reviewer", "web_scout"],
             "price_note": "Gratis temporal · Tier 2 multimodal · solo datos no confidenciales",
             "temporary": True,
             "confidential_data_allowed": False,
@@ -263,7 +264,7 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "tier": "standard",
             "caps": ["coding", "reasoning", "synthesis", "long_ctx"],
             "best_for": [],
-            "allowed_roles": ["reviewer", "qa"],
+            "allowed_roles": ["reviewer"],
             "automatic": False,
             "requires_probe": True,
             "price_note": "Gratis temporal · review durable 0/3; manual y probe-gated",
@@ -306,14 +307,9 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
         {
             "value": "gpt-5.6-luna", "label": "GPT-5.6 Luna",
             "tier": "budget", "caps": ["coding", "reasoning", "synthesis", "long_ctx"],
-            "best_for": ["file_scout", "web_scout", "worker"],
-            "price_note": "Suscripción · rápido/eficiente · Tier 3",
-        },
-        {
-            "value": "gpt-5.5", "label": "GPT-5.5 (calibrado)",
-            "tier": "premium", "caps": ["coding", "reasoning", "synthesis", "long_ctx"],
-            "best_for": ["context_curator"],
-            "price_note": "Fallback calibrado para Context Curator hasta evaluar Luna",
+            "best_for": ["file_scout", "web_scout", "context_curator", "worker"],
+            "reasoning_effort_by_role": {"context_curator": "medium"},
+            "price_note": "Suscripción · rápido/eficiente · Tier 3; curator calibrado 6/6 con effort medium",
         },
     ],
     # Ordered best-to-cheapest so options[0] → senior model, last "mini"/"nano" → junior.
@@ -348,28 +344,28 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "price_note": "$2/$12 MTok hasta 200K · preview · Tier 1",
         },
         {
-            "value": "gemini-3.5-flash", "label": "Gemini 3.5 Flash",
+            "value": "gemini-3.6-flash", "label": "Gemini 3.6 Flash",
             "tier": "standard", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": ["engineer", "software_engineer", "reviewer", "code_reviewer", "qa", "test_designer"],
-            "price_note": "$1.50/$9 MTok · estable · Tier 2",
+            "price_note": "$1.50/$7.50 MTok · estable · Tier 2",
         },
         {
-            "value": "gemini-3.1-flash-lite", "label": "Gemini 3.1 Flash-Lite",
+            "value": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite",
             "tier": "budget", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": ["file_scout", "web_scout", "context_curator"],
-            "price_note": "$0.25/$1.50 MTok · estable · Tier 3",
+            "price_note": "$0.30/$2.50 MTok · estable · Tier 3",
         },
     ],
     "gemini_api_free": [
         {
-            "value": "gemini-3.5-flash", "label": "Gemini 3.5 Flash · Free tier",
+            "value": "gemini-3.6-flash", "label": "Gemini 3.6 Flash · Free tier",
             "tier": "standard", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": ["reviewer", "code_reviewer", "qa", "test_designer"],
             "allowed_roles": ["reviewer", "qa", "test_designer"],
             "price_note": "Free tier BYOK · cuota del proyecto · datos sujetos a términos free",
         },
         {
-            "value": "gemini-3.1-flash-lite", "label": "Gemini 3.1 Flash-Lite · Free tier",
+            "value": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite · Free tier",
             "tier": "budget", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": ["file_scout", "web_scout", "context_curator"],
             "allowed_roles": ["file_scout", "web_scout", "context_curator"],
@@ -393,7 +389,9 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "max_criticality": "medium",
             "structured_output": "json_object",
             "structured_output_repair": "bounded_once_authority_preserving",
-            "price_note": "Free plan · 1000 RPD / 8K TPM publicados · Tier 3 preliminar",
+            "automatic": False,
+            "requires_probe": True,
+            "price_note": "Free plan · preview · 500 tok/s publicados · Tier 3 manual y probe-gated",
         },
         {
             "value": "openai/gpt-oss-20b", "label": "GPT-OSS 20B · Groq Free",
@@ -415,7 +413,7 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "value": "gemini-3.6-flash-medium", "label": "Gemini 3.6 Flash (Medium)",
             "tier": "standard", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": [], "automatic": False, "requires_probe": True,
-            "price_note": "Antigravity · review durable 3/3; baseline 3.5 High conservado",
+            "price_note": "Antigravity · review durable 3/3; sin señal económica para desplazar baseline",
         },
         {
             "value": "gemini-3.6-flash-low", "label": "Gemini 3.6 Flash (Low)",
@@ -927,7 +925,14 @@ def model_is_selectable(option: dict[str, Any]) -> bool:
 
 
 def model_options() -> dict[str, list[dict[str, Any]]]:
-    return MODEL_OPTIONS_BY_PROFILE
+    profiles = {str(profile.get("id") or ""): profile for profile in DEFAULT_ADAPTER_PROFILES}
+    return {
+        profile_id: [
+            annotate_model_tier(profile_id, profiles.get(profile_id, {"id": profile_id}), item)
+            for item in options
+        ]
+        for profile_id, options in MODEL_OPTIONS_BY_PROFILE.items()
+    }
 
 
 def executable_model_options(
@@ -964,7 +969,7 @@ def executable_model_options(
     }
     declared_options = selected.get("model_options") if isinstance(selected.get("model_options"), list) else []
     options = [
-        dict(item) for item in (MODEL_OPTIONS_BY_PROFILE.get(profile_id) or declared_options)
+        dict(item) for item in (model_options().get(profile_id) or declared_options)
         if isinstance(item, dict)
     ]
     status = str(selected.get("status") or "")
@@ -1470,7 +1475,7 @@ def model_options_for_role(
     if executable_only:
         options, _catalog = executable_model_options(profile_id)
     else:
-        options = MODEL_OPTIONS_BY_PROFILE.get(profile_id, [])
+        options = model_options().get(profile_id, [])
     role_key = canonical_role(role)
     profile = ROLE_CAPABILITY_PROFILES.get(role_key, {})
     needs_coding = "coding" in profile.get("capabilities_needed", [])

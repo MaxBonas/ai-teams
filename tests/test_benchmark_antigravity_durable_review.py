@@ -1,4 +1,5 @@
 from scripts.benchmark_antigravity_durable_review import (
+    CODEX_MODELS,
     OPENCODE_MODELS,
     _sum_usage,
     aggregate_reports,
@@ -17,6 +18,7 @@ def _report(model: str, seed: int, seconds: float) -> dict:
             "provider_calls": 2,
             "product_runs": 4,
             "wall_seconds": seconds,
+            "tokens": None,
         },
     }
 
@@ -61,6 +63,10 @@ def test_opencode_matrix_includes_laguna() -> None:
     assert "opencode/laguna-s-2.1-free" in OPENCODE_MODELS
 
 
+def test_durable_review_matrix_includes_codex_terra() -> None:
+    assert CODEX_MODELS == ("gpt-5.6-terra",)
+
+
 def test_aggregate_requires_unique_seeds_and_only_surfaces_stable_challenger() -> None:
     duplicate_seed_baseline = [
         _report("opencode/deepseek-v4-flash-free", seed, 10 + seed)
@@ -90,3 +96,23 @@ def test_sum_usage_counts_provider_calls_even_when_one_has_no_usage() -> None:
     ])
 
     assert totals == {"input_tokens": 17, "total_tokens": 21}
+
+
+def test_aggregate_preserves_subscription_token_telemetry_when_every_seed_has_it() -> None:
+    reports = [_report("gpt-5.6-terra", seed, 50 + seed) for seed in (1, 2, 3)]
+    for seed, report in enumerate(reports, start=1):
+        report["quota_observation"]["tokens"] = {
+            "input_tokens": 100 * seed,
+            "output_tokens": 10 * seed,
+        }
+
+    aggregate = aggregate_reports(reports)
+
+    assert aggregate["arms"][0]["token_totals"] == {
+        "input_tokens": 600,
+        "output_tokens": 60,
+    }
+    assert aggregate["conclusion"]["tokens_available"] is True
+    assert aggregate["conclusion"]["exact_pair_calibrated"] is True
+    assert aggregate["conclusion"]["decision"] == "calibrate_exact_pair"
+    assert "presión de cuota" in aggregate["conclusion"]["quota_note"]

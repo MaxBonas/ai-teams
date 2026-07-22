@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_luna_tier3_role_canary",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "medium",
+  "role": "worker",
+  "seed": 1,
+  "wall_seconds": 28.265,
+  "attempts": 2,
+  "checks": {
+    "issue_done": false,
+    "run_completed": true,
+    "valid_assignee_report": false,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": false
+  },
+  "evaluation": {
+    "anchors": {
+      "active_wave": true,
+      "owner": true,
+      "observed_rate": true,
+      "threshold": true,
+      "window": true,
+      "rollback": true,
+      "acceptance": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": null,
+  "artifact": "Checklist causal preparado y tarea cerrada.\n\n⚙ Sistema: el rol de solo lectura intentó cerrar sin un AGENT-REPORT válido. El cierre no cuenta y se permite un único reintento de formato.\n\nChecklist causal de decisión:\n1. Confirmar que la wave W3 está activa.\n2. Verificar tasa de error del 2,1 %, por encima del límite del 1,0 % durante 5 minutos.\n3. Release Engineer, como owner, pausa W3.\n4. Volver a W2.\n5. Reviewer acepta únicamente cuando los logs y la métrica confirmen la recuperación.\n\nChecklist causal reportado; la tarea queda cerrada.\n\n⚙ Sistema: segundo cierre sin AGENT-REPORT válido; la tarea queda bloqueada y vuelve al supervisor para reasignación o ajuste de modelo.",
+  "runtime": {
+    "issue_status": "blocked",
+    "run": {
+      "id": "run:af5fa8ee-32d7-4d9d-b741-2658d03689f4",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "usage_json": "{\"cached_input_tokens\": 14080, \"input_tokens\": 17995, \"output_tokens\": 368, \"reasoning_output_tokens\": 36}"
+    },
+    "input_tokens": 35587,
+    "output_tokens": 918,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-luna-worker-medium-seed-1\\.aiteam\\aiteam.db"
+  },
+  "ok": false
+}

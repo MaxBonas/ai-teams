@@ -38,7 +38,7 @@ class GeminiApiRuntime:
         self,
         descriptor: AdapterDescriptor,
         *,
-        model: str = "gemini-3.5-flash",
+        model: str = "gemini-3.6-flash",
         timeout: float = 120.0,
         free_tier: bool = False,
     ) -> None:

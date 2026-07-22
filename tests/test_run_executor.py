@@ -268,7 +268,7 @@ def _dispatch_one(db_path: Path) -> Any:
 @pytest.mark.parametrize(
     ("owner_action", "expected_model", "expected_status", "expected_queued"),
     [
-        ("accept", "gpt-5.5", "todo", 1),
+        ("accept", "gpt-5.6-terra", "todo", 1),
         ("reject", "gpt-5.6-luna", "blocked", 0),
     ],
 )
@@ -291,7 +291,7 @@ def test_model_unavailable_requires_owner_before_same_profile_fallback(
         "catalog_client_version": "0.145.0",
         "models": [],
     })
-    record_model_health("codex_subscription", "gpt-5.5", available=True, reason="run_completed")
+    record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="run_completed")
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             "UPDATE agents SET adapter_config_json = ? WHERE id = 'agent-1'",
@@ -318,7 +318,7 @@ def test_model_unavailable_requires_owner_before_same_profile_fallback(
     payload = json.loads(interaction["payload_json"])
     assert payload["reason"] == "model_fallback_required"
     assert payload["failed_model"] == "gpt-5.6-luna"
-    assert payload["proposed_model"] == "gpt-5.5"
+    assert payload["proposed_model"] == "gpt-5.6-terra"
     assert payload["changes_tier"] is True
 
     resolve_interaction(
@@ -4636,11 +4636,18 @@ def test_scout_closing_done_auto_reports_to_supervisor(tmp_path: Path) -> None:
             return {"AITEAM_RUN_ID": run_id}
 
         def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
-            # Cierra done SIN notify_supervisor — como el LLM real.
+            # Cierra con evidencia válida pero SIN notify_supervisor — como el LLM real.
             return ExecutionResult(
                 status="completed",
                 output="Verificado: archivos presentes y con contenido.",
-                actions={"issue_status": "done"},
+                actions={
+                    "issue_status": "done",
+                    "add_comments": [
+                        "Verificado.\n---AGENT-REPORT---\n"
+                        "role: file_scout\nresult: done\nissue_status: done\n"
+                        "next_owner: lead\nblocker: none\nevidence: archivos presentes"
+                    ],
+                },
             )
 
     executor = RunExecutor(db_path, AdapterRegistry([_ScoutRuntime()]))
@@ -4657,6 +4664,78 @@ def test_scout_closing_done_auto_reports_to_supervisor(tmp_path: Path) -> None:
             "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
         ).fetchone()[0]
     assert lead_wake == 1, "el cierre de un hijo debe despertar al padre SIEMPRE, sin depender del LLM"
+
+
+def test_scout_close_without_agent_report_retries_once_then_blocks(tmp_path: Path) -> None:
+    """Un summary no es evidencia: se corrige una vez y después se escala."""
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, adapter_type, supervisor_agent_id) VALUES "
+            "('role:lead', 'lead', 'L', 'subscription_cli', NULL),"
+            "('role:scout', 'file_scout', 'S', 'subscription_cli', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES "
+            "('root', 'g1', 'Root', 'in_progress', 'lead', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES "
+            "('scout-issue', 'g1', 'root', 'Verificar', 'in_progress', 'file_scout', 'role:scout')"
+        )
+        conn.commit()
+
+    class _ReportlessScoutRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Verificado, cierro.",
+                actions={"issue_status": "done"},
+            )
+
+    executor = RunExecutor(db_path, AdapterRegistry([_ReportlessScoutRuntime()]))
+    enqueue_wakeup(
+        db_path, agent_id="role:scout", source="assignment", reason="new_issue",
+        payload={"issue_id": "scout-issue", "wake_reason": "new_issue"},
+    )
+
+    first = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:scout")
+    assert first is not None
+    executor.execute(first)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT status FROM issues WHERE id='scout-issue'").fetchone()[0] == "todo"
+        retry = conn.execute(
+            "SELECT payload_json FROM wakeup_requests "
+            "WHERE agent_id='role:scout' AND reason='tier3_report_retry' AND status='queued'"
+        ).fetchone()
+        lead_wakes = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
+        ).fetchone()[0]
+    assert retry is not None
+    assert json.loads(retry[0])["wake_reason"] == "tier3_report_retry"
+    assert lead_wakes == 0
+
+    second = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:scout")
+    assert second is not None
+    executor.execute(second)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT status FROM issues WHERE id='scout-issue'").fetchone()[0] == "blocked"
+        missing_count = conn.execute(
+            "SELECT COUNT(*) FROM activity_log "
+            "WHERE action='tier3.agent_report_missing' AND target_id='scout-issue'"
+        ).fetchone()[0]
+        lead_wakes = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
+        ).fetchone()[0]
+    assert missing_count == 2
+    assert lead_wakes == 1
 
 
 # ── P3: métricas de calidad deterministas en el runner builtin ────────────────

@@ -35,7 +35,7 @@ _ADAPTER_DEFAULT_PROVIDER = {
 }
 _ADAPTER_DEFAULT_MODEL = {
     "openai_api": "gpt-5.6-terra",
-    "gemini_api": "gemini-3.5-flash",
+    "gemini_api": "gemini-3.6-flash",
     "anthropic_api": "claude-opus-4-8",
     "anthropic_sonnet": "claude-sonnet-5",
 }

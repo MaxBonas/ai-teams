@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "test_designer",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "checks_passed": 24,
+  "checks_total": 24,
+  "wall_seconds_median": 73.172,
+  "wall_seconds_range": [
+    71.235,
+    92.328
+  ],
+  "usage": {
+    "cached_input_tokens": 337664,
+    "input_tokens": 404062,
+    "output_tokens": 7956,
+    "reasoning_output_tokens": 1451,
+    "marginal_cost_cents": 0,
+    "note": "presión de cuota; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "integración multi-módulo",
+      "tests de browser",
+      "property-based testing"
+    ]
+  }
+}

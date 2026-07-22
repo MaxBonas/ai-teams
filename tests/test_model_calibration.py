@@ -12,7 +12,7 @@ from aiteam.user_config import MODEL_OPTIONS_BY_PROFILE
 
 def _versions() -> dict[str, str]:
     return {
-        "codex_subscription": "0.128.0",
+        "codex_subscription": "0.145.0",
         "antigravity_subscription": "1.1.5",
     }
 
@@ -54,19 +54,19 @@ def test_age_marks_calibration_stale_without_changing_existing_default() -> None
 
 def test_calibration_age_boundary_is_fresh_through_day_thirty() -> None:
     day_thirty = audit_promoted_model_calibrations(
-        observed_at=datetime(2026, 8, 19, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 8, 21, tzinfo=timezone.utc),
         observed_versions=_versions(),
     )
     day_thirty_one = audit_promoted_model_calibrations(
-        observed_at=datetime(2026, 8, 20, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 8, 22, tzinfo=timezone.utc),
         observed_versions=_versions(),
     )
 
     gpt_day_thirty = next(
-        entry for entry in day_thirty["entries"] if entry["model"] == "gpt-5.5"
+        entry for entry in day_thirty["entries"] if entry["model"] == "gpt-5.6-luna"
     )
     gpt_day_thirty_one = next(
-        entry for entry in day_thirty_one["entries"] if entry["model"] == "gpt-5.5"
+        entry for entry in day_thirty_one["entries"] if entry["model"] == "gpt-5.6-luna"
     )
     assert gpt_day_thirty["age_days"] == 30
     assert gpt_day_thirty["status"] == "fresh"

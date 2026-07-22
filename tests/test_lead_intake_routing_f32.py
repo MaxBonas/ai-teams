@@ -17,14 +17,13 @@ import json
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.lead_intake import (
     _suggested_issues_for_profile,
     apply_accepted_team_proposal,
-    build_team_proposal,
 )
+from aiteam.project_adapters import write_project_adapter_policy
+from aiteam.user_config import record_model_health
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -141,6 +140,53 @@ class TestApplyProposalRoutingOverride:
             f"Expected lead_executor for critical+high+code, got {row['role']}"
         )
         assert row["assignee_agent_id"] == "role:lead_executor"
+
+    def test_accepted_team_materializes_canonical_owner_selection_intent(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = tmp_path / "db.sqlite"
+        _init_db(db_path)
+        write_project_adapter_policy(tmp_path, profile_ids=["openai_api"])
+        record_model_health(
+            "openai_api", "gpt-5.6-terra", available=True, reason="test_fixture"
+        )
+        proposal = {
+            "profile": "full_team",
+            "direct_work": False,
+            "proposed_team": [{
+                "id": "role:reviewer",
+                "role": "reviewer",
+                "name": "Reviewer",
+                "seniority": "standard",
+                "adapter_type": "openai_api",
+                "adapter_config": {
+                    "profile_id": "openai_api",
+                    "model": "gpt-5.6-terra",
+                },
+                "capabilities": ["repo_read"],
+                "supervisor_agent_id": "role:lead",
+            }],
+            "suggested_issues": [],
+        }
+
+        apply_accepted_team_proposal(
+            db_path,
+            parent_issue_id="issue:root",
+            proposal=proposal,
+            source_run_id="r1",
+        )
+
+        with sqlite3.connect(str(db_path)) as conn:
+            raw = conn.execute(
+                "SELECT adapter_config_json FROM agents WHERE id='role:reviewer'"
+            ).fetchone()[0]
+        config = json.loads(raw)
+        assert config["profile_id"] == "openai_api"
+        assert config["model"] == "gpt-5.6-terra"
+        assert config["selection_intent"]["schema_version"] == "model_selection_intent_v1"
+        assert config["selection_intent"]["mode"] == "owner_explicit"
+        assert config["selection_intent"]["source"] == "accepted_team_proposal"
+        assert config["selection_intent"]["candidate_id"]
 
     def test_routing_preserves_role_for_lead_tier(self, tmp_path: Path) -> None:
         """Lead-tier roles (lead, team_lead, lead_executor) are never overridden."""

@@ -25,6 +25,7 @@ PRICE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
         "gpt-5.6-sol":  (500, 3000),
         "gpt-5.6-terra": (250, 1500),
         "gpt-5.6-luna": (100, 600),
+        # Compatibilidad FinOps para runs históricos; no son defaults activos.
         "gpt-4.1-nano": (10, 40),
         "gpt-4.1-mini": (40, 160),
         "gpt-4.1":      (200, 800),
@@ -35,6 +36,9 @@ PRICE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
     },
     "google": {
         "gemini-3.1-pro-preview": (200, 1200),
+        "gemini-3.6-flash":      (150, 750),
+        "gemini-3.5-flash-lite": (30, 250),
+        # Compatibilidad FinOps para runs históricos; no son defaults activos.
         "gemini-3.5-flash":      (150, 900),
         "gemini-3.1-flash-lite": (25, 150),
         "gemini-2.0-flash-lite": (8, 30),
@@ -50,6 +54,7 @@ PRICE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
         # no se usa como baseline durable de FinOps.
         "claude-sonnet-5":    (300, 1500),
         "claude-haiku-4-5":   (100, 500),
+        # Compatibilidad FinOps para runs históricos; no son defaults activos.
         "claude-opus-4-5":   (500, 2500),
         "claude-sonnet-4-5": (300, 1500),
         "claude-3-5-sonnet-20241022": (300, 1500),
@@ -60,7 +65,7 @@ PRICE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
 # Fallback model when the exact model is unknown for a priced provider.
 _DEFAULT_MODEL_KEY = {
     "openai": "gpt-5.6-terra",
-    "google": "gemini-3.5-flash",
+    "google": "gemini-3.6-flash",
     "anthropic": "claude-sonnet-5",
 }
 

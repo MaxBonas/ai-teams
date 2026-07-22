@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "benchmark": "coding_behavioral_calibration_aggregate",
+  "case": "cli_conversor",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "same_case": true,
+  "same_evaluation_contract": true,
+  "samples_passed": 3,
+  "wall_seconds_median": 62.921,
+  "wall_seconds_range": [
+    50.563,
+    70.797
+  ],
+  "attempts": [
+    1,
+    1,
+    1
+  ],
+  "usage": {
+    "available": true,
+    "input_tokens": 116800,
+    "output_tokens": 8812,
+    "marginal_cost_cents": 0,
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "goodhart_risk": "residual_hidden_suite_overfit",
+    "unmeasured_constructs": [
+      "repositorios grandes",
+      "cambios multiarchivo",
+      "recovery tras tests fallidos"
+    ]
+  }
+}

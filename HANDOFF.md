@@ -104,7 +104,7 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   capacidad. Quorum y review crítico ya no cuentan Codex+OpenAI/GPT como dos
   perspectivas, aunque sus cuotas puedan seguir separadas. Los perfiles custom
   conservan metadata de roles, datos, workspace, MCP y salida estructurada.
-  Verificación del estado completo: `1164 passed` el 2026-07-21.
+  Verificación del estado completo: `1237 passed` el 2026-07-22.
 - Sonnet 4.6 es ahora el modelo automático de Engineer dentro de Antigravity;
   Flash High conserva review/QA. En tres semillas de `cli_conversor`, ambos
   pasan 9/9 ocultos, pero Sonnet cierra 3/3, queda Ruff limpio 3/3 y tarda
@@ -153,10 +153,11 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   exactamente el mismo conjunto. Las runs completadas verifican el par
   perfil+modelo sin que un health check posterior borre la evidencia. El probe
   de `agy models` añadió la opción real `Gemini 3.1 Pro (Low)`.
-- El primer canario Luna/auth es solo diagnóstico: Codex CLI `0.128.0` no puede
-  ejecutar el catálogo cacheado para `0.145.0`. No se obtuvo summary ni score;
-  GPT-5.5 continúa como Context Curator calibrado y Luna queda deshabilitado en
-  Equipo hasta actualizar el CLI y repetir auth+queue.
+- El primer canario Luna/auth quedó como diagnóstico de la instalación antigua:
+  Codex CLI `0.128.0` no podía ejecutar el catálogo cacheado para `0.145.0`.
+  El CLI ya está actualizado a `0.145.0`, el cache enumera Sol/Terra/Luna y un
+  probe efímero read-only de Luna devuelve `LUNA_OK`. GPT-5.5 continúa como
+  Context Curator hasta completar el A/B causal auth+queue.
 - Lifecycle de modelos completado: `model_unavailable` bloquea la issue y crea
   una propuesta idempotente del mejor modelo ejecutable del mismo perfil,
   indicando cambios de familia/tier. Solo el owner puede aceptarla; la
@@ -328,11 +329,45 @@ Tres repeticiones 1/25/100/1000 verifican la fórmula acotada; a 1000 registra
 solo ante cambios de schema, índices, scheduler o límite de snapshot.
 
 La frescura de calibración queda implementada sin mezclarse con health. El
-registro canónico contiene tres pares promovidos: GPT-5.5/`context_curator` y
+registro canónico contiene tres pares promovidos: Luna/`context_curator` y
 Sonnet 4.6/`engineer`+`software_engineer`, con fecha, versión y recibos. El
-auditor de drift pasa ahora 5/5 gates y los tres pares están `fresh`; una entrada
-stale o no registrada bloquea solo promociones nuevas y deja el default actual
-sin cambios. Codex `cli_update_required` continúa como atención independiente.
+auditor de drift pasa 6/6 gates con Codex 0.145.0. El A/B causal auth+queue deja
+GPT-5.5 como control histórico 6/6 y promueve Luna `medium` 6/6 como Tier 3 para
+`context_curator`; Luna `low` 3/6 y prompt v2 4/6 quedan como fallos preservados.
+El inventario nuevo de cobertura conductual separa la matriz estructural de la
+evidencia real: 46 modelos/131 destinos semánticos, con 8 calibrados, 5
+parciales, 32 canarios ejecutables, 4 fixtures de tools pendientes, 3 manuales y
+79 bloqueados. Los lotes vivos quedan divididos por Codex, Antigravity, local,
+OpenCode y APIs bloqueadas en `task.md`; no se retira un modelo solo por ser
+antiguo.
+El primer bloque Codex Tier 3 alineó `worker` como rol read-only de reporting y
+cerró el hueco que permitía a worker/scouts/test runner marcar `done` sin
+`AGENT-REPORT`: hay una corrección y después bloqueo+escalado durable. Luna
+`file_scout` low/medium conserva 3/6 anclas; Luna `worker` conserva 7/7, pero
+low usa un `result` inválido y medium omite el informe. Los cuatro screenings
+quedan como diagnóstico negativo, no como promoción ni evidencia parcial.
+Luna `web_scout` completa además 3 semillas sobre MCP gobernado: 3/3 usan la
+tool read aprobada, respetan la denegación write y conservan 8/8 anclas; 2/3
+cierran en una run. Se registra `partial`, no promoción.
+Terra `medium` queda calibrado exactamente para Reviewer (3/3 ciclos durables;
+mediana 64,0 s), Engineer (27/27 tests ocultos, Ruff limpio, 3/3; mediana
+62,921 s), QA (3/3 ciclos adversariales, 30/30 checks; mediana 116,048 s) y Test
+Designer (3/3 suites, 24/24 checks, 15/15 mutantes; mediana 73,172 s) y MCP
+Operator (3/3, 36/36 checks de allow/deny, health y recovery; mediana 42,359 s).
+Codex aporta usage comparable de suscripción, no coste API. Los cinco pares
+Terra tienen capacidades explícitas y evidencia exacta; no se extrapolan.
+
+El siguiente objetivo transversal P0.M está ya registrado en `task.md` y en las
+fases 5.7/contrato de orquestación: catálogo universal de todos los proveedores
+y modelos, estadísticas y score versionado por rol, pestaña `Modelos` y ranking
+global en creación/edición de equipos. El `role_score` actual sigue siendo una
+heurística transitoria de tier+caps+`best_for`; el nuevo selector debe aplicar
+primero hard gates de adapter/modelo/compatibilidad/evidencia, funcionar en
+shadow y persistir la explicación antes de gobernar plazas nuevas. No debe
+mutar agentes existentes ni convertir score en autoridad.
+QA condicional, Test Designer y MCP Operator recuperan skills propias alineadas
+con el runtime. QA requiere escritura acotada a tests adversariales; por ello se
+retiraron dos recomendaciones QA de OpenCode sin retirar sus modelos.
 El bloque completo, incluido `65eb862`, quedó publicado en `origin/master`
 mediante `c9dd733` tras 1229 tests en verde y revisión de secretos/diff.
 
@@ -416,6 +451,68 @@ mediante `c9dd733` tras 1229 tests en verde y revisión de secretos/diff.
   supera (cuatro sesiones aceptadas, dos incompletas y signo inestable).
 - La higiene local quedó endurecida después de encontrar 11,1 GB en `.pytest-workspace-tmp`: `pytest_local.bat` y el wrapper estable crean sesiones aisladas, limpian en un proceso posterior al cierre de handles SQLite, desactivan cache/bytecode y preservan el exit code de pytest. `scripts/cleanup_test_artifacts.py` permite el barrido manual.
 - Los documentos históricos de migración pueden contener estados de fase ya superados; el banner del documento indica cómo leerlos.
+- La portabilidad y el soporte poliglota ya tienen contrato explícito en P0.I y
+  `docs/INSTALLATION_AND_INTEGRATION.md`: Windows es hoy el único bootstrap
+  verificado. Linux/macOS, `doctor --json`, releases y cada ecosistema requieren
+  fixtures/recibos antes de anunciarse como soportados; Git transporta código,
+  nunca secrets, sesiones, `runtime/`, `venv/` o `node_modules/`.
+- P0.M.1 está cerrado con `model_catalog_identity_v1` en
+  `aiteam/model_catalog_projection.py`: identidad operacional separada por
+  perfil/canal/pool, cuatro fuentes de inventario y once estados ortogonales con
+  provenance. No cambia routing; M.2 añadió el scorer por rol y M.3 conectó
+  runs/SQLite a la proyección.
+- P0.M.2 está cerrado en shadow con `model_role_score_v1`: pesos 40/15/15/20/10,
+  confidence separada, unknowns como rango, economía específica por canal, 13
+  hard gates y desempate estable solo sobre unidades comparables. No está
+  conectado aún a defaults; M.3 aporta el read model y provenance real.
+- P0.M.3 está cerrado con `model_catalog_read_model_v1`, colector SQLite
+  read-only, auditor CLI y snapshots hasheados/idempotentes. El baseline local
+  proyecta 46 candidatos/124 pares, 0 automáticos, 0 fallos y 20 warnings de
+  cobertura. Métricas runtime crudas nunca se normalizan implícitamente y los
+  inputs de benchmark no pueden anular hard gates. M.7 conectará la persistencia
+  cuando active defaults.
+- P0.M.4 está cerrado con `/api/model-catalog` y
+  `/api/model-catalog/candidates`: filtros globales, agrupación por perfil/canal,
+  ranking por rol, breakdown/confianza/métricas/recibos y deny reason proceden
+  del mismo read model, sin activar routing. El endpoint legacy por perfil
+  conserva campos y compatibilidad contextual pero delega identidad, score y
+  orden. El smoke con la DB activa devuelve 48 candidatos, 12 perfiles/canales,
+  13 reviewer y 0 auto-elegibles.
+- P0.M.5 está cerrado con una pestaña global `Modelos`: proveedores/canales,
+  filtros, matriz modelo×rol y ficha lateral de score, confianza, evidencia,
+  receipts, estados y hard gates. El read model expone gobernanza redacted del
+  perfil y economía para evitar fuentes paralelas. El E2E demuestra que un
+  bloqueado con score 95 no adelanta al elegible, además de loading/error/empty,
+  adapter verde y responsive. React consume el orden backend y no calcula score.
+  M.6 está en curso: existe `POST /api/model-catalog/selection`, con gates
+  contextuales antes del ranking, pares sin score visibles, score base inmutable
+  y ausencia explícita de default cuando nadie es auto-elegible. Un
+  `ModelRoleSelector` compartido ya sustituye los selectores divergentes en
+  onboarding/bootstrap, edición, hiring propuesto, alta directa de Equipo,
+  quorum y fallback. La composición backend única vive en
+  `contextual_model_selection`: deriva issue, tools, cuota y presupuesto y
+  alimenta tanto el POST como lifecycle. Quorum conserva diversidad de
+  perspectiva y recovery prohíbe cruzar de adapter desde su selector.
+  La elección del componente ya guarda `model_selection_intent_v1` dentro de
+  `adapter_config`; reconcile conserva intactos perfil, modelo, candidate id y
+  modo `owner_explicit`. Create/update y aceptación de hiring validan ya la
+  identidad canónica, rechazan IDs falsificados y un E2E cubre guardado → recarga
+  de estado → recarga de UI. Solo queda `mode=default`, dependiente de M.7.
+  M.6.1 deriva ahora cuota/capacidad y presupuesto desde SQLite/configuración:
+  agotamiento bloquea antes del ranking, unknown sigue unknown y solo una
+  política de cuota explícita puede sustituir economía con provenance. Dos E2E
+  cubren orden, deny por cuota, elección owner y ausencia segura de default.
+  Las tools específicas se heredan mediante `issue_id` y
+  `issue_compatibility_context`. Onboarding, alta directa, quorum y fallback
+  conservan el modelo exacto elegido con `owner_explicit`. M.6.2 queda pendiente
+  solo de retirar defaults residuales/primer-modelo y delegar gradualmente el
+  endpoint legacy por perfil. M.6.3 queda pendiente solo del modo durable
+  `default`, que ningún cliente owner puede fabricar antes de M.7.
+  M.7 dispone ya de evaluación shadow durable y endpoint explícito. El smoke
+  local persistió seis snapshots idempotentes de 48 candidatos, obtuvo seis
+  `no_winner` y confirmó cero cambios en `agents`. El constructor de
+  `mode=default` recalcula el hash y exige snapshot `auto_applied` con ganador
+  elegible; aún no existe flag ni conexión a plazas nuevas.
 - Prompts externos o antiguos que mencionen `AITEAM_AUTO_QUORUM` están obsoletos: el único disparador vivo es el perfil explícito `lead_quorum`.
 - Windows puede retener handles de SQLite o temporales de pytest. El 2026-07-21
   se confirmó que `.pytest-workspace-tmp` y `.pytest-user-config-tmp` están
@@ -425,11 +522,24 @@ mediante `c9dd733` tras 1229 tests en verde y revisión de secretos/diff.
 
 ## Verificación
 
-Suite completa verificada el `2026-07-21`:
+Suite completa verificada el `2026-07-22`:
 
 ```powershell
 .\scripts\pytest_local.bat tests -q --tb=short
-# 1164 passed in 133.58s
+# 1309 passed in 203.15s
+```
+
+Después de retirar el duplicado sombreado `GET /api/runs/{run_id}`, los 77 tests
+API pasan sin warnings OpenAPI.
+
+Frontend M.5 verificado:
+
+```powershell
+Set-Location ide-frontend
+npm run build
+npm run lint
+npm run test:e2e
+# 3 passed
 ```
 
 Canario e2e:

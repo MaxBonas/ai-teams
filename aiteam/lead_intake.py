@@ -15,6 +15,7 @@ from aiteam.compatibility_service import (
 from aiteam.db.dependencies import sync_default_child_dependencies
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.hiring_economics import log_hiring_decision
+from aiteam.model_selection_intent import normalize_owner_explicit_selection
 from aiteam.project_adapters import apply_adapter_policy_to_member, project_profiles
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES
 from aiteam.provider_identity import profile_perspective_key
@@ -412,6 +413,13 @@ def apply_accepted_team_proposal(
     compatibility_context = issue_compatibility_context(db_path, parent_issue_id)
     available_profiles = project_profiles(Path(db_path).parent)
     for member in proposal.get("proposed_team") or []:
+        member["adapter_config"] = normalize_owner_explicit_selection(
+            db_path,
+            role=str(member.get("role") or "engineer"),
+            adapter_config=member.get("adapter_config") or {},
+            issue_id=parent_issue_id,
+            source="accepted_team_proposal",
+        )
         require_compatible_assignment(
             adapter_type=str(member.get("adapter_type") or "manual"),
             adapter_config=member.get("adapter_config") or {},

@@ -422,6 +422,26 @@ CREATE TABLE IF NOT EXISTS orientation_events (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Snapshot inmutable de una decisión shadow/automática de modelo por rol.
+-- Conserva el conjunto completo; no hace de la tabla una segunda fuente de
+-- métricas. El hash permite reproducir exactamente la entrada al selector.
+CREATE TABLE IF NOT EXISTS model_role_score_snapshots (
+    id TEXT PRIMARY KEY,
+    selection_scope TEXT NOT NULL,
+    issue_id TEXT REFERENCES issues(id) ON DELETE SET NULL,
+    agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    canonical_role TEXT NOT NULL,
+    score_version TEXT NOT NULL,
+    read_model_version TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    candidates_json TEXT NOT NULL,
+    winner_candidate_id TEXT,
+    winner_reason TEXT NOT NULL DEFAULT '',
+    auto_applied INTEGER NOT NULL DEFAULT 0 CHECK (auto_applied IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(selection_scope, input_hash)
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency
     ON wakeup_requests(agent_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
@@ -442,6 +462,8 @@ CREATE INDEX IF NOT EXISTS idx_issue_documents_issue_key ON issue_documents(issu
 CREATE INDEX IF NOT EXISTS idx_issue_document_revisions_doc ON issue_document_revisions(document_id, revision_number);
 CREATE INDEX IF NOT EXISTS idx_cost_events_run ON cost_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_cost_events_agent_period ON cost_events(agent_id, period);
+CREATE INDEX IF NOT EXISTS idx_model_score_snapshots_role
+    ON model_role_score_snapshots(canonical_role, created_at);
 CREATE INDEX IF NOT EXISTS idx_quorum_sessions_issue ON quorum_sessions(issue_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_quorum_contributions_session ON quorum_contributions(session_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_orientation_events_session ON orientation_events(session_id, created_at);

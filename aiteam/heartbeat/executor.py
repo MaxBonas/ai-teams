@@ -32,7 +32,7 @@ from aiteam.db.interactions import create_interaction, get_interaction, list_int
 from aiteam.db.issues import get_issue, update_issue
 from aiteam.db.runs import append_run_event, finish_run, mark_run_running
 from aiteam.db.tool_access import record_tool_access
-from aiteam.db.agent_reports import latest_agent_report, record_agent_report
+from aiteam.db.agent_reports import agent_report_is_valid, latest_agent_report, record_agent_report
 from aiteam.db.quorum_sessions import (
     accept_quorum_synthesis,
     create_quorum_session,
@@ -48,6 +48,8 @@ from aiteam.heartbeat.scheduler import DispatchResult
 from aiteam.lead_intake import apply_accepted_team_proposal, build_team_proposal, format_team_proposal
 from aiteam.hiring_economics import log_hiring_decision
 from aiteam.mcp_runtime import mcp_servers_for_run
+from aiteam.model_selection import same_profile_fallback
+from aiteam.model_selection_context import contextual_model_selection
 from aiteam.plan_contract import PLAN_FORMAT, encode_plan_contract
 from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
 from aiteam.provider_governor import GOVERNOR
@@ -75,7 +77,6 @@ from aiteam.adapters.subscription_cli_adapter import ClaudeSubscriptionCliRuntim
 from aiteam.user_config import (
     inject_adapter_secrets,
     load_adapter_profiles,
-    model_fallback_for_role,
     profile_is_connected,
     record_model_health,
     resolve_adapter_config,
@@ -114,6 +115,7 @@ def _is_rate_limit_error(error: str | None) -> bool:
 
 _COMMENT_BODY_MAX = 4096  # hard limit stored in DB
 _AGENT_REPORT_MARKER = "---AGENT-REPORT---"
+_REPORT_REQUIRED_CLOSE_ROLES = frozenset({"worker", "file_scout", "web_scout", "test_runner"})
 
 
 def _safe_truncate_output(text: str, max_len: int = _COMMENT_BODY_MAX) -> str:
@@ -158,7 +160,7 @@ def _safe_truncate_output(text: str, max_len: int = _COMMENT_BODY_MAX) -> str:
 # questions to the user, bypassing the communication chain.
 _WORKSPACE_READER_ROLES = frozenset({
     "reviewer", "code_reviewer",
-    "file_scout",
+    "worker", "file_scout",
     "test_runner",
     "engineer", "software_engineer",
 })
@@ -302,6 +304,18 @@ class RunExecutor:
                     max_comments=_max_comments,
                 )
                 payload["wake_context"] = ctx
+                if str(ctx.get("wake_reason") or "") == "tier3_report_retry":
+                    correction = (
+                        "CORRECCIÓN OBLIGATORIA: tu run anterior intentó cerrar la tarea sin un "
+                        "AGENT-REPORT válido. Usa `add_comment` y termina su body con un bloque "
+                        "`---AGENT-REPORT---` que incluya al menos role, result, issue_status, "
+                        "next_owner, blocker y evidence; después emite `set_status: done`. "
+                        "El summary por sí solo no satisface el contrato."
+                    )
+                    existing_instruction = str(payload.get("mandatory_instruction") or "").strip()
+                    payload["mandatory_instruction"] = correction + (
+                        f"\n\n{existing_instruction}" if existing_instruction else ""
+                    )
                 # Quorum auditors review the immutable Plan A, not workspace
                 # files or sibling implementation. Do not expose other auditor
                 # answers here: first-pass independence is contractual.
@@ -2690,6 +2704,109 @@ class RunExecutor:
                 return sys.executable
         return None
 
+    def _run_has_trusted_agent_report(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        agent_role: str,
+        run_id: str,
+        add_comments: Iterable[Any],
+    ) -> bool:
+        """Return whether this exact run supplied a valid assignee report."""
+        try:
+            with contextlib.closing(_connect(self.db_path)) as conn:
+                assignee = conn.execute(
+                    "SELECT assignee_agent_id FROM issues WHERE id=?", (issue_id,)
+                ).fetchone()
+                if assignee is None or str(assignee["assignee_agent_id"] or "") != agent_id:
+                    return False
+                persisted = conn.execute(
+                    "SELECT 1 FROM agent_reports WHERE issue_id=? AND agent_id=? AND run_id=? "
+                    "AND valid=1 AND is_assignee=1 LIMIT 1",
+                    (issue_id, agent_id, run_id),
+                ).fetchone()
+            if persisted is not None:
+                return True
+        except sqlite3.OperationalError:
+            # A report carried by add_comment can still be validated before its
+            # row is persisted later in _apply_result_actions.
+            pass
+        for body in add_comments:
+            if not isinstance(body, str):
+                continue
+            parsed = _parse_agent_report(body)
+            if parsed and agent_report_is_valid(parsed=parsed, agent_role=agent_role):
+                return True
+        return False
+
+    def _deny_reportless_tier3_close(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        agent_role: str,
+        run_id: str,
+    ) -> None:
+        """Retry once, then block, when a read-only executor closes without evidence."""
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            prior = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM activity_log "
+                    "WHERE action='tier3.agent_report_missing' AND target_id=?",
+                    (issue_id,),
+                ).fetchone()[0]
+            )
+        log_activity(
+            self.db_path,
+            action="tier3.agent_report_missing",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=run_id,
+            payload={"role": agent_role, "attempt": prior + 1},
+        )
+        if prior < 1:
+            update_issue(self.db_path, issue_id=issue_id, status="todo")
+            create_comment(
+                self.db_path,
+                issue_id=issue_id,
+                author_user_id="system",
+                body=(
+                    "⚙ Sistema: el rol de solo lectura intentó cerrar sin un AGENT-REPORT "
+                    "válido. El cierre no cuenta y se permite un único reintento de formato."
+                ),
+                metadata={"source": "tier3_report_validation"},
+            )
+            enqueue_wakeup(
+                self.db_path,
+                agent_id=agent_id,
+                source="report_validation",
+                reason="tier3_report_retry",
+                payload={"issue_id": issue_id, "wake_reason": "tier3_report_retry"},
+                idempotency_key=f"tier3_report_retry:{issue_id}:{agent_id}",
+            )
+            return
+
+        update_issue(self.db_path, issue_id=issue_id, status="blocked")
+        create_comment(
+            self.db_path,
+            issue_id=issue_id,
+            author_user_id="system",
+            body=(
+                "⚙ Sistema: segundo cierre sin AGENT-REPORT válido; la tarea queda bloqueada "
+                "y vuelve al supervisor para reasignación o ajuste de modelo."
+            ),
+            metadata={"source": "tier3_report_validation"},
+        )
+        self._enqueue_supervisor_report(
+            issue_id=issue_id,
+            reporting_agent_id=agent_id,
+            source_run_id=run_id,
+            liveness_state="blocked",
+            liveness_reason="tier3_agent_report_missing",
+        )
+
     def _apply_result_actions(
         self,
         *,
@@ -2702,6 +2819,8 @@ class RunExecutor:
         issue_id = str(run.get("issue_id") or "")
         if not issue_id:
             return
+
+        _report_close_denied = False
 
         # ── Role permission matrix (op filter) ───────────────────────────────
         # Drop action groups outside the role's vocabulary, per the declarative
@@ -3062,6 +3181,26 @@ class RunExecutor:
                         reason=_quality_denied_reason,
                     )
                     issue_status = None
+            role_key = str(agent_role or "").strip().lower()
+            if (
+                issue_status == "done"
+                and role_key in _REPORT_REQUIRED_CLOSE_ROLES
+                and not self._run_has_trusted_agent_report(
+                    issue_id=issue_id,
+                    agent_id=agent_id,
+                    agent_role=role_key,
+                    run_id=str(run.get("id") or ""),
+                    add_comments=actions.get("add_comments") or [],
+                )
+            ):
+                self._deny_reportless_tier3_close(
+                    issue_id=issue_id,
+                    agent_id=agent_id,
+                    agent_role=role_key,
+                    run_id=str(run.get("id") or ""),
+                )
+                issue_status = None
+                _report_close_denied = True
         if isinstance(issue_status, str) and issue_status:
             update_issue(self.db_path, issue_id=issue_id, status=issue_status)
             log_activity(
@@ -3114,7 +3253,7 @@ class RunExecutor:
                             )
                 except Exception:
                     logger.warning("learning distillation failed at close of %s", issue_id, exc_info=True)
-        if actions.get("notify_supervisor"):
+        if actions.get("notify_supervisor") and not _report_close_denied:
             self._enqueue_supervisor_report(
                 issue_id=issue_id,
                 reporting_agent_id=agent_id,
@@ -4036,7 +4175,7 @@ class RunExecutor:
         )
 
     # Tier 3 cheap specialists — always prefer budget/local adapters.
-    _TIER3_ROLES = frozenset({"file_scout", "web_scout", "context_curator", "test_runner"})
+    _TIER3_ROLES = frozenset({"worker", "file_scout", "web_scout", "context_curator", "test_runner"})
 
     def _ensure_role_agent(
         self,
@@ -5459,15 +5598,14 @@ class RunExecutor:
         if not issue_id or not profile_id or not failed_model:
             return False
         update_issue(self.db_path, issue_id=issue_id, status="blocked")
-        compatibility_context = issue_compatibility_context(self.db_path, issue_id)
-        fallback = model_fallback_for_role(
-            profile_id,
-            failed_model,
-            agent_role,
-            run_profile=compatibility_context["run_profile"],
-            criticality=compatibility_context["criticality"],
-            data_class=compatibility_context["data_class"],
-            required_capabilities=compatibility_context["required_capabilities"],
+        fallback = same_profile_fallback(
+            contextual_model_selection(
+                self.db_path,
+                role=agent_role,
+                issue_id=issue_id,
+            ),
+            profile_id=profile_id,
+            failed_model=failed_model,
         )
         if fallback is None:
             log_activity(
@@ -5552,6 +5690,9 @@ class RunExecutor:
                 "failed_tier": fallback.get("failed_tier"),
                 "proposed_model": proposed_model,
                 "proposed_tier": fallback.get("tier"),
+                "proposed_candidate_id": fallback.get("candidate_id"),
+                "proposed_rank": fallback.get("rank"),
+                "selection_reason": fallback.get("selection_reason"),
                 "changes_family": bool(fallback.get("changes_family")),
                 "changes_tier": bool(fallback.get("changes_tier")),
                 "failure_reason": failure_reason,
@@ -5638,6 +5779,33 @@ class RunExecutor:
         expected_profile = str(payload.get("profile_id") or "").strip()
         failed_model = str(payload.get("failed_model") or "").strip()
         proposed_model = str(payload.get("proposed_model") or "").strip()
+        result_payload = _decode_json((interaction or {}).get("result_json"))
+        owner_selection = (result_payload.get("resolution_data") or {}).get("model_selection") or {}
+        owner_candidate_id = str(owner_selection.get("candidateId") or "").strip()
+        if owner_selection:
+            selected_profile = str(owner_selection.get("profileId") or "").strip()
+            selected_model = str(owner_selection.get("model") or "").strip()
+            projection = contextual_model_selection(
+                self.db_path,
+                role=str(payload.get("agent_role") or agent.get("role") or ""),
+                issue_id=issue_id,
+            )
+            selected_candidate = next(
+                (
+                    item for item in projection.get("candidates") or ()
+                    if item.get("candidate_id") == owner_candidate_id
+                    and str((item.get("identity") or {}).get("profile_id") or "") == selected_profile
+                    and str((item.get("identity") or {}).get("model_id") or "") == selected_model
+                ),
+                None,
+            )
+            if selected_profile != expected_profile or selected_candidate is None or selected_candidate.get("owner_selectable") is not True:
+                return ExecutionResult(
+                    status="failed",
+                    error_code="model_fallback_owner_selection_invalid",
+                    error="owner fallback selection is not selectable in the current adapter",
+                )
+            proposed_model = selected_model
 
         if (current_profile, current_model) != (expected_profile, failed_model):
             # The owner already changed Team while the card was pending. Preserve
@@ -5678,7 +5846,16 @@ class RunExecutor:
             update_agent(
                 self.db_path,
                 agent_id=agent_id,
-                adapter_config={**current_config, "model": proposed_model},
+                adapter_config={
+                    **current_config,
+                    "model": proposed_model,
+                    "selection_intent": {
+                        "schema_version": "model_selection_intent_v1",
+                        "mode": "owner_explicit",
+                        "source": "model_fallback_interaction",
+                        "candidate_id": owner_candidate_id or payload.get("proposed_candidate_id"),
+                    },
+                },
             )
             applied_model = proposed_model
             resolution = "proposed_fallback_applied"

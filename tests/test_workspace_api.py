@@ -273,6 +273,8 @@ def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypa
                 "name": "AnthropicLead",
                 "adapter_profile_ids": ["codex_subscription", "anthropic_api"],
                 "lead_adapter_profile_id": "anthropic_api",
+                "lead_model": "claude-opus-4-8",
+                "lead_candidate_id": "model-candidate:anthropic-opus-fixture",
                 "run_profile": "lead_quorum",
             },
         )
@@ -295,7 +297,15 @@ def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypa
             """
         ).fetchone()
 
-    assert json.loads(lead["adapter_config_json"])["profile_id"] == "anthropic_api"
+    lead_config = json.loads(lead["adapter_config_json"])
+    assert lead_config["profile_id"] == "anthropic_api"
+    assert lead_config["model"] == "claude-opus-4-8"
+    assert lead_config["selection_intent"] == {
+        "schema_version": "model_selection_intent_v1",
+        "mode": "owner_explicit",
+        "source": "onboarding_model_role_selector",
+        "candidate_id": "model-candidate:anthropic-opus-fixture",
+    }
     assert json.loads(lead["metadata_json"])["selected_by_user"] is True
     assert codex_auditor is not None
 

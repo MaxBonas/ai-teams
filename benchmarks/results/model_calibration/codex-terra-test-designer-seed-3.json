@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "test_designer",
+  "seed": 3,
+  "seconds": 73.172,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": true,
+    "all_hidden_mutants_killed": true,
+    "durable_report_done": true,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 0,
+      "stdout": "...........                                                              [100%]\n11 passed in 0.04s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_zero_quantity": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_negative_price": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_discount_over_100": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_discount": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_quantity": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_pricing.py"
+  ],
+  "run": {
+    "id": "run:cd9a56bf-150f-412f-9fea-1608cfc1a0e0",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gpt-5.6-terra",
+    "provider": "openai-codex",
+    "channel": "subscription",
+    "usage_json": "{\"cached_input_tokens\": 115200, \"input_tokens\": 130183, \"output_tokens\": 2943, \"reasoning_output_tokens\": 464}"
+  },
+  "report": {
+    "id": "312e9972-bf3d-4761-b768-5e6a32d214eb",
+    "issue_id": "issue:benchmark_test_designer",
+    "agent_id": "role:benchmark_test_designer",
+    "run_id": "run:cd9a56bf-150f-412f-9fea-1608cfc1a0e0",
+    "agent_role": "test_designer",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "test_runner",
+    "tech_match": null,
+    "blocker": null,
+    "evidence": null,
+    "valid": 1,
+    "is_assignee": 1,
+    "raw_json": "{\"evidence\": \"\", \"files_created\": \"\", \"issue_status\": \"done\", \"next_owner\": \"test_runner\", \"result\": \"done\", \"summary\": \"Suite de aceptación creada exclusivamente para pricing.quote.\", \"verification\": \"\"}",
+    "created_at": "2026-07-22 16:21:57"
+  },
+  "usage": {
+    "cached_input_tokens": 115200,
+    "input_tokens": 130183,
+    "output_tokens": 2943,
+    "reasoning_output_tokens": 464
+  },
+  "workspace": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-terra-test-designer-seed-3",
+  "ok": true
+}

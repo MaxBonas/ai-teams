@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from aiteam.skills import list_skills, load_skill
 
 SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -38,10 +36,28 @@ def test_load_skill_reviewer():
     assert "Gate note" in skill
 
 
-def test_load_skill_qa_deprecated():
-    """qa.md was deleted in Phase 2 (2026-05-12); load_skill must return None."""
+def test_load_skill_qa_conditional():
     skill = load_skill("qa")
-    assert skill is None, "qa skill has been deleted — expect None from load_skill"
+    assert skill is not None
+    assert "adversarial" in skill.lower()
+    assert "AGENT-REPORT" in skill
+    assert "inside the body of your final `add_comment`" in skill
+    assert "notify_supervisor" in skill
+
+
+def test_load_skill_test_designer_and_mcp_operator():
+    test_designer = load_skill("test_designer") or ""
+    assert "acceptance" in test_designer.lower()
+    assert "inside the body of the final `add_comment`" in test_designer
+    assert "notify_supervisor" in test_designer
+    mcp_operator = load_skill("mcp_operator") or ""
+    assert "allowlist" in mcp_operator.lower()
+    assert "inside the body of the final" in mcp_operator
+    assert "`add_comment` op" in mcp_operator
+    assert "notify_supervisor" in mcp_operator
+    assert "result: done | blocked" in mcp_operator
+    assert "issue_status: done | blocked" in mcp_operator
+    assert "health/recovery" in mcp_operator
 
 
 def test_load_skill_test_runner():
@@ -105,7 +121,9 @@ def test_list_skills_returns_all_roles():
     assert "lead" in roles
     assert "engineer" in roles
     assert "reviewer" in roles
-    assert "qa" not in roles, "qa skill has been deleted — must not appear in list_skills()"
+    assert "qa" in roles
+    assert "test_designer" in roles
+    assert "mcp_operator" in roles
     assert "quorum_senior" in roles
     # Tier 3 specialists must be discoverable
     assert "file_scout" in roles

@@ -52,7 +52,7 @@ def test_user_adapter_profiles_include_subscriptions_and_local_models(tmp_path: 
     assert profiles["local_qwen_ollama"]["config"]["model"] == "qwen2.5-coder:14b"
     assert profiles["local_gem4_lmstudio"]["config"]["local_provider"] == "lmstudio"
     assert profiles["openai_api"]["model_options"][0]["value"] == "gpt-5.6-sol"
-    assert profiles["gemini_api"]["config"]["model"] == "gemini-3.5-flash"
+    assert profiles["gemini_api"]["config"]["model"] == "gemini-3.6-flash"
     assert profiles["anthropic_api"]["config"]["model"] == "claude-sonnet-5"
     assert {item["value"] for item in profiles["antigravity_subscription"]["model_options"]} >= {
         "gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low",
@@ -145,20 +145,20 @@ def test_completed_run_evidence_reenables_exact_model_only(tmp_path: Path, monke
         "catalog_client_version": "0.145.0",
         "models": [],
     })
-    record_model_health("codex_subscription", "gpt-5.5", available=True, reason="run_completed")
+    record_model_health("codex_subscription", "gpt-5.6-luna", available=True, reason="run_completed")
 
     options, _catalog = executable_model_options("codex_subscription")
     by_value = {item["value"]: item for item in options}
 
-    assert by_value["gpt-5.5"]["available"] is True
-    assert by_value["gpt-5.5"]["availability"] == "verified"
-    assert by_value["gpt-5.6-luna"]["available"] is False
+    assert by_value["gpt-5.6-luna"]["available"] is True
+    assert by_value["gpt-5.6-luna"]["availability"] == "verified"
+    assert by_value["gpt-5.6-sol"]["available"] is False
 
     save_adapter_health("codex_subscription", {"status": "ok", "reason": "auth_present"})
     persisted = json.loads(
         (tmp_path / "user-config" / "adapter_health.json").read_text(encoding="utf-8")
     )["profiles"]["codex_subscription"]
-    assert persisted["verified_models"] == ["gpt-5.5"]
+    assert persisted["verified_models"] == ["gpt-5.6-luna"]
 
 
 def test_api_catalogue_is_visible_but_not_selectable_until_exact_probe(tmp_path: Path, monkeypatch) -> None:
@@ -333,14 +333,14 @@ def test_model_fallback_stays_in_profile_and_excludes_manual_options(tmp_path: P
         "catalog_client_version": "0.145.0",
         "models": [],
     })
-    record_model_health("codex_subscription", "gpt-5.5", available=True, reason="run_completed")
+    record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="run_completed")
 
     fallback = model_fallback_for_role(
-        "codex_subscription", "gpt-5.6-luna", "context_curator"
+        "codex_subscription", "gpt-5.6-sol", "context_curator"
     )
 
     assert fallback is not None
-    assert fallback["value"] == "gpt-5.5"
+    assert fallback["value"] == "gpt-5.6-terra"
     assert fallback["changes_family"] is False
     assert fallback["changes_tier"] is True
 

@@ -233,22 +233,30 @@ def test_parallel_drain_executes_batch_concurrently(tmp_path: Path, monkeypatch)
     both_started = threading.Barrier(2, timeout=30)
 
     class _BarrierRuntime:
-        def __init__(self, adapter_type: str, channel: str) -> None:
+        def __init__(self, adapter_type: str, channel: str, report_role: str = "") -> None:
             self.descriptor = AdapterDescriptor(adapter_type=adapter_type, channel=channel)
+            self.report_role = report_role
 
         def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
             return {}
 
         def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
             both_started.wait()  # solo pasa si el otro run también está corriendo
-            return ExecutionResult(status="completed", output="ok")
+            output = "ok"
+            if self.report_role:
+                output += (
+                    "\n---AGENT-REPORT---\n"
+                    f"role: {self.report_role}\nresult: done\nissue_status: done\n"
+                    "next_owner: lead\nblocker: none\nevidence: barrier completed"
+                )
+            return ExecutionResult(status="completed", output=output)
 
     enqueue_wakeup(db_path, agent_id="role:lead", source="manual", reason="t", payload={"issue_id": "root-a"})
     enqueue_wakeup(db_path, agent_id="role:scout", source="manual", reason="t", payload={"issue_id": "root-b"})
 
     registry = AdapterRegistry([
         _BarrierRuntime("subscription_cli", "subscription"),
-        _BarrierRuntime("openai_api", "api"),
+        _BarrierRuntime("openai_api", "api", report_role="web_scout"),
     ])
     executor = RunExecutor(db_path, registry)
     loop = HeartbeatLoop(db_path, executor)

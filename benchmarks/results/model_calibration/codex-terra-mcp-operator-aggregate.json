@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_tier_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "mcp_operator",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "checks_passed": 36,
+  "checks_total": 36,
+  "wall_seconds_median": 42.359,
+  "wall_seconds_range": [
+    27.859,
+    49.593
+  ],
+  "usage": {
+    "input_tokens": 342171,
+    "output_tokens": 4424,
+    "marginal_cost_cents": 0,
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "MCP remoto",
+      "credenciales reales",
+      "recovery durante una llamada activa"
+    ]
+  }
+}

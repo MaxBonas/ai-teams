@@ -13,8 +13,11 @@ from aiteam.db.activity_log import log_activity
 from aiteam.db.agents import create_agent, get_agent, list_agents, update_agent
 from aiteam.db.finops import check_budget
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
-from aiteam.user_config import assert_no_inline_secret, validate_model_selection
+from aiteam.model_selection_context import contextual_model_selection
+from aiteam.model_selection_intent import normalize_owner_explicit_selection
+from aiteam.user_config import assert_no_inline_secret, load_adapter_profiles, validate_model_selection
 from aiteam.compatibility_service import ModelCompatibilityError, require_compatible_assignment
+from aiteam.tools.catalog import default_capabilities_for_role
 
 router = APIRouter()
 
@@ -52,6 +55,13 @@ class UpdateAgentRequest(BaseModel):
     required_capabilities: list[str] = Field(default_factory=list)
 
 
+class QuorumReconcileRequest(BaseModel):
+    agent_id: str | None = None
+    profile_id: str | None = None
+    model: str | None = None
+    candidate_id: str | None = None
+
+
 @router.post("/api/agents")
 async def post_agent(body: CreateAgentRequest, request: Request):
     _require_api_auth_request(request)
@@ -68,10 +78,17 @@ async def post_agent(body: CreateAgentRequest, request: Request):
             data_class=body.data_class,
             required_capabilities=body.required_capabilities,
         )
+        adapter_config = normalize_owner_explicit_selection(
+            db,
+            role=body.role,
+            adapter_config=body.adapter_config,
+            source="agent_create_api",
+        )
         row = create_agent(
             db, role=body.role, name=body.name, seniority=body.seniority,
-            adapter_type=body.adapter_type, adapter_config=body.adapter_config,
-            capabilities=body.capabilities, budget_monthly_cents=body.budget_monthly_cents,
+            adapter_type=body.adapter_type, adapter_config=adapter_config,
+            capabilities=body.capabilities or default_capabilities_for_role(body.role),
+            budget_monthly_cents=body.budget_monthly_cents,
             heartbeat_interval_sec=body.heartbeat_interval_sec,
             supervisor_agent_id=body.supervisor_agent_id, metadata=body.metadata,
         )
@@ -93,7 +110,9 @@ async def post_agent(body: CreateAgentRequest, request: Request):
 
 
 @router.post("/api/agents/quorum/reconcile")
-async def post_quorum_agents_reconcile(request: Request):
+async def post_quorum_agents_reconcile(
+    request: Request, body: QuorumReconcileRequest | None = None
+):
     """Aprovisiona los dos auditores canónicos que consume ``lead_quorum``.
 
     No usa el hiring conversacional: el contrato del quorum referencia IDs
@@ -102,11 +121,41 @@ async def post_quorum_agents_reconcile(request: Request):
     _require_api_auth_request(request)
     db = _db(request)
     try:
-        created = ensure_quorum_agents(db, profiles=project_profiles(db.parent))
+        explicit: dict[str, dict[str, Any]] | None = None
+        targets: list[str] | None = None
+        profiles = project_profiles(db.parent)
+        if body is not None and any((body.agent_id, body.profile_id, body.model, body.candidate_id)):
+            if not all((body.agent_id, body.profile_id, body.model, body.candidate_id)):
+                raise ValueError("agent_id, profile_id, model and candidate_id must be provided together")
+            if body.agent_id not in {"role:quorum_auditor_1", "role:quorum_auditor_2"}:
+                raise ValueError("unknown quorum auditor id")
+            projection = contextual_model_selection(db, role="quorum_auditor")
+            candidate = next(
+                (
+                    item for item in projection.get("candidates") or ()
+                    if item.get("candidate_id") == body.candidate_id
+                    and str((item.get("identity") or {}).get("profile_id") or "") == body.profile_id
+                    and str((item.get("identity") or {}).get("model_id") or "") == body.model
+                ),
+                None,
+            )
+            if candidate is None or candidate.get("owner_selectable") is not True:
+                raise ValueError("quorum model selection is not selectable for this role")
+            profiles = load_adapter_profiles()
+            explicit = {body.agent_id: body.model_dump(exclude_none=True)}
+            targets = [body.agent_id]
+        created = ensure_quorum_agents(
+            db,
+            profiles=profiles,
+            explicit_selections=explicit,
+            target_agent_ids=targets,
+        )
         agents = [
             get_agent(db, agent_id=agent_id)
             for agent_id in ("role:quorum_auditor_1", "role:quorum_auditor_2")
         ]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except sqlite3.OperationalError as exc:
         raise _schema_err(exc)
     log_activity(
@@ -164,6 +213,13 @@ async def patch_agent(agent_id: str, body: UpdateAgentRequest, request: Request)
             new_profile = str(body.adapter_config.get("profile_id") or "")
             if (new_profile, new_model) != (old_profile, old_model):
                 validate_model_selection(body.adapter_config)
+            body.adapter_config = normalize_owner_explicit_selection(
+                db,
+                role=str(existing_decoded.get("role") or ""),
+                adapter_config=body.adapter_config,
+                source="agent_update_api",
+                existing_config=existing_config or {},
+            )
         if existing and (
             body.adapter_type is not None
             or body.adapter_config is not None

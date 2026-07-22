@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_luna_tier3_role_canary",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "medium",
+  "role": "file_scout",
+  "seed": 1,
+  "wall_seconds": 23.578,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "source_path": true,
+      "tenant_boundary": true,
+      "atomicity": false,
+      "winner_check": false,
+      "missing_test": true,
+      "next_owner": false
+    },
+    "anchors_retained": 3,
+    "anchors_total": 6,
+    "forbidden_matches": [],
+    "contract_passed": false
+  },
+  "agent_report": {
+    "role": "file_scout",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "src/tenant_checkout.py, tests/test_checkout.py"
+  },
+  "artifact": "Leídos `src/tenant_checkout.py` y `tests/test_checkout.py`. El checkout consulta y actualiza cualquier issue global `todo`, sin filtrar por tenant; solo existe un test para cola vacía, por lo que falta cobertura multi-tenant. Siguiente owner: lead.\n\nFiles read:\n- `src/tenant_checkout.py` — 306 bytes\n- `tests/test_checkout.py` — 83 bytes\n\nSummary:\n- `checkout(conn, worker_id)` ejecuta `SELECT id FROM issues WHERE status='todo' ORDER BY priority LIMIT 1` y no recibe ni filtra ningún `tenant_id`.\n- Después actualiza `status='in_progress'` y `lease_owner` únicamente por `id`.\n- Evidencia: `row = conn.execute(\"SELECT id FROM issues WHERE status='todo' ORDER BY priority LIMIT 1\").fetchone()`\n- Evidencia: `conn.execute(\"UPDATE issues SET status='in_progress', lease_owner=? WHERE id=?\", (worker_id, row[0]))`\n- El único test existente verifica que una cola vacía devuelve `None`.\n- No se encontró un test que compruebe aislamiento entre tenants o checkout restringido al tenant correcto.\n\nWhat was NOT found:\n- No faltan archivos de la lista indicada.\n\n---AGENT-REPORT---\nrole: file_scout\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: src/tenant_checkout.py, tests/test_checkout.py",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:32159aee-d00e-4779-a1eb-a11dd884a7f0",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 18384, \"output_tokens\": 1030, \"reasoning_output_tokens\": 176}"
+    },
+    "input_tokens": 18384,
+    "output_tokens": 1030,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-luna-file-scout-medium-seed-1\\.aiteam\\aiteam.db"
+  },
+  "ok": false
+}

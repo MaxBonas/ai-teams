@@ -1,0 +1,208 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "auth_migration_causal_v5",
+  "source_chars": 8501,
+  "summary_chars": 895,
+  "causal_units": [
+    {
+      "id": "obj-auth-migration",
+      "kind": "objective",
+      "statement": "Migrar autenticación de forma reversible y sin downtime.",
+      "links": [],
+      "source_comment_ids": [
+        "e6de94fc-2d60-4b95-b7e9-8f6c0895d9b2"
+      ]
+    },
+    {
+      "id": "decision-jwt-rotation",
+      "kind": "decision",
+      "statement": "Mantener JWT RS256 y rotar claves con doble validación durante 24 horas; conservar la clave antigua hasta que legacy_kid_hits sea cero durante dos horas.",
+      "links": [
+        "scope:auth-key-rotation"
+      ],
+      "source_comment_ids": [
+        "e6de94fc-2d60-4b95-b7e9-8f6c0895d9b2"
+      ]
+    },
+    {
+      "id": "scope-out",
+      "kind": "scope",
+      "statement": "Quedan fuera de alcance la migración de sesiones existentes y el cambio de proveedor de identidad.",
+      "links": [
+        "relation:excluded-from-migration"
+      ],
+      "source_comment_ids": [
+        "e6de94fc-2d60-4b95-b7e9-8f6c0895d9b2"
+      ]
+    },
+    {
+      "id": "evidence-dual-reader",
+      "kind": "evidence",
+      "statement": "Engineer implementó el lector dual en src/auth/keyring.py; pytest tests/auth -q produjo 42 tests pasados.",
+      "links": [
+        "owner:engineer",
+        "deliverable:dual-reader",
+        "accepted_by:reviewer"
+      ],
+      "source_comment_ids": [
+        "e6de94fc-2d60-4b95-b7e9-8f6c0895d9b2"
+      ]
+    },
+    {
+      "id": "open-rollback",
+      "kind": "open_item",
+      "statement": "Rollback aún no automatizado: Engineer debe crear scripts/rollback_keys.py y Reviewer debe aceptar su dry-run.",
+      "links": [
+        "owner:engineer",
+        "deliverable:rollback_keys.py",
+        "accepted_by:reviewer"
+      ],
+      "source_comment_ids": [
+        "e6de94fc-2d60-4b95-b7e9-8f6c0895d9b2"
+      ]
+    },
+    {
+      "id": "risk-jwks-cache",
+      "kind": "risk",
+      "statement": "Cachés regionales pueden conservar JWKS durante 15 minutos, afectando la rotación.",
+      "links": [
+        "metric:regional-JWKS-cache",
+        "window:15m"
+      ],
+      "source_comment_ids": [
+        "e6de94fc-2d60-4b95-b7e9-8f6c0895d9b2"
+      ]
+    },
+    {
+      "id": "escalate-401",
+      "kind": "escalation",
+      "statement": "Ante más de 0,5 % de respuestas 401 durante cinco minutos, pausar la rotación y escalar al Lead.",
+      "links": [
+        "metric:401-rate",
+        "threshold:>0.5%",
+        "window:5m",
+        "action:pause-rotation-and-escalate-to-lead"
+      ],
+      "source_comment_ids": [
+        "e6de94fc-2d60-4b95-b7e9-8f6c0895d9b2"
+      ]
+    }
+  ],
+  "causal_index_chars": 1945,
+  "artifact_chars": 2841,
+  "artifact_ratio": 0.3342,
+  "compression_ratio": 0.1053,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 8,
+  "required_total": 9,
+  "required_retention_rate": 0.8889,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": false,
+  "accepted": false,
+  "criteria": [
+    {
+      "id": "jwt_rs256",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "JWT.{0,20}RS256"
+      ]
+    },
+    {
+      "id": "dual_validation_24h",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "doble validaci[oó]n.{0,40}24 ?(h|horas)|24[- ]hour.{0,40}dual(-key)? validation|dual(-key)? validation.{0,40}24[- ]hour"
+      ]
+    },
+    {
+      "id": "legacy_kid_gate",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "legacy_kid_hits.{0,80}(0|cero).{0,40}(2 ?h|dos horas|2 consecutive hours)"
+      ]
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,80}rollback_keys\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,40}dry-run|dry-run.{0,40}Reviewer"
+      ]
+    },
+    {
+      "id": "regional_cache_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cach[eé]s\\s+regionales.{0,50}15 ?(min|minutos)|regional JWKS caches.{0,60}15 ?(min|minutes)"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0[,.]5 ?%.{0,50}401.{0,50}(5 ?min|cinco minutos|5-minute)|401.{0,50}0[,.]5 ?%.{0,50}(5 ?min|cinco minutos|5-minute)"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de (scope|alcance).{0,70}(sesiones|proveedor de identidad)|scope exclusions.{0,70}(session migration|identity provider)"
+      ]
+    }
+  ],
+  "profile_id": "codex_subscription",
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "gpt-5.6-luna",
+    "channel": "subscription"
+  },
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:d36bf371-d70d-4548-86da-e3dbe045b23f",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "attempts": 1,
+    "wall_seconds": 27.3,
+    "input_tokens": 21411,
+    "output_tokens": 1243,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.6-luna-cli-0.145.0-seed-3\\.aiteam\\aiteam.db"
+  },
+  "summary": "## Síntesis causal\n\n- Objetivo: migrar autenticación de forma reversible y sin downtime.\n- Decisiones: mantener JWT RS256; rotar claves con doble validación durante 24 h; no borrar la clave antigua hasta que `legacy_kid_hits` sea cero durante 2 h. Fuera de alcance: migrar sesiones existentes y cambiar el proveedor de identidad.\n- Completado: Engineer implementó el lector dual en `src/auth/keyring.py`; evidencia: `pytest tests/auth -q` → 42 tests pasados. Reviewer aprobó la compatibilidad.\n- Pendiente: Engineer debe crear `scripts/rollback_keys.py`; Reviewer debe aceptar su dry-run. El rollback aún no está automatizado.\n- Riesgo/escalado: cachés regionales pueden conservar JWKS hasta 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar la rotación y escalar al Lead.\n- Se descartan repeticiones, saludos, nombres temporales, estimaciones sin decisión y logs no accionables."
+}

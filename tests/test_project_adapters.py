@@ -72,7 +72,8 @@ def test_reconcile_repairs_missing_profile_with_governed_model(tmp_path: Path, m
     ('claude', not installed) and racked up 89 straight failed runs while
     every sibling carried codex_subscription."""
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
-    record_model_health("codex_subscription", "gpt-5.5", available=True, reason="test")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="test")
     db_path = tmp_path / "aiteam.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -105,7 +106,7 @@ def test_reconcile_repairs_missing_profile_with_governed_model(tmp_path: Path, m
 
     assert "role:engineer" in repaired
     assert config.get("profile_id") == "codex_subscription"
-    assert config.get("model") == "gpt-5.5"  # modelo legacy fuera de catálogo sustituido por uno verificado
+    assert config.get("model") == "gpt-5.6-terra"  # modelo legacy fuera de catálogo sustituido por uno verificado
     assert lead_config.get("model") == "gpt-5.5"  # healthy config untouched
 
 
@@ -144,6 +145,47 @@ def test_reconcile_does_not_restore_profile_outside_drifted_allowlist(tmp_path: 
     assert row["adapter_type"] == "subscription_cli"
     assert config.get("profile_id") is None
     assert config.get("model") == "gpt-5.4"
+
+
+def test_reconcile_preserves_explicit_owner_selection_intent(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="test")
+    db_path = tmp_path / "aiteam.db"
+    explicit = {
+        "profile_id": "codex_subscription",
+        "model": "gpt-5.6-terra",
+        "selection_intent": {
+            "schema_version": "model_selection_intent_v1",
+            "mode": "owner_explicit",
+            "source": "model_role_selector",
+            "candidate_id": "model-candidate:fixture",
+        },
+    }
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executemany(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, adapter_config_json, capabilities_json, supervisor_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("role:lead", "lead", "Lead", "lead", "subscription_cli",
+                 json.dumps(explicit), '["skill_run"]', None),
+                ("role:reviewer", "reviewer", "Reviewer", "senior", "subscription_cli",
+                 json.dumps(explicit), '["repo_read"]', "role:lead"),
+            ],
+        )
+        conn.commit()
+    (tmp_path / "project_config.json").write_text(
+        json.dumps({"version": 1, "adapter_profile_ids": ["codex_subscription"]}),
+        encoding="utf-8",
+    )
+
+    reconcile_project_agent_policy(db_path, include_tier3=False)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        stored = json.loads(conn.execute(
+            "SELECT adapter_config_json FROM agents WHERE id = 'role:reviewer'"
+        ).fetchone()[0])
+    assert stored == explicit
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +246,7 @@ class TestProfileScore:
         assert result is not None
         assert result["adapter_type"] == "openai_api"
 
-    def test_codex_context_curator_uses_calibrated_premium_model(self):
+    def test_codex_context_curator_uses_calibrated_budget_model(self):
         profile = {
             **_make_profile("subscription_cli", channel="subscription"),
             "id": "codex_subscription",
@@ -212,7 +254,8 @@ class TestProfileScore:
         }
         result = choose_adapter_for_role("context_curator", "cheap", [profile])
         assert result is not None
-        assert result["model"] == "gpt-5.5"
+        assert result["model"] == "gpt-5.6-luna"
+        assert result["adapter_config"]["model_reasoning_effort"] == "medium"
 
     @pytest.mark.parametrize(
         ("profile_id", "role", "expected"),
@@ -228,8 +271,8 @@ class TestProfileScore:
             ("anthropic_api", "engineer", "claude-sonnet-5"),
             ("anthropic_api", "context_curator", "claude-haiku-4-5"),
             ("gemini_api", "lead", "gemini-3.1-pro-preview"),
-            ("gemini_api", "engineer", "gemini-3.5-flash"),
-            ("gemini_api", "file_scout", "gemini-3.1-flash-lite"),
+            ("gemini_api", "engineer", "gemini-3.6-flash"),
+            ("gemini_api", "file_scout", "gemini-3.5-flash-lite"),
             ("antigravity_subscription", "lead", "gemini-3.1-pro-high"),
             ("antigravity_subscription", "engineer", "claude-sonnet-4-6"),
             ("antigravity_subscription", "reviewer", "gemini-3.5-flash-high"),
@@ -373,6 +416,84 @@ class TestEnsureQuorumAgents:
         assert rows["role:quorum_auditor_1"]["supervisor_agent_id"] == "role:lead"
         assert rows["role:quorum_auditor_2"]["supervisor_agent_id"] == "role:lead"
         assert rows["role:quorum_auditor_1"]["seniority"] == "senior"
+
+    def test_explicit_quorum_selection_persists_owner_intent_for_only_target(self, tmp_path: Path):
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profile = {
+            **_make_profile("subscription_cli", channel="subscription"),
+            "id": "codex_subscription",
+            "provider": "openai-codex",
+        }
+
+        created = ensure_quorum_agents(
+            db,
+            profiles=[profile],
+            explicit_selections={
+                "role:quorum_auditor_1": {
+                    "profile_id": "codex_subscription",
+                    "model": "gpt-5.6-sol",
+                    "candidate_id": "codex_subscription::gpt-5.6-sol",
+                }
+            },
+            target_agent_ids=["role:quorum_auditor_1"],
+        )
+
+        assert created == ["role:quorum_auditor_1"]
+        with sqlite3.connect(str(db)) as conn:
+            raw = conn.execute(
+                "SELECT adapter_config_json FROM agents WHERE id='role:quorum_auditor_1'"
+            ).fetchone()[0]
+            auditor_2 = conn.execute(
+                "SELECT 1 FROM agents WHERE id='role:quorum_auditor_2'"
+            ).fetchone()
+        config = json.loads(raw)
+        assert config["model"] == "gpt-5.6-sol"
+        assert config["selection_intent"] == {
+            "schema_version": "model_selection_intent_v1",
+            "mode": "owner_explicit",
+            "source": "model_role_selector",
+            "candidate_id": "codex_subscription::gpt-5.6-sol",
+        }
+        assert auditor_2 is None
+
+    def test_explicit_quorum_selection_rejects_duplicate_perspective(self, tmp_path: Path):
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profiles = [
+            {
+                **_make_profile("subscription_cli", channel="subscription"),
+                "id": "codex_a",
+                "provider": "openai-codex",
+            },
+            {
+                **_make_profile("subscription_cli", channel="subscription"),
+                "id": "codex_b",
+                "provider": "openai-codex",
+            },
+        ]
+        ensure_quorum_agents(
+            db,
+            profiles=profiles,
+            explicit_selections={
+                "role:quorum_auditor_1": {
+                    "profile_id": "codex_a", "model": "gpt-a", "candidate_id": "a"
+                }
+            },
+            target_agent_ids=["role:quorum_auditor_1"],
+        )
+
+        with pytest.raises(ValueError, match="perspective diversity"):
+            ensure_quorum_agents(
+                db,
+                profiles=profiles,
+                explicit_selections={
+                    "role:quorum_auditor_2": {
+                        "profile_id": "codex_b", "model": "gpt-b", "candidate_id": "b"
+                    }
+                },
+                target_agent_ids=["role:quorum_auditor_2"],
+            )
 
     def test_works_with_no_profiles(self, tmp_path: Path):
         """When no adapter profiles exist, still creates agents with openai_api default."""

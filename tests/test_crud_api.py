@@ -166,6 +166,65 @@ def test_team_api_rejects_incompatible_model_patch(client) -> None:
     assert response.json()["detail"]["code"] == "model_tier_insufficient"
 
 
+def test_agent_owner_selection_intent_survives_create_patch_and_reload(client) -> None:
+    created = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer explícito",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+        },
+        "data_class": "internal",
+    })
+    assert created.status_code == 200
+    agent_id = created.json()["agent"]["id"]
+    initial = created.json()["agent"]["adapter_config"]
+    assert initial["selection_intent"]["schema_version"] == "model_selection_intent_v1"
+    assert initial["selection_intent"]["mode"] == "owner_explicit"
+    assert initial["selection_intent"]["source"] == "agent_create_api"
+    assert initial["selection_intent"]["candidate_id"]
+
+    patched = client.patch(f"/api/agents/{agent_id}", json={
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+            "model_reasoning_effort": "high",
+        },
+        "data_class": "internal",
+    })
+    assert patched.status_code == 200
+    patched_config = patched.json()["agent"]["adapter_config"]
+    assert patched_config["selection_intent"] == initial["selection_intent"]
+    assert patched_config["model_reasoning_effort"] == "high"
+
+    reloaded = client.get(f"/api/agents/{agent_id}")
+    assert reloaded.status_code == 200
+    assert reloaded.json()["agent"]["adapter_config"] == patched_config
+
+
+def test_agent_api_rejects_selection_intent_for_another_candidate(client) -> None:
+    response = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer inconsistente",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+            "selection_intent": {
+                "schema_version": "model_selection_intent_v1",
+                "mode": "owner_explicit",
+                "source": "model_role_selector",
+                "candidate_id": "candidate:forged",
+            },
+        },
+        "data_class": "internal",
+    })
+
+    assert response.status_code == 400
+    assert "candidate_id does not match" in response.json()["detail"]
+
+
 # ── Issues ────────────────────────────────────────────────────────────────────
 
 def test_issue_crud(client):

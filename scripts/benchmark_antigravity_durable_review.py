@@ -37,7 +37,8 @@ OPENCODE_MODELS = (
     "opencode/mimo-v2.5-free",
     "opencode/laguna-s-2.1-free",
 )
-MODELS = (*ANTIGRAVITY_MODELS, *OPENCODE_MODELS)
+CODEX_MODELS = ("gpt-5.6-terra",)
+MODELS = (*ANTIGRAVITY_MODELS, *OPENCODE_MODELS, *CODEX_MODELS)
 
 BROKEN = '''def close_issue(db, issue_id, actor):
     issue = db.query("SELECT * FROM issues WHERE id=?", issue_id)
@@ -67,7 +68,12 @@ FIXED = '''def close_issue(db, issue_id, actor, enqueue_wakeup):
 
 def _init_sample(root: Path, model: str) -> Path:
     is_opencode = model.startswith("opencode/")
-    profile_id = "opencode_zen_free" if is_opencode else "antigravity_subscription"
+    is_codex = model in CODEX_MODELS
+    profile_id = (
+        "opencode_zen_free" if is_opencode
+        else "codex_subscription" if is_codex
+        else "antigravity_subscription"
+    )
     os.environ["AITEAM_USER_CONFIG_DIR"] = str(root / "user-config")
     record_model_health(
         profile_id, model, available=True,
@@ -77,14 +83,17 @@ def _init_sample(root: Path, model: str) -> Path:
     (root / "close_issue.py").write_text(BROKEN, encoding="utf-8")
     db_path = root / ".aiteam" / "aiteam.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    config = json.dumps({
+    config_payload = {
         "profile_id": profile_id,
-        "command": ["opencode.cmd"] if is_opencode else ["agy"],
-        "cli_kind": "opencode" if is_opencode else "antigravity",
+        "command": ["opencode.cmd"] if is_opencode else ["codex"] if is_codex else ["agy"],
+        "cli_kind": "opencode" if is_opencode else "codex" if is_codex else "antigravity",
         "model": model,
         "timeout_sec": 180,
-        "sandbox": "read-only" if is_opencode else "workspace-write",
-    })
+        "sandbox": "read-only" if is_opencode or is_codex else "workspace-write",
+    }
+    if is_codex:
+        config_payload["model_reasoning_effort"] = "medium"
+    config = json.dumps(config_payload)
     root_meta = json.dumps({
         "profile": "full_team",
         "data_class": "public" if is_opencode else "internal",
@@ -156,6 +165,7 @@ def _latest_report(db_path: Path) -> dict[str, Any] | None:
 
 def run_sample(root: Path, *, model: str, seed: int) -> dict[str, Any]:
     is_opencode = model.startswith("opencode/")
+    is_codex = model in CODEX_MODELS
     db_path = _init_sample(root, model)
     reject_seconds = _wake_and_run(db_path, f"reject-seed-{seed}")
     rejected = _latest_report(db_path)
@@ -203,10 +213,14 @@ def run_sample(root: Path, *, model: str, seed: int) -> dict[str, Any]:
         "schema_version": 1,
         "benchmark": "durable_review",
         "seed": seed,
-        "profile_id": "opencode_zen_free" if is_opencode else "antigravity_subscription",
-        "provider": "opencode-zen" if is_opencode else "google-antigravity",
+        "profile_id": (
+            "opencode_zen_free" if is_opencode
+            else "codex_subscription" if is_codex
+            else "antigravity_subscription"
+        ),
+        "provider": "opencode-zen" if is_opencode else "openai-codex" if is_codex else "google-antigravity",
         "channel": "free_gateway" if is_opencode else "subscription",
-        "cli_version": "1.18.4" if is_opencode else "1.1.5",
+        "cli_version": "1.18.4" if is_opencode else "0.145.0" if is_codex else "1.1.5",
         "model": model,
         "contract": "same_broken_diff_then_same_fix_v1",
         "reject": {"ok": reject_ok, "seconds": reject_seconds, "report": rejected},
@@ -250,6 +264,16 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         rows = [row for row in reports if row.get("model") == model]
         seconds = [float(row["quota_observation"]["wall_seconds"]) for row in rows]
         seeds = sorted(int(row.get("seed") or 0) for row in rows)
+        usage_rows = [row.get("quota_observation", {}).get("tokens") for row in rows]
+        tokens_available = all(isinstance(usage, dict) and bool(usage) for usage in usage_rows)
+        token_totals = {
+            key: sum(int(usage.get(key) or 0) for usage in usage_rows if isinstance(usage, dict))
+            for key in {
+                key
+                for usage in usage_rows if isinstance(usage, dict)
+                for key in usage
+            }
+        }
         arms.append({
             "model": model,
             "samples": len(rows),
@@ -267,6 +291,8 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
                 int(row.get("quota_observation", {}).get("product_runs") or len(row.get("runs") or []))
                 for row in rows
             ),
+            "tokens_available": tokens_available,
+            "token_totals": token_totals if tokens_available else None,
         })
     baseline = arms[0]
     challengers = arms[1:]
@@ -282,9 +308,16 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         if manual_catalog_candidates
         else "sin challenger estable 3/3 que justifique promoción"
     )
+    exact_pair_calibrated = bool(
+        len(arms) == 1
+        and baseline["seed_matrix_complete"]
+        and baseline["passed"] == baseline["samples"] == 3
+    )
+    if exact_pair_calibrated:
+        reason = "modelo único completa el contrato durable 3/3; calibra solo el par exacto"
     return {
         "schema_version": 1,
-        "benchmark": "antigravity_durable_review_aggregate",
+        "benchmark": "durable_review_aggregate",
         "providers": list(dict.fromkeys(str(row.get("provider") or "") for row in reports)),
         "channels": list(dict.fromkeys(str(row.get("channel") or "") for row in reports)),
         "contract": "same_broken_diff_then_same_fix_v1",
@@ -293,8 +326,9 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "matrix_balanced": balanced,
         "conclusion": {
             "behavioral_contract_tied": balanced and all_passed,
+            "exact_pair_calibrated": exact_pair_calibrated,
             "default_change_allowed": False,
-            "decision": "retain_baseline",
+            "decision": "calibrate_exact_pair" if exact_pair_calibrated else "retain_baseline",
             "baseline": baseline["model"],
             "challengers": [arm["model"] for arm in challengers],
             "manual_catalog_candidates": manual_catalog_candidates,
@@ -305,8 +339,13 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
                 ) for arm in challengers
             },
             "reason": reason,
-            "tokens_available": False,
+            "tokens_available": all(bool(arm["tokens_available"]) for arm in arms),
             "marginal_cost_cents": 0,
+            "quota_note": (
+                "tokens observados por Codex subscription; presión de cuota, no coste API"
+                if all(bool(arm["tokens_available"]) for arm in arms)
+                else "algún transporte no expone usage comparable por run"
+            ),
             "goodhart_risk": "residual: una familia de defecto y juez contractual determinista",
         },
     }

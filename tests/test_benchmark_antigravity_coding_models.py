@@ -2,6 +2,7 @@ from scripts.benchmark_antigravity_coding_models import (
     BASELINE_MODEL,
     CHALLENGER_MODEL,
     aggregate_reports,
+    aggregate_single_model_reports,
 )
 from scripts.benchmark_integrity import code_evaluation_contract
 
@@ -92,4 +93,33 @@ def test_legacy_behavioral_report_cannot_promote_without_explicit_limits() -> No
     assert aggregate["integrity"]["conclusion_allowed"] is True
     assert aggregate["integrity"]["promotion_allowed"] is False
     assert aggregate["conclusion"]["disposition"] == "insufficient_promotion_contract"
+    assert aggregate["conclusion"]["default_change_allowed"] is False
+
+
+def test_single_model_aggregate_calibrates_exact_pair_without_fake_baseline() -> None:
+    reports = [
+        {
+            "seed": seed,
+            "case": "cli_conversor",
+            "evaluation_contract": code_evaluation_contract(),
+            "arms": {
+                "gpt-5.6-terra": {
+                    **_arm(passed=9, seconds=50 + seed),
+                    "input_tokens": 100 * seed,
+                    "output_tokens": 10 * seed,
+                    "usage_available": True,
+                }
+            },
+        }
+        for seed in (1, 2, 3)
+    ]
+
+    aggregate = aggregate_single_model_reports(
+        reports, model="gpt-5.6-terra", profile_id="codex_subscription"
+    )
+
+    assert aggregate["matrix_complete"] is True
+    assert aggregate["samples_passed"] == 3
+    assert aggregate["usage"]["input_tokens"] == 600
+    assert aggregate["conclusion"]["exact_pair_calibrated"] is True
     assert aggregate["conclusion"]["default_change_allowed"] is False
