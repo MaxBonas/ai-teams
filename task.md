@@ -571,6 +571,23 @@ sí sola el privilegio de un rol.
 - [ ] **Informe de coste por entrega/proyecto**: coste real, ahorro estimado,
   latencia y calidad por perfil; solo construirlo cuando haya volumen suficiente
   para no presentar estimaciones como hechos.
+  - [x] Definir y automatizar el gate previo sin construir el informe. Cada
+    entrega es un issue raíz y su subárbol; por perfil se exigen al menos cinco
+    entregas terminales dentro de la misma SQLite, 80 % de runs temporizadas,
+    80 % con provenance de coste en `cost_events` y 80 % de entregas con señal
+    de calidad procedente del último report válido del assignee Reviewer/QA/
+    Test Runner. `scripts/audit_cost_report_readiness.py` es read-only y falla
+    cerrado con `--require-ready`.
+  - [x] Inventariar la evidencia retenida. El recibo
+    `benchmarks/results/cost_reporting/cost-report-readiness-v1.json` revisa 71
+    DB, audita 70 y no encuentra ningún proyecto listo. Hay 2 entregas
+    terminales `full_team`, 9 `lead_quorum` y 8 `solo_lead`, pero ninguna SQLite
+    contiene más de una del mismo perfil; no se pueden sumar semillas de
+    proyectos distintos para fabricar volumen.
+  - [ ] Repetir el gate cuando un proyecto real acumule cinco entregas
+    terminales comparables por perfil y cierre las coberturas exigidas.
+  - [ ] Solo entonces implementar API/UI por entrega y total de proyecto,
+    manteniendo coste real y ahorro estimado como magnitudes separadas.
 - [x] **Evaluar sesiones persistentes de CLI** con un experimento acotado. Las
   columnas `session_id_before/after` existen, pero solo activar reanudación si
   reduce re-derivación sin introducir contaminación de contexto o recovery

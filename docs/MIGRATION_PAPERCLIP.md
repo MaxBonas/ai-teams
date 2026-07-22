@@ -212,6 +212,15 @@ Estado: helpers DB implementados en `aiteam/db/runs.py`: `create_run`, `mark_run
 
 FinOps v2: `aiteam/db/finops.py` implementa `record_cost`, `check_budget`, `BudgetStatus` y periodo mensual. `RunExecutor` registra `actual_cost_cents` en `cost_events`, actualiza `agents.spent_monthly_cents` y bloquea ejecuciones si el agente ya supero `budget_monthly_cents`, creando `request_confirmation` con titulo `Budget exceeded`. El presupuesto `0` significa sin limite. Pendiente portar senales avanzadas de presion, forecast y anomalias desde `docs/legacy_rescue/` si aportan valor.
 
+Gate del informe económico (`2026-07-22`):
+`scripts/audit_cost_report_readiness.py` impide construir comparativas por
+entrega/proyecto antes de tener, dentro de una misma SQLite, cinco entregas
+terminales por perfil y coberturas mínimas del 80 % para latencia, provenance de
+coste y calidad confiable. El primer inventario audita 70 de 71 DB retenidas y
+no abre el gate: ninguna contiene más de una entrega terminal del mismo perfil.
+Las semillas de proyectos distintos no se agregan como si fueran una muestra
+operativa. Recibo: `benchmarks/results/cost_reporting/cost-report-readiness-v1.json`.
+
 ### Fase 4 — Wakeup queue paralela
 
 Objetivo: reemplazar rondas por cola durable, sin cortar compatibilidad.

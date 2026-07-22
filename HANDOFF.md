@@ -46,6 +46,15 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 
 ## Trabajo reciente
 
+- El informe económico por entrega/proyecto sigue deliberadamente sin
+  construirse: el proyecto activo no aporta volumen y el nuevo auditor read-only
+  `scripts/audit_cost_report_readiness.py` falla cerrado hasta que una misma
+  SQLite tenga cinco entregas terminales por perfil y 80 % de cobertura de
+  latencia, `cost_events` y calidad con provenance. El inventario revisa 71 DB,
+  audita 70 y encuentra cero proyectos listos; aunque hay 2 entregas terminales
+  `full_team`, 9 `lead_quorum` y 8 `solo_lead`, ninguna DB contiene más de una
+  del mismo perfil. No sumar semillas inconexas. Recibo:
+  `benchmarks/results/cost_reporting/cost-report-readiness-v1.json`.
 - Tres primeros bloques de la validación reabierta de paralelismo completados.
   `dispatch_candidate_decisions` persiste cada candidato considerado en modo
   secuencial/paralelo con raíz, pool efectivo, work slot, primera readiness

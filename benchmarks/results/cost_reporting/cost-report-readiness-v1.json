@@ -1,0 +1,2112 @@
+{
+  "schema_version": 1,
+  "audit": "cost_report_readiness",
+  "generated_at": "2026-07-22T10:09:57.685283+00:00",
+  "root": "runtime",
+  "contract": {
+    "read_only": true,
+    "models_or_network_used": false,
+    "issue_content_exported": false,
+    "delivery_definition": "root_issue_and_recursive_subtree",
+    "minimum_terminal_deliveries_per_profile": 5,
+    "minimum_timed_run_coverage": 0.8,
+    "minimum_cost_provenance_coverage": 0.8,
+    "minimum_quality_delivery_coverage": 0.8,
+    "quality_provenance": "latest_valid_assignee_report_from_review_qa_or_test_role",
+    "actual_cost_provenance": "runs.actual_cost_cents_with_cost_events_coverage_reported_separately",
+    "estimated_savings_is_not_actual_cost": true
+  },
+  "summary": {
+    "discovered_database_count": 71,
+    "audited_database_count": 70,
+    "invalid_database_count": 1,
+    "discovery_error_count": 0,
+    "pruned_ephemeral_directory_count": 107,
+    "ready_project_count": 0,
+    "terminal_deliveries_by_profile": {
+      "full_team": 2,
+      "lead_quorum": 9,
+      "solo_lead": 8
+    },
+    "profile_exclusion_counts": {
+      "insufficient_cost_provenance": 54,
+      "insufficient_latency_coverage": 51,
+      "insufficient_quality_coverage": 64,
+      "insufficient_terminal_deliveries": 70
+    }
+  },
+  "ready_projects": [],
+  "sources": [
+    {
+      "database": "runtime/bench/accessible-checkout-seed-1-full-team/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 12,
+      "profiles": [
+        {
+          "profile": "full_team",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-1-solo-lead-rerun/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 1,
+          "timed_run_count": 1,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 1,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-1-solo-lead/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 1,
+          "timed_run_count": 1,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 1,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-2-full-team/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 10,
+      "profiles": [
+        {
+          "profile": "full_team",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 10,
+          "timed_run_count": 10,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 9,
+          "cost_provenance_coverage": 0.9,
+          "quality_delivery_count": 1,
+          "quality_delivery_coverage": 1.0,
+          "quality_signal_count": 3,
+          "quality_pass_count": 3,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-2-solo-lead/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 1,
+          "timed_run_count": 1,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 1,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-seed-1/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-seed-1/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v2-seed-1/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v2-seed-1/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v3-seed-1/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v3-seed-1/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-1/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-1/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-2/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-2/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-3/claude-sonnet-4-6/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/antigravity-coding-v4-seed-3/gemini-3.5-flash-high/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-1-retry-2/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-1-retry/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-2/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-anthropic-seed-3/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-auth-codex-luna-seed-1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-seed-1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-seed-2/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-seed-3/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-seed-4/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-senior-seed-1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-codex-senior-seed-2/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-antigravity-seed-1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-mini-seed-1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-mini-seed-2-retry/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-mini-seed-2/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-mini-seed-3/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/context-curator-queue-codex-senior-seed-1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-1-solo-lead/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 1,
+          "timed_run_count": 1,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 1,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-1/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 12,
+      "profiles": [
+        {
+          "profile": "full_team",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-2-full-team/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 10,
+      "profiles": [
+        {
+          "profile": "full_team",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 10,
+          "timed_run_count": 10,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 9,
+          "cost_provenance_coverage": 0.9,
+          "quality_delivery_count": 1,
+          "quality_delivery_coverage": 1.0,
+          "quality_signal_count": 3,
+          "quality_pass_count": 3,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-2-solo-lead/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 1,
+          "timed_run_count": 1,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 1,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-1-full-team/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 12,
+      "profiles": [
+        {
+          "profile": "full_team",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-1-solo-lead/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 1,
+          "timed_run_count": 1,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 1,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-2-full-team/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 12,
+      "profiles": [
+        {
+          "profile": "full_team",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-2-solo-lead/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 1,
+          "timed_run_count": 1,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 1,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/live-run-profile-lead-quorum-20260721-seed2/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 5,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/live-run-profile-lead-quorum-20260721-seed3/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 6,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/live-run-profile-lead-quorum-20260721-seed4/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 4,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 4,
+          "timed_run_count": 4,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 3,
+          "cost_provenance_coverage": 0.75,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/live-run-profile-lead-quorum-20260721/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 6,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-multitenant-anthropic-seed-1/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 6,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-multitenant-anthropic-seed-2/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 4,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 4,
+          "timed_run_count": 4,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 4,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-multitenant-anthropic-seed-3/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 4,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 4,
+          "timed_run_count": 4,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 4,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-multitenant-seed-4/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 4,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 4,
+          "timed_run_count": 4,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 4,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-1/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-2/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 6,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 6,
+          "timed_run_count": 6,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 4,
+          "cost_provenance_coverage": 0.6667,
+          "quality_delivery_count": 1,
+          "quality_delivery_coverage": 1.0,
+          "quality_signal_count": 2,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_cost_provenance"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-3/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 5,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 5,
+          "timed_run_count": 5,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 4,
+          "cost_provenance_coverage": 0.8,
+          "quality_delivery_count": 1,
+          "quality_delivery_coverage": 1.0,
+          "quality_signal_count": 2,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-4/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 4,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 4,
+          "timed_run_count": 4,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 4,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 1,
+          "quality_delivery_coverage": 1.0,
+          "quality_signal_count": 2,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-anthropic-seed-5/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 5,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-gemma-seed-1/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 4,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-provider-failover-seed-6/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 4,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 4,
+          "timed_run_count": 4,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 4,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-1/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 5,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-2/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 5,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-3/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 5,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 5,
+          "timed_run_count": 5,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 3,
+          "cost_provenance_coverage": 0.6,
+          "quality_delivery_count": 1,
+          "quality_delivery_coverage": 1.0,
+          "quality_signal_count": 2,
+          "quality_pass_count": 1,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_cost_provenance"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-4/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 6,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-5/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 6,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/quorum-sqlite-antigravity-seed-6/lead_quorum/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 5,
+      "profiles": [
+        {
+          "profile": "lead_quorum",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/release-notes-seed-1-full-team/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 7,
+      "profiles": [
+        {
+          "profile": "full_team",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/bench/release-notes-seed-1-solo/team/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 1,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 1,
+          "run_count": 1,
+          "timed_run_count": 1,
+          "timed_run_coverage": 1.0,
+          "cost_provenance_run_count": 1,
+          "cost_provenance_coverage": 1.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/context-canary-auth-causal-v1-seed-2/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 2,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/context-canary-auth-causal-v1-seed-3/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/context-canary-auth-causal-v1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    },
+    {
+      "database": "runtime/context-canary-queue-causal-v1-seed-1/.aiteam/aiteam.db",
+      "delivery_count": 1,
+      "terminal_delivery_count": 0,
+      "terminal_run_count": 1,
+      "profiles": [
+        {
+          "profile": "solo_lead",
+          "delivery_count": 1,
+          "terminal_delivery_count": 0,
+          "run_count": 0,
+          "timed_run_count": 0,
+          "timed_run_coverage": 0.0,
+          "cost_provenance_run_count": 0,
+          "cost_provenance_coverage": 0.0,
+          "quality_delivery_count": 0,
+          "quality_delivery_coverage": 0.0,
+          "quality_signal_count": 0,
+          "quality_pass_count": 0,
+          "ready": false,
+          "exclusions": [
+            "insufficient_terminal_deliveries",
+            "insufficient_latency_coverage",
+            "insufficient_cost_provenance",
+            "insufficient_quality_coverage"
+          ]
+        }
+      ],
+      "report_ready": false
+    }
+  ],
+  "invalid_databases": [
+    {
+      "database": "runtime/aiteam.db",
+      "error": "empty_database"
+    }
+  ],
+  "discovery_errors": [],
+  "conclusion": {
+    "cost_report_allowed": false,
+    "decision": "collect_more_deliveries",
+    "reason": "ningún proyecto retenido satisface todavía volumen y cobertura por perfil"
+  }
+}
