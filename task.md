@@ -605,11 +605,16 @@ sí sola el privilegio de un rol.
   no por vendor aparente. La tabla es aditiva/idempotente para DB existentes y
   los tests cubren dependencia, checkout, mismo agente, misma raíz, mismo pool,
   segundo work slot y estabilidad de `ready_at`.
-- [ ] **Hacer que el auditor consuma esa provenance exacta.** Mantener los DB
-  históricos como evidencia `approximate`, separar espera total de espera
-  paralelizable y no contar tiempo bloqueado por dependencias o checkout.
-  Cierre: fixtures positivos/negativos y JSON que declare cobertura y calidad de
-  evidencia.
+- [x] **Hacer que el auditor consuma esa provenance exacta.** El loop secuencial
+  fotografía el prefijo completo de candidatos antes de reclamar: el primero
+  listo queda `selected`, los demás listos `sequential_mode`, y dependencia o
+  checkout permanecen `not ready`. El auditor v2 separa espera total, espera
+  desde readiness y espera paralelizable; usa raíz/pool/work slot persistidos,
+  deduplica por wakeup y sólo una fuente `exact` puede abrir el trigger. DB sin
+  decisiones son `approximate` y batches singleton anteriores al contrato son
+  `partial_exact`. Fixtures positivos/negativos cubren calidad, cobertura y
+  exclusiones. El recibo histórico v2 conserva 7 DB/75 runs como `approximate`
+  y cero trigger exacto: `benchmarks/results/parallel_channels/parallel-channel-capacity-v2.json`.
 - [ ] **Construir un A/B hermético sobre el `HeartbeatLoop` real.** Ejecutar la
   misma cola determinista con flag off/on, al menos tres raíces, tres pools, un
   único work slot y una rama que falla. Cierre: solapamiento sólo entre ramas

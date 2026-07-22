@@ -57,9 +57,21 @@ def test_run_once_drains_wakeup_queue(tmp_path: Path) -> None:
         completed_runs = conn.execute(
             "SELECT COUNT(*) FROM runs WHERE status = 'completed'",
         ).fetchone()[0]
+        first_batch = conn.execute(
+            """
+            SELECT decision, reason
+            FROM dispatch_candidate_decisions
+            WHERE batch_id = (
+                SELECT batch_id FROM dispatch_candidate_decisions
+                ORDER BY considered_at, batch_id LIMIT 1
+            )
+            ORDER BY requested_at, wakeup_request_id
+            """
+        ).fetchall()
 
     assert pending == 0
     assert completed_runs == 2
+    assert first_batch == [("selected", "selected"), ("rejected", "sequential_mode")]
 
 
 def test_run_once_returns_zero_when_queue_empty(tmp_path: Path) -> None:

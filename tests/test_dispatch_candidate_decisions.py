@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Iterator
 
 from aiteam.db.migration import SCHEMA_PATH
-from aiteam.heartbeat.scheduler import HeartbeatScheduler, plan_parallel_batch
+from aiteam.heartbeat.scheduler import (
+    HeartbeatScheduler,
+    plan_parallel_batch,
+    plan_sequential_batch,
+)
 
 
 @contextmanager
@@ -244,3 +248,41 @@ def test_sequential_selection_records_ready_provenance(tmp_path: Path) -> None:
         "capacity_pool": "lead-pool",
     }
     assert row["ready_at"] is not None
+
+
+def test_sequential_plan_snapshots_ready_waiters_and_blockers(tmp_path: Path) -> None:
+    path = tmp_path / "sequential-full-queue.db"
+    with _init_db(path) as conn:
+        for agent_id, pool in (("a1", "pool-a"), ("a2", "pool-b"), ("a3", "pool-c")):
+            _agent(conn, agent_id, "file_scout", pool)
+            _issue(conn, f"root-{agent_id}", agent_id, role="file_scout")
+        conn.execute(
+            "INSERT INTO issue_dependencies (issue_id, depends_on_issue_id) "
+            "VALUES ('root-a3', 'root-a1')"
+        )
+        _wakeup(conn, "w1", "a1", "root-a1", 1)
+        _wakeup(conn, "w2", "a2", "root-a2", 2)
+        _wakeup(conn, "w3", "a3", "root-a3", 3)
+        conn.commit()
+
+    plan = plan_sequential_batch(path)
+
+    assert plan.selected_wakeup_ids == ["w1"]
+    assert {
+        item["wakeup_id"]: (item["decision"], item["reason"])
+        for item in plan.decisions
+    } == {
+        "w1": ("selected", "selected"),
+        "w2": ("rejected", "sequential_mode"),
+        "w3": ("rejected", "dependency_blocked"),
+    }
+    with sqlite3.connect(str(path)) as conn:
+        rows = conn.execute(
+            "SELECT wakeup_request_id, reason, ready_at "
+            "FROM dispatch_candidate_decisions WHERE batch_id = ? ORDER BY requested_at",
+            (plan.batch_id,),
+        ).fetchall()
+    assert [row[1] for row in rows] == ["selected", "sequential_mode", "dependency_blocked"]
+    assert rows[0][2] is not None
+    assert rows[1][2] == rows[0][2]
+    assert rows[2][2] is None

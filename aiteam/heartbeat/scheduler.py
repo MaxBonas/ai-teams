@@ -279,7 +279,10 @@ def batch_candidates(db_path: Path, *, limit: int = 25) -> list[dict[str, Any]]:
 def plan_parallel_batch(db_path: Path, *, max_runs: int, limit: int = 25) -> ParallelBatchPlan:
     """Evalúa y persiste un snapshot completo antes de reclamar wakeups."""
     candidates = batch_candidates(db_path, limit=limit)
-    decisions = evaluate_parallel_batch(candidates, max_runs=max_runs)
+    decisions = [
+        _with_snapshot_contract(item, limit=limit)
+        for item in evaluate_parallel_batch(candidates, max_runs=max_runs)
+    ]
     batch_id = f"parallel:{uuid.uuid4()}"
     record_dispatch_decisions(
         db_path,
@@ -297,6 +300,59 @@ def plan_parallel_batch(db_path: Path, *, max_runs: int, limit: int = 25) -> Par
             if item["decision"] == "selected"
         ],
     )
+
+
+def plan_sequential_batch(db_path: Path, *, limit: int = 25) -> ParallelBatchPlan:
+    """Persiste toda la cola visible antes del siguiente dispatch secuencial.
+
+    El primer candidato listo conserva la selección FIFO productiva. Los demás
+    candidatos listos quedan como ``sequential_mode``: ésta es la evidencia
+    exacta de que esperaron por la política, no por dependencias o checkout.
+    """
+    candidates = batch_candidates(db_path, limit=limit)
+    selected = False
+    decisions: list[dict[str, Any]] = []
+    for candidate in candidates:
+        reason = str(candidate.get("readiness_reason") or "")
+        if reason:
+            decision = "rejected"
+        elif not selected:
+            decision = "selected"
+            reason = "selected"
+            selected = True
+        else:
+            decision = "rejected"
+            reason = "sequential_mode"
+        decisions.append(_with_snapshot_contract(
+            {**candidate, "decision": decision, "reason": reason},
+            limit=limit,
+        ))
+    batch_id = f"sequential:{uuid.uuid4()}"
+    record_dispatch_decisions(
+        db_path,
+        batch_id=batch_id,
+        dispatch_mode="sequential",
+        decisions=decisions,
+    )
+    return ParallelBatchPlan(
+        batch_id=batch_id,
+        candidates=candidates,
+        decisions=decisions,
+        selected_wakeup_ids=[
+            str(item["wakeup_id"])
+            for item in decisions
+            if item["decision"] == "selected"
+        ],
+    )
+
+
+def _with_snapshot_contract(item: dict[str, Any], *, limit: int) -> dict[str, Any]:
+    details = dict(item.get("readiness_details") or {})
+    details.update({
+        "snapshot_contract": "candidate_queue_prefix_v1",
+        "snapshot_limit": limit,
+    })
+    return {**item, "readiness_details": details}
 
 
 def select_parallel_batch(candidates: list[dict[str, Any]], *, max_runs: int) -> list[str]:

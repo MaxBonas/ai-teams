@@ -183,14 +183,29 @@ class HeartbeatLoop:
             dispatched += await self._drain_parallel(loop)
             return dispatched
 
+        from aiteam.heartbeat.scheduler import plan_sequential_batch
+
         while True:
             try:
-                result = await loop.run_in_executor(None, self._scheduler.dispatch_next)
+                plan = await loop.run_in_executor(
+                    None,
+                    lambda: plan_sequential_batch(self.db_path),
+                )
+                if not plan.candidates:
+                    break
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: self._scheduler.dispatch_next(
+                        record_candidate_decision=False,
+                    ),
+                )
             except Exception:
                 logger.exception("dispatch_next failed")
                 break
             if result is None:
-                break
+                # El dispatch acaba de drenar wakeups bloqueados/checkout.
+                # Releer la cola evita confundir ese descarte con cola vacía.
+                continue
             try:
                 await loop.run_in_executor(None, self.executor.execute, result)
             except Exception:

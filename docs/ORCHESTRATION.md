@@ -669,6 +669,26 @@ batch. La tabla es aditiva y la aplica el schema idempotente al abrir DB antigua
 Este bloque mejora observabilidad/corrección, pero no prueba beneficio de
 latencia ni autoriza el default paralelo.
 
+El segundo bloque elimina la inferencia en DB nuevas. Antes de cada reclamación
+secuencial, el loop persiste el prefijo de cola considerado con contrato
+`candidate_queue_prefix_v1`: primer candidato listo seleccionado, restantes
+listos rechazados por `sequential_mode`, y candidatos bloqueados sin `ready_at`.
+El auditor v2 calcula por separado espera total desde `requested_at`, espera
+lista desde la primera observación del scheduler y la fracción paralelizable
+entre una oportunidad elegible y la selección posterior del mismo wakeup. Usa
+la raíz, pool y work slot persistidos; no carga dependencia ni checkout a esa
+fracción y deduplica oportunidades repetidas por wakeup.
+
+La calidad declarada es `exact` sólo cuando existe el contrato de snapshot,
+`partial_exact` para decisiones antiguas aisladas y `approximate` cuando no hay
+provenance. Sólo espera positiva `exact` puede abrir el trigger del canario vivo;
+una señal aproximada se informa aparte. El recibo
+`benchmarks/results/parallel_channels/parallel-channel-capacity-v2.json`
+reprocesa las siete DB históricas: siguen siendo `approximate`, con 75 runs y
+cero espera paralelizable inferida. El default permanece secuencial. El próximo
+bloque es el A/B hermético sobre el `HeartbeatLoop`, que valida corrección sin
+consumir proveedores.
+
 Anthropic describe mejoras grandes en su sistema de research multiagente, pero también un consumo de tokens muy superior y sensibilidad alta a coordinación, prompts y herramientas. Es evidencia de ingeniería de un vendor sobre su sistema, no una garantía general para coding agents. Fuente: [ANTH-2](ORCHESTRATION_SOURCES.md#anth-2-multi-agent-research).
 
 ## Extensiones MCP gobernadas

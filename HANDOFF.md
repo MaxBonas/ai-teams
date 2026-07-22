@@ -46,14 +46,18 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 
 ## Trabajo reciente
 
-- Primer bloque de la validación reabierta de paralelismo completado.
+- Dos primeros bloques de la validación reabierta de paralelismo completados.
   `dispatch_candidate_decisions` persiste cada candidato considerado en modo
   secuencial/paralelo con raíz, pool efectivo, work slot, primera readiness
-  observada y razón estable de selección/rechazo. Dependencia, checkout, agente,
-  raíz, pool y segundo work slot tienen cobertura. El baseline histórico sigue
-  siendo aproximado; ahora toca hacer que el auditor consuma esta provenance.
+  observada y razón estable de selección/rechazo. El loop secuencial fotografía
+  el prefijo de cola antes de reclamar y distingue `sequential_mode` de
+  dependencia/checkout. `audit_parallel_channels.py` v2 consume raíz/pool/work
+  slot exactos, separa espera total/lista/paralelizable, deduplica por wakeup y
+  declara cobertura y calidad `exact`/`partial_exact`/`approximate`. Sólo la
+  primera puede abrir el trigger. El recibo v2 mantiene las siete DB históricas
+  como aproximadas y sin trigger. Ahora toca el A/B hermético del `HeartbeatLoop`.
   El default continúa secuencial y el flag opt-in; no se consumieron modelos.
-  Verificación completa: `1189 passed` en 133,26 s.
+  Verificación completa: `1192 passed` en 157,02 s; Ruff dirigido limpio.
 - OpenCode server permanece experimental. El A/B de transporte v1 con DeepSeek
   pasa 3/3 direct y 3/3 attached, conserva seis sesiones aisladas y reduce la
   mediana 7,50→2,92 s con tokens equivalentes. El servidor está autenticado en

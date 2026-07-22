@@ -1,0 +1,294 @@
+{
+  "schema_version": 2,
+  "audit": "parallel_channel_capacity",
+  "evidence_quality": "approximate",
+  "policy": {
+    "default_enabled": false,
+    "environment_override_active": false,
+    "batch_max": 3,
+    "constraints": [
+      "distinct_agents",
+      "distinct_root_issues",
+      "distinct_non_builtin_capacity_pools",
+      "at_most_one_workspace_work_slot"
+    ]
+  },
+  "sources": [
+    {
+      "database": "runtime/bench/accessible-checkout-seed-1-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 12,
+      "timed_runs": 12,
+      "excluded_untimed_runs": 0,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 6,
+      "total_queue_wait_samples": 12,
+      "total_queue_wait_seconds": 780.163,
+      "total_queue_wait_seconds_median": 0.568,
+      "queue_wait_samples": 12,
+      "queue_wait_seconds_median": 0.568,
+      "rate_limit_errors": 0,
+      "evidence_quality": "approximate",
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "dispatch_evidence": {
+        "candidate_decisions": 0,
+        "dispatch_batches": 0,
+        "candidate_snapshot_batches": 0,
+        "full_queue_batches": 0,
+        "selected_runs_covered": 0,
+        "selected_run_coverage_ratio": 0.0,
+        "excluded_by_reason": {}
+      },
+      "limitations": [
+        "sin dispatch_candidate_decisions: raíz y proveedor sólo aproximan la elegibilidad histórica",
+        "no puede separar dependencia o checkout de la espera inferida"
+      ]
+    },
+    {
+      "database": "runtime/bench/accessible-checkout-seed-2-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 10,
+      "timed_runs": 10,
+      "excluded_untimed_runs": 0,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 5,
+      "total_queue_wait_samples": 10,
+      "total_queue_wait_seconds": 350.375,
+      "total_queue_wait_seconds_median": 0.749,
+      "queue_wait_samples": 10,
+      "queue_wait_seconds_median": 0.749,
+      "rate_limit_errors": 0,
+      "evidence_quality": "approximate",
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "dispatch_evidence": {
+        "candidate_decisions": 0,
+        "dispatch_batches": 0,
+        "candidate_snapshot_batches": 0,
+        "full_queue_batches": 0,
+        "selected_runs_covered": 0,
+        "selected_run_coverage_ratio": 0.0,
+        "excluded_by_reason": {}
+      },
+      "limitations": [
+        "sin dispatch_candidate_decisions: raíz y proveedor sólo aproximan la elegibilidad histórica",
+        "no puede separar dependencia o checkout de la espera inferida"
+      ]
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-1/team/.aiteam/aiteam.db",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "excluded_untimed_runs": 1,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 6,
+      "total_queue_wait_samples": 11,
+      "total_queue_wait_seconds": 819.528,
+      "total_queue_wait_seconds_median": 0.86,
+      "queue_wait_samples": 11,
+      "queue_wait_seconds_median": 0.86,
+      "rate_limit_errors": 0,
+      "evidence_quality": "approximate",
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "dispatch_evidence": {
+        "candidate_decisions": 0,
+        "dispatch_batches": 0,
+        "candidate_snapshot_batches": 0,
+        "full_queue_batches": 0,
+        "selected_runs_covered": 0,
+        "selected_run_coverage_ratio": 0.0,
+        "excluded_by_reason": {}
+      },
+      "limitations": [
+        "sin dispatch_candidate_decisions: raíz y proveedor sólo aproximan la elegibilidad histórica",
+        "no puede separar dependencia o checkout de la espera inferida"
+      ]
+    },
+    {
+      "database": "runtime/bench/deployment-wave-seed-2-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 10,
+      "timed_runs": 10,
+      "excluded_untimed_runs": 0,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 5,
+      "total_queue_wait_samples": 10,
+      "total_queue_wait_seconds": 482.618,
+      "total_queue_wait_seconds_median": 1.06,
+      "queue_wait_samples": 10,
+      "queue_wait_seconds_median": 1.06,
+      "rate_limit_errors": 0,
+      "evidence_quality": "approximate",
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "dispatch_evidence": {
+        "candidate_decisions": 0,
+        "dispatch_batches": 0,
+        "candidate_snapshot_batches": 0,
+        "full_queue_batches": 0,
+        "selected_runs_covered": 0,
+        "selected_run_coverage_ratio": 0.0,
+        "excluded_by_reason": {}
+      },
+      "limitations": [
+        "sin dispatch_candidate_decisions: raíz y proveedor sólo aproximan la elegibilidad histórica",
+        "no puede separar dependencia o checkout de la espera inferida"
+      ]
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-1-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "excluded_untimed_runs": 1,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 6,
+      "total_queue_wait_samples": 11,
+      "total_queue_wait_seconds": 952.167,
+      "total_queue_wait_seconds_median": 0.804,
+      "queue_wait_samples": 11,
+      "queue_wait_seconds_median": 0.804,
+      "rate_limit_errors": 0,
+      "evidence_quality": "approximate",
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "dispatch_evidence": {
+        "candidate_decisions": 0,
+        "dispatch_batches": 0,
+        "candidate_snapshot_batches": 0,
+        "full_queue_batches": 0,
+        "selected_runs_covered": 0,
+        "selected_run_coverage_ratio": 0.0,
+        "excluded_by_reason": {}
+      },
+      "limitations": [
+        "sin dispatch_candidate_decisions: raíz y proveedor sólo aproximan la elegibilidad histórica",
+        "no puede separar dependencia o checkout de la espera inferida"
+      ]
+    },
+    {
+      "database": "runtime/bench/inventory-diff-seed-2-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 12,
+      "timed_runs": 11,
+      "excluded_untimed_runs": 1,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 6,
+      "total_queue_wait_samples": 11,
+      "total_queue_wait_seconds": 412.257,
+      "total_queue_wait_seconds_median": 0.794,
+      "queue_wait_samples": 11,
+      "queue_wait_seconds_median": 0.794,
+      "rate_limit_errors": 0,
+      "evidence_quality": "approximate",
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "dispatch_evidence": {
+        "candidate_decisions": 0,
+        "dispatch_batches": 0,
+        "candidate_snapshot_batches": 0,
+        "full_queue_batches": 0,
+        "selected_runs_covered": 0,
+        "selected_run_coverage_ratio": 0.0,
+        "excluded_by_reason": {}
+      },
+      "limitations": [
+        "sin dispatch_candidate_decisions: raíz y proveedor sólo aproximan la elegibilidad histórica",
+        "no puede separar dependencia o checkout de la espera inferida"
+      ]
+    },
+    {
+      "database": "runtime/bench/release-notes-seed-1-full-team/team/.aiteam/aiteam.db",
+      "recorded_runs": 7,
+      "timed_runs": 7,
+      "excluded_untimed_runs": 0,
+      "root_count": 1,
+      "provider_count": 1,
+      "work_slot_runs": 5,
+      "total_queue_wait_samples": 7,
+      "total_queue_wait_seconds": 584.225,
+      "total_queue_wait_seconds_median": 0.626,
+      "queue_wait_samples": 7,
+      "queue_wait_seconds_median": 0.626,
+      "rate_limit_errors": 0,
+      "evidence_quality": "approximate",
+      "parallelizable_wait_runs": 0,
+      "parallelizable_wait_seconds": 0,
+      "eligible_serial_wait_runs": 0,
+      "eligible_serial_wait_seconds": 0,
+      "eligible_overlap_pairs": 0,
+      "dispatch_evidence": {
+        "candidate_decisions": 0,
+        "dispatch_batches": 0,
+        "candidate_snapshot_batches": 0,
+        "full_queue_batches": 0,
+        "selected_runs_covered": 0,
+        "selected_run_coverage_ratio": 0.0,
+        "excluded_by_reason": {}
+      },
+      "limitations": [
+        "sin dispatch_candidate_decisions: raíz y proveedor sólo aproximan la elegibilidad histórica",
+        "no puede separar dependencia o checkout de la espera inferida"
+      ]
+    }
+  ],
+  "aggregate": {
+    "database_count": 7,
+    "exact_database_count": 0,
+    "partial_exact_database_count": 0,
+    "approximate_database_count": 7,
+    "recorded_runs": 75,
+    "timed_runs": 72,
+    "excluded_untimed_runs": 3,
+    "total_queue_wait_seconds": 4381.333,
+    "single_root_databases": 7,
+    "single_provider_databases": 7,
+    "parallelizable_wait_runs": 0,
+    "parallelizable_wait_seconds": 0,
+    "exact_parallelizable_wait_runs": 0,
+    "exact_parallelizable_wait_seconds": 0,
+    "approximate_parallelizable_wait_runs": 0,
+    "eligible_serial_wait_runs": 0,
+    "eligible_serial_wait_seconds": 0,
+    "eligible_overlap_pairs": 0,
+    "rate_limit_errors": 0
+  },
+  "conclusion": {
+    "contention_trigger_observed": false,
+    "approximate_contention_signal_observed": false,
+    "evidence_sufficient_for_default_enable": false,
+    "default_change_allowed": false,
+    "decision": "retain_sequential_default",
+    "reason": "no existe todavía espera paralelizable mayor que cero demostrada con provenance exacta",
+    "reopen_when": [
+      "exact_parallelizable_wait_runs > 0 en proyectos reales comparables",
+      "A/B secuencial-paralelo con misma cola y resultados",
+      "sin regresión de checkout, evidencia, cuota ni liveness"
+    ]
+  },
+  "limitations": [
+    "las fuentes approximate no pueden disparar por sí solas un canario vivo",
+    "sin A/B secuencial-paralelo no se puede autorizar un cambio de default"
+  ]
+}
