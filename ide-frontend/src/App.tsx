@@ -14,11 +14,13 @@ import {
   GitBranch,
   KeyRound,
   ListChecks,
+  LockKeyhole,
   MessageSquare,
   Play,
   Plus,
   RefreshCcw,
   Send,
+  Trash2,
   Users,
 } from 'lucide-react';
 import { API_BASE, apiFetch, getWorkspacePath, setWorkspacePath } from './lib/api';
@@ -772,6 +774,29 @@ interface ProjectStatePayload {
   plan_document?: PlanDocument | null;
 }
 
+interface OrientationMeasurement {
+  consent: {
+    enabled: boolean;
+    current_session_id: string | null;
+    consented_at: string | null;
+    revoked_at: string | null;
+  };
+  sessions: Record<'active' | 'completed' | 'abandoned' | 'revoked', number>;
+  event_count: number;
+  flows: Record<string, Record<string, number>>;
+  privacy: {
+    storage: string;
+    external_transmission: boolean;
+    free_text_collected: boolean;
+    issue_or_workspace_ids_collected: boolean;
+  };
+  interpretation: {
+    constructs_not_measured: string[];
+    conclusion_allowed: boolean;
+    reason: string;
+  };
+}
+
 type TimelineType = 'issue' | 'comment' | 'interaction' | 'run' | 'activity' | 'cost' | 'tool';
 const TIMELINE_TYPES: TimelineType[] = ['issue', 'comment', 'interaction', 'run', 'activity', 'cost', 'tool'];
 
@@ -790,7 +815,7 @@ type ViewMode = 'timeline' | 'issue' | 'plan' | 'runs' | 'chat' | 'inbox' | 'fil
 
 // Secciones del panel de configuración, agrupadas por ámbito.
 type ConfigSection =
-  | 'proyecto' | 'autonomia' | 'skills' | 'mcp' | 'danger'
+  | 'proyecto' | 'autonomia' | 'medicion' | 'skills' | 'mcp' | 'danger'
   | 'keys' | 'clis' | 'adapters' | 'sistema';
 
 interface ChatMessage {
@@ -1034,6 +1059,11 @@ export default function App() {
   const [selectedInteractionId, setSelectedInteractionId] = useState<string | null>(null);
   // Sección activa del panel de configuración (dos ámbitos: proyecto / aplicación)
   const [cfgSection, setCfgSection] = useState<ConfigSection>('proyecto');
+  const [orientationMeasurement, setOrientationMeasurement] = useState<OrientationMeasurement | null>(null);
+  const [orientationBusy, setOrientationBusy] = useState(false);
+  const orientationWorkspaceRef = useRef('');
+  const orientationConsentRef = useRef<{ enabled: boolean; sessionId: string | null }>({ enabled: false, sessionId: null });
+  const orientationPlanFlowActiveRef = useRef(false);
   // Workspace files browser
   const [wsFiles, setWsFiles] = useState<Array<{ path: string; size_bytes: number; mime: string }>>([]);
   const [wsSelectedFile, setWsSelectedFile] = useState<string | null>(null);
@@ -1387,6 +1417,85 @@ export default function App() {
     } catch { /* ignore */ }
   };
 
+  const loadOrientationMeasurement = async () => {
+    try {
+      const res = await apiFetch('/api/orientation-measurement');
+      if (!res.ok) return;
+      const json = (await res.json()) as OrientationMeasurement & { success?: boolean };
+      if (json.consent.enabled && !json.consent.current_session_id) {
+        const restart = await apiFetch('/api/orientation-measurement/consent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: true }),
+        });
+        if (restart.ok) {
+          const restarted = (await restart.json()) as { consent?: OrientationMeasurement['consent'] };
+          if (restarted.consent) json.consent = restarted.consent;
+        }
+      }
+      setOrientationMeasurement(json);
+    } catch { /* medición opcional: nunca bloquea el cockpit */ }
+  };
+
+  const changeOrientationConsent = async (enabled: boolean) => {
+    if (orientationBusy) return;
+    setOrientationBusy(true);
+    setError('');
+    try {
+      const res = await apiFetch('/api/orientation-measurement/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      const json = (await res.json()) as { detail?: string };
+      if (!res.ok) throw new Error(json.detail || `orientation-consent:${res.status}`);
+      if (!enabled) orientationPlanFlowActiveRef.current = false;
+      await loadOrientationMeasurement();
+    } catch (consentError) {
+      setError(consentError instanceof Error ? consentError.message : 'orientation_consent_failed');
+    } finally {
+      setOrientationBusy(false);
+    }
+  };
+
+  const eraseOrientationMeasurement = async () => {
+    if (orientationBusy || !window.confirm('¿Borrar todas las sesiones y eventos locales de orientación de este proyecto?')) return;
+    setOrientationBusy(true);
+    setError('');
+    try {
+      const res = await apiFetch('/api/orientation-measurement', { method: 'DELETE' });
+      const json = (await res.json()) as { detail?: string };
+      if (!res.ok) throw new Error(json.detail || `orientation-delete:${res.status}`);
+      orientationPlanFlowActiveRef.current = false;
+      await loadOrientationMeasurement();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'orientation_delete_failed');
+    } finally {
+      setOrientationBusy(false);
+    }
+  };
+
+  const recordOrientationEvent = async (
+    flow: 'inbox' | 'profile_selection' | 'accepted_plan_to_task',
+    event: 'flow_started' | 'flow_completed' | 'flow_abandoned' | 'profile_selected' | 'guidance_viewed' | 'ui_error',
+    profile?: string,
+  ) => {
+    if (!orientationConsentRef.current.enabled || !orientationConsentRef.current.sessionId) return;
+    try {
+      await apiFetch('/api/orientation-measurement/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flow, event, ...(profile ? { profile } : {}) }),
+      });
+    } catch { /* la telemetría local nunca interrumpe una acción del usuario */ }
+  };
+
+  const recordProfileOrientation = async (profile: string) => {
+    await recordOrientationEvent('profile_selection', 'profile_selected', profile);
+    await recordOrientationEvent('profile_selection', 'guidance_viewed', profile);
+    await recordOrientationEvent('profile_selection', 'flow_completed', profile);
+  };
+
   const runMcpHealth = async (server: McpServer) => {
     if (mcpBusy) return;
     setMcpBusy(server.name);
@@ -1688,11 +1797,47 @@ export default function App() {
     if (viewMode === 'chat') chatStickToBottomRef.current = true;
   }, [viewMode]);
 
+  useEffect(() => {
+    orientationConsentRef.current = {
+      enabled: Boolean(orientationMeasurement?.consent.enabled),
+      sessionId: orientationMeasurement?.consent.current_session_id || null,
+    };
+  }, [orientationMeasurement]);
+
+  useEffect(() => {
+    if (!workspaceConfigured || !workspace || orientationWorkspaceRef.current === workspace) return;
+    orientationWorkspaceRef.current = workspace;
+    void loadOrientationMeasurement();
+    // Se reinicia únicamente al cambiar de proyecto; no en cada poll del cockpit.
+  }, [workspaceConfigured, workspace]);
+
+  useEffect(() => {
+    const finishObservedSession = () => {
+      if (!orientationConsentRef.current.enabled || !orientationConsentRef.current.sessionId) return;
+      void apiFetch('/api/orientation-measurement/session/end', {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: orientationPlanFlowActiveRef.current ? 'abandoned' : 'completed' }),
+      });
+    };
+    const resumeObservedSession = () => {
+      if (orientationWorkspaceRef.current) void loadOrientationMeasurement();
+    };
+    window.addEventListener('pagehide', finishObservedSession);
+    window.addEventListener('pageshow', resumeObservedSession);
+    return () => {
+      window.removeEventListener('pagehide', finishObservedSession);
+      window.removeEventListener('pageshow', resumeObservedSession);
+    };
+  }, []);
+
   // Lazy-load project skills + MCP servers only when the Config tab is open.
   useEffect(() => {
     if (viewMode === 'config' && workspaceConfigured) {
       void loadProjectSkills();
       void loadMcpServers();
+      void loadOrientationMeasurement();
     }
   }, [viewMode, workspaceConfigured]);
 
@@ -1987,6 +2132,7 @@ export default function App() {
   const createTask = async () => {
     const task = newTaskDraft.trim();
     if (!task) return;
+    const observedPlanFlow = Boolean(pendingPlanRef && orientationPlanFlowActiveRef.current);
     const title = task.split(/\r?\n/).find((line) => line.trim())?.trim().slice(0, 160) || 'Nueva tarea';
     setLoading(true);
     setError('');
@@ -2051,8 +2197,13 @@ export default function App() {
       setSelectedIssueId(issue.id);
       setViewMode('chat');
       setLastResult({ issue: issueJson, comment: commentJson, wakeup: wakeupJson, run_once: runOnceJson });
+      if (observedPlanFlow) {
+        orientationPlanFlowActiveRef.current = false;
+        void recordOrientationEvent('accepted_plan_to_task', 'flow_completed', newTaskProfile);
+      }
       await loadProjectData(issue.id);
     } catch (taskError) {
+      if (observedPlanFlow) void recordOrientationEvent('accepted_plan_to_task', 'ui_error', newTaskProfile);
       setError(taskError instanceof Error ? taskError.message : 'task_create_failed');
     } finally {
       setLoading(false);
@@ -3338,7 +3489,13 @@ export default function App() {
                 📋 Plan aceptado adjunto
                 <button
                   className="attached-plan-clear"
-                  onClick={() => setPendingPlanRef(null)}
+                  onClick={() => {
+                    if (orientationPlanFlowActiveRef.current) {
+                      void recordOrientationEvent('accepted_plan_to_task', 'flow_abandoned', newTaskProfile);
+                    }
+                    orientationPlanFlowActiveRef.current = false;
+                    setPendingPlanRef(null);
+                  }}
                   title="Quitar el plan adjunto"
                 >
                   ✕
@@ -3353,7 +3510,10 @@ export default function App() {
                   data-testid={`task-profile-${p.value}`}
                   aria-pressed={newTaskProfile === p.value}
                   className={`profile-chip${newTaskProfile === p.value ? ' active' : ''}`}
-                  onClick={() => setNewTaskProfile(p.value)}
+                  onClick={() => {
+                    setNewTaskProfile(p.value);
+                    void recordProfileOrientation(p.value);
+                  }}
                   title={p.value === 'lead_quorum' ? `${p.desc}. Úsalo para objetivos ambiguos o críticos que justifiquen auditoría senior.` : p.desc}
                 >
                   {p.label}
@@ -3392,7 +3552,10 @@ export default function App() {
             <button
               data-testid="inbox-tab"
               className={viewMode === 'inbox' ? 'tab active tab-chat' : `tab tab-chat${hasPending ? ' tab-chat-pending' : ''}`}
-              onClick={() => setViewMode('inbox')}
+              onClick={() => {
+                setViewMode('inbox');
+                void recordOrientationEvent('inbox', 'flow_completed');
+              }}
             >
               <Bell size={16} />
               Bandeja
@@ -3419,6 +3582,7 @@ export default function App() {
               {agents.length > 0 ? <span className="tab-badge">{agents.length}</span> : null}
             </button>
             <button
+              data-testid="config-tab"
               className={viewMode === 'config' ? 'tab active tab-config' : 'tab tab-config'}
               onClick={() => setViewMode('config')}
               title="Configuración"
@@ -3576,6 +3740,8 @@ export default function App() {
                 onCreateExecutionTask={() => {
                   const revisionId = quorum?.session.final_plan_revision_id;
                   if (!revisionId) return;
+                  orientationPlanFlowActiveRef.current = true;
+                  void recordOrientationEvent('accepted_plan_to_task', 'flow_started', 'full_team');
                   setPendingPlanRef({ revisionId, sourceIssueId: quorum.session.issue_id });
                   setNewTaskDraft(
                     `Ejecuta el plan aceptado de "${selectedIssue?.title || quorum.session.issue_id}". `
@@ -4139,6 +4305,7 @@ export default function App() {
                   <div className="config-nav-group">Este proyecto · {projectDisplayName}</div>
                   <button className={`config-nav-item${cfgSection === 'proyecto' ? ' active' : ''}`} onClick={() => setCfgSection('proyecto')}>Proyecto activo</button>
                   <button className={`config-nav-item${cfgSection === 'autonomia' ? ' active' : ''}`} onClick={() => setCfgSection('autonomia')}>Autonomía</button>
+                  <button data-testid="orientation-config-nav" className={`config-nav-item${cfgSection === 'medicion' ? ' active' : ''}`} onClick={() => setCfgSection('medicion')}>Privacidad y medición</button>
                   <button className={`config-nav-item${cfgSection === 'skills' ? ' active' : ''}`} onClick={() => setCfgSection('skills')}>Skills del proyecto</button>
                   <button className={`config-nav-item${cfgSection === 'mcp' ? ' active' : ''}`} onClick={() => setCfgSection('mcp')}>Extensiones MCP</button>
                   <button className={`config-nav-item config-nav-danger${cfgSection === 'danger' ? ' active' : ''}`} onClick={() => setCfgSection('danger')}>Zona de peligro</button>
@@ -4150,7 +4317,7 @@ export default function App() {
                 </nav>
 
                 <div className="config-main">
-                  {['proyecto', 'autonomia', 'skills', 'mcp', 'danger'].includes(cfgSection) ? (
+                  {['proyecto', 'autonomia', 'medicion', 'skills', 'mcp', 'danger'].includes(cfgSection) ? (
                     <p className="config-scope-note">Ámbito: solo este proyecto. Los demás proyectos no cambian.</p>
                   ) : (
                     <p className="config-scope-note">Ámbito: toda la aplicación — afecta a todos los proyectos.</p>
@@ -4219,6 +4386,69 @@ export default function App() {
                           ? ' — las interacciones operativas se resuelven solas (una vez por issue y motivo).'
                           : ' — el equipo se detiene en cada escalación hasta que respondas.'}
                         {' '}También conmutable desde la barra superior.
+                      </p>
+                    </div>
+                  )}
+
+                  {cfgSection === 'medicion' && (
+                    <div className="config-subsection orientation-lab" data-testid="orientation-measurement-panel">
+                      <div className="orientation-lab-head">
+                        <div className="orientation-lab-icon"><LockKeyhole size={19} /></div>
+                        <div>
+                          <span className="orientation-eyebrow">Instrumentación local · opt-in</span>
+                          <h3>Medir la orientación sin leer tu trabajo</h3>
+                        </div>
+                        <span className={`orientation-signal${orientationMeasurement?.consent.enabled ? ' live' : ''}`} data-testid="orientation-measurement-status">
+                          <i />{orientationMeasurement?.consent.enabled ? 'Midiendo' : 'Apagado'}
+                        </span>
+                      </div>
+
+                      <p className="orientation-intro">
+                        Registra únicamente pasos en Bandeja, selección de perfil y plan aceptado → tarea.
+                        Los datos se quedan en la SQLite de este proyecto y nunca incluyen títulos, prompts,
+                        rutas, issues ni texto escrito.
+                      </p>
+
+                      <div className="orientation-privacy-grid" aria-label="Garantías de privacidad">
+                        <span><strong>LOCAL</strong> SQLite del proyecto</span>
+                        <span><strong>0</strong> transmisión externa</span>
+                        <span><strong>0</strong> campos de texto</span>
+                        <span><strong>3</strong> flujos cerrados</span>
+                      </div>
+
+                      <div className="orientation-console">
+                        <div><strong>{Object.values(orientationMeasurement?.sessions || {}).reduce((sum, count) => sum + count, 0)}</strong><span>sesiones</span></div>
+                        <div><strong>{orientationMeasurement?.sessions.abandoned || 0}</strong><span>abandonos</span></div>
+                        <div><strong>{orientationMeasurement?.event_count || 0}</strong><span>eventos</span></div>
+                      </div>
+
+                      <div className="orientation-actions">
+                        <button
+                          type="button"
+                          data-testid="orientation-consent-toggle"
+                          aria-pressed={Boolean(orientationMeasurement?.consent.enabled)}
+                          className={`orientation-consent-button${orientationMeasurement?.consent.enabled ? ' active' : ''}`}
+                          disabled={orientationBusy || !orientationMeasurement}
+                          onClick={() => void changeOrientationConsent(!orientationMeasurement?.consent.enabled)}
+                        >
+                          <span className="orientation-toggle-track"><i /></span>
+                          {orientationMeasurement?.consent.enabled ? 'Revocar consentimiento' : 'Activar medición local'}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="orientation-delete-data"
+                          className="orientation-delete-button"
+                          disabled={orientationBusy || !orientationMeasurement || (orientationMeasurement.event_count === 0 && Object.values(orientationMeasurement.sessions).every((count) => count === 0))}
+                          onClick={() => void eraseOrientationMeasurement()}
+                        >
+                          <Trash2 size={14} /> Borrar medidas
+                        </button>
+                      </div>
+
+                      <p className="orientation-boundary">
+                        <AlertCircle size={14} /> Estos conteos detectan fricción y abandono; por sí solos no
+                        demuestran adopción, claridad, satisfacción ni causalidad. Las conclusiones requieren
+                        sesiones humanas y un criterio definido antes de observarlas.
                       </p>
                     </div>
                   )}

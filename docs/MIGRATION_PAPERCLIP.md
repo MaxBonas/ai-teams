@@ -337,8 +337,10 @@ El backend local ya dispone de consentimiento, sesiones, eventos con allowlist,
 revocación y borrado en SQLite. El contrato prohíbe texto libre, rutas, títulos,
 IDs de issue/workspace y transmisión externa; su resumen declara explícitamente
 que los conteos no miden adopción, claridad, satisfacción ni causalidad. Falta
-conectar el control visible y los eventos del cockpit antes de observar sesiones
-humanas consentidas.
+observar sesiones humanas consentidas: Config ya ofrece opt-in, revocación,
+borrado y resumen local, y el cockpit instrumenta los tres flujos mediante la
+allowlist. El E2E Chromium verifica 11 eventos sintéticos sin campos extra; esta
+evidencia sigue siendo técnica, no una prueba de comprensión.
 
 ### Fase 8 — Consolidar logs
 

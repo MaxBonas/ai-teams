@@ -183,8 +183,11 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
   evidencia de adopción o claridad real. El backend consentido ya persiste solo
   sesión, flow, evento allowlisted y perfil canónico en SQLite; bloquea eventos
   sin consentimiento, soporta revocación/borrado y prohíbe texto, rutas e IDs de
-  proyecto. Falta conectar Config y los eventos del cockpit; ese task permanece
-  abierto y sus conteos no autorizan conclusiones de comprensión.
+  proyecto. Config ya ofrece opt-in, revocación, borrado y resumen; el cockpit
+  instrumenta Bandeja, perfiles y plan → tarea. El E2E registra 11 eventos
+  sintéticos sin campos fuera de `flow`, `event` y `profile` opcional. Falta la
+  observación humana consentida; esos conteos no autorizan conclusiones de
+  comprensión.
 - El auditor de benchmarks separa conclusión de promoción. Ya no acepta un
   booleano de independencia si las clases de evaluador son solo léxicas, y una
   promoción nueva exige `constructs_not_measured` más riesgo de Goodhart. Los

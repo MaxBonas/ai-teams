@@ -1,11 +1,29 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "benchmark": "frontend_orientation_flow",
   "observed_at": "2026-07-22",
   "measurement": "deterministic_ui_contract",
   "command": "npm run test:e2e:orientation",
   "browser": "chromium",
   "result": "passed",
+  "consented_measurement": {
+    "surface": "Config > Privacidad y medición",
+    "default_enabled": false,
+    "synthetic_opt_in_completed": true,
+    "local_session_count": 1,
+    "recorded_event_count": 11,
+    "event_payload_fields": [
+      "flow",
+      "event",
+      "profile"
+    ],
+    "extra_payload_fields_observed": [],
+    "storage": "local_project_sqlite",
+    "external_transmission": false,
+    "free_text_collected": false,
+    "issue_or_workspace_ids_collected": false,
+    "revocation_and_delete_visible": true
+  },
   "flows": {
     "inbox": {
       "actions": 1,
@@ -32,7 +50,7 @@
   "limits": {
     "real_user_adoption_measured": false,
     "real_user_clarity_measured": false,
-    "note": "Este recibo verifica fricción funcional y regresiones; no sustituye sesiones observadas ni analítica consentida."
+    "note": "Este recibo verifica fricción funcional, consentimiento e instrumentación allowlisted; no sustituye sesiones humanas observadas ni mide comprensión."
   },
   "decision": "technical_gate_passed_keep_product_measurement_open"
 }

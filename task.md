@@ -704,11 +704,18 @@ sí sola el privilegio de un rol.
     IDs de issue/workspace ni payload JSON. Sin consentimiento devuelven `409`;
     revocar cierra la sesión, borrar elimina sesiones y eventos, y el resumen
     declara que no mide adopción, claridad, satisfacción ni causalidad.
-  - [ ] Añadir en Config el control explícito de consentimiento y borrado, con
+  - [x] Añadir en Config el control explícito de consentimiento y borrado, con
     explicación de almacenamiento local y sin transmisión externa.
-  - [ ] Instrumentar Bandeja, selección/lectura de perfiles y plan aceptado →
+    Cerrado con una consola local opt-in, apagada por defecto, que expone estado,
+    sesiones, abandonos, eventos, garantías de privacidad, revocación y borrado.
+  - [x] Instrumentar Bandeja, selección/lectura de perfiles y plan aceptado →
     tarea mediante la allowlist; cerrar sesiones y registrar abandono/error sin
     capturar contenido del usuario.
+    El E2E Chromium activa consentimiento, recorre los tres flujos y observa 11
+    eventos cuyos únicos campos son `flow`, `event` y `profile` opcional. El CTA
+    inicia el flujo; crear la tarea lo completa, quitar el plan registra abandono
+    y un error de creación solo registra `ui_error`. `pagehide` cierra la sesión
+    como completada o abandonada sin bloquear la acción principal.
   - [ ] Ejecutar sesiones humanas consentidas y definir previamente muestra y
     criterio; no convertir conteos observados en conclusiones de comprensión.
 

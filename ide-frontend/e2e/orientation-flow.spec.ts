@@ -51,6 +51,9 @@ const quorum = {
 
 test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos observables', async ({ page }, testInfo) => {
   const browserErrors: string[] = [];
+  let orientationEnabled = false;
+  let orientationSessionId: string | null = null;
+  const orientationEvents: Array<Record<string, unknown>> = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) {
@@ -64,6 +67,7 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
   await page.route('http://127.0.0.1:8010/api/**', async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
+    const method = route.request().method();
     let status = 200;
     let body: unknown;
 
@@ -97,6 +101,43 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
     };
     else if (path === '/api/tools/catalog') body = { catalog: {} };
     else if (path === '/api/user-adapters') body = { profiles: [], cli_status: [], secrets: [] };
+    else if (path === '/api/project/skills') body = { skills: [], governance: null };
+    else if (path === '/api/project/extensions/mcp') body = { mcp_servers: [] };
+    else if (path === '/api/project/extensions/mcp/catalog') body = { entries: [] };
+    else if (path === '/api/orientation-measurement' && method === 'GET') body = {
+      success: true,
+      consent: { enabled: orientationEnabled, current_session_id: orientationSessionId, consented_at: null, revoked_at: null },
+      sessions: { active: orientationSessionId ? 1 : 0, completed: 0, abandoned: 0, revoked: 0 },
+      event_count: orientationEvents.length,
+      flows: {},
+      privacy: { storage: 'local_project_sqlite', external_transmission: false, free_text_collected: false, issue_or_workspace_ids_collected: false },
+      interpretation: { constructs_not_measured: ['adoption', 'clarity', 'satisfaction', 'causality'], conclusion_allowed: false, reason: 'test' },
+    };
+    else if (path === '/api/orientation-measurement/consent' && method === 'POST') {
+      orientationEnabled = Boolean((route.request().postDataJSON() as { enabled?: boolean }).enabled);
+      orientationSessionId = orientationEnabled ? 'orientation:test' : null;
+      body = { success: true, consent: { enabled: orientationEnabled, current_session_id: orientationSessionId } };
+    }
+    else if (path === '/api/orientation-measurement/events' && method === 'POST') {
+      if (!orientationEnabled) {
+        status = 409;
+        body = { detail: 'orientation_measurement_not_consented' };
+      } else {
+        const payload = route.request().postDataJSON() as Record<string, unknown>;
+        orientationEvents.push(payload);
+        body = { success: true, event: { id: `event:${orientationEvents.length}`, ...payload } };
+      }
+    }
+    else if (path === '/api/orientation-measurement/session/end' && method === 'POST') {
+      orientationSessionId = null;
+      body = { success: true, session: { status: (route.request().postDataJSON() as { status: string }).status } };
+    }
+    else if (path === '/api/orientation-measurement' && method === 'DELETE') {
+      orientationEnabled = false;
+      orientationSessionId = null;
+      orientationEvents.length = 0;
+      body = { success: true, deleted_events: 0, deleted_sessions: 1, enabled: false };
+    }
     else {
       status = 404;
       body = { detail: `fixture_missing:${path}` };
@@ -107,6 +148,15 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
 
   await page.goto('/');
   await expect(page.getByTestId('project-cockpit')).toBeVisible();
+
+  await page.getByTestId('config-tab').click();
+  await page.getByTestId('orientation-config-nav').click();
+  await expect(page.getByTestId('orientation-measurement-panel')).toContainText('sin leer tu trabajo');
+  await expect(page.getByTestId('orientation-measurement-panel')).toContainText('0 transmisión externa');
+  await expect(page.getByTestId('orientation-consent-toggle')).toHaveAttribute('aria-pressed', 'false');
+  await page.getByTestId('orientation-consent-toggle').click();
+  await expect(page.getByTestId('orientation-consent-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await page.screenshot({ path: testInfo.outputPath('orientation-consent.png'), fullPage: true });
 
   const metrics = {
     schema_version: 1,
@@ -157,6 +207,10 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
     'lead_quorum',
     'full_team',
   ]);
+  await expect.poll(() => orientationEvents.length).toBeGreaterThanOrEqual(11);
+  expect(orientationEvents.every((event) => Object.keys(event).every((key) => ['flow', 'event', 'profile'].includes(key)))).toBe(true);
+  expect(orientationEvents).toContainEqual({ flow: 'inbox', event: 'flow_completed' });
+  expect(orientationEvents).toContainEqual({ flow: 'accepted_plan_to_task', event: 'flow_started', profile: 'full_team' });
 
   await writeFile(testInfo.outputPath('orientation-metrics.json'), JSON.stringify(metrics, null, 2));
   await page.screenshot({ path: testInfo.outputPath('orientation.png'), fullPage: true });
