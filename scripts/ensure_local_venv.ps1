@@ -204,12 +204,24 @@ function Invoke-PythonChecked {
     param(
         [string]$PythonExe,
         [string[]]$Arguments,
-        [string]$StepName
+        [string]$StepName,
+        [string]$WorkingDirectory = ""
     )
 
     Write-Info $StepName
-    & $PythonExe @Arguments
-    if ($LASTEXITCODE -ne 0) {
+    $exitCode = 0
+    if ($WorkingDirectory) {
+        Push-Location $WorkingDirectory
+    }
+    try {
+        & $PythonExe @Arguments
+        $exitCode = $LASTEXITCODE
+    } finally {
+        if ($WorkingDirectory) {
+            Pop-Location
+        }
+    }
+    if ($exitCode -ne 0) {
         throw "Fallo durante: $StepName"
     }
 }
@@ -236,7 +248,7 @@ function Recreate-Venv {
     Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -StepName "Actualizando pip"
 
     if (Test-Path $pyprojectPath) {
-        Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "-e", ".[dev]") -StepName "Instalando dependencias del proyecto"
+        Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "-e", ".[dev]") -StepName "Instalando dependencias del proyecto" -WorkingDirectory $rootDir
         Write-StoredDependencyHash -HashValue (Get-ProjectDependencyHash)
     } else {
         throw "No se encontro pyproject.toml para instalar dependencias."
@@ -248,7 +260,7 @@ function Install-ProjectDependencies {
         throw "No se encontro pyproject.toml para instalar dependencias."
     }
 
-    Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "-e", ".[dev]") -StepName "Reinstalando dependencias del proyecto"
+    Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "-e", ".[dev]") -StepName "Reinstalando dependencias del proyecto" -WorkingDirectory $rootDir
     Write-StoredDependencyHash -HashValue (Get-ProjectDependencyHash)
 }
 

@@ -60,6 +60,9 @@ no deben repetirse hasta un cambio material.
   produjo `ok=true` en Windows x86_64 sin promocionar soporte; 107 pruebas
   dirigidas, suite backend 1493/1493, typecheck frontend y Ruff acotado a
   superficies cambiadas pasan. El siguiente bloque es I.3.
+  El smoke-clone posterior detectó y corrigió que `pip install -e .` podía
+  heredar el cwd del invocador y enlazar otro checkout: el helper fija ahora
+  su propio root como working directory y existe regresión específica.
 - I.2.2 añade `aiteam_portable_config_v1` y
   `scripts/config_portability.py export|inspect|import`. El paquete hasheado
   conserva settings allowlisted, perfiles custom y política estructurada

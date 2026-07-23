@@ -58,3 +58,10 @@ def test_documented_migration_validation_remains_a_dry_run() -> None:
 
     assert "scripts\\migrate_to_v2.py --json" in validation
     assert "--apply" not in validation
+
+
+def test_venv_install_is_anchored_to_its_own_checkout() -> None:
+    script = _read("scripts/ensure_local_venv.ps1")
+
+    assert "Push-Location $WorkingDirectory" in script
+    assert script.count("-WorkingDirectory $rootDir") == 2
