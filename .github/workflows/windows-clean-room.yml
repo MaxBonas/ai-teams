@@ -26,15 +26,18 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout exact revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Configure Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Configure Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: npm
@@ -42,6 +45,8 @@ jobs:
 
       - name: Run I.1.4 acceptance
         shell: pwsh
+        env:
+          AITEAM_EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: >
           python scripts/accept_windows_clean_room.py
           --receipt "${{ runner.temp }}\windows-clean-room-receipt.json"
@@ -49,7 +54,7 @@ jobs:
 
       - name: Upload redacted receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: windows-clean-room-receipt
           path: ${{ runner.temp }}\windows-clean-room-receipt.json

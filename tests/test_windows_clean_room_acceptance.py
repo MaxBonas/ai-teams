@@ -57,6 +57,7 @@ def test_independent_ci_requires_complete_matching_github_provenance(
         "GITHUB_RUN_ATTEMPT": "1",
         "GITHUB_JOB": "windows-clean-room",
         "GITHUB_SHA": "abc123",
+        "AITEAM_EXPECTED_SOURCE_SHA": "abc123",
         "RUNNER_OS": "Windows",
         "RUNNER_ARCH": "X64",
     }
@@ -67,5 +68,5 @@ def test_independent_ci_requires_complete_matching_github_provenance(
     assert independent is True
     assert provenance["run_id"] == "123"
 
-    monkeypatch.setenv("GITHUB_SHA", "other")
+    monkeypatch.setenv("AITEAM_EXPECTED_SOURCE_SHA", "other")
     assert _github_provenance("abc123")[0] is False

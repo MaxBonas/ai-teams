@@ -131,7 +131,8 @@ def _github_provenance(revision: str) -> tuple[bool, dict[str, str | None]]:
         "run_id": os.environ.get("GITHUB_RUN_ID"),
         "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
         "job": os.environ.get("GITHUB_JOB"),
-        "sha": os.environ.get("GITHUB_SHA"),
+        "source_sha": os.environ.get("AITEAM_EXPECTED_SOURCE_SHA"),
+        "trigger_sha": os.environ.get("GITHUB_SHA"),
         "runner_os": os.environ.get("RUNNER_OS"),
         "runner_arch": os.environ.get("RUNNER_ARCH"),
     }
@@ -140,7 +141,7 @@ def _github_provenance(revision: str) -> tuple[bool, dict[str, str | None]]:
         and os.environ.get("CI") == "true"
         and provenance["runner_os"] == "Windows"
         and provenance["runner_arch"] == "X64"
-        and provenance["sha"] == revision
+        and provenance["source_sha"] == revision
         and all(
             provenance[key]
             for key in ("repository", "run_id", "run_attempt", "job")
