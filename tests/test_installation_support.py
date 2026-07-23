@@ -56,6 +56,14 @@ def test_machine_audit_does_not_treat_optional_tools_as_blockers() -> None:
     assert report["live_runs"]["status"] == "adapter_installed_auth_health_required"
     assert report["live_runs"]["ready"] is False
     assert report["acceptance_contract"]["workflow"] == ".github/workflows/windows-clean-room.yml"
+    assert {item["id"] for item in report["runtimes"]} == {
+        "python",
+        "node",
+        "npm",
+        "git",
+        "powershell",
+    }
+    assert all(item["ready"] for item in report["runtimes"])
     assert next(item for item in report["adapters"] if item["id"] == "ollama")["installed"] is False
 
 

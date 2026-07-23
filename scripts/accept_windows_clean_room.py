@@ -260,11 +260,25 @@ def main() -> int:
             raise RuntimeError("installation_audit no dejó el control plane listo")
         receipt["installation_audit"] = {
             "schema_version": audit.get("schema_version"),
+            "contract_updated_at": audit.get("contract_updated_at"),
             "support_id": audit.get("host", {}).get("support_id"),
             "support_status": audit.get("host", {}).get("support_status"),
             "control_plane_ready": True,
             "live_runs_status": audit.get("live_runs", {}).get("status"),
+            "runtimes": [
+                {
+                    "id": item.get("id"),
+                    "version": item.get("version"),
+                    "minimum_version": item.get("minimum_version"),
+                    "ready": item.get("ready"),
+                }
+                for item in audit.get("runtimes", [])
+            ],
         }
+        if not receipt["installation_audit"]["runtimes"] or not all(
+            item["ready"] for item in receipt["installation_audit"]["runtimes"]
+        ):
+            raise RuntimeError("installation_audit no conservó runtimes listos")
 
         step(
             "start",
