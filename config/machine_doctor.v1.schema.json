@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MaxBonas/ai-teams/schemas/machine_doctor.v1.schema.json",
+  "title": "machine_doctor_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scope",
+    "host",
+    "runtimes",
+    "ports",
+    "permissions",
+    "toolchains",
+    "adapters",
+    "diagnostics",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "machine_doctor_v1"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "read_only",
+        "secrets_read",
+        "credentials_probed",
+        "personal_paths_emitted"
+      ],
+      "properties": {
+        "read_only": {"const": true},
+        "secrets_read": {"const": false},
+        "credentials_probed": {"const": false},
+        "personal_paths_emitted": {"const": false}
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture", "release", "support_id", "support_status"],
+      "properties": {
+        "os": {"enum": ["windows", "linux", "macos"]},
+        "architecture": {"type": "string", "minLength": 1},
+        "release": {"type": "string"},
+        "support_id": {"type": ["string", "null"]},
+        "support_status": {
+          "enum": ["verified", "preview", "planned", "unsupported", "unlisted"]
+        }
+      }
+    },
+    "runtimes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/runtime"},
+      "minItems": 5
+    },
+    "ports": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/port"},
+      "minItems": 2
+    },
+    "permissions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/permission"},
+      "minItems": 1
+    },
+    "toolchains": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/toolchain"},
+      "minItems": 11
+    },
+    "adapters": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/adapter"}
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/diagnostic"}
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inventory_complete",
+        "required_runtimes_ready",
+        "missing_required",
+        "profiles_observed",
+        "toolchains_manifest_detected",
+        "status",
+        "strict_pass",
+        "severity_counts",
+        "next_action_codes"
+      ],
+      "properties": {
+        "inventory_complete": {"type": "boolean"},
+        "required_runtimes_ready": {"type": "boolean"},
+        "missing_required": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "profiles_observed": {"type": "integer", "minimum": 0},
+        "toolchains_manifest_detected": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "status": {
+          "enum": ["blocked", "degraded", "ready_with_unknowns", "ready"]
+        },
+        "strict_pass": {"type": "boolean"},
+        "severity_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["blocker", "warning", "info"],
+          "properties": {
+            "blocker": {"type": "integer", "minimum": 0},
+            "warning": {"type": "integer", "minimum": 0},
+            "info": {"type": "integer", "minimum": 0}
+          }
+        },
+        "next_action_codes": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "requirement",
+        "installed",
+        "version",
+        "minimum_version",
+        "ready",
+        "source",
+        "executable"
+      ],
+      "properties": {
+        "id": {"enum": ["python", "node", "npm", "git", "powershell", "sqlite"]},
+        "requirement": {"enum": ["required", "required_on_windows", "embedded"]},
+        "installed": {"type": "boolean"},
+        "version": {"type": ["string", "null"]},
+        "minimum_version": {"type": ["string", "null"]},
+        "ready": {"type": "boolean"},
+        "source": {"enum": ["current_process", "path_lookup", "stdlib"]},
+        "executable": {"type": ["string", "null"], "pattern": "^[^/\\\\]*$"}
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "port", "interface", "state", "source"],
+      "properties": {
+        "id": {"enum": ["backend", "frontend"]},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "interface": {"const": "loopback"},
+        "state": {"enum": ["listening", "not_listening", "probe_error"]},
+        "source": {"const": "loopback_connect"}
+      }
+    },
+    "permission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "exists", "readable", "writable", "searchable", "source"],
+      "properties": {
+        "id": {"enum": ["checkout_root"]},
+        "exists": {"type": "boolean"},
+        "readable": {"type": "boolean"},
+        "writable": {"type": "boolean"},
+        "searchable": {"type": "boolean"},
+        "source": {"const": "os_access"}
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "manifest_detected",
+        "manifests",
+        "binary_installed",
+        "version",
+        "executable",
+        "source",
+        "support_claim",
+        "diagnostic_state"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "python", "javascript", "java", "kotlin", "go", "rust",
+            "dotnet", "php", "ruby", "swift", "containers"
+          ]
+        },
+        "manifest_detected": {"type": "boolean"},
+        "manifests": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[^/\\\\]*$"},
+          "uniqueItems": true
+        },
+        "binary_installed": {"type": "boolean"},
+        "version": {"type": ["string", "null"]},
+        "executable": {"type": ["string", "null"], "pattern": "^[^/\\\\]*$"},
+        "source": {"const": "root_manifest_and_path_lookup"},
+        "support_claim": {"const": false},
+        "diagnostic_state": {
+          "enum": ["not_detected", "absent", "unverified", "ready"]
+        }
+      }
+    },
+    "cli_observation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["id", "installed", "version", "executable", "source"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "installed": {"type": "boolean"},
+        "version": {"type": ["string", "null"]},
+        "executable": {"type": ["string", "null"], "pattern": "^[^/\\\\]*$"},
+        "source": {"const": "path_lookup_version_only"}
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "provider",
+        "channel",
+        "adapter_type",
+        "setup_class",
+        "declared_status",
+        "primary_candidate",
+        "declared",
+        "cli",
+        "provider_runtime",
+        "authentication_status",
+        "authentication_source",
+        "health_status",
+        "health_source",
+        "diagnostic_state"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "provider": {"type": "string"},
+        "channel": {"type": "string", "minLength": 1},
+        "adapter_type": {"type": "string", "minLength": 1},
+        "setup_class": {"type": "string", "minLength": 1},
+        "declared_status": {"type": "string", "minLength": 1},
+        "primary_candidate": {"type": "boolean"},
+        "declared": {"const": true},
+        "cli": {"$ref": "#/$defs/cli_observation"},
+        "provider_runtime": {"$ref": "#/$defs/cli_observation"},
+        "authentication_status": {
+          "enum": ["authenticated", "not_authenticated", "not_checked", "not_applicable"]
+        },
+        "authentication_source": {
+          "enum": ["adapter_health", "channel_contract"]
+        },
+        "health_status": {
+          "enum": ["ok", "installed", "failed", "degraded", "unavailable", "untested", "unknown"]
+        },
+        "health_source": {"const": "adapter_health"},
+        "diagnostic_state": {
+          "enum": [
+            "ready", "absent", "not_authenticated", "incompatible",
+            "unverified", "degraded"
+          ]
+        }
+      }
+    },
+    "next_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "description", "requires_human", "mutates_state"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "requires_human": {"type": "boolean"},
+        "mutates_state": {"type": "boolean"}
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "subject_kind", "subject_id", "state", "severity", "code",
+        "message", "source", "next_action"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "subject_kind": {
+          "enum": ["runtime", "permission", "port", "toolchain", "adapter", "system"]
+        },
+        "subject_id": {"type": "string", "minLength": 1},
+        "state": {
+          "enum": ["absent", "not_authenticated", "incompatible", "unverified", "degraded"]
+        },
+        "severity": {"enum": ["blocker", "warning", "info"]},
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "source": {"type": "string", "minLength": 1},
+        "next_action": {"$ref": "#/$defs/next_action"}
+      }
+    }
+  }
+}

@@ -11,18 +11,31 @@ def _read(relative_path: str) -> str:
 def test_documented_windows_entrypoints_and_templates_exist() -> None:
     for relative_path in (
         "scripts/prepare_dev_env.bat",
+        "scripts/prepare_dev_env.sh",
+        "scripts/dev_lifecycle.py",
         "scripts/update_windows.bat",
         "scripts/update_windows.ps1",
         "scripts/config_portability.py",
+        "scripts/machine_doctor.py",
+        "scripts/machine_doctor_receipt.py",
+        "scripts/machine_doctor_remediate.py",
         "start_ide.bat",
+        "start_ide.sh",
         "stop_ide.bat",
+        "stop_ide.sh",
         "scripts/python_local.bat",
+        "scripts/python_local.sh",
+        "scripts/pytest_local.sh",
         "scripts/migrate_to_v2.py",
         "scripts/audit_installation_support.py",
         "scripts/accept_windows_clean_room.py",
         ".github/workflows/windows-clean-room.yml",
         "config/installation_support.v1.json",
         "config/configuration_layers.v1.json",
+        "config/machine_doctor.v1.schema.json",
+        "config/machine_doctor_receipt.v1.schema.json",
+        "config/machine_doctor_remediation.v1.schema.json",
+        "config/dev_lifecycle.v1.json",
         "config/control_plane.example.json",
         "config/agents.example.json",
     ):
@@ -50,6 +63,12 @@ def test_installation_guide_is_linked_and_does_not_overclaim_platforms() -> None
     assert "aiteam_portable_config_v1" in guide
     assert "config_portability.py import" in guide
     assert "--apply" in guide
+    assert "machine_doctor_receipt.py" in guide
+    assert "machine_doctor_remediate.py" in guide
+    assert "`applied=false`" in guide
+    assert "config/dev_lifecycle.v1.json" in readme
+    assert "sh scripts/prepare_dev_env.sh" in guide
+    assert "estado preview" in guide
 
 
 def test_documented_migration_validation_remains_a_dry_run() -> None:

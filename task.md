@@ -64,8 +64,9 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 6. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próxima unidad ejecutable sin esperar un trigger externo: **I.3.1**, definir el
-schema estable y el inventario read-only del `doctor` de máquina. M.8 permanece
+Próxima unidad ejecutable sin esperar un trigger externo: **I.5**, definir el
+registro versionado de ecosistemas/toolchains y su frontera detectar/ejecutar.
+M.8 permanece
 abierto solo por mantenimiento continuo; sus cuatro diagnósticos mono-familia
 no se repiten hasta cambio material.
 
@@ -198,32 +199,128 @@ no se repiten hasta cambio material.
   - Cierre: un checkout limpio reconstruye el entorno y una mudanza conserva
     intención/configuración no secreta sin copiar estado local.
 
-- [ ] **I.3 Crear un `doctor` de máquina seguro y legible por humanos/IA**.
-  - [ ] **I.3.1 Schema e inventario base read-only**: definir
+- [x] **I.3 Crear un `doctor` de máquina seguro y legible por humanos/IA**.
+  - [x] **I.3.1 Schema e inventario base read-only**: definir
     `machine_doctor_v1` e inventariar OS/arquitectura, Python, Node/npm, Git,
     SQLite, puertos y permisos sin imprimir entorno, secretos ni paths
     personales.
-  - [ ] **I.3.2 Toolchains y adapters**: observar CLIs, versiones, fuente,
+    - [x] `config/machine_doctor.v1.schema.json` falla cerrado sobre diez
+      secciones y seis runtimes base; los ejecutables se reducen a basename.
+    - [x] El probe usa solo comandos de versión allowlisted con entorno mínimo,
+      conexión loopback y `os.access`; no crea archivos ni lee credenciales.
+    - [x] `scripts/machine_doctor.py` ofrece salida humana y `--json --strict`
+      iniciales. Diagnóstico completo/remediation permanecen en I.3.2–I.3.4.
+    - Verificación: doctor real Windows x86_64 con inventario completo, 29 tests
+      focalizados, Ruff limpio en alcance y suite backend 1502/1502.
+  - [x] **I.3.2 Toolchains y adapters**: observar CLIs, versiones, fuente,
     autenticación/health del par exacto y toolchains del proyecto sin instalar
     ni ejecutar inferencias.
-  - [ ] **I.3.3 Diagnóstico y presentación**: salida humana y `--json` estable
+    - [x] Once señales poliglotas separan manifest detectado, binario/version
+      observados y soporte demostrado; discovery raíz nunca promociona lenguaje.
+    - [x] Los perfiles redactados publican canal, proveedor, CLI/transporte,
+      runtime local, auth y health durable por separado. `installed` no implica
+      auth, `ok` no se fabrica desde presencia y local usa `not_applicable`.
+    - [x] Solo se ejecutan `--version`/equivalentes allowlisted con entorno
+      mínimo; no se invocan login, secret store, catálogo vivo ni inferencia.
+    - Verificación: doctor real observa 12 perfiles y manifests Python/JS sin
+      mutar los tres archivos de configuración locales; 46 tests focalizados,
+      Ruff limpio y suite backend 1506/1506.
+  - [x] **I.3.3 Diagnóstico y presentación**: salida humana y `--json` estable
     con bloqueo y siguiente acción; distinguir ausente, no autenticado,
     incompatible, no verificado y degradado.
-  - [ ] **I.3.4 Recibo y contrato de no mutación**: demostrar que discovery no
+    - [x] Cada toolchain y adapter conserva `diagnostic_state`; los diagnósticos
+      publican sujeto, severidad, código, evidencia y siguiente acción sin
+      incluir un comando ejecutable ni realizar la remediation.
+    - [x] La composición marca `blocked`, `degraded`, `ready_with_unknowns` o
+      `ready`. `--strict` falla solo ante blockers y nunca convierte warnings o
+      desconocidos en salud inventada.
+    - [x] Un perfil opcional ausente queda informativo; runtimes obligatorios,
+      permisos incompatibles, toolchain requerida por manifest o falta de una
+      vía primaria autenticada+verde bloquean con causa estable.
+    - Verificación: doctor real Windows clasifica la máquina como `blocked`
+      únicamente por no tener vía primaria durable verificada; `--strict`
+      devuelve 2 y no ejecuta login, canarios ni remediaciones. Pasan 49 tests
+      focalizados, Ruff y 1509/1509 tests backend.
+  - [x] **I.3.4 Recibo y contrato de no mutación**: demostrar que discovery no
     escribe ni instala; cualquier remediation queda en un comando separado,
     explícito y con recibo reproducible.
+    - [x] `machine_doctor_receipt_v1` incluye el report validado, hashes
+      canónicos y guard sobre metadata de checkout/config más presencia de CLIs;
+      el guard no abre contenido de secretos ni emite rutas personales.
+    - [x] `scripts/machine_doctor_receipt.py --output ...` es la única escritura
+      de este flujo, exige path explícito, no crea el directorio padre y requiere
+      `--force` para reemplazar exactamente ese recibo.
+    - [x] `scripts/machine_doctor_remediate.py --receipt ... --action ...`
+      produce `machine_doctor_remediation_v1`, vinculado al hash y siempre
+      `guided_manual`, `applied=false`, `not_executed`; no existe `--apply`.
+    - [x] El contrato detecta una escritura fixture, rechaza tampering/acciones
+      no diagnosticadas y mantiene salida UTF-8 en Windows.
+    - Verificación: recibo real con checkout, user config e inventario CLI sin
+      cambios; segunda ejecución con el mismo `receipt_id`; remediation real
+      hash-bound y no ejecutada. Pasan 38 tests focalizados, Ruff y 1518/1518
+      tests backend.
   - Cierre: una IA puede decidir si la máquina está lista usando solo el JSON y
     puede explicar cada bloqueo sin inferirlo de logs libres.
 
-- [ ] **I.4 Unificar bootstrap y ciclo de vida cross-platform**.
-  - [ ] Extraer la lógica de `prepare_dev_env.bat`/PowerShell a un contrato
+- [x] **I.4 Unificar bootstrap y ciclo de vida cross-platform**.
+  - [x] **I.4.1 Contrato común idempotente**: extraer la lógica de
+    `prepare_dev_env.bat`/PowerShell a un contrato
     idempotente con frontends Windows y POSIX equivalentes; mantener comandos de
     start, stop, test y migrate por plataforma.
-  - [ ] Usar entorno local del repo, locks/versiones reproducibles y procesos
+    - [x] `config/dev_lifecycle.v1.json` define la superficie ordenada
+      `prepare/start/stop/test/migrate`, alcance de mutación, idempotencia,
+      frontends e invariantes; falla cerrado ante acciones o autoridad extra.
+    - [x] `aiteam.dev_lifecycle_contract` proyecta manifests deterministas para
+      Windows/Linux/macOS y verifica que cada frontend quede dentro del checkout.
+    - [x] Windows conserva sus entrypoints; POSIX añade wrappers locales para
+      bootstrap, Python, pytest y sesión foreground Node. No usa PowerShell,
+      `sudo`, instalaciones globales, login ni inferencias.
+    - [x] POSIX continúa `planned/preview`: no se confunde disponer de scripts
+      con soporte aceptado. Locks, ownership y matriz de recovery quedan
+      implementados en I.4.2–I.4.3, pero necesitan aceptación POSIX independiente.
+    - Verificación: 37 tests focalizados, Ruff, proyecciones Windows/Linux,
+      paths Unicode y `node --check` limpios; 1527/1527 tests backend. Dos
+      bootstraps Windows consecutivos terminan en 0 sin cambiar CLIs ni hashes
+      de estado. Esta máquina no dispone de `sh`, por lo que no aporta recibo
+      POSIX.
+  - [x] **I.4.2 Entorno y procesos gobernados**: usar entorno local del repo,
+    locks/versiones reproducibles y procesos
     hijos explícitos; no depender de asociaciones de `.ps1`, shell interactiva,
     PATH mutable ni instalaciones globales accidentales.
-  - [ ] Probar espacios y Unicode en rutas, puertos ocupados, dependencia ausente,
+    - [x] `requirements-dev.lock` fija dependencias Python y el bootstrap instala
+      primero el lock y después el checkout editable sin dependencias ni build
+      isolation. Frontend exige `package-lock.json` + `npm ci`: no actualiza el
+      lock ni cae a `npm install`. Python ya no actualiza `pip` implícitamente.
+    - [x] Windows ejecuta cada `.ps1` mediante `powershell.exe` explícito y
+      serializa bootstrap con `FileShare.None`; POSIX usa un lockdir atómico con
+      owner PID y recuperación stale. La segunda pasada no cambia hashes ni
+      timestamps de estado y `pip check` queda limpio.
+    - [x] `dev_process_registry_v1` registra PID, create time, firma, puertos y
+      checkout. Start falla si un puerto está ocupado; stop solo termina árboles
+      cuya identidad coincide y nunca busca/mata por puerto o firma global.
+    - Verificación local Windows: 32 tests focalizados, Ruff/Node limpios, lock
+      concurrente fail-closed, start 200/200, stop completo, proceso ajeno en
+      8010 conservado, `pip check` e idempotencia de bootstrap; 1531/1531 tests
+      backend. La aceptación POSIX permanece pendiente y no se sobreafirma.
+  - [x] **I.4.3 Matriz de fallos y recovery**: probar espacios y Unicode en
+    rutas, puertos ocupados, dependencia ausente,
     ejecución repetida, interrupción y limpieza/recovery.
+    - [x] `dev_lifecycle_v1.recovery_matrix` fija diez casos, invariant y
+      evidencia diferenciada por plataforma. Windows queda verificado en los
+      canarios vivos aplicables; POSIX conserva `preview/contract_tested`.
+    - [x] El bootstrap hace preflight de todos los inputs versionados antes de
+      crear `runtime/`; un lock ausente en una ruta Unicode falla con diagnóstico
+      y cero mutación. Los frontends batch fuerzan UTF-8.
+    - [x] Backend y frontend se registran inmediatamente después de cada spawn.
+      Una interrupción entre ambos deja ownership recuperable; segundo start,
+      pérdida parcial, pérdida total con registro stale, registro corrupto y
+      stop repetido fallan o recuperan según contrato sin tocar procesos ajenos.
+    - [x] Canarios Windows: checkout por junction con espacios/`ñ`/japonés
+      completa prepare→start→health 200/200→stop; puerto ajeno se conserva;
+      segundo start no altera la sesión; backend perdido limpia frontend y
+      reinicia; pérdida total elimina registro stale y reinicia sin PID heredado.
+    - Verificación: 27 pruebas focalizadas, Ruff/Node/diff limpios y 1537/1537
+      tests backend. No quedan registro, listeners ni fixture Unicode.
   - Cierre: segunda ejecución no rompe ni reinstala innecesariamente; todo fallo
     deja diagnóstico accionable y no una instalación parcial silenciosa.
 

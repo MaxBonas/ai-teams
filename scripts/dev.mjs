@@ -5,7 +5,7 @@
  */
 
 import { createServer } from 'net';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -52,13 +52,11 @@ async function waitForHttp(url, timeoutMs = 30_000) {
 // ── Process helpers ──────────────────────────────────────────────────────────
 
 function resolvePython() {
-  if (IS_WIN) {
-    const wrapper = join(ROOT, 'scripts', 'python_local.bat');
-    if (existsSync(wrapper)) return wrapper;
-  }
-  const venvPy = join(ROOT, 'venv', 'Scripts', 'python.exe');
+  const venvPy = IS_WIN
+    ? join(ROOT, 'venv', 'Scripts', 'python.exe')
+    : join(ROOT, 'venv', 'bin', 'python');
   if (existsSync(venvPy)) return venvPy;
-  return IS_WIN ? 'python' : 'python3';
+  throw new Error('Falta el Python local; ejecuta el bootstrap del checkout.');
 }
 
 function runSetup() {
@@ -92,6 +90,19 @@ function spawnProc(cmd, args, opts = {}) {
   return proc;
 }
 
+function processRegistry(python, args, quiet = false) {
+  const result = spawnSync(
+    python,
+    [join(ROOT, 'scripts', 'ide_processes.py'), ...args],
+    { cwd: ROOT, encoding: 'utf8' },
+  );
+  if (!quiet && result.stdout) process.stdout.write(result.stdout);
+  if (result.status !== 0) {
+    const detail = (result.stdout || result.stderr || '').trim();
+    throw new Error(`process registry failed (${result.status}): ${detail}`);
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -110,6 +121,7 @@ async function main() {
   console.log('  Press Ctrl+C to stop all services\n');
 
   const python = resolvePython();
+  processRegistry(python, ['assert-clear'], true);
 
   // ── Backend ────────────────────────────────────────────────────────────────
   const backend = spawnProc(
@@ -120,6 +132,16 @@ async function main() {
       '--reload'],
     { cwd: ROOT },
   );
+  try {
+    processRegistry(
+      python,
+      ['register-one', '--role', 'backend', '--pid', String(backend.pid), '--port', String(backendPort)],
+      true,
+    );
+  } catch (error) {
+    backend.kill('SIGTERM');
+    throw error;
+  }
 
   // ── Frontend ───────────────────────────────────────────────────────────────
   const frontendCwd = join(ROOT, 'ide-frontend');
@@ -138,6 +160,26 @@ async function main() {
       },
     },
   );
+  try {
+    processRegistry(
+      python,
+      [
+        'register-one',
+        '--role', 'frontend',
+        '--pid', String(frontend.pid),
+        '--port', String(frontendPort),
+      ],
+      true,
+    );
+  } catch (error) {
+    try {
+      processRegistry(python, ['stop'], true);
+    } catch {
+      backend.kill('SIGTERM');
+      frontend.kill('SIGTERM');
+    }
+    throw error;
+  }
 
   // ── Wait for both to be ready ─────────────────────────────────────────────
   console.log('  Waiting for services to be ready...');
@@ -152,8 +194,10 @@ async function main() {
     console.log(`\n  Open: http://localhost:${frontendPort}\n`);
 
     // Auto-open browser (best-effort)
-    const openCmd = IS_WIN ? 'start' : (process.platform === 'darwin' ? 'open' : 'xdg-open');
-    spawn(openCmd, [`http://localhost:${frontendPort}`], { shell: true, detached: true, stdio: 'ignore' }).unref();
+    const url = `http://localhost:${frontendPort}`;
+    const openCmd = IS_WIN ? 'powershell.exe' : (process.platform === 'darwin' ? 'open' : 'xdg-open');
+    const openArgs = IS_WIN ? ['-NoProfile', '-Command', `Start-Process -FilePath '${url}'`] : [url];
+    spawn(openCmd, openArgs, { detached: true, stdio: 'ignore' }).unref();
   } else {
     console.error('\n  ✗ One or more services failed to start. Check logs above.');
   }
@@ -161,8 +205,11 @@ async function main() {
   // ── Cleanup on Ctrl+C ─────────────────────────────────────────────────────
   function shutdown() {
     console.log('\n[dev] Shutting down...');
-    backend.kill('SIGTERM');
-    frontend.kill('SIGTERM');
+    try {
+      processRegistry(python, ['stop'], true);
+    } catch (error) {
+      console.error(`[dev] ${error.message}`);
+    }
     setTimeout(() => process.exit(0), 1000);
   }
   process.on('SIGINT', shutdown);

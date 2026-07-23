@@ -19,6 +19,17 @@ UTF8_SUBPROCESS_OPTIONS: dict[str, Any] = {
 }
 
 
+def configure_utf8_stdio() -> None:
+    """Make CLI JSON/text output portable across Windows console encodings."""
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            continue
+
+
 def platform_id(*, system: str | None = None) -> str:
     observed = (system or platform.system()).strip().lower()
     if observed.startswith("win"):

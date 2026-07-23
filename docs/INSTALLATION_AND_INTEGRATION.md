@@ -4,8 +4,9 @@ Actualizado: `2026-07-23`
 
 Esta es la guía canónica para instalar AI Teams en una máquina nueva, trasladar
 una instalación y entregar la integración a una persona o agente de IA. Describe
-el estado real: Windows x86_64 tiene control plane verificado; Linux, macOS, releases
-empaquetadas, `doctor --json` y la matriz poliglota siguen en P0.I de `task.md`.
+el estado real: Windows x86_64 tiene control plane verificado; Linux, macOS,
+releases empaquetadas, el doctor completo y la matriz poliglota siguen en P0.I
+de `task.md`. El inventario base `machine_doctor_v1` ya está implementado.
 
 ## Contrato de portabilidad
 
@@ -75,8 +76,39 @@ terceros. Después del bootstrap muestra presencia y siguiente acción mediante:
 .\scripts\python_local.bat scripts\audit_installation_support.py --json
 ```
 
-Este auditor I.1 es read-only: no prueba credenciales ni health y no sustituye
-al `doctor --json` de I.3.
+Este auditor I.1 es read-only: no prueba credenciales ni health. El inventario
+base estable de I.3 se obtiene con:
+
+```powershell
+.\scripts\python_local.bat scripts\machine_doctor.py --json --strict
+.\scripts\python_local.bat scripts\machine_doctor_receipt.py `
+  --output runtime\machine-doctor-receipt.json
+```
+
+`machine_doctor_v1` enumera OS/arquitectura, Python, Node/npm, Git, PowerShell,
+SQLite, puertos loopback, permisos, once señales de toolchain y perfiles
+adapter. Para cada perfil separa presencia/versión del CLI, runtime local,
+autenticación durable y health; `not_checked` es información válida y no se
+convierte en conectado. No lee secretos, no inicia login, no ejecuta inferencias
+ni emite paths personales. Clasifica bloqueos, degradación y desconocidos con
+siguientes acciones legibles, pero no ejecuta esas acciones. El segundo comando
+genera `machine_doctor_receipt_v1`: compara metadata —no contenido— del checkout
+y configuración local, además de presencia de CLIs conocidos. Solo escribe el
+output explícito, no crea su directorio padre y exige `--force` para reemplazarlo.
+
+Para obtener guía sobre una acción ya diagnosticada:
+
+```powershell
+.\scripts\python_local.bat scripts\machine_doctor_remediate.py `
+  --receipt runtime\machine-doctor-receipt.json `
+  --action verify_primary_adapter `
+  --output runtime\machine-doctor-remediation.json
+```
+
+La salida queda vinculada al hash del report y declara siempre
+`guided_manual`, `applied=false` y `not_executed`. No existe `--apply`: login,
+instalación o cambios de configuración siguen siendo decisiones humanas
+separadas.
 
 ```powershell
 git clone https://github.com/MaxBonas/ai-teams.git
@@ -86,7 +118,11 @@ Set-Location ai-teams
 
 El script coordina validación de runtime, entorno Python y dependencias del
 frontend, y termina mostrando adapters primarios y opcionales. Debe ejecutarse
-en primer plano y puede repetirse. No instala ni autentica CLIs.
+en primer plano y puede repetirse. Un lock exclusivo impide dos bootstraps
+simultáneos; `requirements-dev.lock` y `package-lock.json` fijan las versiones,
+y un lock ausente o incoherente falla sin sustituirse por una instalación
+abierta. No actualiza `pip`, no ejecuta `npm install` como fallback y no instala
+ni autentica CLIs.
 
 ### Adapters recomendados y autenticación
 
@@ -131,6 +167,20 @@ Arranque y parada:
 .\stop_ide.bat
 ```
 
+`start_ide.bat` exige los entornos del checkout, comprueba que los puertos estén
+libres y registra backend/frontend en `runtime/ide_processes.json`. `stop_ide.bat`
+solo termina un árbol si coinciden PID, instante de creación y firma de comando.
+Nunca libera un puerto matando al proceso que lo ocupa. Una discrepancia de
+identidad falla cerrada y conserva el registro para diagnóstico.
+
+La matriz canónica de recovery está en `config/dev_lifecycle.v1.json`. Cubre
+checkout Unicode, lock de dependencia ausente, bootstrap concurrente/repetido,
+puerto ocupado, start/stop repetidos, pérdida parcial o total de procesos y
+registro corrupto/stale. Cada proceso se registra inmediatamente después de su
+spawn: si el backend desaparece, stop limpia el frontend restante; si ambos
+desaparecen, el siguiente start retira únicamente el registro stale. Un registro
+corrupto o una identidad discrepante nunca autorizan matar un PID.
+
 Backend y frontend por separado:
 
 ```powershell
@@ -173,11 +223,30 @@ de rutas o secretos. Por ello Windows x86_64 y `git_checkout` pasan a
 
 ## Linux y macOS
 
-El código Python declara `>=3.10` y la pila web es portable en principio, pero
-el repositorio aún no tiene bootstrap POSIX ni recibos de aceptación. Instalar
-manualmente con `python -m venv`, `pip install -e ".[dev]"` y `npm ci` puede
-servir para contribuir a esa validación, pero no convierte la plataforma en
-`verified`.
+El código Python declara `>=3.10` y la pila web es portable en principio. I.4.1
+añade frontends POSIX en estado preview:
+
+```sh
+sh scripts/prepare_dev_env.sh
+sh start_ide.sh
+sh scripts/pytest_local.sh tests -q --tb=short
+sh scripts/python_local.sh scripts/migrate_to_v2.py --json
+```
+
+`start_ide.sh` mantiene la sesión foreground y registra sus hijos;
+`stop_ide.sh` consume el mismo registro de identidad y es idempotente. El
+bootstrap usa `venv/`, `node_modules/` y `runtime/` del checkout, locks
+versionados y exclusión mutua, nunca instalaciones globales. La misma matriz de
+recovery está implementada como contrato, pero sus filas POSIX permanecen
+`preview/contract_tested`: todavía faltan aceptación independiente y merge
+conservador de upgrades. Disponer de estos scripts no convierte la plataforma
+en `verified`.
+
+El contrato común se inspecciona sin ejecutar acciones:
+
+```sh
+sh scripts/python_local.sh scripts/dev_lifecycle.py --platform linux
+```
 
 Toda prueba POSIX debe registrar como mínimo OS/arquitectura, versiones de
 Python/Node/npm/Git, comandos exactos, checks ejecutados, limitaciones y diff
@@ -291,6 +360,8 @@ por adapters y routers:
 Auditoría local, read-only salvo sus fixtures temporales:
 
 ```powershell
+.\scripts\python_local.bat scripts\machine_doctor.py --json --strict
+.\scripts\python_local.bat scripts\machine_doctor_receipt.py --output runtime\machine-doctor-receipt.json
 .\scripts\python_local.bat scripts\audit_platform_portability.py --json --strict
 ```
 
@@ -319,11 +390,13 @@ node_modules\.bin\tsc.cmd -b
 ```
 
 `system-check` valida únicamente que el registro de adapters puede cargarse y
-enumera sus tipos; no prueba conectividad, autenticación ni health. El futuro
-`doctor --json` añadirá inventario completo, clasificación de bloqueos y salida
-estable para máquinas; hasta entonces, no interpretar un CLI encontrado como
-autenticado o compatible. Los canarios vivos consumen cuota y se ejecutan solo
-de forma intencional.
+enumera sus tipos; no prueba conectividad, autenticación ni health. El doctor
+observa evidencia durable, pero tampoco interpreta un CLI encontrado como
+autenticado o compatible. `--strict` bloquea si faltan runtimes/permisos,
+toolchains exigidas por manifests o una vía primaria verificada; los perfiles
+opcionales ausentes quedan informativos. La remediation se mantiene en un
+comando separado y plan-only. Los canarios vivos consumen cuota y se ejecutan
+solo de forma intencional.
 
 ## Traslado y actualización
 

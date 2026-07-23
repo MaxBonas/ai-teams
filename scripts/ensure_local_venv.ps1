@@ -14,6 +14,7 @@ $venvDir = Join-Path $rootDir "venv"
 $venvPython = Join-Path $venvDir "Scripts\\python.exe"
 $pyvenvCfg = Join-Path $venvDir "pyvenv.cfg"
 $pyprojectPath = Join-Path $rootDir "pyproject.toml"
+$lockPath = Join-Path $rootDir "requirements-dev.lock"
 $stateHashPath = Join-Path $venvDir ".aiteam-pyproject.sha256"
 
 function Write-Info {
@@ -102,7 +103,20 @@ function Get-ProjectDependencyHash {
     if (-not (Test-Path $pyprojectPath)) {
         throw "No se encontro pyproject.toml para calcular el hash de dependencias."
     }
-    return Get-FileSha256 -PathValue $pyprojectPath
+    if (-not (Test-Path $lockPath)) {
+        throw "No se encontro requirements-dev.lock; el bootstrap no acepta dependencias sin lock."
+    }
+    $material = @(
+        "pyproject.toml:$(Get-FileSha256 -PathValue $pyprojectPath)",
+        "requirements-dev.lock:$(Get-FileSha256 -PathValue $lockPath)"
+    ) -join "`n"
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($material)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
 }
 
 function Read-StoredDependencyHash {
@@ -245,14 +259,7 @@ function Recreate-Venv {
     }
 
     Invoke-PythonChecked -PythonExe $BasePython -Arguments @("-m", "venv", $venvDir) -StepName "Creando venv local"
-    Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -StepName "Actualizando pip"
-
-    if (Test-Path $pyprojectPath) {
-        Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "-e", ".[dev]") -StepName "Instalando dependencias del proyecto" -WorkingDirectory $rootDir
-        Write-StoredDependencyHash -HashValue (Get-ProjectDependencyHash)
-    } else {
-        throw "No se encontro pyproject.toml para instalar dependencias."
-    }
+    Install-ProjectDependencies
 }
 
 function Install-ProjectDependencies {
@@ -260,7 +267,11 @@ function Install-ProjectDependencies {
         throw "No se encontro pyproject.toml para instalar dependencias."
     }
 
-    Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "-e", ".[dev]") -StepName "Reinstalando dependencias del proyecto" -WorkingDirectory $rootDir
+    if (-not (Test-Path $lockPath)) {
+        throw "No se encontro requirements-dev.lock."
+    }
+    Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "-r", $lockPath) -StepName "Instalando dependencias bloqueadas" -WorkingDirectory $rootDir
+    Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "--no-deps", "--no-build-isolation", "-e", ".") -StepName "Instalando AI Teams editable" -WorkingDirectory $rootDir
     Write-StoredDependencyHash -HashValue (Get-ProjectDependencyHash)
 }
 

@@ -10,8 +10,8 @@ hasta cerrarlo o pedir un desbloqueo.
 | Entorno | Estado | Entrada |
 |---|---|---|
 | Windows x86_64 nativo | Verificado para control plane | `scripts\prepare_dev_env.bat` |
-| Linux | Objetivo, aún no verificado | Bootstrap POSIX pendiente |
-| macOS | Objetivo, aún no verificado | Bootstrap POSIX pendiente |
+| Linux | Objetivo, aún no verificado | `sh scripts/prepare_dev_env.sh` · preview |
+| macOS | Objetivo, aún no verificado | `sh scripts/prepare_dev_env.sh` · preview |
 
 “Objetivo” no significa soporte probado. La matriz y los criterios de promoción
 viven en [task.md](task.md), bloque P0.I.
@@ -65,6 +65,10 @@ usa exclusivamente `git pull --ff-only`, reconstruye dependencias y deja un
 recibo local en `runtime/last_update.json`. No hace `stash`, `reset`, migraciones
 de DB, login ni instalación de CLIs; tampoco borra proyectos, `.aiteam/`,
 settings, secretos o sesiones de proveedor.
+
+El bootstrap instala únicamente en `venv/` y `ide-frontend/node_modules` desde
+los locks versionados. Arranque y parada usan `runtime/ide_processes.json`:
+un puerto ocupado produce diagnóstico y nunca autoriza matar el proceso ajeno.
 
 Para una instalación anterior a la existencia del actualizador:
 
@@ -149,6 +153,8 @@ configurarse y probarse en la máquina destino antes de ser seleccionable.
 ## Verificación de desarrollo
 
 ```powershell
+.\scripts\python_local.bat scripts\machine_doctor.py --json --strict
+.\scripts\python_local.bat scripts\machine_doctor_receipt.py --output runtime\machine-doctor-receipt.json
 .\scripts\python_local.bat scripts\audit_platform_portability.py --json --strict
 .\scripts\pytest_local.bat tests -q --tb=short
 .\scripts\python_local.bat scripts\migrate_to_v2.py --json
@@ -156,13 +162,44 @@ Set-Location ide-frontend
 node_modules\.bin\tsc.cmd -b
 ```
 
+La superficie versionada `config/dev_lifecycle.v1.json` mantiene los comandos
+`prepare`, `start`, `stop`, `test` y `migrate` para Windows/POSIX. Puede
+inspeccionarse sin ejecutar nada:
+
+```powershell
+.\scripts\python_local.bat scripts\dev_lifecycle.py --platform windows
+.\scripts\python_local.bat scripts\dev_lifecycle.py --platform linux
+```
+
+Los frontends POSIX existen en preview, pero no promueven Linux/macOS a soporte
+verificado. Requieren aceptación independiente; start es foreground y termina
+con Ctrl+C.
+
 El auditor de portabilidad prueba filesystem UTF-8, espacios/Unicode, permisos
 y teardown de procesos, y revisa rutas personales/`shell=True`; es local y no
 promociona soporte de nuevas plataformas.
 
+`machine_doctor_v1` añade inventario read-only de host, runtimes, SQLite,
+puertos, permisos, señales de toolchain y perfiles adapter sin leer credenciales
+ni emitir paths personales. Manifest, binario, auth y health son estados
+independientes; una detección no declara soporte. La salida añade blockers,
+warnings y siguientes acciones; `--strict` devuelve 2 únicamente si existe un
+bloqueo real de preparación. El doctor no ejecuta esas acciones. Para conservar
+evidencia reproducible, el comando de recibo compara superficies antes/después
+y escribe únicamente el path indicado. La remediation guiada se solicita aparte:
+
+```powershell
+.\scripts\python_local.bat scripts\machine_doctor_remediate.py `
+  --receipt runtime\machine-doctor-receipt.json `
+  --action verify_primary_adapter
+```
+
+Ese comando no instala ni aplica cambios: devuelve un plan sellado con
+`applied=false`.
+
 El actual `aiteam system-check` comprueba que el registro de adapters puede
 cargarse y enumera sus tipos; no prueba conectividad, autenticación ni health y
-no sustituye al `doctor --json` cross-platform planificado.
+no sustituye la prueba/health explícita de cada perfil ni la remediation.
 
 ## Instalar o trasladar a otra máquina
 

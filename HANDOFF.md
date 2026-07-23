@@ -44,14 +44,66 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad ejecutable: **P0.I.3.1**, schema e inventario read-only del
-`doctor` de máquina. M.8 queda abierto como
+Siguiente unidad ejecutable: **P0.I.5**, registro versionado de
+ecosistemas/toolchains y frontera detectar/ejecutar. M.8 queda abierto como
 mantenimiento por evento/mes; sus 25 pares
 calibrados ya tienen quality exacta, 21 abren diversidad y los cuatro restantes
 no deben repetirse hasta un cambio material.
 
 ## Trabajo reciente
 
+- I.4 queda cerrado. I.4.3 añade diez casos versionados de recovery y registra
+  cada proceso inmediatamente después de su spawn. Preflight falla antes de
+  mutar ante inputs ausentes; los batch usan UTF-8. Los canarios Windows cubren
+  ruta con espacios/ñ/japonés, puerto ajeno, start repetido, pérdida parcial,
+  pérdida total/stale y reinicio 200/200. Pasan 27 tests focalizados,
+  Ruff/Node/diff y 1537/1537 backend. POSIX conserva estado preview hasta
+  aceptación independiente.
+- I.4.2 fija `requirements-dev.lock`, exige `package-lock.json` + `npm ci` y
+  elimina upgrades/fallbacks abiertos. El bootstrap queda serializado por lock
+  exclusivo en Windows y lockdir con PID en POSIX. Start/stop comparten
+  `dev_process_registry_v1`: validan PID, create time y firma, no matan por
+  puerto y fallan cerrados ante identidad discrepante. El canario Windows
+  devuelve health 200/200, libera solo sus árboles, conserva un proceso ajeno
+  en 8010 y confirma segunda pasada sin cambiar estado. Pasan 32 tests
+  focalizados, Ruff/Node y 1531/1531 backend; POSIX sigue pendiente de recibo
+  independiente e I.4.3 conserva fallos/interrupción/recovery.
+- I.4.1 añade `dev_lifecycle_v1`, fuente versionada de las acciones
+  prepare/start/stop/test/migrate y sus frontends Windows/POSIX. El proyector
+  falla cerrado, conserva paths dentro del checkout y publica gaps. Los wrappers
+  POSIX usan venv/node_modules locales y sesión foreground; no usan PowerShell
+  ni instalaciones globales. POSIX sigue preview/planned: no hay `sh` ni recibo
+  independiente en esta máquina, y locks/PIDs/recovery quedan en I.4.2–I.4.3.
+  La doble ejecución Windows no cambia CLIs ni hashes de estado tras evitar
+  reescrituras de timestamps/baselines; pasan 37 tests focalizados, Ruff y
+  1527/1527 backend.
+- I.3 queda cerrado. I.3.4 añade un recibo determinista que sella
+  `machine_doctor_v1` y compara metadata de checkout/config e inventario de CLIs
+  sin abrir secretos. La escritura del recibo requiere output explícito y
+  consentimiento de overwrite. La remediation vive en otro comando, consume el
+  recibo sellado y solo produce un plan `guided_manual`, `applied=false`.
+  El flujo real conserva las tres superficies y queda hash-bound; una frontera
+  UTF-8 común evita fallos cp1252 en Windows. Dos ejecuciones reales producen
+  el mismo `receipt_id`; pasan 38 tests focalizados, Ruff y 1518/1518 backend.
+- I.3.3 añade diagnóstico determinista a `machine_doctor_v1`: estados
+  `absent`, `not_authenticated`, `incompatible`, `unverified` y `degraded`,
+  severidad, fuente y siguiente acción. La máquina queda `blocked` solo por
+  no existir una vía primaria con auth+health durables; `--strict` devuelve 2.
+  Los perfiles opcionales no bloquean y ninguna acción se ejecuta desde doctor.
+  Pasan 49 tests focalizados, Ruff y 1509/1509 tests backend.
+- I.3.2 amplía `machine_doctor_v1` con 11 señales de toolchain y todos los
+  perfiles adapter redactados. Manifest, binario, versión, auth y health quedan
+  como estados ortogonales; los runtimes locales se observan aparte del CLI de
+  transporte. El doctor real ve 12 perfiles y manifests Python/JS sin login,
+  secret store, catálogo vivo, instalación ni inferencia; no muta los tres
+  archivos de configuración locales. Pasan 46 tests focalizados, Ruff y
+  1506/1506 tests backend.
+- I.3.1 queda cerrado con `machine_doctor_v1`: JSON Schema fail-closed,
+  inventario de host, Python, Node/npm, Git, PowerShell, SQLite, puertos
+  loopback y permisos del checkout. Los comandos de versión reciben solo entorno
+  allowlisted; la salida elimina paths y declara que no leyó secretos ni
+  credenciales. El doctor real devuelve inventario completo; 29 tests
+  focalizados, Ruff en alcance y 1502 tests backend pasan.
 - I.2 queda cerrado. I.2.3 añade `aiteam.platform_runtime` para semántica de
   paths, shims ejecutables, layout de venv, UTF-8 y teardown de árboles de
   proceso; adapters, MCP, notifier, CLI y probes usan la frontera. El notifier

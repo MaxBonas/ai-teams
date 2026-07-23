@@ -1,5 +1,7 @@
 @echo off
 setlocal EnableExtensions
+chcp 65001 >nul
+set "PYTHONUTF8=1"
 
 rem ── AI Team IDE launcher ──────────────────────────────────────────────────
 rem  Backend  : Python uvicorn  → http://localhost:8010  (api.main:app --reload)
@@ -26,15 +28,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
+call :prepare_environment || goto :fail
 call :resolve_python || goto :fail
 call :resolve_npm    || goto :fail
-call :ensure_runtime || goto :fail
-call :ensure_frontend_deps || goto :fail
 call :ensure_log_dir || goto :fail
+call :assert_registry_clear || goto :fail
+call :assert_port_free %BACKEND_PORT% || goto :fail
+call :assert_port_free %FRONTEND_PORT% || goto :fail
 
-echo [AI Team IDE] Liberando puertos %BACKEND_PORT% y %FRONTEND_PORT%...
-call :kill_port %BACKEND_PORT%
-call :kill_port %FRONTEND_PORT%
+set "BACKEND_PID="
+set "FRONTEND_PID="
 
 echo [AI Team IDE] Arrancando backend en puerto %BACKEND_PORT%...
 set "PYTHONUNBUFFERED=1"
@@ -44,7 +47,12 @@ set "START_EXE=%PYTHON_EXE%"
 set "START_ARGS=-m uvicorn api.main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload"
 set "START_STDOUT=%BACKEND_LOG%"
 set "START_STDERR=%BACKEND_ERR_LOG%"
-call :start_process "backend" || goto :fail
+call :start_process "backend" BACKEND_PID || goto :startup_failed
+"%PYTHON_EXE%" "%ROOT_DIR%scripts\ide_processes.py" register-one --role backend --pid %BACKEND_PID% --port %BACKEND_PORT% >nul
+if errorlevel 1 (
+    echo [AI Team IDE] ERROR: No se pudo registrar el backend.
+    goto :startup_failed
+)
 
 echo [AI Team IDE] Arrancando frontend en puerto %FRONTEND_PORT%...
 set "VITE_API_URL=%VITE_API_URL%"
@@ -53,7 +61,12 @@ set "START_EXE=%NPM_CMD%"
 set "START_ARGS=run dev -- --host 0.0.0.0 --port %FRONTEND_PORT% --strictPort"
 set "START_STDOUT=%FRONTEND_LOG%"
 set "START_STDERR=%FRONTEND_ERR_LOG%"
-call :start_process "frontend" || goto :fail
+call :start_process "frontend" FRONTEND_PID || goto :startup_failed
+"%PYTHON_EXE%" "%ROOT_DIR%scripts\ide_processes.py" register-one --role frontend --pid %FRONTEND_PID% --port %FRONTEND_PORT% >nul
+if errorlevel 1 (
+    echo [AI Team IDE] ERROR: No se pudo registrar el frontend.
+    goto :startup_failed
+)
 
 echo [AI Team IDE] Esperando servicios...
 call :wait_backend_ready
@@ -70,21 +83,13 @@ echo [AI Team IDE]  Logs     -^>  runtime\ide_logs\
 echo [AI Team IDE]  Para todo con stop_ide.bat
 echo [AI Team IDE] ============================================
 echo.
-if /I not "%AITEAM_NO_BROWSER%"=="1" start "" "http://localhost:%FRONTEND_PORT%"
+if /I not "%AITEAM_NO_BROWSER%"=="1" powershell.exe -NoProfile -Command "Start-Process -FilePath 'http://localhost:%FRONTEND_PORT%'" >nul 2>nul
 goto :success
 
-:ensure_frontend_deps
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%scripts\ensure_frontend_deps.ps1" -Quiet >nul 2>nul
+:prepare_environment
+call "%ROOT_DIR%scripts\prepare_dev_env.bat"
 if errorlevel 1 (
-    echo [AI Team IDE] ERROR: No se pudieron preparar las dependencias frontend.
-    exit /b 1
-)
-exit /b 0
-
-:ensure_runtime
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%scripts\ensure_local_runtime.ps1" -Quiet >nul 2>nul
-if errorlevel 1 (
-    echo [AI Team IDE] ERROR: No se pudo preparar el runtime local.
+    echo [AI Team IDE] ERROR: No se pudo preparar el entorno local.
     exit /b 1
 )
 exit /b 0
@@ -98,27 +103,12 @@ if errorlevel 1 (
 exit /b 0
 
 :resolve_python
-set "PYTHON_EXE="
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%scripts\ensure_local_venv.ps1" -PrintPython -Quiet 2^>nul`) do (
-    if not defined PYTHON_EXE set "PYTHON_EXE=%%i"
-)
-if defined PYTHON_EXE (
-    echo [AI Team IDE] Usando Python local del proyecto.
-    exit /b 0
-)
-echo [AI Team IDE] WARNING: no se pudo validar o reparar el venv local; probando fallback.
-where python >nul 2>nul
-if errorlevel 1 (
-    echo [AI Team IDE] ERROR: Python no encontrado. Instala Python o crea venv en .\venv
+set "PYTHON_EXE=%ROOT_DIR%venv\Scripts\python.exe"
+if not exist "%PYTHON_EXE%" (
+    echo [AI Team IDE] ERROR: falta el Python local despues del bootstrap.
     exit /b 1
 )
-set "PYTHON_EXE=python"
-call :python_has_uvicorn "%PYTHON_EXE%"
-if errorlevel 1 (
-    echo [AI Team IDE] ERROR: uvicorn no encontrado. Ejecuta: pip install uvicorn
-    exit /b 1
-)
-echo [AI Team IDE] Usando Python del PATH.
+echo [AI Team IDE] Usando Python local del proyecto.
 exit /b 0
 
 :resolve_npm
@@ -132,13 +122,18 @@ if not defined NPM_CMD (
 echo [AI Team IDE] Usando npm en %NPM_CMD%
 exit /b 0
 
-:python_has_uvicorn
-"%~1" -c "import uvicorn" >nul 2>nul
-if errorlevel 1 exit /b 1
-exit /b 0
-
 :start_process
-powershell -NoProfile -Command "$p = Start-Process -FilePath $env:START_EXE -ArgumentList $env:START_ARGS -WorkingDirectory $env:START_WD -RedirectStandardOutput $env:START_STDOUT -RedirectStandardError $env:START_STDERR -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>nul
+set "STARTED_PID="
+set "START_PID_FILE=%LOG_DIR%\.%~1.pid.tmp"
+if exist "%START_PID_FILE%" del /q "%START_PID_FILE%" >nul 2>nul
+powershell.exe -NoProfile -Command "$p = Start-Process -FilePath $env:START_EXE -ArgumentList $env:START_ARGS -WorkingDirectory $env:START_WD -RedirectStandardOutput $env:START_STDOUT -RedirectStandardError $env:START_STDERR -WindowStyle Hidden -PassThru; if ($p) { Set-Content -LiteralPath $env:START_PID_FILE -Value $p.Id -Encoding ASCII } else { exit 1 }" >nul 2>nul
+if exist "%START_PID_FILE%" set /p STARTED_PID=<"%START_PID_FILE%"
+if exist "%START_PID_FILE%" del /q "%START_PID_FILE%" >nul 2>nul
+if not defined STARTED_PID (
+    echo [AI Team IDE] ERROR: No se pudo obtener el PID de %~1.
+    exit /b 1
+)
+set "%~2=%STARTED_PID%"
 if errorlevel 1 (
     echo [AI Team IDE] ERROR: No se pudo lanzar %~1.
     echo [AI Team IDE] Revisa %START_STDOUT% y %START_STDERR%
@@ -146,11 +141,20 @@ if errorlevel 1 (
 )
 exit /b 0
 
-:kill_port
-for /f "tokens=5" %%p in ('netstat -aon ^| findstr /R /C:":%~1 "') do (
-    if not "%%p"=="" if not "%%p"=="0" (
-        taskkill /F /T /PID %%p >nul 2>nul
-    )
+:assert_registry_clear
+"%PYTHON_EXE%" "%ROOT_DIR%scripts\ide_processes.py" assert-clear >nul
+if errorlevel 1 (
+    echo [AI Team IDE] ERROR: ya existe una sesion propia viva o un registro invalido.
+    echo [AI Team IDE] Ejecuta stop_ide.bat y revisa runtime\ide_processes.json.
+    exit /b 1
+)
+exit /b 0
+
+:assert_port_free
+powershell.exe -NoProfile -Command "$listener=$null; try { $listener=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,%~1); $listener.Start(); exit 0 } catch { exit 1 } finally { if($null -ne $listener){$listener.Stop()} }" >nul 2>nul
+if errorlevel 1 (
+    echo [AI Team IDE] ERROR: el puerto %~1 esta ocupado por otro proceso; no se terminara automaticamente.
+    exit /b 1
 )
 exit /b 0
 
@@ -168,8 +172,12 @@ exit /b %errorlevel%
 echo.
 echo [AI Team IDE] ERROR: Alguno de los servicios no arranco.
 echo [AI Team IDE] Revisa runtime\ide_logs\backend*.log y frontend*.log.
-call :kill_port %BACKEND_PORT%
-call :kill_port %FRONTEND_PORT%
+if exist "%ROOT_DIR%runtime\ide_processes.json" (
+    "%PYTHON_EXE%" "%ROOT_DIR%scripts\ide_processes.py" stop >nul 2>nul
+) else (
+    if defined FRONTEND_PID taskkill.exe /F /T /PID %FRONTEND_PID% >nul 2>nul
+    if defined BACKEND_PID taskkill.exe /F /T /PID %BACKEND_PID% >nul 2>nul
+)
 goto :fail
 
 :success

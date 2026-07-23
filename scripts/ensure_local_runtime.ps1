@@ -16,6 +16,7 @@ $configDir = Join-Path $rootDir "config"
 $runtimeDir = Join-Path $rootDir "runtime"
 $statePath = Join-Path $runtimeDir ".template_sync_state.json"
 $baselineDir = Join-Path $runtimeDir ".template_baselines"
+$script:StateChanged = $false
 
 function Write-Info {
     param([string]$Message)
@@ -223,11 +224,28 @@ function Sync-Template {
             mode = "synced"
             synced_at = (Get-Date).ToUniversalTime().ToString("o")
         }
+        $script:StateChanged = $true
         Write-Info "Creado $name desde plantilla."
         return
     }
 
     $targetHash = Get-FileSha256 -PathValue $TargetPath
+    $baselineCurrent = (
+        (Test-Path $baselinePath) -and
+        ((Get-FileSha256 -PathValue $baselinePath) -eq $sourceHash)
+    )
+    $stateCurrent = (
+        $stateEntry.ContainsKey("source_hash") -and
+        $stateEntry.ContainsKey("target_hash") -and
+        $stateEntry.ContainsKey("mode") -and
+        [string]$stateEntry["source_hash"] -eq $sourceHash -and
+        [string]$stateEntry["target_hash"] -eq $targetHash -and
+        [string]$stateEntry["mode"] -in @("synced", "local_override")
+    )
+    if ($baselineCurrent -and $stateCurrent) {
+        return
+    }
+
     if ($targetHash -eq $sourceHash) {
         Copy-Item -LiteralPath $SourcePath -Destination $baselinePath -Force
         $State[$name] = @{
@@ -236,6 +254,7 @@ function Sync-Template {
             mode = "synced"
             synced_at = (Get-Date).ToUniversalTime().ToString("o")
         }
+        $script:StateChanged = $true
         return
     }
 
@@ -257,6 +276,7 @@ function Sync-Template {
             mode = "synced"
             synced_at = (Get-Date).ToUniversalTime().ToString("o")
         }
+        $script:StateChanged = $true
         Write-Info "Actualizado $name desde plantilla compartida."
         return
     }
@@ -286,6 +306,7 @@ function Sync-Template {
         mode = $mode
         synced_at = (Get-Date).ToUniversalTime().ToString("o")
     }
+    $script:StateChanged = $true
     Write-Info "Actualizado $name por merge conservador ($mode). Backup: $(Split-Path $backupPath -Leaf)"
 }
 
@@ -298,7 +319,9 @@ try {
 
     Sync-Template -State $state -SourcePath (Join-Path $configDir "control_plane.example.json") -TargetPath (Join-Path $runtimeDir "control_plane.json")
     Sync-Template -State $state -SourcePath (Join-Path $configDir "agents.example.json") -TargetPath (Join-Path $runtimeDir "agents.json")
-    Save-State -State $state
+    if ($script:StateChanged) {
+        Save-State -State $state
+    }
 
     Write-Info "Runtime local listo."
 } catch {

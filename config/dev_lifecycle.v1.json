@@ -1,0 +1,154 @@
+{
+  "schema_version": "dev_lifecycle_v1",
+  "contract_status": "preview",
+  "actions": [
+    {
+      "id": "prepare",
+      "purpose": "Preparar runtime, venv, dependencias frontend y auditoría local.",
+      "mutation_scope": "checkout_local_dependencies_and_runtime",
+      "windows": ["scripts\\prepare_dev_env.bat"],
+      "posix": ["sh", "scripts/prepare_dev_env.sh"],
+      "idempotency": "input_hash_and_existing_environment",
+      "detached": false
+    },
+    {
+      "id": "start",
+      "purpose": "Iniciar backend y frontend de desarrollo.",
+      "mutation_scope": "runtime_logs_and_processes",
+      "windows": ["start_ide.bat"],
+      "posix": ["sh", "start_ide.sh"],
+      "idempotency": "single_owned_session",
+      "detached": false
+    },
+    {
+      "id": "stop",
+      "purpose": "Detener una sesión de desarrollo gobernada.",
+      "mutation_scope": "owned_processes_only",
+      "windows": ["stop_ide.bat"],
+      "posix": ["sh", "stop_ide.sh"],
+      "idempotency": "safe_when_already_stopped",
+      "detached": false
+    },
+    {
+      "id": "test",
+      "purpose": "Ejecutar pytest mediante el Python local del checkout.",
+      "mutation_scope": "test_artifacts_only",
+      "windows": ["scripts\\pytest_local.bat"],
+      "posix": ["sh", "scripts/pytest_local.sh"],
+      "idempotency": "same_args_same_test_contract",
+      "detached": false
+    },
+    {
+      "id": "migrate",
+      "purpose": "Previsualizar la migración SQLite; aplicar exige --apply explícito.",
+      "mutation_scope": "none_by_default",
+      "windows": [
+        "scripts\\python_local.bat",
+        "scripts\\migrate_to_v2.py",
+        "--json"
+      ],
+      "posix": [
+        "sh",
+        "scripts/python_local.sh",
+        "scripts/migrate_to_v2.py",
+        "--json"
+      ],
+      "idempotency": "dry_run_by_default",
+      "detached": false
+    }
+  ],
+  "recovery_matrix": [
+    {
+      "id": "unicode_checkout",
+      "windows": "verified",
+      "posix": "preview",
+      "invariant": "prepare_start_health_stop",
+      "evidence": "live_junction_and_unicode_preflight"
+    },
+    {
+      "id": "missing_dependency_lock",
+      "windows": "verified",
+      "posix": "contract_tested",
+      "invariant": "fail_before_runtime_mutation",
+      "evidence": "test_windows_bootstrap_missing_lock_fails_before_runtime_mutation"
+    },
+    {
+      "id": "bootstrap_lock_contention",
+      "windows": "verified",
+      "posix": "contract_tested",
+      "invariant": "single_owner_and_actionable_timeout",
+      "evidence": "exclusive_lock_canary"
+    },
+    {
+      "id": "repeated_bootstrap",
+      "windows": "verified",
+      "posix": "contract_tested",
+      "invariant": "no_dependency_or_state_rewrite",
+      "evidence": "state_hash_and_timestamp_canary"
+    },
+    {
+      "id": "occupied_port",
+      "windows": "verified",
+      "posix": "contract_tested",
+      "invariant": "foreign_process_preserved",
+      "evidence": "live_foreign_listener_canary"
+    },
+    {
+      "id": "repeated_start",
+      "windows": "verified",
+      "posix": "contract_tested",
+      "invariant": "existing_owned_session_preserved",
+      "evidence": "live_second_start_canary"
+    },
+    {
+      "id": "partial_process_loss",
+      "windows": "verified",
+      "posix": "contract_tested",
+      "invariant": "remaining_owned_tree_reaped_and_restartable",
+      "evidence": "live_backend_loss_canary"
+    },
+    {
+      "id": "stale_process_registry",
+      "windows": "verified",
+      "posix": "contract_tested",
+      "invariant": "stale_identity_removed_before_restart",
+      "evidence": "live_full_process_loss_canary"
+    },
+    {
+      "id": "corrupt_process_registry",
+      "windows": "contract_tested",
+      "posix": "contract_tested",
+      "invariant": "fail_closed_without_process_kill",
+      "evidence": "test_invalid_registry_fails_closed_without_touching_process"
+    },
+    {
+      "id": "repeated_stop",
+      "windows": "contract_tested",
+      "posix": "contract_tested",
+      "invariant": "idempotent_not_running",
+      "evidence": "test_stop_is_idempotent_without_registry"
+    }
+  ],
+  "invariants": {
+    "workspace_local_python": true,
+    "workspace_local_node_modules": true,
+    "versioned_python_lock": "requirements-dev.lock",
+    "versioned_frontend_lock": "ide-frontend/package-lock.json",
+    "bootstrap_concurrency_lock": true,
+    "process_identity_registry": "runtime/ide_processes.json",
+    "stop_policy": "pid_create_time_and_command_marker",
+    "global_dependency_install": false,
+    "provider_cli_install": false,
+    "provider_login": false,
+    "inference": false,
+    "migrate_apply_requires": "--apply",
+    "posix_start_mode": "foreground_ctrl_c",
+    "platform_promotion_requires_independent_receipt": true
+  },
+  "known_gaps": [
+    "POSIX permanece planned hasta aceptación independiente.",
+    "Los gates POSIX de la matriz de recovery son contract_tested/preview hasta aceptación independiente.",
+    "POSIX solo crea defaults runtime ausentes; el merge conservador de upgrades requiere fixture POSIX independiente.",
+    "El bootstrap POSIX inicial crea dependencias locales y todavía no es un artefacto de release offline."
+  ]
+}

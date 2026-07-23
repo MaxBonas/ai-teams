@@ -47,6 +47,13 @@ def test_support_contract_separates_required_primary_and_optional_local() -> Non
     assert acceptance["required_steps"].count("bootstrap_first") == 1
     assert "independent_machine=true" in acceptance["promotion_requires"]
     assert "No ejecuta inferencias" in " ".join(acceptance["limits"])
+    posix = [
+        item
+        for item in contract["platforms"]
+        if item["os"] in {"linux", "macos"}
+    ]
+    assert all(item["status"] == "planned" for item in posix)
+    assert all(item["bootstrap"] == "sh scripts/prepare_dev_env.sh" for item in posix)
 
     receipt_path = ROOT / windows["evidence"]
     receipt_bytes = receipt_path.read_bytes()

@@ -170,10 +170,18 @@ distintos lenguajes mediante capacidades demostradas.
 - Git y los artefactos versionados transportan código y defaults; `runtime/`,
   `venv/`, `node_modules/`, bases activas, sesiones CLI y secretos son estado
   local y nunca se trasladan como parte de la instalación.
-- Un comando `doctor` read-only debe publicar un manifiesto JSON de OS,
-  arquitectura, runtimes, toolchains, adapters y bloqueos sin revelar secretos.
+- `machine_doctor_v1` ya publica el inventario base read-only de OS,
+  arquitectura, runtimes, SQLite, puertos, permisos, señales de toolchain y
+  perfiles adapter sin revelar secretos ni convertir discovery en soporte,
+  autenticación o health. El diagnóstico publica estado, severidad, fuente y
+  siguiente acción sin ejecutarla. Un recibo hash-bound prueba no mutación sobre
+  superficies gobernadas; la remediation es otro comando y permanece plan-only.
 - El bootstrap debe ser idempotente y tener frontends Windows/POSIX equivalentes;
   no instalará runtimes o CLIs globales ni dependerá de asociaciones de shell.
+- `dev_lifecycle_v1` fija ya la superficie prepare/start/stop/test/migrate y
+  frontends por plataforma. Locks de dependencias/bootstrap, ownership
+  incremental y diez casos de recovery están implementados; POSIX permanece
+  preview/planned hasta completar su aceptación independiente.
 - El soporte de lenguajes se modelará mediante descriptores versionados de
   detección, manifests, comandos permitidos, artefactos y requisitos. Reconocer
   archivos no equivale a soportar un ecosistema: se exige fixture build/test por

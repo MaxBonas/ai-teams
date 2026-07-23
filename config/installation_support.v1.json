@@ -109,28 +109,28 @@
       "os": "linux",
       "architecture": "x86_64",
       "status": "planned",
-      "bootstrap": null
+      "bootstrap": "sh scripts/prepare_dev_env.sh"
     },
     {
       "id": "linux_arm64",
       "os": "linux",
       "architecture": "arm64",
       "status": "planned",
-      "bootstrap": null
+      "bootstrap": "sh scripts/prepare_dev_env.sh"
     },
     {
       "id": "macos_x86_64",
       "os": "macos",
       "architecture": "x86_64",
       "status": "planned",
-      "bootstrap": null
+      "bootstrap": "sh scripts/prepare_dev_env.sh"
     },
     {
       "id": "macos_arm64",
       "os": "macos",
       "architecture": "arm64",
       "status": "planned",
-      "bootstrap": null
+      "bootstrap": "sh scripts/prepare_dev_env.sh"
     }
   ],
   "runtimes": [

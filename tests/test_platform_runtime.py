@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from aiteam.adapters.registry import AdapterDescriptor
 from aiteam.adapters.subprocess_adapter import SubprocessAdapterRuntime
 from aiteam.platform_runtime import (
     architecture_id,
+    configure_utf8_stdio,
     executable_candidates,
     path_comparison_key,
     probe_filesystem_boundary,
@@ -84,6 +86,25 @@ def test_utf8_command_roundtrip_in_unicode_workspace(tmp_path: Path) -> None:
     assert completed.returncode == 0
     assert completed.stdout.strip() == "salida ñ 日本語"
     assert completed.stderr == ""
+
+
+def test_utf8_stdio_configuration_is_explicit_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    class Stream:
+        def reconfigure(self, *, encoding: str, errors: str) -> None:
+            calls.append((encoding, errors))
+
+    monkeypatch.setattr(
+        "aiteam.platform_runtime.sys",
+        SimpleNamespace(platform="win32", stdout=Stream(), stderr=Stream()),
+    )
+
+    configure_utf8_stdio()
+
+    assert calls == [("utf-8", "replace"), ("utf-8", "replace")]
 
 
 def test_timeout_is_reported_and_process_group_is_reaped() -> None:

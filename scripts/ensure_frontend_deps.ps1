@@ -102,23 +102,19 @@ try {
 
     if ($needsInstall) {
         $lockPath = Join-Path $frontendDir "package-lock.json"
-        if (Test-Path $lockPath) {
-            try {
-                Invoke-Npm -NpmCmd $npmCmd -Arguments @("ci", "--prefer-offline", "--no-fund", "--no-audit") -StepName "Instalando dependencias frontend"
-            } catch {
-                Write-Info "package-lock desfasado; fallback a npm install."
-                Invoke-Npm -NpmCmd $npmCmd -Arguments @("install", "--prefer-offline", "--no-fund", "--no-audit") -StepName "Actualizando dependencias frontend"
-            }
-        } else {
-            Invoke-Npm -NpmCmd $npmCmd -Arguments @("install", "--prefer-offline", "--no-fund", "--no-audit") -StepName "Instalando dependencias frontend"
+        if (-not (Test-Path $lockPath)) {
+            throw "Falta package-lock.json; el bootstrap no acepta dependencias frontend sin lock."
         }
+        Invoke-Npm -NpmCmd $npmCmd -Arguments @("ci", "--prefer-offline", "--no-fund", "--no-audit") -StepName "Instalando dependencias frontend bloqueadas"
     }
 
     if (-not (Test-Path $nodeModulesDir)) {
         throw "node_modules no existe despues de instalar dependencias."
     }
 
-    Set-Content -LiteralPath $statePath -Value $inputHash -Encoding UTF8
+    if ($needsInstall -or -not (Test-Path $statePath)) {
+        Set-Content -LiteralPath $statePath -Value $inputHash -Encoding UTF8
+    }
     Write-Info "Frontend listo."
 } catch {
     if (-not $Quiet) {

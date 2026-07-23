@@ -147,6 +147,10 @@ def test_legacy_runtime_json_is_merged_without_losing_local_values(
 
     _run_runtime_sync(root)
     first_hash = control_path.read_bytes()
+    state_path = runtime / ".template_sync_state.json"
+    first_state = state_path.read_bytes()
+    baseline_path = runtime / ".template_baselines" / "control_plane.json"
+    first_baseline_mtime = baseline_path.stat().st_mtime_ns
     merged = json.loads(control_path.read_text(encoding="utf-8-sig"))
 
     assert merged["heartbeat_interval_ms"] == 9000
@@ -162,6 +166,8 @@ def test_legacy_runtime_json_is_merged_without_losing_local_values(
 
     _run_runtime_sync(root)
     assert control_path.read_bytes() == first_hash
+    assert state_path.read_bytes() == first_state
+    assert baseline_path.stat().st_mtime_ns == first_baseline_mtime
 
     control_template["new_default"] = {"enabled": True}
     (config / "control_plane.example.json").write_text(

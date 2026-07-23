@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MaxBonas/ai-teams/schemas/machine_doctor_receipt.v1.schema.json",
+  "title": "machine_doctor_receipt_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "doctor_schema_version",
+    "report_sha256",
+    "report",
+    "contract",
+    "mutation_guard",
+    "receipt_id"
+  ],
+  "properties": {
+    "schema_version": {"const": "machine_doctor_receipt_v1"},
+    "doctor_schema_version": {"const": "machine_doctor_v1"},
+    "report_sha256": {"$ref": "#/$defs/sha256"},
+    "report": {"type": "object"},
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discovery_entrypoint",
+        "read_only",
+        "secret_contents_read_by_guard",
+        "install_commands_allowed",
+        "login_commands_allowed",
+        "inference_allowed",
+        "receipt_write_is_explicit_and_outside_discovery",
+        "remediation_entrypoint"
+      ],
+      "properties": {
+        "discovery_entrypoint": {"const": "scripts/machine_doctor.py"},
+        "read_only": {"const": true},
+        "secret_contents_read_by_guard": {"const": false},
+        "install_commands_allowed": {"const": false},
+        "login_commands_allowed": {"const": false},
+        "inference_allowed": {"const": false},
+        "receipt_write_is_explicit_and_outside_discovery": {"const": true},
+        "remediation_entrypoint": {
+          "const": "scripts/machine_doctor_remediate.py"
+        }
+      }
+    },
+    "mutation_guard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verified", "surfaces"],
+      "properties": {
+        "verified": {"type": "boolean"},
+        "surfaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checkout", "user_config", "known_cli_inventory"],
+          "properties": {
+            "checkout": {"$ref": "#/$defs/metadata_surface"},
+            "user_config": {"$ref": "#/$defs/metadata_surface"},
+            "known_cli_inventory": {"$ref": "#/$defs/cli_surface"}
+          }
+        }
+      }
+    },
+    "receipt_id": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "metadata_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation", "unchanged", "entries_before", "entries_after"],
+      "properties": {
+        "observation": {"const": "metadata_only"},
+        "unchanged": {"type": "boolean"},
+        "entries_before": {"type": "integer", "minimum": 0},
+        "entries_after": {"type": "integer", "minimum": 0}
+      }
+    },
+    "cli_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation", "unchanged", "entries_before", "entries_after"],
+      "properties": {
+        "observation": {"const": "path_presence_only"},
+        "unchanged": {"type": "boolean"},
+        "entries_before": {"type": "integer", "minimum": 0},
+        "entries_after": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
