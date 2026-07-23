@@ -200,7 +200,15 @@ export function ModelRoleSelector({
             ? ` · ventaja ${Number(selection.default.advantage.value || 0).toFixed(1)} puntos`
             : selection?.default.advantage?.kind === 'only_auto_eligible'
               ? ' · único candidato auto-elegible'
-              : ' · desempate canónico por evidencia e identidad'}
+              : selection?.default.advantage?.kind === 'evidence_tie_break'
+                ? ' · empate de score resuelto por mejor evidencia'
+                : selection?.default.advantage?.kind === 'quality_tie_break'
+                  ? ' · empate resuelto por calidad del rol'
+                  : selection?.default.advantage?.kind === 'economy_tie_break'
+                    ? ' · empate resuelto por menor presión económica comparable'
+                    : selection?.default.advantage?.kind === 'speed_tie_break'
+                      ? ' · empate resuelto por menor latencia comparable'
+                      : ' · empate final resuelto por identidad canónica'}
           {breakdownLabel(recommended.selection_score)
             ? ` · ${breakdownLabel(recommended.selection_score)}`
             : ' · breakdown aún sin métricas completas'}

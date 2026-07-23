@@ -4,6 +4,8 @@
   "profile_id": "codex_subscription",
   "model": "gpt-5.6-terra",
   "role": "qa",
+  "contract_version": null,
+  "case_family": "authorization_boundary",
   "seeds": [
     1,
     2,
@@ -11,6 +13,35 @@
   ],
   "matrix_complete": true,
   "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-terra-qa-seed-1.json",
+    "benchmarks/results/model_calibration/codex-terra-qa-seed-2.json",
+    "benchmarks/results/model_calibration/codex-terra-qa-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-qa-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "178341278e80ea041af5433a622050951bf405dddececf0082ac11c17cdf682e"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-qa-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "d08e3462d5b48315ebacecd821e3feb696b036b11af269659680f72279f86907"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-qa-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "3a3d98189a306b822224773bf340dd63121debd98dbf64558381e49b814ce2c8"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true
+  },
   "checks_passed": 30,
   "checks_total": 30,
   "wall_seconds_median": 116.048,
@@ -24,6 +55,7 @@
     "output_tokens": 12946,
     "reasoning_output_tokens": 2216,
     "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
     "note": "presión de cuota de suscripción; no coste API"
   },
   "conclusion": {

@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "benchmark": "coding_behavioral_calibration",
+  "case": "config_redactor",
+  "seed": 1,
+  "started_at": "2026-07-23T15:47:24+0200",
+  "evaluation_contract": {
+    "version": 1,
+    "evaluators": [
+      {
+        "id": "hidden_acceptance",
+        "class": "deterministic_behavioral",
+        "blind": true
+      },
+      {
+        "id": "ruff",
+        "class": "static_analysis",
+        "blind": true
+      }
+    ],
+    "independent_semantic_or_structural": true,
+    "goodhart_risk": "residual_hidden_suite_overfit",
+    "constructs_not_measured": [
+      "behavior outside the hidden suite",
+      "long-term maintainability",
+      "real-user acceptance"
+    ]
+  },
+  "case_family": "config_redactor",
+  "config": {
+    "max_attempts": 2,
+    "stateless": true
+  },
+  "arms": {
+    "claude-sonnet-4-6": {
+      "model": "claude-sonnet-4-6",
+      "profile_id": "antigravity_subscription",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "issue_status": "done",
+      "attempts": 1,
+      "runs": [
+        {
+          "id": "run:78c43c82-4d25-4c16-8e0a-4aca2866f225",
+          "status": "completed",
+          "error_code": null,
+          "liveness_state": "advanced",
+          "provider": "google-antigravity",
+          "model": "claude-sonnet-4-6",
+          "channel": "subscription"
+        }
+      ],
+      "wall_seconds": 135.906,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_cents": 0,
+      "usage_available": false,
+      "score": {
+        "ruff_issues": 1,
+        "hidden_exit": 0,
+        "hidden_passed": 3,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 3,
+        "deliverable_files": [
+          "README.md",
+          "config_redactor.py",
+          "test_config_redactor.py"
+        ]
+      },
+      "workspace": "runtime/bench/m83-config-redactor-sonnet-s1/claude-sonnet-4-6"
+    }
+  },
+  "finished_at": "2026-07-23T15:49:49+0200"
+}

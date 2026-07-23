@@ -12,6 +12,7 @@ from api.utils import PROJECT_ROOT, _require_api_auth_request, _workspace_from_r
 from aiteam.db.activity_log import log_activity
 from aiteam.db.agents import create_agent, get_agent, list_agents, update_agent
 from aiteam.db.finops import check_budget
+from aiteam.db.issues import get_issue
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
 from aiteam.model_selection_context import contextual_model_selection
 from aiteam.model_selection_intent import normalize_owner_explicit_selection
@@ -33,6 +34,7 @@ class CreateAgentRequest(BaseModel):
     heartbeat_interval_sec: int = 0
     supervisor_agent_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    issue_id: str = ""
     run_profile: str = ""
     criticality: str = "medium"
     data_class: str = ""
@@ -49,6 +51,7 @@ class UpdateAgentRequest(BaseModel):
     capabilities: list[str] | None = None
     budget_monthly_cents: int | None = None
     supervisor_agent_id: str | None = None
+    issue_id: str = ""
     run_profile: str = ""
     criticality: str = "medium"
     data_class: str = ""
@@ -60,6 +63,7 @@ class QuorumReconcileRequest(BaseModel):
     profile_id: str | None = None
     model: str | None = None
     candidate_id: str | None = None
+    issue_id: str = ""
 
 
 @router.post("/api/agents")
@@ -69,19 +73,28 @@ async def post_agent(body: CreateAgentRequest, request: Request):
     try:
         assert_no_inline_secret(body.adapter_config)
         validate_model_selection(body.adapter_config)
+        context = _assignment_context(
+            db,
+            issue_id=body.issue_id,
+            run_profile=body.run_profile,
+            criticality=body.criticality,
+            data_class=body.data_class,
+            required_capabilities={
+                *body.required_capabilities,
+                *body.capabilities,
+            },
+        )
         require_compatible_assignment(
             adapter_type=body.adapter_type or "manual",
             adapter_config=body.adapter_config,
             role=body.role,
-            run_profile=body.run_profile,
-            criticality=body.criticality,
-            data_class=body.data_class,
-            required_capabilities=body.required_capabilities,
+            **context,
         )
         adapter_config = normalize_owner_explicit_selection(
             db,
             role=body.role,
             adapter_config=body.adapter_config,
+            issue_id=body.issue_id,
             source="agent_create_api",
         )
         row = create_agent(
@@ -129,7 +142,11 @@ async def post_quorum_agents_reconcile(
                 raise ValueError("agent_id, profile_id, model and candidate_id must be provided together")
             if body.agent_id not in {"role:quorum_auditor_1", "role:quorum_auditor_2"}:
                 raise ValueError("unknown quorum auditor id")
-            projection = contextual_model_selection(db, role="quorum_auditor")
+            projection = contextual_model_selection(
+                db,
+                role="quorum_auditor",
+                issue_id=body.issue_id,
+            )
             candidate = next(
                 (
                     item for item in projection.get("candidates") or ()
@@ -149,6 +166,7 @@ async def post_quorum_agents_reconcile(
             profiles=profiles,
             explicit_selections=explicit,
             target_agent_ids=targets,
+            issue_id=body.issue_id if body is not None else "",
         )
         agents = [
             get_agent(db, agent_id=agent_id)
@@ -217,6 +235,7 @@ async def patch_agent(agent_id: str, body: UpdateAgentRequest, request: Request)
                 db,
                 role=str(existing_decoded.get("role") or ""),
                 adapter_config=body.adapter_config,
+                issue_id=body.issue_id,
                 source="agent_update_api",
                 existing_config=existing_config or {},
             )
@@ -225,14 +244,27 @@ async def patch_agent(agent_id: str, body: UpdateAgentRequest, request: Request)
             or body.adapter_config is not None
             or body.capabilities is not None
         ):
+            effective_capabilities = (
+                body.capabilities
+                if body.capabilities is not None
+                else existing_decoded.get("capabilities") or []
+            )
+            context = _assignment_context(
+                db,
+                issue_id=body.issue_id,
+                run_profile=body.run_profile,
+                criticality=body.criticality,
+                data_class=body.data_class,
+                required_capabilities={
+                    *body.required_capabilities,
+                    *effective_capabilities,
+                },
+            )
             require_compatible_assignment(
                 adapter_type=body.adapter_type or str(existing_decoded.get("adapter_type") or "manual"),
                 adapter_config=body.adapter_config if body.adapter_config is not None else existing_decoded.get("adapter_config") or {},
                 role=str(existing_decoded.get("role") or ""),
-                run_profile=body.run_profile,
-                criticality=body.criticality,
-                data_class=body.data_class,
-                required_capabilities=body.required_capabilities,
+                **context,
             )
         row = update_agent(
             db, agent_id=agent_id,
@@ -388,6 +420,44 @@ async def get_costs_summary(request: Request):
 def _db(request: Request) -> Path:
     ws = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
     return resolve_runtime_dir(ws, PROJECT_ROOT) / "aiteam.db"
+
+
+def _assignment_context(
+    db: Path,
+    *,
+    issue_id: str,
+    run_profile: str,
+    criticality: str,
+    data_class: str,
+    required_capabilities: set[str],
+) -> dict[str, Any]:
+    context = {
+        "run_profile": run_profile,
+        "criticality": criticality,
+        "data_class": data_class,
+        "required_capabilities": sorted(
+            str(item).strip() for item in required_capabilities if str(item).strip()
+        ),
+    }
+    if not issue_id or get_issue(db, issue_id=issue_id) is None:
+        return context
+    from aiteam.compatibility_service import issue_compatibility_context
+
+    issue_context = issue_compatibility_context(db, issue_id)
+    return {
+        "run_profile": str(issue_context.get("run_profile") or run_profile),
+        "criticality": str(issue_context.get("criticality") or criticality),
+        "data_class": str(issue_context.get("data_class") or data_class),
+        "required_capabilities": sorted({
+            *context["required_capabilities"],
+            *(
+                str(item).strip()
+                for item in issue_context.get("required_capabilities") or ()
+                if str(item).strip()
+            ),
+        }),
+    }
+
 
 def _decode(row: dict) -> dict:
     import json

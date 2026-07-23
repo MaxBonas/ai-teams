@@ -106,6 +106,19 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
     else if (path === '/api/project/skills') body = { skills: [], governance: null };
     else if (path === '/api/project/extensions/mcp') body = { mcp_servers: [] };
     else if (path === '/api/project/extensions/mcp/catalog') body = { entries: [] };
+    else if (path === '/api/model-catalog/selection' && method === 'POST') body = {
+      success: true,
+      selection_version: 'model_contextual_selection_v1',
+      schema_version: 'model_catalog_read_model_v1',
+      score_version: 'model_role_score_v1',
+      content_hash: 'orientation-fixture',
+      rollout: 'shadow_only',
+      canonical_role: 'lead',
+      context: {},
+      default: { candidate_id: null, action: 'require_owner_selection' },
+      counts: { candidates: 0, auto_eligible: 0, owner_selectable: 0 },
+      candidates: [],
+    };
     else if (path === '/api/orientation-measurement' && method === 'GET') body = {
       success: true,
       consent: { enabled: orientationEnabled, current_session_id: orientationSessionId, consented_at: null, revoked_at: null },

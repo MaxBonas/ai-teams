@@ -8,10 +8,20 @@ from aiteam.model_catalog_read_model import (
     audit_model_catalog_read_model,
     build_model_catalog_read_model,
     collect_model_runtime_observations,
+    load_durable_catalog_versions,
 )
+from aiteam.policies import CANONICAL_ROLES
 
 
 OBSERVED_AT = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
+
+
+def _role(read_model: dict, name: str) -> dict:
+    return next(
+        row
+        for row in read_model["candidates"][0]["roles"]
+        if row["canonical_role"] == name
+    )
 
 
 def _runtime_db(tmp_path: Path) -> Path:
@@ -148,12 +158,18 @@ def _normalized_metrics() -> dict:
             },
             "evidence": {
                 "status": "calibrated",
+                "kind": "exact_role_canary",
                 "classes": ["behavioral_deterministic"],
                 "seeds": 3,
                 "cases": 2,
+                "case_families": ["tenant_boundary", "concurrency"],
+                "case_family_count": 2,
+                "case_diversity": "multi_family",
                 "required_tools": ["repo_write"],
                 "covered_tools": ["repo_write"],
                 "fresh": True,
+                "provider_version": "responses-v1",
+                "evaluated_at": "2026-07-22",
                 "goodhart_risk": "low",
                 "unmeasured_constructs": ["novel_projects"],
             },
@@ -197,6 +213,22 @@ def test_runtime_collector_degrades_for_missing_and_legacy_db(tmp_path: Path) ->
     }
 
 
+def test_runtime_collector_deduplicates_equivalent_database_paths(
+    tmp_path: Path,
+) -> None:
+    db_path = _runtime_db(tmp_path)
+
+    report = collect_model_runtime_observations(
+        [db_path, db_path.parent / "." / db_path.name]
+    )
+
+    assert len(report["database_sources"]) == 1
+    assert report["role_metrics"][0]["run_count"] == 3
+    assert [item["code"] for item in report["diagnostics"]] == [
+        "database_duplicate_ignored"
+    ]
+
+
 def test_read_model_composes_normalized_score_and_provenance(tmp_path: Path) -> None:
     profile = _profile()
     runtime = collect_model_runtime_observations([_runtime_db(tmp_path)])
@@ -215,12 +247,25 @@ def test_read_model_composes_normalized_score_and_provenance(tmp_path: Path) -> 
     candidate = read_model["candidates"][0]
     assert candidate["model_metadata"]["tier"] == "standard"
     assert candidate["provider_metadata"]["label"] == "Profile One"
-    role = candidate["roles"][0]
+    assert tuple(row["canonical_role"] for row in candidate["roles"]) == CANONICAL_ROLES
+    role = _role(read_model, "engineer")
     assert role["canonical_role"] == "engineer"
     assert role["score"]["score"] == 80.75
     assert role["score"]["auto_eligible"] is True
+    assert role["score_inputs"]["evidence"]["status"] == "calibrated"
     assert role["provenance"]["evaluation_receipts"] == ["receipt.json"]
     assert role["provenance"]["runtime_run_ids"] == ["run-1", "run-2", "run-3"]
+    assert read_model["normalized_metrics"]["pair_count"] == 1
+    assert read_model["normalized_metrics"]["pairs"] == [
+        {
+            "profile_id": "openai_api",
+            "model": "model-a",
+            "canonical_role": "engineer",
+            "version": "caller_supplied",
+            "evidence_kind": "exact_role_canary",
+            "case_diversity": "multi_family",
+        }
+    ]
     assert audit_model_catalog_read_model(read_model)["ok"] is True
 
 
@@ -235,7 +280,7 @@ def test_raw_runtime_metrics_are_not_misrepresented_as_normalized_score(
         runtime_report=collect_model_runtime_observations([_runtime_db(tmp_path)]),
         observed_at=OBSERVED_AT,
     )
-    role = read_model["candidates"][0]["roles"][0]
+    role = _role(read_model, "engineer")
 
     assert role["runtime_metrics"]["median_duration_ms"] == 2000
     assert role["score"]["breakdown"]["speed"]["value"] is None
@@ -245,6 +290,85 @@ def test_raw_runtime_metrics_are_not_misrepresented_as_normalized_score(
     audit = audit_model_catalog_read_model(read_model)
     assert audit["ok"] is True
     assert audit["automatic_candidate_count"] == 0
+
+
+def test_local_channel_gets_known_zero_external_cost_economy() -> None:
+    profile = _profile()
+    profile.update(
+        {
+            "id": "local_fixture",
+            "provider": "ollama",
+            "channel": "local",
+            "adapter_type": "subscription_cli",
+        }
+    )
+    report = _evaluation_report()
+    report["rows"][0]["profile_id"] = "local_fixture"
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"local_fixture": profile["model_options"]},
+        evaluation_report=report,
+        observed_at=OBSERVED_AT,
+    )
+
+    economy = _role(read_model, "engineer")["score"]["breakdown"][
+        "economy"
+    ]
+    assert economy["status"] == "known"
+    assert economy["value"] == 100
+    assert economy["basis"] == "zero_external_cost"
+    assert economy["burden"] == 0
+    assert economy["reason"] == "local_zero_external_cost_and_quota"
+
+
+def test_durable_catalog_version_fallback_requires_fresh_passing_receipt(
+    tmp_path: Path,
+) -> None:
+    receipt_dir = tmp_path / "benchmarks" / "results" / "model_catalog_drift"
+    receipt_dir.mkdir(parents=True)
+    payload = {
+        "benchmark": "model_catalog_drift_audit",
+        "observed_at": "2026-07-23T10:00:00+00:00",
+        "ok": True,
+        "gates": {"inventory": True, "coverage": True},
+        "catalogs": [
+            {
+                "profile_id": "antigravity_subscription",
+                "cli_version": "1.1.5",
+                "coverage_ok": True,
+                "status": "current",
+            }
+        ],
+        "codex_catalog": {
+            "installed_version": "0.145.0",
+            "coverage_ok": True,
+            "status": "current",
+        },
+    }
+    path = receipt_dir / "model-catalog-drift-2026-07-23.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = load_durable_catalog_versions(
+        repo_root=tmp_path,
+        observed_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
+    )
+
+    assert report["profiles"]["codex_subscription"]["version"] == "0.145.0"
+    assert report["profiles"]["antigravity_subscription"]["version"] == "1.1.5"
+    assert report["profiles"]["codex_subscription"]["source"].startswith(
+        "drift_receipt:"
+    )
+
+    payload["gates"]["coverage"] = False
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    rejected = load_durable_catalog_versions(
+        repo_root=tmp_path,
+        observed_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
+    )
+    assert rejected["profiles"] == {}
+    assert rejected["diagnostics"] == [
+        "receipt_not_authoritative:model-catalog-drift-2026-07-23.json"
+    ]
 
 
 def test_auditor_detects_hash_and_consumer_divergence() -> None:
@@ -295,4 +419,140 @@ def test_auditor_detects_declared_model_and_role_removed_even_with_rehashed_payl
         "declared_profile_missing",
         "declared_model_missing",
         "declared_role_missing",
+    }
+
+
+def test_auditor_recomputes_role_input_hash_and_score_after_outer_rehash() -> None:
+    import hashlib
+
+    profile = _profile()
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=_evaluation_report(),
+        normalized_metrics=_normalized_metrics(),
+        observed_at=OBSERVED_AT,
+    )
+    role = _role(read_model, "engineer")
+    role["score_inputs"]["components"]["quality"]["value"] = 1
+    role["score"]["score"] = 99
+    canonical = json.dumps(
+        {key: value for key, value in read_model.items() if key != "content_hash"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    read_model["content_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    audit = audit_model_catalog_read_model(read_model)
+
+    assert {item["code"] for item in audit["failures"]} == {
+        "role_input_hash_mismatch",
+        "role_score_mismatch",
+    }
+
+
+def test_matrix_explains_incompatible_cells_without_score() -> None:
+    profile = _profile()
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=_evaluation_report(),
+        normalized_metrics=_normalized_metrics(),
+        observed_at=OBSERVED_AT,
+    )
+
+    deterministic = _role(read_model, "test_runner")
+
+    assert deterministic["compatibility"]["code"] == "deterministic_role"
+    assert deterministic["evaluation"]["status"] == "incompatible"
+    assert deterministic["evaluation"]["reason_code"] == "deterministic_role"
+    assert deterministic["evaluation"]["score_permitted"] is False
+    assert deterministic["score"]["score"] is None
+
+
+def test_compatible_role_is_manual_until_explicitly_nominated() -> None:
+    profile = _profile()
+    profile["supported_roles"] = []
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=_evaluation_report(),
+        observed_at=OBSERVED_AT,
+    )
+
+    worker = _role(read_model, "worker")
+
+    assert worker["compatibility"]["allowed"] is True
+    assert worker["automatic_selection"] == {
+        "model_policy_enabled": True,
+        "role_nominated": False,
+        "eligible_by_policy": False,
+        "nomination_source": "model_option.best_for",
+    }
+    assert worker["score_inputs"]["hard_gates"]["automatic_policy"] is False
+    assert worker["evaluation"]["status"] == "compatible_not_nominated"
+    assert worker["evaluation"]["next_action"] is None
+
+
+def test_partial_exact_evidence_is_not_scheduled_again_without_change() -> None:
+    profile = _profile()
+    report = _evaluation_report()
+    role = report["rows"][0]["roles"][0]
+    role["status"] = "partial"
+    role["evidence_receipts"] = ["three-seed-partial.json"]
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=report,
+        observed_at=OBSERVED_AT,
+    )
+
+    engineer = _role(read_model, "engineer")
+
+    assert engineer["evaluation"]["next_action"] == "no_rerun_until_material_change"
+    assert engineer["score_inputs"]["hard_gates"]["automatic_policy"] is True
+    assert engineer["score_inputs"]["hard_gates"]["calibrated"] is False
+    assert audit_model_catalog_read_model(read_model)["ok"] is True
+
+
+def test_auditor_rejects_operational_automatic_pair_without_exact_evidence() -> None:
+    profile = _profile()
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report={"rows": []},
+        observed_at=OBSERVED_AT,
+    )
+
+    audit = audit_model_catalog_read_model(read_model)
+
+    assert "automatic_operational_evidence_missing" in {
+        item["code"] for item in audit["failures"]
+    }
+
+
+def test_auditor_rejects_incomplete_canonical_role_matrix() -> None:
+    import hashlib
+
+    profile = _profile()
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=_evaluation_report(),
+        observed_at=OBSERVED_AT,
+    )
+    read_model["candidates"][0]["roles"].pop()
+    canonical = json.dumps(
+        {key: value for key, value in read_model.items() if key != "content_hash"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    read_model["content_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    audit = audit_model_catalog_read_model(read_model)
+
+    assert "candidate_role_matrix_incomplete" in {
+        item["code"] for item in audit["failures"]
     }

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "local_gemma4_ollama",
+  "model": "gemma4:e4b",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "role": "file_scout",
+  "seed": 1,
+  "wall_seconds": 72.297,
+  "attempts": 2,
+  "checks": {
+    "issue_done": false,
+    "run_completed": false,
+    "valid_assignee_report": false,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": false
+  },
+  "evaluation": {
+    "anchors": {
+      "source_path": true,
+      "tenant_boundary": true,
+      "atomicity": true,
+      "winner_check": true,
+      "missing_test": true,
+      "next_owner": false
+    },
+    "anchors_retained": 5,
+    "anchors_total": 6,
+    "forbidden_matches": [],
+    "contract_passed": false
+  },
+  "agent_report": null,
+  "artifact": "File Scout: Analysis Complete\n\n**Files Read:**\n*   `src/tenant_checkout.py` (1,645 Bytes)\n*   `tests/test_checkout.py` (938 Bytes)\n\n**Findings based strictly on file content:**\n\n1.  **How does the checkout delimit tenant?**\nThe provided code in `src/tenant_checkout.py` uses a query (`SELECT id FROM issues WHERE status='todo' ORDER BY priority LIMIT 1`) that selects an issue ID solely based on its global status ('todo') and priority ordering, without any explicit filtering or inclusion of a tenant identifier (`tenant_id`) in the selection criteria for the initial issue fetch. The subsequent update uses `lease_owner=?` which records a worker ID, but this does not inherently delimit by tenant.\n\n2.  **Do SELECT and reservation form an atomic operation?**\nThe code executes the SELECT statement and the UPDATE statement sequentially using two separate calls to `conn.execute()` within the `checkout` function. The atomicity of this read-modify-write sequence is not explicitly guaranteed by wrapping both operations within a visible database transaction block (e.g., begin/commit/rollback) within the provided scope.\n\n3.  **Does the UPDATE confirm that this run was the winner?**\nThe `UPDATE` statement sets `status='in_progress'` and populates `lease_owner=?` with the worker ID (`worker_id`). This confirms *which worker* successfully claimed a lease on that specific issue record at that point in time, but whether this constitutes the definitive 'winner' status is dependent on logic external to this function scope.\n\n4.  **What case does the test cover and what concurrent/multi-tenant case is not covered?**\nThe test case in `tests/test_checkout.py` (`test_empty_queue_returns_none`) covers the scenario where no issues are available for processing (the queue is empty).\n\nContent analysis does not provide evidence or tests covering race conditions, such as two workers simultaneously reading the same issue record before either has successfully executed the reservation update, which would be a primary concurrent/multi-tenant concern.\n\n⚙ Sistema: el rol de solo lectura intentó cerrar sin un AGENT-REPORT válido. El cierre no cuenta y se permite un único reintento de formato.",
+  "runtime": {
+    "issue_status": "in_progress",
+    "run": {
+      "id": "run:484a1491-143b-4b2c-bf65-b7d537199c0e",
+      "status": "failed",
+      "error_code": "subscription_cli_parse_error",
+      "error": "codex output JSON not found in: '{\\n    \"status\": \"completed\",\\n    \"summary\": \"Report compiled based on analysis of source and test files.\",\\n    \"add_comment\": \"He revisado los archivos `src/tenant_checkout.py` y `tests/test_checkout.'",
+      "model": "gemma4:e4b",
+      "provider": "ollama",
+      "channel": "local",
+      "usage_json": "{}"
+    },
+    "input_tokens": 2051,
+    "output_tokens": 1482,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\local-gemma-e4b-file-scout-screen-seed-1\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": false
+}

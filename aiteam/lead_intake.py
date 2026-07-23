@@ -107,6 +107,11 @@ def build_team_proposal(
             run_profile=effective_profile,
             criticality=str(issue.get("criticality") or "medium"),
             data_class=str(issue_metadata.get("data_class") or ""),
+            required_capabilities=[
+                str(item).strip()
+                for item in issue_metadata.get("required_capabilities") or ()
+                if str(item).strip()
+            ],
         )
         if effective_profile == LEAD_QUORUM:
             selected_id = str(member.get("adapter_profile_id") or "")
@@ -172,6 +177,7 @@ def _blueprint_to_member(
     run_profile: str = "",
     criticality: str = "medium",
     data_class: str = "",
+    required_capabilities: list[str] | None = None,
 ) -> dict[str, Any]:
     member = {
         "id": agent.agent_id,
@@ -191,6 +197,7 @@ def _blueprint_to_member(
         run_profile=run_profile,
         criticality=criticality,
         data_class=data_class,
+        required_capabilities=required_capabilities or [],
     )
 
 

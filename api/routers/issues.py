@@ -124,7 +124,7 @@ async def post_issue(body: CreateIssueRequest, request: Request):
             workspace = _workspace_from_request(request, get_current_workspace(), PROJECT_ROOT)
             runtime_dir = resolve_runtime_dir(workspace, PROJECT_ROOT)
             profiles = project_profiles(runtime_dir)
-            ensure_quorum_agents(db, profiles=profiles)
+            ensure_quorum_agents(db, profiles=profiles, issue_id=str(row["id"]))
         except Exception:
             pass  # never fail issue creation because of agent bootstrap
 

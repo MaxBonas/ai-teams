@@ -1,6 +1,6 @@
 # Instalación e integración de AI Teams
 
-Actualizado: `2026-07-22`
+Actualizado: `2026-07-23`
 
 Esta es la guía canónica para instalar AI Teams en una máquina nueva, trasladar
 una instalación y entregar la integración a una persona o agente de IA. Describe
@@ -20,8 +20,15 @@ proyecto fixture, dejando versión y resultado fechados. Los estados son:
 | `planned` | Existe tarea y contrato, pero no evidencia suficiente. |
 | `unsupported` | Hay incompatibilidad conocida o no existe integración segura. |
 
-Estado actual: Windows nativo es `verified` para el bootstrap de desarrollo.
+Estado actual: el bootstrap de desarrollo de Windows nativo está probado y es
+repetible, pero la plataforma completa sigue en `preview` hasta que I.1 deje el
+recibo de máquina limpia y la regresión automática exigidos por este contrato.
 Linux y macOS son `planned`; no deben presentarse como instalaciones cerradas.
+
+La fuente única legible por máquina es
+`config/installation_support.v1.json`. Contiene plataformas, arquitecturas,
+runtimes, distribuciones y clases de adapter. El bootstrap y los tests validan
+ese contrato; esta guía lo explica, pero no mantiene una matriz paralela.
 
 ## Qué viaja y qué se reconstruye
 
@@ -42,13 +49,31 @@ operativos. No commitear `.env`, secretos, `runtime/`, `venv/` ni
 
 ## Instalación verificada: Windows
 
-Requisitos actuales:
+Requisitos actuales del control plane:
 
 - Git;
 - Python `>=3.10` (3.12 recomendado para desarrollo);
-- Node.js y npm compatibles con el lock del frontend;
-- PowerShell;
-- al menos un adapter LLM instalado y autenticado si se harán runs vivos.
+- Node.js `>=22` (24 LTS recomendado) y npm `>=10`;
+- PowerShell `>=5.1` (7 recomendado).
+
+Para runs vivos se necesita además al menos un adapter Lead-capable instalado,
+autenticado, compatible y verde. No es necesario instalar todos los canales:
+
+| Clase | Componentes | Contrato |
+|---|---|---|
+| Opción primaria | Codex CLI, Antigravity CLI o una API Lead-capable | Hace falta al menos una, no todas |
+| Economía opcional | OpenCode Zen | No sustituye por sí solo al Lead vigente |
+| Local opcional | Ollama o LM Studio | Solo por decisión del owner y hardware adecuado |
+
+AI Teams no instala automáticamente CLIs globales ni acepta condiciones de
+terceros. Después del bootstrap muestra presencia y siguiente acción mediante:
+
+```powershell
+.\scripts\python_local.bat scripts\audit_installation_support.py --json
+```
+
+Este auditor I.1 es read-only: no prueba credenciales ni health y no sustituye
+al `doctor --json` de I.3.
 
 ```powershell
 git clone https://github.com/MaxBonas/ai-teams.git
@@ -57,8 +82,44 @@ Set-Location ai-teams
 ```
 
 El script coordina validación de runtime, entorno Python y dependencias del
-frontend. Debe ejecutarse en primer plano y puede repetirse. No instala ni
-autentica Codex, Gemini, Claude u otros CLIs.
+frontend, y termina mostrando adapters primarios y opcionales. Debe ejecutarse
+en primer plano y puede repetirse. No instala ni autentica CLIs.
+
+### Adapters recomendados y autenticación
+
+Codex y Antigravity son alternativas primarias, no requisitos acumulativos.
+Sus instaladores oficiales se muestran en el manifiesto y deben ejecutarse de
+forma explícita por la persona o IA integradora. La autenticación requiere al
+owner: `codex login` usa ChatGPT o una key gestionada por Codex; `agy` reutiliza
+el keyring del sistema y abre Google Sign-In cuando falta sesión.
+
+OpenCode es opcional. La documentación vigente de Zen exige iniciar sesión y
+crear una API key personal, incluso para modelos cuyo precio sea temporalmente
+cero. AI Teams puede abrir
+`opencode auth login --provider opencode`, detectar después la sesión y usarla
+sin copiar su credencial, pero no puede crear la cuenta, aceptar condiciones,
+añadir facturación ni compartir una key. “Gratis” describe el precio observado
+del modelo, no autenticación anónima ni disponibilidad permanente.
+
+Flujo guiado:
+
+1. Abrir `https://opencode.ai/auth`, iniciar sesión y crear una API key personal.
+2. En Config, pulsar **Conectar OpenCode Zen**. Alternativamente, ejecutar
+   `opencode auth login --provider opencode`.
+3. Pegar la key únicamente en la terminal que controla OpenCode. No introducirla
+   en un formulario, prompt o archivo de AI Teams.
+4. Comprobar la sesión con `opencode auth list`.
+5. Volver a Config y usar **Probar** sobre
+   `OpenCode Zen · modelos gratuitos`.
+
+AI Teams no guarda esa key en SQLite ni en la configuración del proyecto. Si el
+CLI existe pero el perfil no pasa la prueba, la interfaz debe conservar la
+diferencia entre “instalado”, “autenticado” y “modelo ejecutable” y mostrar el
+diagnóstico correspondiente.
+
+Ollama y LM Studio nunca forman parte de la instalación mínima. No descargarlos,
+instalarlos ni bajar modelos salvo petición explícita del owner; sus perfiles
+permanecen visibles como opciones locales.
 
 Arranque y parada:
 
@@ -74,6 +135,34 @@ Backend y frontend por separado:
 Set-Location ide-frontend
 npm run dev -- --port 9490
 ```
+
+### Aceptación Windows limpia
+
+El contrato ejecutable de I.1.4 vive en
+`.github/workflows/windows-clean-room.yml`. En un runner Windows x86_64 efímero:
+
+- checkout de la revisión exacta;
+- bootstrap dos veces;
+- auditoría estricta del control plane;
+- arranque y health de backend/frontend;
+- creación de un proyecto fixture con issue inicial y SQLite válida;
+- parada y comprobación de puertos liberados;
+- verificación de que el bootstrap no instaló CLIs globales.
+
+El workflow conserva `windows-clean-room-receipt.json` como artefacto redacted.
+No autentica proveedores ni ejecuta inferencias: esos gates pertenecen al
+`doctor` y a los canarios por adapter. Una ejecución manual del harness sirve
+para depurarlo, pero se etiqueta `local_existing_host` y nunca autoriza pasar
+Windows de `preview` a `verified`:
+
+```powershell
+python scripts\accept_windows_clean_room.py `
+  --receipt "$env:TEMP\windows-clean-room-receipt.json" `
+  --fixture-root "$env:TEMP\aiteam-i1-fixtures"
+```
+
+La promoción requiere una ejecución verde del workflow y conservar su recibo:
+definir CI no equivale a haber probado todavía una máquina independiente.
 
 ## Linux y macOS
 
@@ -128,10 +217,12 @@ Set-Location ide-frontend
 node_modules\.bin\tsc.cmd -b
 ```
 
-`system-check` es un smoke test de adapters. El futuro `doctor --json` añadirá
-inventario completo, clasificación de bloqueos y salida estable para máquinas;
-hasta entonces, no interpretar un CLI encontrado como autenticado o compatible.
-Los canarios vivos consumen cuota y se ejecutan solo de forma intencional.
+`system-check` valida únicamente que el registro de adapters puede cargarse y
+enumera sus tipos; no prueba conectividad, autenticación ni health. El futuro
+`doctor --json` añadirá inventario completo, clasificación de bloqueos y salida
+estable para máquinas; hasta entonces, no interpretar un CLI encontrado como
+autenticado o compatible. Los canarios vivos consumen cuota y se ejecutan solo
+de forma intencional.
 
 ## Traslado y actualización
 
@@ -183,6 +274,7 @@ Un agente sin contexto previo debe seguir este orden:
    intuición ni por una única ejecución parcial.
 5. Preparar usando el entrypoint de la plataforma. No instalar runtimes/CLIs
    globales, autenticar cuentas o alterar PATH sin autorización explícita.
+   Ollama y LM Studio son siempre opcionales.
 6. Configurar paths y adapters locales. Tratar API y suscripción como canales
    independientes y exigir health del par exacto.
 7. Ejecutar checks herméticos primero; pedir permiso antes de canarios vivos o
@@ -208,6 +300,14 @@ La integración se considera completa únicamente si:
 - adapters seleccionables tienen versión, autenticación y health verificadas;
 - cualquier plataforma/toolchain no cubierta queda etiquetada y accionable;
 - se conserva un recibo sin secretos con fecha, versiones y resultados.
+
+## Fuentes de instalación y autenticación
+
+- Codex CLI: https://github.com/openai/codex
+- OpenCode CLI: https://opencode.ai/docs/cli
+- OpenCode Zen: https://opencode.ai/docs/zen
+- Antigravity CLI: https://antigravity.google/docs/cli-install
+- Ciclo de soporte Node.js: https://nodejs.org/en/about/previous-releases
 
 El backlog ejecutable y los criterios de cierre viven en `../task.md` P0.I; esta
 guía no es un segundo plan.

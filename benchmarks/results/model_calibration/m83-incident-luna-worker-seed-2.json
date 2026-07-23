@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "incident_dependency_handoff",
+  "role": "worker",
+  "seed": 2,
+  "wall_seconds": 36.375,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "incident": true,
+      "owner": true,
+      "observed_lag": true,
+      "threshold": true,
+      "window": true,
+      "freeze": true,
+      "dependency": true,
+      "acceptance": true
+    },
+    "anchors_retained": 8,
+    "anchors_total": 8,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "issue payload de issue:worker e inputs; README.md inspeccionado en .\\runtime\\bench\\m83-incident-luna-worker-s2\\README.md"
+  },
+  "artifact": "Checklist causal completado con los hechos del issue, payload y README.md inspeccionado.\n\nChecklist causal de INC-42:\n\n- Estado: incidente activo.\n- Owner: Database SRE.\n- Señal causal: replication lag de 47 s, por encima del límite de 10 s durante 3 minutos.\n- Acción inmediata requerida: congelar las escrituras.\n- Dependencia de recuperación: el failover a replica-eu-2 queda bloqueado hasta que el checksum coincida.\n- Aceptación: Incident Commander acepta cuando el lag sea menor de 10 s y el checksum coincida.\n- Opción descartada: reiniciar la caché; no forma parte del plan.\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: issue payload de issue:worker e inputs; README.md inspeccionado en .\\runtime\\bench\\m83-incident-luna-worker-s2\\README.md",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:6433c8a8-a808-46c6-a97c-2aa036a70a54",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "usage_json": "{\"cached_input_tokens\": 137984, \"input_tokens\": 180100, \"output_tokens\": 1257, \"reasoning_output_tokens\": 202}"
+    },
+    "input_tokens": 180100,
+    "output_tokens": 1257,
+    "cost_cents": 0,
+    "db": "runtime/bench/m83-incident-luna-worker-s2/.aiteam/aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true,
+  "reevaluation": {
+    "reason": "deterministic_evaluator_contract_update",
+    "provider_rerun": false
+  }
+}

@@ -97,6 +97,7 @@ def issue_compatibility_context(db_path: Path, issue_id: str) -> dict[str, Any]:
     }
     current = str(issue_id or "").strip()
     seen: set[str] = set()
+    criticality_found = False
     with contextlib.closing(sqlite3.connect(str(db_path), timeout=20.0)) as conn:
         conn.row_factory = sqlite3.Row
         while current and current not in seen and len(seen) < 32:
@@ -113,8 +114,9 @@ def issue_compatibility_context(db_path: Path, issue_id: str) -> dict[str, Any]:
                 context["run_profile"] = str(
                     metadata.get("profile") or selection.get("profile") or ""
                 ).strip().lower()
-            if context["criticality"] == "medium" and str(row["criticality"] or "").strip():
+            if not criticality_found and str(row["criticality"] or "").strip():
                 context["criticality"] = str(row["criticality"]).strip().lower()
+                criticality_found = True
             if not context["data_class"]:
                 classification = metadata.get("data_classification")
                 if isinstance(classification, dict):
@@ -122,12 +124,16 @@ def issue_compatibility_context(db_path: Path, issue_id: str) -> dict[str, Any]:
                 context["data_class"] = str(
                     metadata.get("data_class") or classification or ""
                 ).strip().lower()
-            if not context["required_capabilities"]:
-                raw_required = metadata.get("required_capabilities")
-                if isinstance(raw_required, list):
-                    context["required_capabilities"] = [
-                        str(item).strip() for item in raw_required if str(item).strip()
-                    ]
+            raw_required = metadata.get("required_capabilities")
+            if isinstance(raw_required, list):
+                context["required_capabilities"] = sorted({
+                    *context["required_capabilities"],
+                    *(
+                        str(item).strip()
+                        for item in raw_required
+                        if str(item).strip()
+                    ),
+                })
             current = str(row["parent_id"] or "").strip()
     return context
 

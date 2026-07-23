@@ -26,7 +26,7 @@ from aiteam.model_tiers import audit_model_tier_matrix  # noqa: E402
 from aiteam.user_config import (  # noqa: E402
     DEFAULT_ADAPTER_PROFILES,
     MODEL_OPTIONS_BY_PROFILE,
-    executable_model_options,
+    codex_catalog_snapshot,
     model_options,
 )
 
@@ -94,11 +94,16 @@ def build_report(
     codex_catalog: dict[str, Any],
     observed_at: datetime,
 ) -> dict[str, Any]:
-    inventory_complete = bool(catalog_rows) and all(
+    codex_current = (
+        codex_catalog.get("status") == "current"
+        and bool(codex_catalog.get("installed_version"))
+        and bool(codex_catalog.get("catalog_client_version"))
+    )
+    inventory_complete = bool(catalog_rows) and codex_current and all(
         row.get("status") == "current" and bool(row.get("cli_version"))
         for row in catalog_rows
     )
-    coverage_ok = inventory_complete and all(
+    coverage_ok = inventory_complete and codex_catalog.get("coverage_ok") is True and all(
         row.get("coverage_ok") is True for row in catalog_rows
     )
     flow_ok = flow_report.get("ok") is True
@@ -141,11 +146,14 @@ def build_report(
                     else "catalog_drift",
                 }
             )
-    if codex_catalog.get("status") != "current":
+    if not codex_current or codex_catalog.get("coverage_ok") is not True:
         attention.append(
             {
                 "profile_id": "codex_subscription",
-                "reason": codex_catalog.get("reason") or codex_catalog.get("status"),
+                "reason": (
+                    codex_catalog.get("reason")
+                    or ("catalog_drift" if codex_current else codex_catalog.get("status"))
+                ),
             }
         )
     for entry in calibration_report["entries"]:
@@ -317,7 +325,26 @@ def run_audit(*, observed_at: datetime | None = None) -> dict[str, Any]:
         _collect_catalog(profile_id, spec)
         for profile_id, spec in CATALOG_COMMANDS.items()
     ]
-    _, codex_catalog = executable_model_options("codex_subscription")
+    # Old completed-run health must not mask a model removed from the current
+    # Codex cache, so this gate consumes the raw read-only catalog snapshot.
+    codex_catalog = codex_catalog_snapshot()
+    declared = [
+        str(item.get("value") or "")
+        for item in model_options().get("codex_subscription", [])
+        if isinstance(item, dict) and str(item.get("value") or "")
+    ]
+    discovered = [str(item) for item in codex_catalog.pop("models", []) if str(item)]
+    missing = sorted(set(declared) - set(discovered))
+    duplicates = sorted({item for item in discovered if discovered.count(item) > 1})
+    codex_catalog.update(
+        {
+            "declared": sorted(set(declared)),
+            "discovered": sorted(set(discovered)),
+            "missing_declared": missing,
+            "duplicate_discovered": duplicates,
+            "coverage_ok": not missing and not duplicates,
+        }
+    )
     return build_report(
         catalog_rows=catalog_rows,
         flow_report=audit_builtin_model_flows(),

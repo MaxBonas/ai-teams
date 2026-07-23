@@ -24,8 +24,12 @@ def test_catalog_cache_tracks_machine_config_and_can_be_invalidated(
 
     first = service.get_current_model_catalog(max_age_seconds=60)
     second = service.get_current_model_catalog(max_age_seconds=60)
-    assert first is second
+    assert first == second
+    assert first is not second
     assert len(calls) == 1
+
+    first["generation"] = 999
+    assert service.get_current_model_catalog(max_age_seconds=60)["generation"] == 1
 
     settings.write_text('{"profile": "changed"}', encoding="utf-8")
     refreshed = service.get_current_model_catalog(max_age_seconds=60)

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": null,
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "failed",
+  "wall_seconds": 8.563,
+  "usage": {},
+  "response": {},
+  "evaluation": {
+    "contract_passed": false,
+    "error": "JSONDecodeError"
+  },
+  "diagnostic": "Expecting property name enclosed in double quotes: line 1 column 2176 (char 2175)",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "disabled_by_contract",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": false
+}

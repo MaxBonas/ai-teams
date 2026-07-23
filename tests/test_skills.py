@@ -83,6 +83,13 @@ def test_load_skill_file_scout():
     assert "AGENT-REPORT" in skill
 
 
+def test_load_skill_worker():
+    skill = load_skill("worker")
+    assert skill is not None, "worker skill must be loadable"
+    assert "Tier 3 Worker" in skill
+    assert "AGENT-REPORT" in skill
+
+
 def test_load_skill_web_scout():
     skill = load_skill("web_scout")
     assert skill is not None, "web_scout skill must be loadable"
@@ -127,6 +134,7 @@ def test_list_skills_returns_all_roles():
     assert "quorum_senior" in roles
     # Tier 3 specialists must be discoverable
     assert "file_scout" in roles
+    assert "worker" in roles
     assert "web_scout" in roles
     assert "context_curator" in roles
     assert "test_runner" in roles

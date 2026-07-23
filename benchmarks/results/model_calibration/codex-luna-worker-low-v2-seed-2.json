@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_luna_tier3_role_canary",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_causal_report_v2",
+  "role": "worker",
+  "seed": 2,
+  "wall_seconds": 20.813,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "active_wave": true,
+      "owner": true,
+      "observed_rate": true,
+      "threshold": true,
+      "window": true,
+      "rollback": true,
+      "acceptance": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "AITEAM_WAKE_PAYLOAD_JSON e issue asignada; README.md inspeccionado (fixture de benchmark; no modificar)"
+  },
+  "artifact": "Checklist causal preparado con la decisión de pausar W3 y volver a W2.\n\nChecklist causal de decisión:\n\n- Alcance: Wave W3 está activa.\n- Métrica y ventana: tasa de error del 2,1 % durante 5 minutos.\n- Umbral: 1,0 %.\n- Causa de decisión: la tasa observada supera el límite permitido.\n- Acción requerida: pausar W3 y volver a W2.\n- Owner: Release Engineer.\n- Condición de aceptación: Reviewer acepta únicamente cuando los logs y la métrica confirmen la recuperación.\n- Dependencia/evidencia pendiente: logs y métrica de recuperación; no se proporcionan resultados de recuperación todavía.\n- Rollback/retorno operativo: W2.\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: AITEAM_WAKE_PAYLOAD_JSON e issue asignada; README.md inspeccionado (fixture de benchmark; no modificar)",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:95025f3f-e7b1-42ff-a9cf-b7306da2a649",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "usage_json": "{\"cached_input_tokens\": 14080, \"input_tokens\": 18058, \"output_tokens\": 753, \"reasoning_output_tokens\": 54}"
+    },
+    "input_tokens": 18058,
+    "output_tokens": 753,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-luna-worker-low-v2-seed-2\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true
+}

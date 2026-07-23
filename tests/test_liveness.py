@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from pathlib import Path
 
-import pytest
-
+import aiteam.db.liveness as liveness
 from aiteam.db.liveness import (
     diagnose_issue,
     reconcile_unassigned_role_issues,
@@ -179,6 +179,44 @@ def test_reconcile_unassigned_role_issue_materializes_agent_and_wakeup(tmp_path)
     assert agent == ("reviewer", "role_builtin")
     assert wakeup[0] == "role:reviewer"
     assert '"issue_id": "i1"' in wakeup[1]
+
+
+def test_reconcile_unassigned_role_uses_issue_context_for_model_selection(
+    tmp_path, monkeypatch
+):
+    db = _init(tmp_path)
+    _insert_issue(db, issue_id="i1", assignee=None)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            """
+            UPDATE issues
+            SET role = 'reviewer',
+                criticality = 'high',
+                metadata_json = ?
+            WHERE id = 'i1'
+            """,
+            (json.dumps({
+                "profile": "full_team",
+                "data_class": "internal",
+                "required_capabilities": ["external_mcp"],
+            }),),
+        )
+    observed: list[dict] = []
+
+    def choose(*args, **kwargs):
+        observed.append(kwargs)
+        return {"adapter_type": "role_builtin", "adapter_config": {}}
+
+    monkeypatch.setattr(liveness, "choose_adapter_for_new_slot", choose)
+    monkeypatch.setattr(liveness, "project_profiles", lambda _runtime_dir: [])
+
+    assert reconcile_unassigned_role_issues(db) == ["i1"]
+    assert len(observed) == 1
+    assert observed[0]["issue_id"] == "i1"
+    assert observed[0]["run_profile"] == "full_team"
+    assert observed[0]["criticality"] == "high"
+    assert observed[0]["data_class"] == "internal"
+    assert observed[0]["required_capabilities"] == ["external_mcp"]
 
 
 def test_reconcile_unassigned_role_issue_idempotent(tmp_path):

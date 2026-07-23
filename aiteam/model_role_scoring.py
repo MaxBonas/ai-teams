@@ -1,6 +1,6 @@
 """Scorer puro y auditable por candidato operacional + rol canónico.
 
-La política ``model_role_score_v1`` funciona únicamente en shadow. No consulta
+La política ``model_role_score_v2`` funciona únicamente en shadow. No consulta
 DB, filesystem, secrets o red y no modifica defaults. Las métricas de entrada
 ya deben estar normalizadas contra candidatos comparables del mismo contexto.
 """
@@ -8,12 +8,13 @@ ya deben estar normalizadas contra candidatos comparables del mismo contexto.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any
 
-from aiteam.policies import canonical_role
+from aiteam.policies import canonical_role, role_status
 
 
-MODEL_ROLE_SCORE_VERSION = "model_role_score_v1"
+MODEL_ROLE_SCORE_VERSION = "model_role_score_v2"
 MODEL_ROLE_SCORE_WEIGHTS = {
     "quality": 40,
     "capability": 15,
@@ -32,6 +33,7 @@ REQUIRED_AUTO_GATES = (
     "automatic_policy",
     "calibrated",
     "fresh",
+    "case_diversity",
     "privacy",
     "tools",
     "workspace",
@@ -42,7 +44,7 @@ REQUIRED_AUTO_GATES = (
 _ECONOMY_BASIS_BY_CHANNEL = {
     "api": "api_cost_per_accepted_task",
     "subscription": "subscription_quota_pressure",
-    "local": "local_resource_throughput",
+    "local": "zero_external_cost",
     "free_gateway": "gateway_capacity_pressure",
 }
 
@@ -97,8 +99,8 @@ def score_model_role(
     """Calcula score, confianza y gates sin seleccionar ni mutar estado."""
     candidate_id, identity = _candidate_identity(candidate)
     role_key = canonical_role(role)
-    if not role_key:
-        raise ValueError("canonical role is required")
+    if not role_key or role_status(role_key) == "unknown":
+        raise ValueError("known canonical role is required")
 
     breakdown: dict[str, dict[str, Any]] = {}
     known_weight = 0
@@ -126,7 +128,8 @@ def score_model_role(
     confidence["evidence_value"] = evidence_confidence
     confidence["metric_completeness_percent"] = known_weight
     confidence["value"] = round(min(evidence_confidence, float(known_weight)), 4)
-    confidence["caps"] = ["unknown_score_components"] if known_weight < 100 else []
+    if known_weight < 100:
+        confidence["caps"].append("unknown_score_components")
     gates = _normalize_gates(hard_gates, evidence=evidence)
     ineligible_reasons = [
         f"gate:{name}:{gate['reason']}"
@@ -181,6 +184,17 @@ def rank_model_role_scores(scores: Iterable[Mapping[str, Any]]) -> list[dict[str
     final, por lo que el orden no depende del orden de entrada.
     """
     rows = [dict(item) for item in scores]
+    candidate_ids = [str(row.get("candidate_id") or "") for row in rows]
+    if any(not candidate_id for candidate_id in candidate_ids):
+        raise ValueError("every ranked score requires candidate_id")
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise ValueError("duplicate candidate_id in role ranking")
+    versions = {str(row.get("score_version") or "") for row in rows}
+    if versions - {MODEL_ROLE_SCORE_VERSION}:
+        raise ValueError("incompatible score version in role ranking")
+    roles = {str(row.get("canonical_role") or "") for row in rows}
+    if len(roles) > 1 or "" in roles:
+        raise ValueError("role ranking requires one canonical role")
     rows.sort(key=_base_rank_key)
     output: list[dict[str, Any]] = []
     start = 0
@@ -204,6 +218,10 @@ def _normalize_component(
     raw = dict(component or {})
     value = raw.get("value")
     reason = str(raw.get("reason") or "metric_not_observed")
+    source = str(raw.get("source") or "unknown").strip()
+    if value is not None and (not source or source.lower() == "unknown"):
+        value = None
+        reason = "metric_source_unproven"
     if name == "economy" and value is not None:
         expected = _ECONOMY_BASIS_BY_CHANNEL.get(channel)
         basis = str(raw.get("basis") or "")
@@ -218,7 +236,7 @@ def _normalize_component(
             "weight_percent": weight,
             "weighted_points": None,
             "reason": reason,
-            "source": str(raw.get("source") or "unknown"),
+            "source": source or "unknown",
         }
     numeric = float(value)
     if not 0.0 <= numeric <= 100.0:
@@ -230,7 +248,7 @@ def _normalize_component(
         "weight_percent": weight,
         "weighted_points": round(numeric * weight / 100.0, 4),
         "reason": reason if reason != "metric_not_observed" else "metric_observed",
-        "source": str(raw.get("source") or "unknown"),
+        "source": source,
     }
 
 
@@ -245,8 +263,10 @@ def _confidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     )
     seeds = max(0, int(evidence.get("seeds") or 0))
     cases = max(0, int(evidence.get("cases") or 0))
-    required_tools = {str(item) for item in evidence.get("required_tools") or ()}
-    covered_tools = {str(item) for item in evidence.get("covered_tools") or ()}
+    case_families = _string_set(evidence.get("case_families"))
+    diversity_cases = len(case_families) if case_families else cases
+    required_tools = _string_set(evidence.get("required_tools"))
+    covered_tools = _string_set(evidence.get("covered_tools"))
     tool_value = (
         100.0
         if not required_tools
@@ -258,7 +278,7 @@ def _confidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_status": _EVIDENCE_STATUS_SCORE.get(status, 0.0),
         "evidence_class": class_value,
         "seeds": min(100.0, seeds / 3 * 100.0),
-        "cases": min(100.0, cases / 2 * 100.0),
+        "cases": min(100.0, diversity_cases / 2 * 100.0),
         "tool_coverage": tool_value,
         "freshness": 100.0 if fresh else 0.0,
         "goodhart": _GOODHART_SCORE.get(goodhart, 0.0),
@@ -272,6 +292,39 @@ def _confidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         for name, value in factors.items()
     }
     value = round(sum(item["weighted_points"] for item in weighted.values()), 4)
+    provider_version = _observed_version(evidence.get("provider_version"))
+    evaluated_at = _observed_at(evidence.get("evaluated_at"))
+    unmeasured = sorted(_string_set(evidence.get("unmeasured_constructs")))
+    receipts = sorted(_string_set(evidence.get("receipts")))
+    caps: list[str] = []
+    if class_value <= _EVIDENCE_CLASS_SCORE["provider_self_report"]:
+        value = min(value, 70.0)
+        caps.append("evidence_class_insufficient_for_auto")
+    if seeds < 3:
+        value = min(value, 74.0)
+        caps.append("fewer_than_three_seeds")
+    if diversity_cases < 2:
+        value = min(value, 74.0)
+        caps.append(
+            "fewer_than_two_case_families"
+            if case_families
+            else "fewer_than_two_cases"
+        )
+    if not receipts:
+        value = min(value, 70.0)
+        caps.append("evidence_receipts_missing")
+    if not provider_version:
+        value = min(value, 70.0)
+        caps.append("provider_version_unobserved")
+    if not evaluated_at:
+        value = min(value, 70.0)
+        caps.append("evaluation_date_unobserved")
+    if unmeasured:
+        value = min(value, max(50.0, 100.0 - 5.0 * len(unmeasured)))
+        caps.append("unmeasured_constructs")
+    if goodhart in {"material", "high", "unknown"}:
+        value = min(value, 60.0 if goodhart == "high" else 70.0)
+        caps.append(f"goodhart_risk_{goodhart}")
     return {
         "value": value,
         "minimum_for_auto": AUTO_CONFIDENCE_MINIMUM,
@@ -281,16 +334,17 @@ def _confidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_rank": round((factors["evidence_status"] + class_value) / 2.0, 4),
         "seeds": seeds,
         "cases": cases,
+        "case_families": sorted(case_families),
+        "case_family_count": len(case_families),
         "required_tools": sorted(required_tools),
         "covered_tools": sorted(covered_tools),
         "fresh": fresh,
-        "provider_version": evidence.get("provider_version"),
-        "evaluated_at": evidence.get("evaluated_at"),
-        "receipts": sorted(str(item) for item in evidence.get("receipts") or ()),
-        "unmeasured_constructs": sorted(
-            str(item) for item in evidence.get("unmeasured_constructs") or ()
-        ),
+        "provider_version": provider_version or None,
+        "evaluated_at": evaluated_at or None,
+        "receipts": receipts,
+        "unmeasured_constructs": unmeasured,
         "goodhart_risk": goodhart,
+        "caps": caps,
     }
 
 
@@ -301,7 +355,8 @@ def _normalize_gates(
     for name in REQUIRED_AUTO_GATES:
         raw = hard_gates.get(name)
         if isinstance(raw, Mapping):
-            passed = raw.get("passed")
+            raw_passed = raw.get("passed")
+            passed = raw_passed if isinstance(raw_passed, bool) else None
             reason = str(
                 raw.get("reason") or ("passed" if passed is True else "not_proven")
             )
@@ -324,10 +379,30 @@ def _normalize_gates(
             "reason": "exact_role_evidence_not_calibrated",
             "source": "evidence",
         }
+    missing_tool_evidence = _string_set(evidence.get("required_tools")) - _string_set(
+        evidence.get("covered_tools")
+    )
+    if missing_tool_evidence:
+        gates["tools"] = {
+            "passed": False,
+            "reason": "required_tool_evidence_missing:"
+            + ",".join(sorted(missing_tool_evidence)),
+            "source": "evidence",
+        }
+    freshness_provenance_complete = bool(
+        _observed_version(evidence.get("provider_version"))
+        and _observed_at(evidence.get("evaluated_at"))
+    )
     if evidence.get("fresh") is not True:
         gates["fresh"] = {
             "passed": False,
             "reason": "evidence_stale_or_unproven",
+            "source": "evidence",
+        }
+    elif not freshness_provenance_complete:
+        gates["fresh"] = {
+            "passed": False,
+            "reason": "evidence_version_or_date_unproven",
             "source": "evidence",
         }
     return gates
@@ -338,7 +413,41 @@ def _candidate_identity(candidate: Mapping[str, Any]) -> tuple[str, dict[str, An
     identity = candidate.get("identity")
     if not candidate_id or not isinstance(identity, Mapping):
         raise ValueError("candidate_id and operational identity are required")
-    return candidate_id, dict(identity)
+    normalized = dict(identity)
+    required = (
+        "profile_id",
+        "provider_org",
+        "model_vendor",
+        "perspective_key",
+        "channel",
+        "capacity_pool",
+        "model_id",
+    )
+    missing = [name for name in required if not str(normalized.get(name) or "").strip()]
+    if missing:
+        raise ValueError("operational identity missing: " + ",".join(missing))
+    return candidate_id, normalized
+
+
+def _string_set(value: Any) -> set[str]:
+    items = [value] if isinstance(value, str) else (value or ())
+    return {str(item).strip() for item in items if str(item).strip()}
+
+
+def _observed_version(value: Any) -> str:
+    text = str(value or "").strip()
+    return "" if text.lower() in {"", "unknown", "unverified", "n/a"} else text
+
+
+def _observed_at(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    return text
 
 
 def _base_rank_key(row: Mapping[str, Any]) -> tuple[Any, ...]:

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 6.765,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO (propuesta insegura en el estado actual)",
+    "challenges": [
+      "La separación entre SELECT y UPDATE en el checkout actual permite una condición de carrera donde dos workers ganan la misma issue.",
+      "Intentar migrar sin detener runs activas manteniendo el checkout no atómico duplica el riesgo de procesamiento concurrente de la misma issue."
+    ],
+    "missing_evidence": [
+      "Evidencia de un mecanismo de checkout atómico en SQLite que impida la doble asignación de issues entre workers.",
+      "Evidencia de la seguridad de la conmutación con el flag para volver al camino anterior sin afectar o corromper las runs activas.",
+      "Demostración de que el gate (100 reinicios / 0 wakeups perdidos en 24h) puede superarse mientras persista la separación entre SELECT y UPDATE."
+    ],
+    "failure_modes": [
+      "Dos workers ejecutan de forma concurrente la misma issue al ganar ambos el checkout debido a la separación entre SELECT y UPDATE.",
+      "Inconsistencia de estado o interferencia en runs activas al activar el flag de reversión durante la migración en caliente.",
+      "Fallo en el gate de 24 horas con 100 reinicios debido a desincronizaciones o race conditions durante las transiciones de estado en SQLite."
+    ],
+    "recommendation": "NO-GO. Se debe garantizar la atomicidad del checkout en SQLite antes de ejecutar la migración sin detener runs activas o validar el gate de 100 reinicios."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": false,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 8,
+    "anchors_total": 9,
+    "missing_anchors": [
+      "case.tenant_boundary"
+    ],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": false
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": false
+}

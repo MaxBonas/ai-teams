@@ -27,6 +27,7 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "adapter_type": "subscription_cli",
         "channel": "subscription",
         "provider": "openai-codex",
+        "setup_class": "primary_option",
         "config": {
             "cli_kind": "codex",
             "command": ["codex"],
@@ -46,6 +47,7 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "adapter_type": "subscription_cli",
         "channel": "subscription",
         "provider": "google-antigravity",
+        "setup_class": "primary_option",
         "config": {
             "cli_kind": "antigravity",
             "command": ["agy"],
@@ -59,6 +61,7 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "adapter_type": "subscription_cli",
         "channel": "free_gateway",
         "provider": "opencode-zen",
+        "setup_class": "optional_economy",
         "supported_roles": [
             "lead", "team_lead", "architect", "quorum_auditor",
             "reviewer", "code_reviewer", "qa",
@@ -154,10 +157,11 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
     },
     {
         "id": "local_qwen_ollama",
-        "label": "Qwen local via Codex/Ollama",
+        "label": "Opcional · Qwen local via Codex/Ollama",
         "adapter_type": "subscription_cli",
         "channel": "local",
         "provider": "ollama",
+        "setup_class": "optional_local",
         "config": {
             "cli_kind": "codex",
             "command": ["codex"],
@@ -170,10 +174,11 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
     },
     {
         "id": "local_gem4_lmstudio",
-        "label": "Gemma local configurado via Codex/LM Studio",
+        "label": "Opcional · Gemma local via Codex/LM Studio",
         "adapter_type": "subscription_cli",
         "channel": "local",
         "provider": "lmstudio",
+        "setup_class": "optional_local",
         "config": {
             "cli_kind": "codex",
             "command": ["codex"],
@@ -186,10 +191,11 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
     },
     {
         "id": "local_gemma4_ollama",
-        "label": "Gemma 4 local via Codex/Ollama",
+        "label": "Opcional · Gemma 4 local via Codex/Ollama",
         "adapter_type": "subscription_cli",
         "channel": "local",
         "provider": "ollama",
+        "setup_class": "optional_local",
         "config": {
             "cli_kind": "codex",
             "command": ["codex"],
@@ -1274,6 +1280,13 @@ def _codex_catalog_compatibility(config: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def codex_catalog_snapshot() -> dict[str, Any]:
+    """Return the full local Codex catalog snapshot for read-only audits."""
+    profile = _profile_by_id("codex_subscription") or {}
+    config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+    return dict(_codex_catalog_compatibility(config))
+
+
 @lru_cache(maxsize=8)
 def _codex_catalog_compatibility_cached(
     command: tuple[str, ...], cache_path: str, cache_mtime: int
@@ -1582,7 +1595,24 @@ def cli_status() -> list[dict[str, Any]]:
             "login_supported": True,
             "login_command": _login_display_command(["opencode", "auth", "login", "--provider", "opencode"]),
             "alternate_login_commands": [_login_display_command(["opencode", "auth", "login"])],
-            "login_hint": "Conecta OpenCode Zen una vez; AI Teams reutiliza esa sesión sin copiar la credencial.",
+            "login_hint": (
+                "OpenCode Zen exige actualmente una API key personal incluso para modelos "
+                "de precio temporalmente cero. AI Teams abre el flujo y reutiliza la sesión, "
+                "pero no crea cuentas, acepta condiciones ni copia la credencial."
+            ),
+            "setup_url": "https://opencode.ai/auth",
+            "setup_url_label": "Crear o gestionar la API key de Zen",
+            "setup_steps": [
+                "Abre OpenCode Zen, inicia sesión y crea una API key personal.",
+                "Pulsa «Conectar OpenCode Zen» para abrir el login del CLI.",
+                "Pega la key solo en la terminal de OpenCode; no la introduzcas en AI Teams.",
+                "Vuelve a Config y prueba el perfil «OpenCode Zen · modelos gratuitos».",
+            ],
+            "credential_storage": (
+                "La credencial queda bajo el almacenamiento de OpenCode en esta máquina; "
+                "AI Teams no la persiste en SQLite, prompts ni configuración del proyecto."
+            ),
+            "post_login_check": "opencode auth list",
         },
         {
             "id": "claude",

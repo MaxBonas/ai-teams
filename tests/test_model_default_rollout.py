@@ -6,7 +6,10 @@ import pytest
 from aiteam.db.model_score_snapshots import persist_model_role_score_snapshot
 from aiteam.model_default_rollout import (
     default_adapter_config_from_snapshot,
+    evaluate_model_default,
     evaluate_shadow_model_default,
+    model_default_rollout_mode,
+    select_model_default_for_new_slot,
 )
 
 
@@ -151,3 +154,107 @@ def test_default_intent_requires_hash_valid_auto_applied_eligible_snapshot(
     tampered = {**snapshot, "candidates": [{**candidate, "auto_eligible": False}]}
     with pytest.raises(ValueError, match="hash"):
         default_adapter_config_from_snapshot(tampered)
+
+
+def test_rollout_flag_is_fail_closed_and_supports_immediate_rollback() -> None:
+    assert model_default_rollout_mode({}) == "shadow"
+    assert model_default_rollout_mode({"AITEAM_MODEL_DEFAULT_ROLLOUT": "recommend"}) == "recommend"
+    assert model_default_rollout_mode({"AITEAM_MODEL_DEFAULT_ROLLOUT": "auto"}) == "auto"
+    assert model_default_rollout_mode({"AITEAM_MODEL_DEFAULT_ROLLOUT": "unsafe"}) == "shadow"
+    assert model_default_rollout_mode({"AITEAM_MODEL_DEFAULT_ROLLOUT": "shadow"}) == "shadow"
+
+
+def test_recommend_persists_winner_without_assignment_authority(tmp_path: Path) -> None:
+    decision = evaluate_model_default(
+        _db(tmp_path),
+        selection_scope="recommend:reviewer",
+        role="reviewer",
+        projection=_projection(),
+        rollout="recommend",
+        new_slot=True,
+    )
+
+    assert decision["rollout"] == "recommend_only"
+    assert decision["winner_candidate_id"] == "candidate:a"
+    assert decision["snapshot"]["auto_applied"] is False
+    assert decision["assignment_changed"] is False
+
+
+def test_auto_applies_only_to_new_unpinned_slot(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    applied = evaluate_model_default(
+        db_path,
+        selection_scope="auto:new:reviewer",
+        role="reviewer",
+        projection=_projection(),
+        rollout="auto",
+        new_slot=True,
+    )
+    existing = evaluate_model_default(
+        db_path,
+        selection_scope="auto:existing:reviewer",
+        role="reviewer",
+        current_profile_id="profile-b",
+        current_model="model-b",
+        projection=_projection(),
+        rollout="auto",
+        new_slot=True,
+    )
+
+    assert applied["snapshot"]["auto_applied"] is True
+    assert applied["assignment_changed"] is True
+    assert existing["snapshot"]["auto_applied"] is False
+    assert existing["assignment_changed"] is False
+
+
+def test_rollout_revalidates_projected_winner_and_fails_closed(tmp_path: Path) -> None:
+    projection = _projection()
+    projection["candidates"][0]["selection_score"]["auto_eligible"] = False
+
+    decision = evaluate_model_default(
+        _db(tmp_path),
+        selection_scope="auto:forged:reviewer",
+        role="reviewer",
+        projection=projection,
+        rollout="auto",
+        new_slot=True,
+    )
+
+    assert decision["decision"] == "no_winner"
+    assert decision["winner_candidate_id"] is None
+    assert decision["snapshot"]["auto_applied"] is False
+    assert decision["assignment_changed"] is False
+
+
+def test_new_slot_selection_materializes_profile_and_durable_default_intent(
+    tmp_path: Path,
+) -> None:
+    selected = select_model_default_for_new_slot(
+        _db(tmp_path),
+        selection_scope="auto:slot:reviewer",
+        role="reviewer",
+        projection=_projection(),
+        rollout="auto",
+        profiles=[{"id": "profile-a", "adapter_type": "subscription_cli"}],
+    )
+
+    assert selected is not None
+    assert selected["adapter_type"] == "subscription_cli"
+    assert selected["adapter_config"]["profile_id"] == "profile-a"
+    assert selected["adapter_config"]["model"] == "model-a"
+    assert selected["adapter_config"]["selection_intent"]["mode"] == "default"
+    assert selected["rollout_decision"]["snapshot"]["auto_applied"] is True
+
+
+@pytest.mark.parametrize("rollout", ["shadow", "recommend", "auto"])
+def test_new_slot_without_winner_never_invents_assignment(
+    tmp_path: Path, rollout: str
+) -> None:
+    assert select_model_default_for_new_slot(
+        _db(tmp_path),
+        selection_scope=f"{rollout}:empty:reviewer",
+        role="reviewer",
+        projection=_projection(winner=None),
+        rollout=rollout,
+        profiles=[{"id": "profile-a", "adapter_type": "subscription_cli"}],
+    ) is None

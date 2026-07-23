@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,10 @@ from typing import Any
 from aiteam.tools.catalog import default_capabilities_for_role
 from aiteam.provider_identity import profile_perspective_key
 from aiteam.model_compatibility import compatibility_decision
+from aiteam.model_default_rollout import (
+    model_default_rollout_mode,
+    select_model_default_for_new_slot,
+)
 from aiteam.compatibility_service import resolve_assignment_compatibility
 from aiteam.policies import canonical_role
 from aiteam.user_config import (
@@ -21,6 +26,7 @@ from aiteam.user_config import (
 
 
 PROJECT_CONFIG_NAME = "project_config.json"
+logger = logging.getLogger(__name__)
 
 # Role tiers for the hiring policy live in aiteam.policies (fase 5) —
 # aliases kept here for existing imports.
@@ -231,6 +237,87 @@ def choose_adapter_for_role(
     }
 
 
+def choose_adapter_for_new_slot(
+    db_path: Path,
+    *,
+    role: str,
+    seniority: str | None,
+    profiles: list[dict[str, Any]],
+    selection_scope: str,
+    issue_id: str = "",
+    **legacy_context: Any,
+) -> dict[str, Any] | None:
+    """Select a new unpinned slot under the governed M.7 rollout.
+
+    Shadow keeps the established selector. Recommend records the canonical
+    decision and also keeps it. Auto applies only a sealed eligible winner; if
+    none exists it returns an explicitly unresolved builtin assignment instead
+    of inventing an LLM fallback.
+    """
+    mode = model_default_rollout_mode()
+    legacy = lambda: choose_adapter_for_role(  # noqa: E731 - lazy fallback
+        role, seniority, profiles, **legacy_context
+    )
+    if mode == "shadow":
+        return legacy()
+    try:
+        from aiteam.model_selection_context import contextual_model_selection
+
+        projection = contextual_model_selection(
+            Path(db_path),
+            role=role,
+            issue_id=issue_id,
+            run_profile=str(legacy_context.get("run_profile") or ""),
+            criticality=str(legacy_context.get("criticality") or "medium"),
+            data_class=str(legacy_context.get("data_class") or "public"),
+            required_capabilities=legacy_context.get("required_capabilities") or (),
+            profiles=profiles,
+        )
+        selected = select_model_default_for_new_slot(
+            Path(db_path),
+            selection_scope=selection_scope,
+            role=role,
+            issue_id=issue_id,
+            projection=projection,
+            rollout=mode,
+            profiles=profiles,
+        )
+    except Exception:
+        logger.warning(
+            "model default rollout failed for new slot scope=%r role=%r mode=%r",
+            selection_scope,
+            role,
+            mode,
+            exc_info=True,
+        )
+        return _unresolved_model_default("rollout_evaluation_failed") if mode == "auto" else legacy()
+    if selected is not None:
+        return selected
+    return _unresolved_model_default("no_auto_eligible_candidate") if mode == "auto" else legacy()
+
+
+def _unresolved_model_default(reason: str) -> dict[str, Any]:
+    return {
+        "adapter_type": "role_builtin",
+        "adapter_config": {
+            "model_default_rollout": {
+                "schema_version": "model_default_rollout_v1",
+                "mode": "auto",
+                "state": "default_unresolved",
+                "reason": reason,
+            }
+        },
+        "adapter_profile_id": None,
+        "model": None,
+    }
+
+
+def is_unresolved_model_default(selection: dict[str, Any] | None) -> bool:
+    config = (selection or {}).get("adapter_config") or {}
+    rollout = config.get("model_default_rollout") if isinstance(config, dict) else None
+    return isinstance(rollout, dict) and rollout.get("state") == "default_unresolved"
+
+
 def _apply_cost_policy(role_key: str, ranked: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Opt-in hard enforcement: Tier 3 roles never bill per-token while a
     connected zero-cost channel (local / subscription) exists in the project.
@@ -262,6 +349,7 @@ def apply_adapter_policy_to_member(
     run_profile: str = "",
     criticality: str = "medium",
     data_class: str = "",
+    required_capabilities: list[str] | None = None,
 ) -> dict[str, Any]:
     selection = choose_adapter_for_role(
         str(member.get("role") or ""),
@@ -270,6 +358,7 @@ def apply_adapter_policy_to_member(
         run_profile=run_profile,
         criticality=criticality,
         data_class=data_class,
+        required_capabilities=required_capabilities or [],
     )
     if not selection:
         return dict(member)
@@ -319,6 +408,11 @@ def reconcile_project_agent_policy(db_path: Path, *, include_tier3: bool = True)
                 _current_config = {}
             if not isinstance(_current_config, dict):
                 _current_config = {}
+            unresolved_default = (
+                isinstance(_current_config.get("model_default_rollout"), dict)
+                and _current_config["model_default_rollout"].get("state")
+                == "default_unresolved"
+            )
             is_adapter_missing_profile = (
                 current_adapter not in {"", "manual", "role_builtin", "lead_builtin"}
                 and not str(_current_config.get("profile_id") or "").strip()
@@ -383,7 +477,7 @@ def reconcile_project_agent_policy(db_path: Path, *, include_tier3: bool = True)
                             )
                         if not repaired_decision.get("allowed"):
                             _profile_repair_config = None
-            if is_placeholder:
+            if is_placeholder and not unresolved_default:
                 sets.extend(["adapter_type = ?", "adapter_config_json = ?"])
                 params.extend([
                     selected_adapter or current_adapter or "manual",
@@ -518,6 +612,7 @@ def ensure_quorum_agents(
     profiles: list[dict[str, Any]],
     explicit_selections: dict[str, dict[str, Any]] | None = None,
     target_agent_ids: list[str] | None = None,
+    issue_id: str = "",
 ) -> list[str]:
     """Create quorum auditor agents if they do not already exist.
 
@@ -536,6 +631,11 @@ def ensure_quorum_agents(
     profiles_by_id = {str(profile.get("id") or ""): profile for profile in profiles}
     used_profile_ids: set[str] = set()
     used_perspectives: set[str] = set()
+    compatibility_context: dict[str, Any] = {}
+    if issue_id:
+        from aiteam.compatibility_service import issue_compatibility_context
+
+        compatibility_context = issue_compatibility_context(db_path, issue_id)
     with sqlite3.connect(str(db_path), timeout=20.0) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
@@ -614,7 +714,15 @@ def ensure_quorum_agents(
                     profile for profile in profiles
                     if str(profile.get("id") or "") not in used_profile_ids
                 ] or profiles
-                selection = choose_adapter_for_role("quorum_auditor", "senior", candidates)
+                selection = choose_adapter_for_new_slot(
+                    db_path,
+                    role="quorum_auditor",
+                    seniority="senior",
+                    profiles=candidates,
+                    selection_scope=f"quorum:new-agent:{agent_id}",
+                    issue_id=issue_id,
+                    **compatibility_context,
+                )
                 selected_profile_id = str((selection or {}).get("adapter_profile_id") or "")
                 selected_profile = profiles_by_id.get(selected_profile_id, {})
             adapter_type = str((selection or {}).get("adapter_type") or "openai_api")
@@ -660,6 +768,10 @@ def ensure_quorum_agents(
                             ((selection or {}).get("adapter_config") or {}).get("model") or ""
                         ),
                     ))
+                # The next governed selection persists its snapshot through a
+                # separate SQLite connection. Release this idempotent agent
+                # write first; a crash is recovered by the next ensure call.
+                conn.commit()
         conn.commit()
     return created
 
@@ -684,7 +796,13 @@ def ensure_tier3_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> lis
             ).fetchone()
             if existing:
                 continue
-            selection = choose_adapter_for_role(role, seniority, profiles)
+            selection = choose_adapter_for_new_slot(
+                db_path,
+                role=role,
+                seniority=seniority,
+                profiles=profiles,
+                selection_scope=f"tier3:new-agent:{agent_id}",
+            )
             # Tier 3 scouts default to role_builtin when no cheap adapter is
             # configured — never openai_api, which would wastefully consume
             # expensive tokens for work designed to run on cheap/local models.
@@ -714,6 +832,9 @@ def ensure_tier3_agents(db_path: Path, *, profiles: list[dict[str, Any]]) -> lis
             )
             if conn.execute("SELECT changes()").fetchone()[0]:
                 created.append(agent_id)
+                # See ensure_quorum_agents: avoid holding a writer lock while
+                # the next slot persists its score snapshot independently.
+                conn.commit()
         conn.commit()
     return created
 

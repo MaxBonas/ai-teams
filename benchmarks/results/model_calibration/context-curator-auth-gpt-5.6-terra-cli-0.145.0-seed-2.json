@@ -204,5 +204,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.6-terra-cli-0.145.0-seed-2\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n\n- Objetivo: migrar la autenticación con corte reversible y sin downtime.\n- Decisión: conservar JWT RS256 y rotar claves con doble validación durante 24 h. La clave anterior solo se elimina cuando `legacy_kid_hits` sea 0 durante 2 h.\n- Hecho: Engineer implementó el lector dual en `src/auth/keyring.py`; `pytest tests/auth -q` pasó 42 pruebas. Reviewer aprobó compatibilidad.\n- Abierto: Engineer debe automatizar rollback en `scripts/rollback_keys.py`; Reviewer acepta tras verificar su dry-run.\n- Riesgo/escalado: cachés regionales pueden retener JWKS 15 min. Si 401 supera 0,5 % durante 5 min, pausar la rotación y escalar al Lead.\n- Alcance excluido: no migrar sesiones existentes ni cambiar proveedor de identidad."
+  "summary": "## Síntesis causal\n\n- Objetivo: migrar la autenticación con corte reversible y sin downtime.\n- Decisión: conservar JWT RS256 y rotar claves con doble validación durante 24 h. La clave anterior solo se elimina cuando `legacy_kid_hits` sea 0 durante 2 h.\n- Hecho: Engineer implementó el lector dual en `src/auth/keyring.py`; `pytest tests/auth -q` pasó 42 pruebas. Reviewer aprobó compatibilidad.\n- Abierto: Engineer debe automatizar rollback en `scripts/rollback_keys.py`; Reviewer acepta tras verificar su dry-run.\n- Riesgo/escalado: cachés regionales pueden retener JWKS 15 min. Si 401 supera 0,5 % durante 5 min, pausar la rotación y escalar al Lead.\n- Alcance excluido: no migrar sesiones existentes ni cambiar proveedor de identidad.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

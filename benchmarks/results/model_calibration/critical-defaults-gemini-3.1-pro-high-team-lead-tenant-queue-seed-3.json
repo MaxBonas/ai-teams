@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "team_lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 6.156,
+  "usage": {},
+  "response": {
+    "objective": "Migrar tenant_queue a SQLite como única fuente durable garantizando checkout atómico por tenant_id, sin detener runs activas, manteniendo un flag para volver al camino anterior y superando el gate de 100 reinicios con cero wakeups perdidos durante 24 horas.",
+    "assignments": [
+      {
+        "task": "Refactorizar checkout para unificar SELECT y UPDATE atómicamente por tenant_id en SQLite y evitar que dos workers ganen la misma issue",
+        "owner": "Backend Lead",
+        "aceptador": "Tech Lead"
+      },
+      {
+        "task": "Implementar e integrar el flag para volver al camino anterior en caso de fallo",
+        "owner": "DevOps Engineer",
+        "aceptador": "Team Lead"
+      },
+      {
+        "task": "Ejecutar la migración de datos y cola a SQLite sin detener runs activas",
+        "owner": "Database Administrator",
+        "aceptador": "Tech Lead"
+      },
+      {
+        "task": "Ejecutar validación de gate: 100 reinicios con cero wakeups perdidos durante 24 horas",
+        "owner": "QA Lead",
+        "aceptador": "Team Lead"
+      }
+    ],
+    "dependencies": [
+      "El refactor de checkout atómico depende del esquema SQLite con tenant_id.",
+      "La migración sin interrupción depende de la disponibilidad del flag para volver al camino anterior.",
+      "La aceptación final depende de completar la ejecución de la prueba del gate."
+    ],
+    "acceptance": [
+      "SQLite es la única fuente durable.",
+      "Cada issue tiene tenant_id.",
+      "El checkout no separa SELECT y UPDATE, previniendo que dos workers ganen la misma issue.",
+      "La migración se realiza sin detener runs activas.",
+      "Existe y funciona el flag para volver al camino anterior.",
+      "Se superan los 100 reinicios con cero wakeups perdidos en un periodo de 24 horas."
+    ],
+    "status_update": "Planificación y asignación finalizadas para tenant_queue_migration. Equipos alineados en la resolución de la condición de carrera en checkout y en los criterios del gate de 24 horas.",
+    "escalation": "Si se detecta cualquier wakeup perdido durante los 100 reinicios o si dos workers ganan la misma issue, se activará inmediatamente el flag de retorno al camino anterior y se escalará a Dirección de Ingeniería."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

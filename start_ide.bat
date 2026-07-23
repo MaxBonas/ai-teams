@@ -70,7 +70,7 @@ echo [AI Team IDE]  Logs     -^>  runtime\ide_logs\
 echo [AI Team IDE]  Para todo con stop_ide.bat
 echo [AI Team IDE] ============================================
 echo.
-start "" "http://localhost:%FRONTEND_PORT%"
+if /I not "%AITEAM_NO_BROWSER%"=="1" start "" "http://localhost:%FRONTEND_PORT%"
 goto :success
 
 :ensure_frontend_deps
@@ -138,7 +138,7 @@ if errorlevel 1 exit /b 1
 exit /b 0
 
 :start_process
-powershell -NoProfile -Command "$p = Start-Process -FilePath $env:START_EXE -ArgumentList $env:START_ARGS -WorkingDirectory $env:START_WD -RedirectStandardOutput $env:START_STDOUT -RedirectStandardError $env:START_STDERR -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>nul
+powershell -NoProfile -Command "$p = Start-Process -FilePath $env:START_EXE -ArgumentList $env:START_ARGS -WorkingDirectory $env:START_WD -RedirectStandardOutput $env:START_STDOUT -RedirectStandardError $env:START_STDERR -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>nul
 if errorlevel 1 (
     echo [AI Team IDE] ERROR: No se pudo lanzar %~1.
     echo [AI Team IDE] Revisa %START_STDOUT% y %START_STDERR%

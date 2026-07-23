@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 26.844,
+  "usage": {
+    "input_tokens": 16573,
+    "cached_input_tokens": 0,
+    "output_tokens": 1062
+  },
+  "response": {
+    "objective": "Migrar el checkout de issues por tenant a una operación atómica en SQLite, sin interrumpir runs activas, manteniendo el flag de retorno y cumpliendo el gate de 100 reinicios con cero wakeups perdidos durante 24 horas.",
+    "execution_steps": [
+      {
+        "order": 1,
+        "change": "Documentar los estados de issue y run, la semántica de tenant_id, el camino actual protegido por el flag y el punto exacto donde SELECT y UPDATE deben sustituirse."
+      },
+      {
+        "order": 2,
+        "change": "Preparar una migración compatible con datos existentes que garantice tenant_id en cada issue y añada únicamente los índices necesarios para localizar issues elegibles por tenant y estado."
+      },
+      {
+        "order": 3,
+        "change": "Implementar el checkout nuevo como una única transacción SQLite: seleccionar una issue elegible, reclamarla mediante una escritura condicionada por su estado previo y devolverla solo si la reclamación afectó exactamente a esa issue."
+      },
+      {
+        "order": 4,
+        "change": "Conservar el camino anterior detrás del flag y hacer que el cambio de flag afecte solo a nuevos checkouts, sin modificar ni cancelar runs ya activas."
+      },
+      {
+        "order": 5,
+        "change": "Asegurar que la creación y reactivación de issues persista durablemente el estado antes de emitir el wakeup; tras un reinicio, el worker deberá reconstruir trabajo pendiente consultando SQLite."
+      },
+      {
+        "order": 6,
+        "change": "Añadir pruebas deterministas de concurrencia con dos o más workers intentando reclamar la misma issue, incluyendo tenants iguales y distintos; verificar que solo un worker obtiene cada issue y que no existe cruce entre tenants."
+      },
+      {
+        "order": 7,
+        "change": "Añadir pruebas de compatibilidad de migración, alternancia del flag, reinicio durante checkout, reinicio después de persistir y antes del wakeup, y continuidad de runs activas durante el despliegue."
+      },
+      {
+        "order": 8,
+        "change": "Ejecutar primero pruebas unitarias e integración y después el gate controlado de 100 reinicios; mantener la observación durante 24 horas y bloquear la promoción si aparece un solo wakeup perdido."
+      }
+    ],
+    "evidence": [
+      {
+        "artifact": "Resultados de la prueba de contención",
+        "required_result": "Para cada issue, exactamente un checkout exitoso y ningún procesamiento duplicado."
+      },
+      {
+        "artifact": "Resultados de aislamiento por tenant",
+        "required_result": "Ningún worker reclama una issue perteneciente a otro tenant."
+      },
+      {
+        "artifact": "Resultados de continuidad",
+        "required_result": "Las runs activas finalizan sin ser canceladas, reiniciadas ni reasignadas por la migración o el cambio de flag."
+      },
+      {
+        "artifact": "Resultados de recuperación",
+        "required_result": "Todo trabajo durable pendiente vuelve a ser detectable después de cada reinicio, incluso si el wakeup previo no se entregó."
+      },
+      {
+        "artifact": "Registro del gate",
+        "required_result": "100 reinicios completados y cero wakeups perdidos durante una ventana continua de 24 horas."
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Contención o bloqueos de SQLite bajo alta concurrencia.",
+        "mitigation": "Mantener corta la transacción de checkout, limitarla a selección y reclamación, y medir reintentos y latencia."
+      },
+      {
+        "risk": "Duplicación si algún consumidor conserva el patrón SELECT seguido de UPDATE.",
+        "mitigation": "Centralizar el checkout nuevo y buscar llamadas directas al camino anterior antes de habilitarlo."
+      },
+      {
+        "risk": "Pérdida de wakeups entre la persistencia y la notificación.",
+        "mitigation": "Tratar SQLite como fuente de verdad y reconciliar periódicamente issues pendientes en lugar de depender exclusivamente de la notificación."
+      },
+      {
+        "risk": "Cambio de semántica para runs activas.",
+        "mitigation": "Aplicar el nuevo checkout únicamente a reclamaciones futuras y probar despliegues con runs en curso."
+      },
+      {
+        "risk": "Datos históricos sin tenant_id válido.",
+        "mitigation": "Validar y corregir esos registros antes de imponer la invariancia requerida."
+      }
+    ],
+    "rollback": {
+      "trigger": "Cualquier checkout duplicado, cruce de tenant, regresión de runs activas, error de migración o wakeup perdido.",
+      "steps": [
+        "Desactivar el checkout nuevo mediante el flag para nuevas reclamaciones.",
+        "Mantener intactas las runs activas y permitir que concluyan por su camino actual.",
+        "Conservar SQLite y los datos escritos; no revertir destructivamente el esquema mientras existan runs o registros que dependan de él.",
+        "Capturar el estado de issues, runs y métricas del incidente antes de corregir y repetir todas las pruebas y el gate."
+      ]
+    },
+    "escalation": {
+      "conditions": [
+        "No es posible asignar tenant_id inequívocamente a registros existentes.",
+        "La atomicidad requiere cambiar estados o contratos consumidos fuera del componente acotado.",
+        "El camino anterior no puede coexistir con el esquema nuevo.",
+        "El gate registra al menos un wakeup perdido o una reclamación duplicada."
+      ],
+      "action": "Detener la promoción, conservar el flag en el camino anterior para nuevos checkouts y solicitar una decisión explícita sobre datos ambiguos o cambios de contrato antes de ampliar el alcance."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:27:19.437920Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:27:19.437958Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:27:19.445501Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:27:19.791647Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:27:19.791670Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

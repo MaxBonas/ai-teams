@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "team_lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 15.391,
+  "usage": {
+    "input_tokens": 18525,
+    "cached_input_tokens": 0,
+    "output_tokens": 704
+  },
+  "response": {
+    "objective": "Migrar tenant_queue a SQLite como única fuente durable, garantizando checkout atómico por tenant_id, continuidad de runs activas y rollback mediante el flag existente.",
+    "assignments": [
+      {
+        "delivery": "Diseño de esquema, índices y transacción atómica de claim SELECT+UPDATE.",
+        "owner": "database_engineer",
+        "acceptor": "team_lead"
+      },
+      {
+        "delivery": "Implementación de migración compatible con runs activas y tenant_id obligatorio.",
+        "owner": "backend_engineer",
+        "acceptor": "database_engineer"
+      },
+      {
+        "delivery": "Validación del flag de rollback al camino anterior.",
+        "owner": "release_engineer",
+        "acceptor": "team_lead"
+      },
+      {
+        "delivery": "Prueba del gate: 100 reinicios y observación durante 24 horas.",
+        "owner": "qa_engineer",
+        "acceptor": "team_lead"
+      }
+    ],
+    "dependencies": [
+      {
+        "from": "Diseño transaccional",
+        "to": "Implementación de migración",
+        "condition": "La operación de claim impide que dos workers ganen la misma issue."
+      },
+      {
+        "from": "Implementación de migración",
+        "to": "Prueba del gate",
+        "condition": "Las runs activas continúan sin detenerse y SQLite conserva todo el estado durable."
+      },
+      {
+        "from": "Validación de rollback",
+        "to": "Despliegue",
+        "condition": "El flag restaura el camino anterior sin pérdida ni duplicación de trabajo."
+      }
+    ],
+    "acceptance": [
+      {
+        "delivery": "Diseño transaccional",
+        "criteria": [
+          "Claim atómico",
+          "Aislamiento por tenant_id",
+          "Una issue no puede asignarse a dos workers"
+        ],
+        "owner": "database_engineer",
+        "acceptor": "team_lead"
+      },
+      {
+        "delivery": "Migración",
+        "criteria": [
+          "SQLite es la única fuente durable",
+          "No se detienen runs activas",
+          "tenant_id está presente en cada issue"
+        ],
+        "owner": "backend_engineer",
+        "acceptor": "database_engineer"
+      },
+      {
+        "delivery": "Rollback",
+        "criteria": [
+          "El flag vuelve al camino anterior de forma verificable"
+        ],
+        "owner": "release_engineer",
+        "acceptor": "team_lead"
+      },
+      {
+        "delivery": "Gate final",
+        "criteria": [
+          "100 reinicios completados",
+          "Cero wakeups perdidos durante 24 horas"
+        ],
+        "owner": "qa_engineer",
+        "acceptor": "team_lead"
+      }
+    ],
+    "status_update": {
+      "state": "planificado",
+      "completed": [],
+      "in_progress": [
+        "Diseño de claim atómico y estrategia de migración en vivo"
+      ],
+      "blocked": [
+        "Despliegue bloqueado hasta superar el gate completo"
+      ],
+      "next_update": "Tras validar el diseño transaccional o ante cualquier bloqueo crítico.",
+      "owner": "team_lead",
+      "acceptor": "release_manager"
+    },
+    "escalation": [
+      {
+        "trigger": "Una issue es reclamada por más de un worker",
+        "action": "Detener el rollout, activar el flag de rollback y escalar a database_engineer y team_lead.",
+        "owner": "release_engineer",
+        "acceptor": "team_lead"
+      },
+      {
+        "trigger": "Se pierde un wakeup, falla un reinicio o una run activa se interrumpe",
+        "action": "Invalidar el gate, conservar evidencias, ejecutar rollback y abrir análisis de causa raíz.",
+        "owner": "qa_engineer",
+        "acceptor": "team_lead"
+      },
+      {
+        "trigger": "SQLite deja de ser la única fuente durable o falta tenant_id",
+        "action": "Bloquear la entrega hasta corregir la integridad y repetir todas las pruebas.",
+        "owner": "backend_engineer",
+        "acceptor": "database_engineer"
+      }
+    ]
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:50:04.200341Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:50:04.200410Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:50:04.210460Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:50:04.553705Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:50:04.553740Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

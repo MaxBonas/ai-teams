@@ -51,7 +51,11 @@ from aiteam.mcp_runtime import mcp_servers_for_run
 from aiteam.model_selection import same_profile_fallback
 from aiteam.model_selection_context import contextual_model_selection
 from aiteam.plan_contract import PLAN_FORMAT, encode_plan_contract
-from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
+from aiteam.project_adapters import (
+    choose_adapter_for_new_slot,
+    project_profiles,
+    reconcile_project_agent_policy,
+)
 from aiteam.provider_governor import GOVERNOR
 from aiteam.quorum_quality import (
     QUORUM_AUDIT_MARKER,
@@ -198,17 +202,17 @@ class RunExecutor:
             and str(agent_role or "").strip().lower() in {"lead", "team_lead"}
         )
         # ── Review cross-provider vinculante (criticidad alta) ───────────────
-        # Antes de resolver el runtime: si este run es de un reviewer sobre una
-        # issue high/critical y su proveedor coincide con el del engineer del
-        # subtree, re-apuntarlo a otro proveedor conectado — el sesgo de
-        # auto-preferencia del juez no se mitiga con una nota, se mitiga con
-        # otra familia de modelo.
+        # Si reviewer y engineer comparten perspectiva, se pausa la run y se
+        # propone al owner una alternativa exacta. Nunca se reescribe una
+        # asignación existente de forma silenciosa.
+        cross_provider_proposal_pending = False
         try:
-            if self._enforce_cross_provider_review(
-                issue_id=str(run.get("issue_id") or ""), agent_id=agent_id, agent_role=agent_role
-            ):
-                agent_info = self._agent_info(agent_id)
-                adapter_type = (agent_info.get("adapter_type") if agent_info else None) or "manual"
+            cross_provider_proposal_pending = self._enforce_cross_provider_review(
+                issue_id=str(run.get("issue_id") or ""),
+                agent_id=agent_id,
+                agent_role=agent_role,
+                run_id=run_id,
+            )
         except Exception:
             logger.warning("cross-provider review enforcement failed for run %s", run_id, exc_info=True)
         runtime = self.registry.get(adapter_type)
@@ -284,6 +288,22 @@ class RunExecutor:
         ctx: dict[str, Any] = json.loads(run.get("context_snapshot_json") or "{}")
         issue_id_str = str(run.get("issue_id") or "")
         comment_id_str = str(ctx.get("wake_comment_id") or "")
+        deterministic_assignment_wake = False
+        if (
+            str(ctx.get("wake_reason") or "") == "interaction_resolved"
+            and str(ctx.get("kind") or "") == "request_confirmation"
+        ):
+            interaction_id = str(ctx.get("interaction_id") or "").strip()
+            resolved_interaction = (
+                get_interaction(self.db_path, interaction_id=interaction_id)
+                if interaction_id else None
+            )
+            resolved_payload = _decode_json((resolved_interaction or {}).get("payload_json"))
+            deterministic_assignment_wake = str(resolved_payload.get("reason") or "") in {
+                "model_fallback_required",
+                "cross_provider_review_required",
+                "adapter_recovery_required",
+            }
         skill_content = compose_skill(agent_role, self.db_path.parent) if agent_role else None
 
         # Compute workspace_root early so reviewer/QA can get file context
@@ -709,7 +729,14 @@ class RunExecutor:
             "interaction_kind": str(ctx.get("kind") or ""),
         }
 
-        gate = self._compliance_gate(run_id=run_id, issue_id=str(run.get("issue_id") or ""), agent_id=agent_id)
+        gate = (
+            "allowed" if deterministic_assignment_wake
+            else self._compliance_gate(
+                run_id=run_id,
+                issue_id=str(run.get("issue_id") or ""),
+                agent_id=agent_id,
+            )
+        )
         if gate == "blocked":
             finish_wakeup(
                 self.db_path,
@@ -735,7 +762,14 @@ class RunExecutor:
                 error="approval_rejected",
             )
             return
-        budget_gate = self._budget_gate(run_id=run_id, issue_id=str(run.get("issue_id") or ""), agent_id=agent_id)
+        budget_gate = (
+            "allowed" if deterministic_assignment_wake
+            else self._budget_gate(
+                run_id=run_id,
+                issue_id=str(run.get("issue_id") or ""),
+                agent_id=agent_id,
+            )
+        )
         if budget_gate == "blocked":
             finish_wakeup(
                 self.db_path,
@@ -765,7 +799,14 @@ class RunExecutor:
         # ── Hard daily cost cap (project-wide) ─────────────────────────────
         # Independiente del progreso: topa el gasto real por día natural aunque
         # el subtree siga "avanzando". Mitigación del cascade pile-up.
-        cap_gate = self._daily_cost_cap_gate(run_id=run_id, issue_id=str(run.get("issue_id") or ""), agent_id=agent_id)
+        cap_gate = (
+            "allowed" if deterministic_assignment_wake
+            else self._daily_cost_cap_gate(
+                run_id=run_id,
+                issue_id=str(run.get("issue_id") or ""),
+                agent_id=agent_id,
+            )
+        )
         if cap_gate == "blocked":
             finish_wakeup(
                 self.db_path,
@@ -1073,7 +1114,11 @@ class RunExecutor:
         # ── Provider pacing gate ─────────────────────────────────────────────
         # Runs execute sequentially and share each provider's TPM budget; wait
         # out any active cooldown (learned from 429s) before spending tokens.
-        if adapter_type in _LLM_ADAPTER_TYPES and str(agent_role or "").strip().lower() != "test_runner":
+        if (
+            not deterministic_assignment_wake
+            and adapter_type in _LLM_ADAPTER_TYPES
+            and str(agent_role or "").strip().lower() != "test_runner"
+        ):
             _paced_seconds = GOVERNOR.acquire(runtime.descriptor.provider)
             if _paced_seconds > 0.5:
                 log_activity(
@@ -1090,21 +1135,36 @@ class RunExecutor:
                 )
         before_workspace = snapshot_workspace(workspace_root)
         result: ExecutionResult
-        is_model_fallback_transition = False
+        is_assignment_transition = False
         try:
             _llm_adapters = {
                 "anthropic_api", "anthropic_sonnet", "openai_api", "gemini_api",
                 "openai_compatible_api",
             }
+            _assignment_resolution = self._resolved_assignment_change_result(
+                run=run,
+                agent_id=agent_id,
+                issue_id=issue_id_str,
+                ctx=ctx,
+            )
             _model_fallback_resolution = self._resolved_model_fallback_result(
                 run=run,
                 agent_id=agent_id,
                 issue_id=issue_id_str,
                 ctx=ctx,
             )
-            if _model_fallback_resolution is not None:
-                is_model_fallback_transition = True
+            if _assignment_resolution is not None:
+                is_assignment_transition = True
+                result = _assignment_resolution
+            elif _model_fallback_resolution is not None:
+                is_assignment_transition = True
                 result = _model_fallback_resolution
+            elif cross_provider_proposal_pending:
+                is_assignment_transition = True
+                result = ExecutionResult(
+                    status="skipped",
+                    output="Review pausado hasta que el owner decida la alternativa cross-provider.",
+                )
             elif str(agent_role or "").strip().lower() == "test_runner":
                 # Ejecutar una suite es determinista (subprocess + exit code):
                 # un LLM aquí solo añade coste y la posibilidad de alucinar la
@@ -1567,7 +1627,7 @@ class RunExecutor:
         final_error_code = result.error_code or ("agent_reported_failure" if final_status == "failed" else None)
         selected_profile_id = str(adapter_cfg.get("profile_id") or "").strip()
         model_fallback_pending = False
-        if selected_profile_id and effective_model and not is_model_fallback_transition:
+        if selected_profile_id and effective_model and not is_assignment_transition:
             if final_status == "completed":
                 record_model_health(
                     selected_profile_id,
@@ -4217,18 +4277,24 @@ class RunExecutor:
             compatibility_context = issue_compatibility_context(self.db_path, issue_id) if issue_id else {}
             if role_key in self._TIER3_ROLES:
                 effective_seniority = "cheap"
-                selection = choose_adapter_for_role(
-                    role_key,
-                    effective_seniority,
-                    project_profiles(Path(self.db_path).parent),
+                selection = choose_adapter_for_new_slot(
+                    self.db_path,
+                    role=role_key,
+                    seniority=effective_seniority,
+                    profiles=project_profiles(Path(self.db_path).parent),
+                    selection_scope=f"issue:new-agent:{agent_id}",
+                    issue_id=issue_id,
                     **compatibility_context,
                 )
             elif role_key != "lead_executor":
                 effective_seniority = "standard"
-                selection = choose_adapter_for_role(
-                    role_key,
-                    effective_seniority,
-                    project_profiles(Path(self.db_path).parent),
+                selection = choose_adapter_for_new_slot(
+                    self.db_path,
+                    role=role_key,
+                    seniority=effective_seniority,
+                    profiles=project_profiles(Path(self.db_path).parent),
+                    selection_scope=f"issue:new-agent:{agent_id}",
+                    issue_id=issue_id,
                     **compatibility_context,
                 )
             row = create_agent(
@@ -5230,15 +5296,91 @@ class RunExecutor:
 
         return "\n".join(parts)
 
-    def _enforce_cross_provider_review(
-        self, *, issue_id: str, agent_id: str, agent_role: str
+    def _propose_assignment_change(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        agent_role: str,
+        run_id: str,
+        reason: str,
+        proposed: dict[str, Any],
+        constraint: dict[str, Any],
+        summary: str,
     ) -> bool:
-        """Fuerza juez de otra familia en issues high/critical (una vez por issue).
+        """Persist a ranked assignment recommendation without mutating the agent."""
+        agent = get_agent(self.db_path, agent_id=agent_id) or {}
+        current_config = _decode_json(agent.get("adapter_config_json"))
+        proposed_profile = str(proposed.get("profile_id") or "").strip()
+        proposed_model = str(proposed.get("model") or "").strip()
+        proposed_adapter = str(proposed.get("adapter_type") or "").strip()
+        if not all((issue_id, agent_id, proposed_profile, proposed_model, proposed_adapter)):
+            return False
+        update_issue(self.db_path, issue_id=issue_id, status="blocked")
+        idempotency_key = f"assignment_change:{reason}:{agent_id}:{issue_id}"
+        with contextlib.closing(_connect(self.db_path)) as conn:
+            existing = conn.execute(
+                """
+                SELECT id FROM issue_thread_interactions
+                WHERE issue_id = ? AND idempotency_key = ?
+                """,
+                (issue_id, idempotency_key),
+            ).fetchone()
+        if existing is not None:
+            return True
+        interaction = create_interaction(
+            self.db_path,
+            issue_id=issue_id,
+            kind="request_confirmation",
+            payload={
+                "version": 1,
+                "reason": reason,
+                "agent_id": agent_id,
+                "agent_role": agent_role,
+                "failed_issue_id": issue_id,
+                "current": {
+                    "adapter_type": str(agent.get("adapter_type") or ""),
+                    "profile_id": str(current_config.get("profile_id") or ""),
+                    "model": str(current_config.get("model") or ""),
+                },
+                "proposed": proposed,
+                "constraint": constraint,
+            },
+            idempotency_key=idempotency_key,
+            source_run_id=run_id or None,
+            created_by_agent_id=agent_id,
+            title=(
+                "Aprobar reviewer independiente"
+                if reason == "cross_provider_review_required"
+                else "Aprobar recuperación por otro adapter"
+            ),
+            summary=f"{summary} Rechazar mantiene la issue bloqueada.",
+        )
+        log_activity(
+            self.db_path,
+            action="issue.assignment_change_proposed",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=run_id or None,
+            payload={
+                "interaction_id": interaction.get("id"),
+                "reason": reason,
+                "current": {
+                    "adapter_type": str(agent.get("adapter_type") or ""),
+                    "profile_id": str(current_config.get("profile_id") or ""),
+                    "model": str(current_config.get("model") or ""),
+                },
+                "proposed": proposed,
+                "constraint": constraint,
+            },
+        )
+        return True
 
-        Devuelve True si re-apuntó el adapter del reviewer (el caller debe
-        recargar agent_info). Sin alternativa conectada, queda la señal
-        informativa de `_separation_of_duties_line` — no se bloquea el review.
-        """
+    def _enforce_cross_provider_review(
+        self, *, issue_id: str, agent_id: str, agent_role: str, run_id: str = ""
+    ) -> bool:
+        """Pause same-perspective reviews and propose an exact owner choice."""
         from aiteam.policies import cross_provider_review_enforced
 
         role_key = str(agent_role or "").strip().lower()
@@ -5252,13 +5394,6 @@ class RunExecutor:
         criticality = str((issue or {}).get("criticality") or "").strip().lower()
         if criticality not in {"high", "critical"}:
             return False
-        with contextlib.closing(_connect(self.db_path)) as conn:
-            if conn.execute(
-                "SELECT COUNT(*) FROM activity_log WHERE action = 'review.cross_provider_enforced' AND target_id = ?",
-                (issue_id,),
-            ).fetchone()[0]:
-                return False
-
         from aiteam.hiring_economics import provider_and_model_for  # noqa: PLC0415
         from aiteam.provider_identity import perspective_key  # noqa: PLC0415
 
@@ -5291,67 +5426,55 @@ class RunExecutor:
         if perspective_key(my_provider, my_model) != engineer_perspective:
             return False  # ya es cross-provider
 
-        profiles = project_profiles(Path(self.db_path).parent)
-        candidates = []
-        for profile in profiles:
-            if not profile_is_connected(profile):
-                continue
-            prov, model = provider_and_model_for(
-                str(profile.get("adapter_type") or ""), {"profile_id": profile.get("id")}
-            )
-            if prov and perspective_key(prov, model) != engineer_perspective:
-                candidates.append(profile)
-        if not candidates:
+        profiles = [
+            profile for profile in project_profiles(Path(self.db_path).parent)
+            if profile_is_connected(profile)
+        ]
+        if not profiles:
             return False
-        from aiteam.hiring_economics import demoted_profile_ids as _demoted  # noqa: PLC0415
-        selection = choose_adapter_for_role(
-            agent_role, None, candidates,
-            demoted_profile_ids=_demoted(self.db_path, candidates),
-            **issue_compatibility_context(self.db_path, issue_id),
+        profile_by_id = {str(profile.get("id") or ""): profile for profile in profiles}
+        projection = contextual_model_selection(
+            self.db_path, role=agent_role, issue_id=issue_id, profiles=profiles
         )
-        if not selection:
+        selected = next(
+            (
+                row for row in projection.get("candidates") or ()
+                if row.get("owner_selectable") is True
+                and str((row.get("identity") or {}).get("model_vendor") or "") != engineer_perspective
+                and str((row.get("identity") or {}).get("profile_id") or "") in profile_by_id
+            ),
+            None,
+        )
+        if selected is None:
             return False
-
-        with contextlib.closing(_connect(self.db_path)) as conn:
-            conn.execute(
-                "UPDATE agents SET adapter_type = ?, adapter_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (
-                    str(selection["adapter_type"]),
-                    json.dumps(selection.get("adapter_config") or {}, ensure_ascii=False, sort_keys=True),
-                    agent_id,
-                ),
-            )
-        log_activity(
-            self.db_path,
-            action="review.cross_provider_enforced",
-            target_type="issue",
-            target_id=issue_id,
-            actor_agent_id=agent_id,
-            payload={
-                "criticality": criticality,
-                "engineer_provider": engineer_provider,
-                "new_adapter_type": str(selection["adapter_type"]),
-                "new_adapter_profile_id": selection.get("adapter_profile_id"),
+        identity = selected.get("identity") or {}
+        profile_id = str(identity.get("profile_id") or "")
+        profile = profile_by_id[profile_id]
+        return self._propose_assignment_change(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            agent_role=agent_role,
+            run_id=run_id,
+            reason="cross_provider_review_required",
+            proposed={
+                "adapter_type": str(profile.get("adapter_type") or ""),
+                "profile_id": profile_id,
+                "model": str(identity.get("model_id") or ""),
+                "candidate_id": selected.get("candidate_id"),
+                "rank": selected.get("rank"),
+                "selection_reason": selected.get("selection_reason"),
             },
+            constraint={
+                "kind": "different_perspective",
+                "engineer_perspective": engineer_perspective,
+                "engineer_provider": engineer_provider,
+                "criticality": criticality,
+            },
+            summary=(
+                f"La issue es {criticality} y reviewer/engineer comparten perspectiva "
+                f"`{engineer_perspective}`. La alternativa recomendada requiere aprobación."
+            ),
         )
-        with contextlib.suppress(Exception):
-            create_comment(
-                self.db_path,
-                issue_id=issue_id,
-                author_agent_id=None,
-                body=(
-                    f"⚙ Sistema: issue de criticidad {criticality} — el reviewer compartía proveedor "
-                    f"con el engineer ({engineer_provider}) y el sesgo de auto-preferencia del juez "
-                    f"debilitaría el veredicto. Reviewer re-apuntado a `{selection['adapter_type']}` "
-                    f"({selection.get('adapter_profile_id')})."
-                ),
-                metadata={"source": "cross_provider_review"},
-            )
-        logger.info(
-            "cross_provider_review: issue %s reviewer moved off %s to %s",
-            issue_id, engineer_provider, selection.get("adapter_profile_id"),
-        )
-        return True
 
     def _attempt_model_escalation(
         self,
@@ -5890,6 +6013,239 @@ class RunExecutor:
             output=f"Fallback aplicado: `{failed_model}` → `{applied_model}`. La issue vuelve a la cola.",
         )
 
+    def _resolved_assignment_change_result(
+        self,
+        *,
+        run: dict[str, Any],
+        agent_id: str,
+        issue_id: str,
+        ctx: dict[str, Any],
+    ) -> ExecutionResult | None:
+        """Apply an accepted cross-profile proposal after live revalidation."""
+        if (
+            str(ctx.get("wake_reason") or "") != "interaction_resolved"
+            or str(ctx.get("kind") or "") != "request_confirmation"
+        ):
+            return None
+        interaction_id = str(ctx.get("interaction_id") or "").strip()
+        interaction = get_interaction(self.db_path, interaction_id=interaction_id) if interaction_id else None
+        payload = _decode_json((interaction or {}).get("payload_json"))
+        reason = str(payload.get("reason") or "")
+        if reason not in {"cross_provider_review_required", "adapter_recovery_required"}:
+            return None
+        if (
+            str(payload.get("failed_issue_id") or "") != issue_id
+            or str(payload.get("agent_id") or "") != agent_id
+        ):
+            return ExecutionResult(
+                status="failed",
+                error_code="assignment_change_target_mismatch",
+                error="assignment change interaction does not match dispatched agent/issue",
+            )
+        action = str(ctx.get("action") or "").strip().lower()
+        if action != "accept":
+            log_activity(
+                self.db_path,
+                action="issue.assignment_change_rejected",
+                target_type="issue",
+                target_id=issue_id,
+                actor_agent_id=agent_id,
+                run_id=str(run.get("id") or "") or None,
+                payload={"interaction_id": interaction_id, "reason": reason, "action": action},
+            )
+            return ExecutionResult(
+                status="skipped",
+                output="Cambio de asignación rechazado; la issue permanece bloqueada.",
+            )
+
+        agent = get_agent(self.db_path, agent_id=agent_id) or {}
+        current_config = _decode_json(agent.get("adapter_config_json"))
+        current = {
+            "adapter_type": str(agent.get("adapter_type") or ""),
+            "profile_id": str(current_config.get("profile_id") or ""),
+            "model": str(current_config.get("model") or ""),
+        }
+        expected = payload.get("current") if isinstance(payload.get("current"), dict) else {}
+        constraint = payload.get("constraint") if isinstance(payload.get("constraint"), dict) else {}
+
+        def satisfies_constraint(*, adapter_type: str, profile_id: str, model: str) -> bool:
+            kind = str(constraint.get("kind") or "")
+            if kind == "different_adapter":
+                return bool(adapter_type and adapter_type != str(constraint.get("failed_adapter_type") or ""))
+            if kind == "different_perspective":
+                from aiteam.hiring_economics import provider_and_model_for  # noqa: PLC0415
+                from aiteam.provider_identity import perspective_key  # noqa: PLC0415
+
+                provider, resolved_model = provider_and_model_for(
+                    adapter_type, {"profile_id": profile_id, "model": model}
+                )
+                return perspective_key(provider, resolved_model) != str(
+                    constraint.get("engineer_perspective") or ""
+                )
+            return False
+
+        expected_tuple = (
+            str(expected.get("adapter_type") or ""),
+            str(expected.get("profile_id") or ""),
+            str(expected.get("model") or ""),
+        )
+        current_tuple = (current["adapter_type"], current["profile_id"], current["model"])
+        profiles = [
+            profile for profile in project_profiles(Path(self.db_path).parent)
+            if profile_is_connected(profile)
+        ]
+        profile_by_id = {str(profile.get("id") or ""): profile for profile in profiles}
+        projection = contextual_model_selection(
+            self.db_path,
+            role=str(payload.get("agent_role") or agent.get("role") or ""),
+            issue_id=issue_id,
+            profiles=profiles,
+        )
+        if current_tuple != expected_tuple:
+            # Team changed while the proposal was pending. Never overwrite the
+            # newer owner decision; only resume if it already meets the gate.
+            current_candidate = next(
+                (
+                    item for item in projection.get("candidates") or ()
+                    if str((item.get("identity") or {}).get("profile_id") or "") == current["profile_id"]
+                    and str((item.get("identity") or {}).get("model_id") or "") == current["model"]
+                    and item.get("owner_selectable") is True
+                ),
+                None,
+            )
+            current_profile_row = profile_by_id.get(current["profile_id"])
+            if (
+                current_candidate is None
+                or str((current_profile_row or {}).get("adapter_type") or "") != current["adapter_type"]
+                or not satisfies_constraint(**current)
+            ):
+                log_activity(
+                    self.db_path,
+                    action="issue.assignment_change_stale",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id") or "") or None,
+                    payload={"reason": reason, "resolution": "manual_override_incompatible"},
+                )
+                return ExecutionResult(
+                    status="skipped",
+                    output="La asignación cambió mientras la propuesta estaba pendiente, pero no satisface el gate; la issue sigue bloqueada.",
+                )
+            applied = current
+            resolution = "manual_override_preserved"
+        else:
+            proposed = payload.get("proposed") if isinstance(payload.get("proposed"), dict) else {}
+            result_payload = _decode_json((interaction or {}).get("result_json"))
+            owner_selection = (result_payload.get("resolution_data") or {}).get("model_selection") or {}
+            selected_profile = str(
+                owner_selection.get("profileId") or owner_selection.get("profile_id")
+                or proposed.get("profile_id") or ""
+            )
+            selected_model = str(owner_selection.get("model") or proposed.get("model") or "")
+            selected_candidate_id = str(
+                owner_selection.get("candidateId") or owner_selection.get("candidate_id")
+                or proposed.get("candidate_id") or ""
+            )
+            selected_candidate = next(
+                (
+                    item for item in projection.get("candidates") or ()
+                    if str(item.get("candidate_id") or "") == selected_candidate_id
+                    and str((item.get("identity") or {}).get("profile_id") or "") == selected_profile
+                    and str((item.get("identity") or {}).get("model_id") or "") == selected_model
+                    and item.get("owner_selectable") is True
+                ),
+                None,
+            )
+            selected_profile_row = profile_by_id.get(selected_profile)
+            selected_adapter = str((selected_profile_row or {}).get("adapter_type") or "")
+            if (
+                selected_candidate is None
+                or selected_profile_row is None
+                or not satisfies_constraint(
+                    adapter_type=selected_adapter,
+                    profile_id=selected_profile,
+                    model=selected_model,
+                )
+            ):
+                return ExecutionResult(
+                    status="failed",
+                    error_code="assignment_change_selection_stale",
+                    error="accepted assignment is no longer selectable or no longer satisfies its gate",
+                    actions={"issue_status": "blocked"},
+                )
+            selected_config = {"profile_id": selected_profile, "model": selected_model}
+            try:
+                validate_model_selection(selected_config)
+                current_context = issue_compatibility_context(self.db_path, issue_id)
+                decision = resolve_assignment_compatibility(
+                    adapter_type=selected_adapter,
+                    adapter_config=selected_config,
+                    role=str(payload.get("agent_role") or agent.get("role") or ""),
+                    run_profile=current_context["run_profile"],
+                    criticality=current_context["criticality"],
+                    data_class=current_context["data_class"],
+                    required_capabilities=current_context["required_capabilities"],
+                )
+                if not decision.get("allowed"):
+                    raise ValueError(f"{decision.get('code')}: {decision.get('reason')}")
+            except ValueError as exc:
+                return ExecutionResult(
+                    status="failed",
+                    error_code="assignment_change_selection_stale",
+                    error=str(exc),
+                    actions={"issue_status": "blocked"},
+                )
+            update_agent(
+                self.db_path,
+                agent_id=agent_id,
+                adapter_type=selected_adapter,
+                adapter_config={
+                    **selected_config,
+                    "selection_intent": {
+                        "schema_version": "model_selection_intent_v1",
+                        "mode": "owner_explicit",
+                        "source": "assignment_change_interaction",
+                        "candidate_id": selected_candidate_id,
+                    },
+                },
+            )
+            applied = {
+                "adapter_type": selected_adapter,
+                "profile_id": selected_profile,
+                "model": selected_model,
+            }
+            resolution = "owner_selection_applied"
+
+        log_activity(
+            self.db_path,
+            action="issue.assignment_change_accepted",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=str(run.get("id") or "") or None,
+            payload={
+                "interaction_id": interaction_id,
+                "reason": reason,
+                "resolution": resolution,
+                "applied": applied,
+            },
+        )
+        update_issue(self.db_path, issue_id=issue_id, status="todo")
+        enqueue_wakeup(
+            self.db_path,
+            agent_id=agent_id,
+            source="assignment_change",
+            reason="assignment",
+            trigger_detail=f"assignment_change:{reason}",
+            payload={"issue_id": issue_id, "wake_reason": "assignment"},
+            idempotency_key=f"assignment_change:{interaction_id}:accepted",
+        )
+        return ExecutionResult(
+            status="skipped",
+            output=f"Cambio de asignación aceptado ({resolution}); la issue vuelve a la cola.",
+        )
+
     def _attempt_adapter_recovery(
         self,
         *,
@@ -5900,18 +6256,17 @@ class RunExecutor:
         agent_role: str,
         liveness_reason: str,
     ) -> bool:
-        """RUN-003 recovery: swap the blocked agent to another connected adapter.
-
-        When an issue blocks after exhausting continuations without workspace
-        evidence, the diagnosis is correct but nothing repairs it. If the
-        project has a *different* connected adapter available for the role,
-        switch the agent to it, reopen the issue and wake the agent — once per
-        issue (audited via ``issue.adapter_recovery`` in the activity log).
-        """
+        """Propose, but never silently apply, recovery through another adapter."""
         with contextlib.closing(_connect(self.db_path)) as conn:
             row = conn.execute(
-                "SELECT COUNT(*) FROM activity_log WHERE action = 'issue.adapter_recovery' AND target_id = ?",
-                (issue_id,),
+                """
+                SELECT COUNT(*) FROM issue_thread_interactions
+                WHERE issue_id = ? AND idempotency_key = ?
+                """,
+                (
+                    issue_id,
+                    f"assignment_change:adapter_recovery_required:{agent_id}:{issue_id}",
+                ),
             ).fetchone()
         if row and int(row[0]) > 0:
             return False
@@ -5923,69 +6278,50 @@ class RunExecutor:
         ]
         if not candidates:
             return False
-        from aiteam.hiring_economics import demoted_profile_ids  # noqa: PLC0415
-        selection = choose_adapter_for_role(
-            agent_role, None, candidates,
-            demoted_profile_ids=demoted_profile_ids(self.db_path, candidates),
-            **issue_compatibility_context(self.db_path, issue_id),
+        profile_by_id = {str(profile.get("id") or ""): profile for profile in candidates}
+        projection = contextual_model_selection(
+            self.db_path, role=agent_role, issue_id=issue_id, profiles=candidates
         )
-        if not selection or str(selection.get("adapter_type") or "") == failed_adapter_type:
+        selected = next(
+            (
+                row for row in projection.get("candidates") or ()
+                if row.get("owner_selectable") is True
+                and str((row.get("identity") or {}).get("profile_id") or "") in profile_by_id
+            ),
+            None,
+        )
+        if selected is None:
             return False
-
-        new_adapter_type = str(selection["adapter_type"])
-        with contextlib.closing(_connect(self.db_path)) as conn:
-            conn.execute(
-                "UPDATE agents SET adapter_type = ?, adapter_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (
-                    new_adapter_type,
-                    json.dumps(selection.get("adapter_config") or {}, ensure_ascii=False, sort_keys=True),
-                    agent_id,
-                ),
-            )
-        update_issue(self.db_path, issue_id=issue_id, status="todo")
-        log_activity(
-            self.db_path,
-            action="issue.adapter_recovery",
-            target_type="issue",
-            target_id=issue_id,
-            actor_agent_id=agent_id,
+        identity = selected.get("identity") or {}
+        profile_id = str(identity.get("profile_id") or "")
+        profile = profile_by_id[profile_id]
+        new_adapter_type = str(profile.get("adapter_type") or "")
+        if not new_adapter_type or new_adapter_type == failed_adapter_type:
+            return False
+        return self._propose_assignment_change(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            agent_role=agent_role,
             run_id=run_id,
-            payload={
+            reason="adapter_recovery_required",
+            proposed={
+                "adapter_type": new_adapter_type,
+                "profile_id": profile_id,
+                "model": str(identity.get("model_id") or ""),
+                "candidate_id": selected.get("candidate_id"),
+                "rank": selected.get("rank"),
+                "selection_reason": selected.get("selection_reason"),
+            },
+            constraint={
+                "kind": "different_adapter",
                 "failed_adapter_type": failed_adapter_type,
-                "new_adapter_type": new_adapter_type,
-                "new_adapter_profile_id": selection.get("adapter_profile_id"),
                 "liveness_reason": liveness_reason,
             },
+            summary=(
+                f"`{failed_adapter_type}` agotó sus intentos sin evidencia verificable "
+                f"({liveness_reason}); se recomienda `{new_adapter_type}` / `{profile_id}`."
+            ),
         )
-        try:
-            create_comment(
-                self.db_path,
-                issue_id=issue_id,
-                author_agent_id=None,
-                body=(
-                    f"⚙ Sistema: el adapter `{failed_adapter_type}` agotó sus intentos sin "
-                    f"producir cambios verificables ({liveness_reason}). Reasignado a "
-                    f"`{new_adapter_type}` ({selection.get('adapter_profile_id')}) y la issue "
-                    "vuelve a `todo` para un intento con el canal nuevo."
-                ),
-                metadata={"source": "adapter_recovery"},
-            )
-        except Exception:
-            logger.warning("adapter_recovery: failed to post system comment", exc_info=True)
-        enqueue_wakeup(
-            self.db_path,
-            agent_id=agent_id,
-            source="adapter_recovery",
-            reason="assignment",
-            trigger_detail=f"adapter_recovery:{failed_adapter_type}->{new_adapter_type}",
-            payload={"issue_id": issue_id, "wake_reason": "assignment"},
-            idempotency_key=f"adapter_recovery:{issue_id}",
-        )
-        logger.info(
-            "adapter_recovery: issue %s reassigned %s -> %s after %s",
-            issue_id, failed_adapter_type, new_adapter_type, liveness_reason,
-        )
-        return True
 
     # ── Issue state machine per role (datos en aiteam.policies) ─────────────
     from aiteam.policies import (

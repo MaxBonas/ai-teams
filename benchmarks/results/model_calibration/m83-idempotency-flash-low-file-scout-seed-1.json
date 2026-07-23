@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-low",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "payment_idempotency_inspection",
+  "role": "file_scout",
+  "seed": 1,
+  "wall_seconds": 55.531,
+  "attempts": 1,
+  "checks": {
+    "issue_done": false,
+    "run_completed": false,
+    "valid_assignee_report": false,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "source_path": false,
+      "tenant_boundary": false,
+      "atomicity": false,
+      "unique_constraint": false,
+      "missing_test": false,
+      "next_owner": false
+    },
+    "anchors_retained": 0,
+    "anchors_total": 6,
+    "forbidden_matches": [],
+    "contract_passed": false
+  },
+  "agent_report": null,
+  "artifact": "",
+  "runtime": {
+    "issue_status": "in_progress",
+    "run": {
+      "id": "run:a4cb370e-3c0f-4e46-84e6-c14b18b4a157",
+      "status": "failed",
+      "error_code": "subscription_cli_parse_error",
+      "error": "submit_work JSON object not found",
+      "model": "gemini-3.5-flash-low",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "runtime/bench/m83-idempotency-flash-low-file-scout-s1/.aiteam/aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": false
+}

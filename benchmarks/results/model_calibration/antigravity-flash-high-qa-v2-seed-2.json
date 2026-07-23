@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "contract_version": "adversarial_qa_fix_cycle_v2",
+  "role": "qa",
+  "seed": 2,
+  "checks": {
+    "attack_run_completed": true,
+    "attack_report_changes_requested": true,
+    "production_unchanged_during_attack": true,
+    "adversarial_test_contract": false,
+    "adversarial_tests_fail_before_fix": true,
+    "verification_run_completed": true,
+    "verification_report_approved": true,
+    "verification_issue_done": true,
+    "passing_adversarial_tests_removed": true,
+    "fixed_production_intact": true
+  },
+  "attack_evaluation": {
+    "anchors": {
+      "imports_target": true,
+      "cross_tenant": true,
+      "inactive_actor": false,
+      "private_non_admin": true,
+      "negative_assertion": true
+    },
+    "anchors_retained": 4,
+    "anchors_total": 5,
+    "contract_passed": false
+  },
+  "failing_test_run": {
+    "executed": true,
+    "exit_code": 1,
+    "stdout": "FFF                                                                      [100%]\n================================== FAILURES ===================================\n____________________________ test_tenant_mismatch _____________________________\n\n    def test_tenant_mismatch():\n        actor = Actor(tenant=\"tenant-a\", active=True, role=\"admin\")\n        resource = Resource(tenant=\"tenant-b\", private=False)\n>       assert can_access(actor, resource) is False\nE       assert True is False\nE        +  where True = can_access(<test_adversarial_auth.Actor object at 0x0000024811ABFA10>, <test_adversarial_auth.Resource object at 0x0000024811ABFB90>)\n\ntests\\test_adversarial_auth.py:17: AssertionError\n_____________________________ test_actor_inactive _____________________________\n\n    def test_actor_inactive():\n        actor = Actor(tenant=\"tenant-a\", active=False, role=\"admin\")\n        resource = Resource(tenant=\"tenant-a\", private=False)\n>       assert can_access(actor, resource) is False\nE       assert True is False\nE        +  where True = can_access(<test_adversarial_auth.Actor object at 0x0000024811A5BAA0>, <test_adversarial_auth.Resource object at 0x0000024811A5B620>)\n\ntests\\test_adversarial_auth.py:22: AssertionError\n______________________ test_private_resource_role_member ______________________\n\n    def test_private_resource_role_member():\n        actor = Actor(tenant=\"tenant-a\", active=True, role=\"member\")\n        resource = Resource(tenant=\"tenant-a\", private=True)\n>       assert can_access(actor, resource) is False\nE       assert True is False\nE        +  where True = can_access(<test_adversarial_auth.Actor object at 0x0000024811ABFE60>, <test_adversarial_auth.Resource object at 0x0000024811ABFE30>)\n\ntests\\test_adversarial_auth.py:27: AssertionError\n=========================== short test summary info ===========================\nFAILED tests\\test_adversarial_auth.py::test_tenant_mismatch - assert True is ...\nFAILED tests\\test_adversarial_auth.py::test_actor_inactive - assert True is F...\nFAILED tests\\test_adversarial_auth.py::test_private_resource_role_member - as...\n3 failed in 0.11s\n",
+    "stderr": ""
+  },
+  "phases": {
+    "attack": {
+      "seconds": 68.328,
+      "issue_status": "done",
+      "run": {
+        "id": "run:f4dfc446-7e7f-486f-aae1-9c2e1be20501",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gemini-3.5-flash-high",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "usage_json": "{}"
+      },
+      "report": {
+        "id": "01a93b46-8570-4d17-b046-e3c7b352485b",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:f4dfc446-7e7f-486f-aae1-9c2e1be20501",
+        "agent_role": "qa",
+        "result": "changes_requested",
+        "issue_status": "done",
+        "next_owner": "engineer",
+        "tech_match": null,
+        "blocker": "can_access no valida tenant, active, ni private admin role",
+        "evidence": "tests/test_adversarial_auth.py: test_tenant_mismatch, test_actor_inactive, test_private_resource_role_member failed under pytest",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"can_access no valida tenant, active, ni private admin role\", \"evidence\": \"tests/test_adversarial_auth.py: test_tenant_mismatch, test_actor_inactive, test_private_resource_role_member failed under pytest\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"qa\"}",
+        "created_at": "2026-07-23 09:42:12"
+      },
+      "comments": [
+        {
+          "id": "820e64af-c152-449c-b9df-45198e3abc84",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:f4dfc446-7e7f-486f-aae1-9c2e1be20501",
+          "body": "Adversarial QA detected defects in auth.py with tenant cross, inactive actor, and private role member.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-23 09:42:12",
+          "updated_at": "2026-07-23 09:42:12"
+        },
+        {
+          "id": "e2096fa1-a282-4551-946e-dc826ad7fa7b",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:f4dfc446-7e7f-486f-aae1-9c2e1be20501",
+          "body": "Se han detectado defectos en auth.py contra las reglas especificadas:\n- Un cruce de tenant-a y tenant-b es permitido erróneamente (can_access devuelve True).\n- Un actor inactivo es permitido erróneamente (can_access devuelve True).\n- Un recurso private con role member es permitido erróneamente (can_access devuelve True).\n\n---AGENT-REPORT---\nrole: qa\nresult: changes_requested\nissue_status: done\nnext_owner: engineer\nblocker: can_access no valida tenant, active, ni private admin role\nevidence: tests/test_adversarial_auth.py: test_tenant_mismatch, test_actor_inactive, test_private_resource_role_member failed under pytest",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-23 09:42:12",
+          "updated_at": "2026-07-23 09:42:12"
+        }
+      ]
+    },
+    "verify_fix": {
+      "seconds": 47.266,
+      "issue_status": "done",
+      "run": {
+        "id": "run:aa7b0a1c-6533-42b8-b512-ea5815d1f3fb",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gemini-3.5-flash-high",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "usage_json": "{}"
+      },
+      "report": {
+        "id": "ff26f8dd-41fa-47b9-8323-d2833ab3aa0a",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:aa7b0a1c-6533-42b8-b512-ea5815d1f3fb",
+        "agent_role": "qa",
+        "result": "approved",
+        "issue_status": "done",
+        "next_owner": "lead",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "verified tenant matching, actor active check, and private admin resource checks. tests/test_adversarial_auth.py deleted.",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"verified tenant matching, actor active check, and private admin resource checks. tests/test_adversarial_auth.py deleted.\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"approved\", \"role\": \"qa\"}",
+        "created_at": "2026-07-23 09:43:00"
+      },
+      "comments": [
+        {
+          "id": "90a9b331-170c-4716-a659-bd89d456d6d0",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:aa7b0a1c-6533-42b8-b512-ea5815d1f3fb",
+          "body": "Adversarial QA approved: Verified boundary checks in auth.py. Tests deleted.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-23 09:43:00",
+          "updated_at": "2026-07-23 09:43:00"
+        },
+        {
+          "id": "1e6b8257-e7e5-4189-b798-a358051ade19",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:aa7b0a1c-6533-42b8-b512-ea5815d1f3fb",
+          "body": "Se han verificado las correcciones del Engineer sobre auth.py. Los límites de tenant matching, actividad del actor y acceso a recursos privados han sido validados correctamente. Los tests adversariales ya pasan, por lo que han sido eliminados.\n\n---AGENT-REPORT---\nrole: qa\nresult: approved\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: verified tenant matching, actor active check, and private admin resource checks. tests/test_adversarial_auth.py deleted.",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-23 09:43:00",
+          "updated_at": "2026-07-23 09:43:00"
+        }
+      ]
+    }
+  },
+  "usage": {},
+  "workspace": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\antigravity-flash-high-qa-v2-seed-2",
+  "ok": false
+}

@@ -1,4 +1,5 @@
 import json
+import contextlib
 import logging
 import mimetypes
 import os
@@ -28,15 +29,18 @@ from aiteam.db.migration import SCHEMA_PATH
 from aiteam.policies import WORKSPACE_NOISE_DIRS as _WS_SKIP_DIRS
 from aiteam.project_adapters import (
     available_project_profiles,
+    choose_adapter_for_new_slot,
     choose_adapter_for_role,
     ensure_quorum_agents,
     project_profiles,
     reconcile_project_agent_policy,
+    is_unresolved_model_default,
     write_project_adapter_policy,
 )
 from aiteam.run_profiles import FULL_TEAM, LEAD_QUORUM, normalize_run_profile
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES, profile_is_connected
 from aiteam.model_compatibility import compatibility_decision
+from aiteam.model_selection_intent import normalize_owner_explicit_selection
 from aiteam.db.comments import create_comment
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.tools.catalog import default_capabilities_for_role
@@ -217,15 +221,19 @@ async def create_project(payload: NewProjectRequest, request: Request):
     except ValueError as exc:
         shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _initialize_project_runtime(
-        target,
-        initial_task=payload.initial_task,
-        run_profile=run_profile,
-        lead_adapter_profile_id=payload.lead_adapter_profile_id,
-        lead_model=payload.lead_model,
-        lead_candidate_id=payload.lead_candidate_id,
-        data_class=payload.data_class,
-    )
+    try:
+        _initialize_project_runtime(
+            target,
+            initial_task=payload.initial_task,
+            run_profile=run_profile,
+            lead_adapter_profile_id=payload.lead_adapter_profile_id,
+            lead_model=payload.lead_model,
+            lead_candidate_id=payload.lead_candidate_id,
+            data_class=payload.data_class,
+        )
+    except ValueError as exc:
+        shutil.rmtree(target, ignore_errors=True)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     # VCS del workspace: solo en proyectos RECIÉN creados por la app (un
     # workspace externo seleccionado a posteriori nunca se toca — sin marker
     # git_managed tampoco habrá commits automáticos).
@@ -458,32 +466,58 @@ def _initialize_project_runtime(
             encoding="utf-8",
         )
     db_path = runtime_dir / "aiteam.db"
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
     profiles = project_profiles(runtime_dir)
     lead_profiles = (
         [profile for profile in profiles if str(profile.get("id") or "") == lead_adapter_profile_id]
         if lead_adapter_profile_id
         else profiles
     )
-    lead_adapter = choose_adapter_for_role(
-        "lead", "lead", lead_profiles,
-        run_profile=run_profile,
-        criticality="medium",
-        data_class=data_class,
-        preferred_model=lead_model,
-    )
+    if lead_model:
+        lead_adapter = choose_adapter_for_role(
+            "lead", "lead", lead_profiles,
+            run_profile=run_profile,
+            criticality="medium",
+            data_class=data_class,
+            preferred_model=lead_model,
+        )
+    else:
+        lead_adapter = choose_adapter_for_new_slot(
+            db_path,
+            role="lead",
+            seniority="lead",
+            profiles=lead_profiles,
+            selection_scope="bootstrap:new-agent:role:lead",
+            run_profile=run_profile,
+            criticality="medium",
+            data_class=data_class,
+        )
     if not lead_adapter:
         raise ValueError("No compatible Lead adapter/model selection")
+    if is_unresolved_model_default(lead_adapter):
+        raise ValueError(
+            "No auto-eligible Lead model is available; select one explicitly or roll back to shadow"
+        )
     lead_adapter_type = str((lead_adapter or {}).get("adapter_type") or "lead_builtin")
     lead_config = dict((lead_adapter or {}).get("adapter_config") or {})
     if lead_model:
-        lead_config["selection_intent"] = {
-            "schema_version": "model_selection_intent_v1",
-            "mode": "owner_explicit",
-            "source": "onboarding_model_role_selector",
-            "candidate_id": lead_candidate_id,
-        }
+        if lead_candidate_id:
+            lead_config["selection_intent"] = {
+                "schema_version": "model_selection_intent_v1",
+                "mode": "owner_explicit",
+                "source": "onboarding_model_role_selector",
+                "candidate_id": lead_candidate_id,
+            }
+        lead_config = normalize_owner_explicit_selection(
+            db_path,
+            role="lead",
+            adapter_config=lead_config,
+            source="onboarding_model_role_selector",
+        )
     lead_adapter_config = json.dumps(lead_config, ensure_ascii=False, sort_keys=True)
-    with sqlite3.connect(str(db_path)) as conn:
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
@@ -589,4 +623,8 @@ def _initialize_project_runtime(
     # Idempotent — safe to call on rename/re-init as well.
     reconcile_project_agent_policy(db_path, include_tier3=run_profile != "solo_lead")
     if run_profile == LEAD_QUORUM:
-        ensure_quorum_agents(db_path, profiles=project_profiles(runtime_dir))
+        ensure_quorum_agents(
+            db_path,
+            profiles=project_profiles(runtime_dir),
+            issue_id="issue:intake",
+        )

@@ -231,5 +231,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.6-luna-cli-0.145.0-seed-1\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n- Objetivo: migrar autenticación con corte reversible y sin downtime.\n- Decisiones: conservar JWT RS256; rotar claves con doble validación durante 24 h; no borrar la clave antigua hasta que `legacy_kid_hits` sea 0 durante 2 h.\n- Completado: Engineer implementó lector dual en `src/auth/keyring.py`; evidencia: `pytest tests/auth -q` → 42 passed. Reviewer aprobó compatibilidad.\n- Próximo paso: Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta mediante dry-run.\n- Restricciones de alcance: no migrar sesiones existentes ni cambiar proveedor de identidad.\n- Riesgo/escalado: cachés regionales pueden conservar JWKS 15 min. Si respuestas 401 >0,5 % durante 5 min, pausar rotación y escalar al Lead.\n- Estado: lector dual done; rollback automatizado todo; aceptación del dry-run pendiente; rotación condicionada al umbral de 401 y a `legacy_kid_hits`.\n\nSe descartan saludos, nombres temporales, estimaciones descartadas y logs no accionables por no aportar decisiones ni evidencia causal."
+  "summary": "## Síntesis causal\n- Objetivo: migrar autenticación con corte reversible y sin downtime.\n- Decisiones: conservar JWT RS256; rotar claves con doble validación durante 24 h; no borrar la clave antigua hasta que `legacy_kid_hits` sea 0 durante 2 h.\n- Completado: Engineer implementó lector dual en `src/auth/keyring.py`; evidencia: `pytest tests/auth -q` → 42 passed. Reviewer aprobó compatibilidad.\n- Próximo paso: Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta mediante dry-run.\n- Restricciones de alcance: no migrar sesiones existentes ni cambiar proveedor de identidad.\n- Riesgo/escalado: cachés regionales pueden conservar JWKS 15 min. Si respuestas 401 >0,5 % durante 5 min, pausar rotación y escalar al Lead.\n- Estado: lector dual done; rollback automatizado todo; aceptación del dry-run pendiente; rotación condicionada al umbral de 401 y a `legacy_kid_hits`.\n\nSe descartan saludos, nombres temporales, estimaciones descartadas y logs no accionables por no aportar decisiones ni evidencia causal.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

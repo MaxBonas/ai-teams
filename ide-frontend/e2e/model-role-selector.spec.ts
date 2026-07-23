@@ -37,7 +37,11 @@ function selectionCandidate(
   };
 }
 
-async function installFixture(page: Page, noDefault = false) {
+async function installFixture(
+  page: Page,
+  noDefault = false,
+  advantage: { kind: string; value: number | null } = { kind: 'score_delta', value: 6 },
+) {
   let patchedBody: Record<string, unknown> | null = null;
   let storedAdapterConfig: Record<string, unknown> = {
     profile_id: 'profile_a',
@@ -88,7 +92,6 @@ async function installFixture(page: Page, noDefault = false) {
       })),
       cli_status: [], secrets: [],
     };
-    else if (path === '/api/user-adapters/models') body = { options: [] };
     else if (path === '/api/project/skills') body = { skills: [], governance: null };
     else if (path === '/api/project/extensions/mcp') body = { mcp_servers: [] };
     else if (path === '/api/project/extensions/mcp/catalog') body = { entries: [] };
@@ -100,7 +103,7 @@ async function installFixture(page: Page, noDefault = false) {
       success: true,
       default: noDefault
         ? { candidate_id: null, action: 'preserve_explicit_or_require_owner' }
-        : { candidate_id: first.candidate_id, action: 'recommend_shadow_only', score: 90, confidence: 90, advantage: { kind: 'score_delta', value: 6 } },
+        : { candidate_id: first.candidate_id, action: 'recommend_shadow_only', score: 90, confidence: 90, advantage },
       candidates: noDefault
         ? [
             { ...first, selection_score: { ...first.selection_score, auto_eligible: false, auto_ineligible_reasons: ['gate:calibrated:no'] } },
@@ -122,6 +125,13 @@ async function installFixture(page: Page, noDefault = false) {
 }
 
 test('selector global respeta orden backend, bloquea cuota y persiste elección owner', async ({ page }) => {
+  const selectionRequests: string[] = [];
+  const legacyRequests: string[] = [];
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/model-catalog/selection') selectionRequests.push(request.method());
+    if (path === '/api/user-adapters/models') legacyRequests.push(request.method());
+  });
   const patchedBody = await installFixture(page);
   await page.goto('/');
   await page.getByRole('button', { name: /^Equipo 1$/ }).click();
@@ -134,10 +144,16 @@ test('selector global respeta orden backend, bloquea cuota y persiste elección 
   await expect(options.nth(3)).toContainText('#3 model-blocked');
   await expect(options.nth(3)).toBeDisabled();
   await expect(options.nth(3)).toContainText('cuota');
+  await expect(page.locator('.model-role-default')).toContainText('ventaja 6.0 puntos');
+  await expect(page.locator('.model-role-default')).toContainText('calidad 90 · economía 60');
   await selector.selectOption('profile_b\u0000model-second');
   await page.getByRole('button', { name: 'Guardar cambios' }).click();
   await expect.poll(() => patchedBody()).not.toBeNull();
+  expect(selectionRequests).toContain('POST');
+  expect(legacyRequests).toEqual([]);
   expect(patchedBody()).toMatchObject({
+    issue_id: 'issue:review',
+    required_capabilities: ['repo_read'],
     adapter_config: {
       profile_id: 'profile_b',
       model: 'model-second',
@@ -148,6 +164,17 @@ test('selector global respeta orden backend, bloquea cuota y persiste elección 
       },
     },
   });
+});
+
+test('selector explica un empate de score resuelto por evidencia', async ({ page }) => {
+  await installFixture(page, false, { kind: 'evidence_tie_break', value: 5 });
+  await page.goto('/');
+  await page.getByRole('button', { name: /^Equipo 1$/ }).click();
+  await page.getByTitle('Configurar agente').click();
+
+  await expect(page.locator('.model-role-default')).toContainText(
+    'empate de score resuelto por mejor evidencia',
+  );
 });
 
 test('selector sin auto-elegibles conserva la elección y exige owner', async ({ page }) => {

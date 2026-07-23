@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_behavioral_diversity_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "role": "web_scout",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_two_family_causal_report_v3",
+  "case_families": [
+    "governed_advisory_lookup",
+    "governed_queue_advisory_lookup"
+  ],
+  "case_family_count": 2,
+  "seeds_per_family": 3,
+  "samples_total": 6,
+  "family_checks": [
+    {
+      "case_family": "governed_advisory_lookup",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "samples_artifact_passed": 3,
+      "samples_single_attempt": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/codex-luna-web-scout-low-v2-aggregate.json"
+    },
+    {
+      "case_family": "governed_queue_advisory_lookup",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "samples_artifact_passed": 3,
+      "samples_single_attempt": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/m83-queue-advisory-luna-web-scout-aggregate.json"
+    }
+  ],
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-luna-web-scout-low-v2-aggregate.json",
+    "benchmarks/results/model_calibration/m83-queue-advisory-luna-web-scout-aggregate.json"
+  ],
+  "source_sha256": [
+    "319b23b3e216c762a406f7b60db90f7eaf321027b24922211d0a0875e1e88c8c",
+    "f2e510b748c93485a9d5760c32666275c1f8103254a07faa390ac8187883029c"
+  ],
+  "integrity": {
+    "same_exact_pair": true,
+    "two_distinct_families": true,
+    "sources_bound": true,
+    "sources_hashed": true
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "case_diversity_passed": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_two_family_exact_pair",
+    "goodhart_risk": "moderate"
+  }
+}

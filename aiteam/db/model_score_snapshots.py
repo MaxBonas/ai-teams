@@ -67,6 +67,21 @@ def persist_model_role_score_snapshot(
         or len(candidate_ids) != len(canonical_candidates)
     ):
         raise ValueError("at least one candidate with candidate_id is required")
+    mismatched_versions = []
+    mismatched_roles = []
+    for item in canonical_candidates:
+        embedded_score = item.get("selection_score")
+        embedded = embedded_score if isinstance(embedded_score, Mapping) else {}
+        declared_version = item.get("score_version", embedded.get("score_version"))
+        declared_role = item.get("canonical_role", embedded.get("canonical_role"))
+        if declared_version is not None and str(declared_version) != str(score_version):
+            mismatched_versions.append(str(item.get("candidate_id") or ""))
+        if declared_role is not None and str(declared_role) != role:
+            mismatched_roles.append(str(item.get("candidate_id") or ""))
+    if mismatched_versions:
+        raise ValueError("candidate score_version must match snapshot score_version")
+    if mismatched_roles:
+        raise ValueError("candidate canonical_role must match snapshot canonical_role")
     if winner_candidate_id and winner_candidate_id not in candidate_ids:
         raise ValueError("winner must belong to the persisted candidate set")
     if auto_applied:

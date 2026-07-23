@@ -219,5 +219,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-queue-gpt-5.6-terra-cli-0.145.0-seed-2\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal — rollout de facturación asíncrona\n\n**Objetivo y aceptación.** Desplegar el nuevo consumidor sin facturas duplicadas y con rollback en menos de 10 minutos.\n\n**Decisiones.** Usar idempotencia `invoice_id`+`attempt`; habilitarlo con feature flag para una cohorte inicial del 10 %; mantener el consumidor anterior en shadow durante 48 h. Limitar retries a 3: después, enviar a DLQ sin confirmar el mensaje como procesado.\n\n**Evidencia.** Platform reprodujo 10.000 mensajes y obtuvo 0 facturas duplicadas.\n\n**Accountability y estado.** Engineer debe crear `scripts/replay_dlq.py`. Reviewer solo acepta la transición si reproduce un dry-run de 100 mensajes en staging; ambos entregables siguen pendientes.\n\n**Riesgo y escalado.** Webhooks fuera de orden pueden llegar hasta 20 min tarde y reabrir estados cerrados. Si duplicados superan 0,1 % durante 10 min, SRE desactiva la flag, vuelve al consumidor anterior y escala al Lead.\n\n**Alcance.** No migrar el broker ni cambiar el esquema de pagos."
+  "summary": "## Síntesis causal — rollout de facturación asíncrona\n\n**Objetivo y aceptación.** Desplegar el nuevo consumidor sin facturas duplicadas y con rollback en menos de 10 minutos.\n\n**Decisiones.** Usar idempotencia `invoice_id`+`attempt`; habilitarlo con feature flag para una cohorte inicial del 10 %; mantener el consumidor anterior en shadow durante 48 h. Limitar retries a 3: después, enviar a DLQ sin confirmar el mensaje como procesado.\n\n**Evidencia.** Platform reprodujo 10.000 mensajes y obtuvo 0 facturas duplicadas.\n\n**Accountability y estado.** Engineer debe crear `scripts/replay_dlq.py`. Reviewer solo acepta la transición si reproduce un dry-run de 100 mensajes en staging; ambos entregables siguen pendientes.\n\n**Riesgo y escalado.** Webhooks fuera de orden pueden llegar hasta 20 min tarde y reabrir estados cerrados. Si duplicados superan 0,1 % durante 10 min, SRE desactiva la flag, vuelve al consumidor anterior y escala al Lead.\n\n**Alcance.** No migrar el broker ni cambiar el esquema de pagos.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

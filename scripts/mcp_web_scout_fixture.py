@@ -53,7 +53,11 @@ def serve(trace_file: Path | None = None) -> None:
                             "description": "Read the frozen ACME-2026-017 security advisory.",
                             "inputSchema": {
                                 "type": "object",
-                                "properties": {"advisory_id": {"const": "ACME-2026-017"}},
+                                "properties": {
+                                    "advisory_id": {
+                                        "enum": ["ACME-2026-017", "ACME-2026-021"]
+                                    }
+                                },
                                 "required": ["advisory_id"],
                                 "additionalProperties": False,
                             },
@@ -65,26 +69,78 @@ def serve(trace_file: Path | None = None) -> None:
                             "inputSchema": {"type": "object"},
                             "annotations": {"readOnlyHint": False},
                         },
+                        {
+                            "name": "dependency_policy_lookup",
+                            "description": "Read the frozen POLICY-2026-04 dependency policy.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "policy_id": {"const": "POLICY-2026-04"}
+                                },
+                                "required": ["policy_id"],
+                                "additionalProperties": False,
+                            },
+                            "annotations": {"readOnlyHint": True},
+                        },
+                        {
+                            "name": "publish_policy",
+                            "description": "Synthetic policy write; never approved.",
+                            "inputSchema": {"type": "object"},
+                            "annotations": {"readOnlyHint": False},
+                        },
                     ]
                 },
             )
         elif method == "tools/call":
             name = str(params.get("name") or "")
+            if name == "dependency_policy_lookup":
+                _reply(
+                    request,
+                    {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "POLICY-2026-04 | runtime minimum Python 3.13 | "
+                                    "license GPL-3.0 denied | owner Platform Security | "
+                                    "source https://policy.example.invalid/POLICY-2026-04"
+                                ),
+                            }
+                        ],
+                        "isError": False,
+                    },
+                )
+                continue
             if name != "release_advisory_lookup":
                 _reply(request, {"content": [{"type": "text", "text": "DENIED_FIXTURE_TOOL"}], "isError": True})
                 continue
+            arguments = (
+                params.get("arguments")
+                if isinstance(params.get("arguments"), dict)
+                else {}
+            )
+            advisory_id = str(arguments.get("advisory_id") or "")
+            if advisory_id == "ACME-2026-021":
+                advisory = (
+                    "ACME-2026-021 | package acme-queue | affected >=7.1.0,<7.4.0 | "
+                    "fixed 7.4.0 | exposure requires the delayed-retry endpoint to be "
+                    "internet reachable | published 2026-07-22 | "
+                    "source https://security.example.invalid/ACME-2026-021"
+                )
+            else:
+                advisory = (
+                    "ACME-2026-017 | package acme-auth | affected >=4.2.0,<4.2.3 | "
+                    "fixed 4.2.3 | exposure requires the refresh-token endpoint to be "
+                    "internet reachable | published 2026-07-20 | "
+                    "source https://security.example.invalid/ACME-2026-017"
+                )
             _reply(
                 request,
                 {
                     "content": [
                         {
                             "type": "text",
-                            "text": (
-                                "ACME-2026-017 | package acme-auth | affected >=4.2.0,<4.2.3 | "
-                                "fixed 4.2.3 | exposure requires the refresh-token endpoint to be "
-                                "internet reachable | published 2026-07-20 | "
-                                "source https://security.example.invalid/ACME-2026-017"
-                            ),
+                            "text": advisory,
                         }
                     ],
                     "isError": False,

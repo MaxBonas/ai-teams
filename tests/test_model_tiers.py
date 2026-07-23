@@ -17,6 +17,13 @@ def test_public_model_options_expose_three_axis_tier_metadata() -> None:
     for profile_options in options.values():
         for option in profile_options:
             assert option["capability_band"] == option["tier"]
-            assert option["economy"]["quota_unlimited"] is False
+            economy = option["economy"]
+            if economy["cost_class"] == "zero_external_cost_local_compute":
+                assert economy["quota_unlimited"] is True
+                assert economy["external_token_consumption"] == 0
+                assert economy["external_quota_pressure"] == 0
+                assert economy["host_resource_cost_separate"] is True
+            else:
+                assert economy["quota_unlimited"] is False
             assert option["speed_class"]
             assert option["speed_source"]

@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "team_lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 6.937,
+  "usage": {},
+  "response": {
+    "objective": "Coordinar la migración de la cola a SQLite como única fuente durable manteniendo tenant_id en cada issue, unificando SELECT y UPDATE en el checkout para evitar que dos workers ganen la misma issue, sin detener runs activas, asegurando un flag de rollback al camino anterior y superando el gate de 100 reinicios con cero wakeups perdidos durante 24 horas.",
+    "assignments": [
+      {
+        "task": "Unificación atómica del checkout (SELECT y UPDATE) con SQLite como fuente durable respetando tenant_id",
+        "owner": "dev_backend",
+        "aceptador": "tech_lead"
+      },
+      {
+        "task": "Implementación y verificación del flag de rollback al camino anterior",
+        "owner": "dev_infrastructure",
+        "aceptador": "team_lead"
+      },
+      {
+        "task": "Ejecución del despliegue en caliente de la migración sin detener runs activas",
+        "owner": "devops_engineer",
+        "aceptador": "tech_lead"
+      },
+      {
+        "task": "Ejecución y monitoreo de la prueba del gate (100 reinicios, 24 horas, cero wakeups perdidos)",
+        "owner": "qa_engineer",
+        "aceptador": "team_lead"
+      }
+    ],
+    "dependencies": [
+      "La unificación del checkout depende de la presencia de tenant_id en cada issue dentro de SQLite.",
+      "La migración sin detener runs activas depende de tener desplegado y validado el flag de rollback.",
+      "El inicio del gate de 24 horas depende de la finalización de la migración en vivo sin interferir con las runs activas."
+    ],
+    "acceptance": "Ejecución exitosa de 100 reinicios con cero wakeups perdidos durante un periodo continuo de 24 horas, confirmando a SQLite como única fuente durable y eliminando la competencia entre workers por la misma issue.",
+    "status_update": "Plan de migración tenant_queue_migration iniciado. Tareas asignadas con owner y aceptador definidos, flag de rollback diseñado y ambiente preparado para ejecutar la validación del gate de reinicios.",
+    "escalation": "Si durante las pruebas o la migración se pierde algún wakeup, se produce una colisión entre workers o fallan las runs activas, se activará de inmediato el flag de rollback al camino anterior y se escalará la incidencia al team_lead."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

@@ -212,5 +212,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-queue-gpt-5.6-terra-cli-0.145.0-seed-3\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal — rollout de facturación asíncrona\n\n**Objetivo.** Desplegar el nuevo consumidor sin facturas duplicadas y con rollback en menos de 10 minutos.\n\n**Decisiones y límites.** Usar idempotencia `invoice_id`+`attempt`; activar con feature flag para cohorte inicial del 10 %; conservar el consumidor anterior en shadow 48 h. Limitar reintentos a 3 y, después, enviar a DLQ sin confirmar el mensaje como procesado. Fuera de alcance: migrar el broker o cambiar el esquema de pagos.\n\n**Evidencia y accountability.** Platform reprodujo 10.000 mensajes sin facturas duplicadas. Engineer debe entregar `scripts/replay_dlq.py`; Reviewer acepta la transición solo tras reproducir en staging un dry-run de 100 mensajes.\n\n**Riesgo y escalado.** Webhooks fuera de orden pueden llegar hasta 20 min tarde y reabrir estados cerrados. Si duplicados superan 0,1 % durante 10 min, SRE desactiva la flag, revierte al consumidor anterior y escala al Lead."
+  "summary": "## Síntesis causal — rollout de facturación asíncrona\n\n**Objetivo.** Desplegar el nuevo consumidor sin facturas duplicadas y con rollback en menos de 10 minutos.\n\n**Decisiones y límites.** Usar idempotencia `invoice_id`+`attempt`; activar con feature flag para cohorte inicial del 10 %; conservar el consumidor anterior en shadow 48 h. Limitar reintentos a 3 y, después, enviar a DLQ sin confirmar el mensaje como procesado. Fuera de alcance: migrar el broker o cambiar el esquema de pagos.\n\n**Evidencia y accountability.** Platform reprodujo 10.000 mensajes sin facturas duplicadas. Engineer debe entregar `scripts/replay_dlq.py`; Reviewer acepta la transición solo tras reproducir en staging un dry-run de 100 mensajes.\n\n**Riesgo y escalado.** Webhooks fuera de orden pueden llegar hasta 20 min tarde y reabrir estados cerrados. Si duplicados superan 0,1 % durante 10 min, SRE desactiva la flag, revierte al consumidor anterior y escala al Lead.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

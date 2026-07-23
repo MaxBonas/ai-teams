@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "benchmark": "context_curator_role_canary_aggregate",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-low",
+  "role": "context_curator",
+  "reasoning_effort": null,
+  "contract_version": "two_causal_slices_three_seeds_each_v1",
+  "matrix_complete": true,
+  "samples_passed": 6,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/context-curator-auth-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-1.json",
+    "benchmarks/results/model_calibration/context-curator-auth-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-2.json",
+    "benchmarks/results/model_calibration/context-curator-auth-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-3.json",
+    "benchmarks/results/model_calibration/context-curator-queue-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-1.json",
+    "benchmarks/results/model_calibration/context-curator-queue-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-2.json",
+    "benchmarks/results/model_calibration/context-curator-queue-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/context-curator-auth-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-1.json",
+      "case_id": "auth_migration",
+      "seed": 1,
+      "accepted": true,
+      "single_attempt": true,
+      "artifact_sha256": "2bc5409e3763a2b0e18710046b5297f2d1e998087b51c1c6d4763447e15e29a4",
+      "source_sha256": "d36c09ac4ffe001885acbdbf7405e0a1c5643dbbf8fe9e21a67916570ec14ec4",
+      "rubric_sha256": "31a6cf2c3fc6e1249664cfc8af1260b0ff805a6753c1127743f2fe5441aa4e05"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/context-curator-auth-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-2.json",
+      "case_id": "auth_migration",
+      "seed": 2,
+      "accepted": true,
+      "single_attempt": true,
+      "artifact_sha256": "148ab05ffad281ff50b71d2d76730e8768dbe6fc15242725db411ced6b401536",
+      "source_sha256": "d36c09ac4ffe001885acbdbf7405e0a1c5643dbbf8fe9e21a67916570ec14ec4",
+      "rubric_sha256": "31a6cf2c3fc6e1249664cfc8af1260b0ff805a6753c1127743f2fe5441aa4e05"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/context-curator-auth-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-3.json",
+      "case_id": "auth_migration",
+      "seed": 3,
+      "accepted": true,
+      "single_attempt": true,
+      "artifact_sha256": "645758d06766bf6675b78c01d4f7b3d01a09b78639cd0ae7e411ceb190b77d81",
+      "source_sha256": "d36c09ac4ffe001885acbdbf7405e0a1c5643dbbf8fe9e21a67916570ec14ec4",
+      "rubric_sha256": "31a6cf2c3fc6e1249664cfc8af1260b0ff805a6753c1127743f2fe5441aa4e05"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/context-curator-queue-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-1.json",
+      "case_id": "queue_rollout",
+      "seed": 1,
+      "accepted": true,
+      "single_attempt": true,
+      "artifact_sha256": "e96390bb4ad60d02825a0172785aaa3d4fc87471ac294681c9e16dbf26b8ef08",
+      "source_sha256": "997245838ab21d4f0a5d2e120e9379247ca0a44f6924c06ecc8db9150d106924",
+      "rubric_sha256": "11dafc6b0aca8cc3f950028a197ca05daa78a294b171e57e07af92622c97894d"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/context-curator-queue-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-2.json",
+      "case_id": "queue_rollout",
+      "seed": 2,
+      "accepted": true,
+      "single_attempt": true,
+      "artifact_sha256": "a8391dd257dd62768343997cd8721a5dca7293ceb76c26df9f121f8a2886d7ce",
+      "source_sha256": "997245838ab21d4f0a5d2e120e9379247ca0a44f6924c06ecc8db9150d106924",
+      "rubric_sha256": "11dafc6b0aca8cc3f950028a197ca05daa78a294b171e57e07af92622c97894d"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/context-curator-queue-gemini-3.5-flash-low-antigravity-1.1.5-v1-seed-3.json",
+      "case_id": "queue_rollout",
+      "seed": 3,
+      "accepted": true,
+      "single_attempt": true,
+      "artifact_sha256": "815abe03ec4859aa96ecbe31cb0b76c8437489797988464bcfe85267a7a2fa14",
+      "source_sha256": "997245838ab21d4f0a5d2e120e9379247ca0a44f6924c06ecc8db9150d106924",
+      "rubric_sha256": "11dafc6b0aca8cc3f950028a197ca05daa78a294b171e57e07af92622c97894d"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "fixtures_hashed": true,
+    "artifacts_hashed": true
+  },
+  "wall_seconds_median": 96.3,
+  "wall_seconds_range": [
+    42.3,
+    169.7
+  ],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "unknown",
+    "note": "el CLI no expone usage headless comparable"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "threads mayores de la ventana fixture",
+      "ruido multilingüe adversarial",
+      "reanudación tras fallo de persistencia"
+    ]
+  }
+}

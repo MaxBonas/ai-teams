@@ -236,5 +236,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.6-luna-cli-0.145.0-prompt-v2-seed-1\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n- Objetivo: migrar autenticación con corte reversible y sin downtime; quedan fuera sesiones existentes y cambio de proveedor de identidad.\n- Decisión: mantener JWT RS256 y rotar claves con doble validación durante 24 h. No borrar la clave antigua hasta que `legacy_kid_hits` sea cero durante 2 h.\n- Completado: Engineer implementó lector dual en `src/auth/keyring.py`; verificación `pytest tests/auth -q` → 42 passed. Reviewer aprobó compatibilidad.\n- Próximo paso: Engineer debe crear `scripts/rollback_keys.py`; Reviewer aceptará mediante dry-run. Rollback automatizado sigue pendiente.\n- Riesgo/escalado: cachés regionales pueden conservar JWKS 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar rotación y escalar al Lead.\n- Estado: lector dual done; compatibilidad aceptada; rollback todo; rotación condicionada a `legacy_kid_hits=0` durante 2 h; sesiones existentes y cambio de IdP fuera de scope. Se descartan repeticiones, saludos, estimaciones y logs sin decisión accionable."
+  "summary": "## Síntesis causal\n- Objetivo: migrar autenticación con corte reversible y sin downtime; quedan fuera sesiones existentes y cambio de proveedor de identidad.\n- Decisión: mantener JWT RS256 y rotar claves con doble validación durante 24 h. No borrar la clave antigua hasta que `legacy_kid_hits` sea cero durante 2 h.\n- Completado: Engineer implementó lector dual en `src/auth/keyring.py`; verificación `pytest tests/auth -q` → 42 passed. Reviewer aprobó compatibilidad.\n- Próximo paso: Engineer debe crear `scripts/rollback_keys.py`; Reviewer aceptará mediante dry-run. Rollback automatizado sigue pendiente.\n- Riesgo/escalado: cachés regionales pueden conservar JWKS 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar rotación y escalar al Lead.\n- Estado: lector dual done; compatibilidad aceptada; rollback todo; rotación condicionada a `legacy_kid_hits=0` durante 2 h; sesiones existentes y cambio de IdP fuera de scope. Se descartan repeticiones, saludos, estimaciones y logs sin decisión accionable.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

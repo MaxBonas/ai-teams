@@ -166,6 +166,69 @@ def test_team_api_rejects_incompatible_model_patch(client) -> None:
     assert response.json()["detail"]["code"] == "model_tier_insufficient"
 
 
+def test_team_api_validates_agent_capabilities_on_create_and_patch(client) -> None:
+    incompatible = {
+        "profile_id": "openai_api",
+        "model": "gpt-5.6-terra",
+    }
+    response = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer MCP",
+        "adapter_type": "openai_api",
+        "adapter_config": incompatible,
+        "capabilities": ["repo_read", "external_mcp"],
+        "data_class": "public",
+    })
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "external_mcp_unsupported"
+
+    created = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer",
+        "adapter_type": "openai_api",
+        "adapter_config": incompatible,
+        "capabilities": ["repo_read"],
+        "data_class": "public",
+    })
+    assert created.status_code == 200
+
+    response = client.patch(
+        f"/api/agents/{created.json()['agent']['id']}",
+        json={
+            "capabilities": ["repo_read", "external_mcp"],
+            "data_class": "public",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "external_mcp_unsupported"
+
+
+def test_team_api_derives_compatibility_from_issue_context(client) -> None:
+    issue = client.post("/api/issues", json={
+        "title": "Integrar MCP externo",
+        "run_profile": "full_team",
+        "criticality": "high",
+        "metadata": {"required_capabilities": ["external_mcp"]},
+    })
+    assert issue.status_code == 200
+
+    response = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer contextual",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+        },
+        "issue_id": issue.json()["issue"]["id"],
+    })
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "external_mcp_unsupported"
+    assert detail["role"] == "reviewer"
+
+
 def test_agent_owner_selection_intent_survives_create_patch_and_reload(client) -> None:
     created = client.post("/api/agents", json={
         "role": "reviewer",
@@ -223,6 +286,48 @@ def test_agent_api_rejects_selection_intent_for_another_candidate(client) -> Non
 
     assert response.status_code == 400
     assert "candidate_id does not match" in response.json()["detail"]
+
+
+def test_agent_patch_rejects_forged_intent_inherited_from_existing_row(
+    client, tmp_path: Path
+) -> None:
+    created = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+        },
+        "data_class": "internal",
+    })
+    assert created.status_code == 200
+    agent_id = created.json()["agent"]["id"]
+    forged = dict(created.json()["agent"]["adapter_config"])
+    forged["selection_intent"] = {
+        **forged["selection_intent"],
+        "candidate_id": "candidate:forged",
+    }
+    db_path = utils.resolve_runtime_dir(tmp_path, utils.PROJECT_ROOT) / "aiteam.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE agents SET adapter_config_json = ? WHERE id = ?",
+            (json.dumps(forged), agent_id),
+        )
+
+    response = client.patch(f"/api/agents/{agent_id}", json={
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+            "model_reasoning_effort": "high",
+        },
+        "data_class": "internal",
+    })
+
+    assert response.status_code == 400
+    assert "candidate_id does not match" in response.json()["detail"]
+    reloaded = client.get(f"/api/agents/{agent_id}").json()["agent"]["adapter_config"]
+    assert reloaded == forged
 
 
 # ── Issues ────────────────────────────────────────────────────────────────────

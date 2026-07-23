@@ -11,6 +11,7 @@ from api.routers.user_adapters import _codex_auth_info, _discover_api_catalog
 from aiteam.user_config import (
     _cmd_command,
     _write_windows_login_launcher,
+    cli_status,
     inject_adapter_secrets,
     load_adapter_profiles,
     executable_model_options,
@@ -546,6 +547,19 @@ def test_user_adapters_login_endpoint_launches_cli(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["launched"] is True
     monkeypatch.delenv("AITEAM_API_KEY", raising=False)
+
+
+def test_opencode_status_guides_personal_key_without_collecting_it() -> None:
+    status = next(item for item in cli_status() if item["id"] == "opencode")
+
+    assert status["login_command"].endswith(
+        "'auth' 'login' '--provider' 'opencode'"
+    ) or status["login_command"] == "opencode auth login --provider opencode"
+    assert status["setup_url"] == "https://opencode.ai/auth"
+    assert len(status["setup_steps"]) == 4
+    assert any("solo en la terminal de OpenCode" in step for step in status["setup_steps"])
+    assert "no la persiste" in status["credential_storage"]
+    assert status["post_login_check"] == "opencode auth list"
 
 
 def test_windows_login_command_uses_powershell_call_operator() -> None:

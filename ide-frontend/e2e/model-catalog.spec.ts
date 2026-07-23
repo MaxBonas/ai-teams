@@ -75,7 +75,7 @@ function roleEvaluation(
 ) {
   const blocked = Boolean(options.blocked);
   const score = options.score ?? null;
-  const confidence = options.confidence ?? 0;
+  const confidence = options.confidence;
   return {
     canonical_role: role,
     compatibility: {
@@ -144,7 +144,6 @@ const good = candidate('candidate-good', 'model-good', 'Model Good', 'profile-gr
 const blocked = candidate('candidate-blocked', 'model-blocked', 'Model Blocked', 'profile-blocked', 'provider-b', 'api', {
   blocked: true,
   score: 95,
-  confidence: 92,
 });
 const engineer = candidate('candidate-engineer', 'model-engineer', 'Model Engineer', 'profile-green', 'provider-a', 'subscription', {
   green: true,
@@ -211,6 +210,19 @@ async function installApiFixture(page: Page, options: { failCatalogOnce?: boolea
       privacy: { storage: 'local', external_transmission: false, free_text_collected: false, issue_or_workspace_ids_collected: false },
       interpretation: { constructs_not_measured: [], conclusion_allowed: false, reason: 'fixture' },
     };
+    else if (path === '/api/model-catalog/selection') body = {
+      success: true,
+      selection_version: 'model_contextual_selection_v1',
+      schema_version: catalog.schema_version,
+      score_version: catalog.score_version,
+      content_hash: catalog.content_hash,
+      rollout: 'shadow_only',
+      canonical_role: 'lead',
+      context: {},
+      default: { candidate_id: null, action: 'require_owner_selection' },
+      counts: { candidates: 0, auto_eligible: 0, owner_selectable: 0 },
+      candidates: [],
+    };
     else if (path === '/api/model-catalog') {
       catalogCalls += 1;
       // React StrictMode ejecuta el efecto inicial dos veces en desarrollo.
@@ -253,8 +265,14 @@ test('Modelos: filtros, orden backend, adapter verde y detalle bloqueado son vis
   await expect(page.getByTestId('models-loading')).toBeVisible();
   await expect(page.getByTestId('model-catalog-view')).toBeVisible();
   await expect(page.getByTestId('provider-profile-green')).toHaveClass(/is-green/);
+  await expect(page.getByTestId('provider-profile-green')).toContainText('2 configurados');
+  await expect(page.getByTestId('provider-profile-green')).toContainText('2 verdes');
+  await expect(page.getByTestId('provider-profile-green').getByRole('img', { name: 'Adapter verde' })).toBeVisible();
   await expect(page.getByTestId('provider-profile-blocked')).toContainText('1 bloqueados');
+  await expect(page.getByText('elige un rol')).toBeVisible();
   await expect(page.getByTestId('model-matrix')).toContainText('Model Blocked');
+
+  await expect(page.getByTestId('model-state-filter').locator('option')).toHaveCount(12);
 
   await page.getByTestId('model-role-filter').selectOption('reviewer');
   await expect(page.getByTestId('model-row-model-good')).toBeVisible();
@@ -267,6 +285,12 @@ test('Modelos: filtros, orden backend, adapter verde y detalle bloqueado son vis
   await expect(page.getByTestId('model-row-model-good')).toHaveCount(0);
   await page.getByTestId('model-cell-model-blocked-reviewer').click();
   const detail = page.getByTestId('model-detail');
+  const closeDetail = page.getByRole('button', { name: 'Cerrar detalle' });
+  await expect(closeDetail).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(detail.locator('summary')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(closeDetail).toBeFocused();
   await expect(detail).toContainText('No elegible automáticamente');
   await expect(detail).toContainText('El modelo exacto falló su probe');
   await expect(detail).toContainText('Calidad');
@@ -276,6 +300,7 @@ test('Modelos: filtros, orden backend, adapter verde y detalle bloqueado son vis
   await page.screenshot({ path: testInfo.outputPath('model-catalog-detail.png'), fullPage: true });
 
   await page.keyboard.press('Escape');
+  await expect(page.getByTestId('model-cell-model-blocked-reviewer')).toBeFocused();
   await page.getByRole('button', { name: /Limpiar/ }).click();
   await page.getByTestId('model-search').fill('does-not-exist');
   await expect(page.getByTestId('models-empty')).toBeVisible();
@@ -294,4 +319,16 @@ test('Modelos: error inicial conserva seguridad y permite reintentar', async ({ 
   await expect(page.getByTestId('models-error')).toContainText('routing no han sido modificados');
   await page.getByRole('button', { name: 'Reintentar' }).click();
   await expect(page.getByTestId('model-catalog-view')).toBeVisible();
+});
+
+test('Modelos: confianza desconocida no se presenta como cero', async ({ page }) => {
+  await installApiFixture(page);
+  await page.goto('/');
+  await page.getByTestId('models-tab').click();
+  await expect(page.getByTestId('model-catalog-view')).toBeVisible();
+  await page.getByTestId('model-role-filter').selectOption('reviewer');
+
+  const cell = page.getByTestId('model-cell-model-blocked-reviewer');
+  await expect(cell.locator('.role-score-confidence')).toHaveText('—');
+  await expect(cell).toHaveAccessibleName(/confianza —/);
 });

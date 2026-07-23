@@ -9,10 +9,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
+import math
 from typing import Any
 
 from aiteam.model_compatibility import compatibility_decision
-from aiteam.model_role_scoring import rank_model_role_scores
+from aiteam.model_role_scoring import (
+    AUTO_CONFIDENCE_MINIMUM,
+    MODEL_ROLE_SCORE_VERSION,
+    MODEL_ROLE_SCORE_WEIGHTS,
+    rank_model_role_scores,
+)
 from aiteam.policies import canonical_role
 from aiteam.tools.catalog import default_capabilities_for_role
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES
@@ -310,13 +316,13 @@ def _contextual_score(
 ) -> dict[str, Any]:
     if not isinstance(base_score, Mapping):
         return {
-            "score_version": "model_role_score_v1",
+            "score_version": MODEL_ROLE_SCORE_VERSION,
             "candidate_id": candidate_id,
             "canonical_role": role,
             "score": None,
             "score_range": {"minimum": 0.0, "maximum": 100.0},
             "known_weight_percent": 0,
-            "unknown_components": ["quality", "capability", "reliability", "economy", "speed"],
+            "unknown_components": list(MODEL_ROLE_SCORE_WEIGHTS),
             "breakdown": {},
             "confidence": {"value": 0.0, "evidence_rank": 0.0},
             "hard_gates": {},
@@ -347,15 +353,31 @@ def _contextual_score(
         }
     capacity_state = str(capacity.get("state") or "capacity_unknown")
     capacity_block = capacity_state in {"exhausted_observed", "limit_reached"}
-    budget_block = channel == "api" and budget.get("status") == "limit_reached"
-    if capacity_block or budget_block:
-        reason = "daily_cost_cap_reached" if budget_block else f"capacity:{capacity_state}"
+    budget_status = str(budget.get("status") or "unknown")
+    budget_block = channel == "api" and budget_status == "limit_reached"
+    capacity_unknown = _capacity_is_unknown(channel=channel, capacity=capacity)
+    budget_unknown = channel == "api" and budget_status == "unknown"
+    if capacity_block or budget_block or capacity_unknown or budget_unknown:
+        if budget_block:
+            reason = "daily_cost_cap_reached"
+            passed = False
+            source = str(budget.get("source") or "daily_cost_cap_policy")
+        elif capacity_block:
+            reason = f"capacity:{capacity_state}"
+            passed = False
+            source = str(capacity.get("source") or "subscription_quota_snapshot")
+        elif budget_unknown:
+            reason = "daily_cost_budget_unknown"
+            passed = None
+            source = str(budget.get("source") or "not_observed")
+        else:
+            reason = "capacity_unknown"
+            passed = None
+            source = str(capacity.get("source") or "not_observed")
         gates["capacity_available"] = {
-            "passed": False,
+            "passed": passed,
             "reason": reason,
-            "source": str(
-                budget.get("source") if budget_block else capacity.get("source") or "subscription_quota_snapshot"
-            ),
+            "source": source,
         }
     numeric_changes = _apply_contextual_economy(
         score, channel=channel, capacity=capacity
@@ -375,7 +397,11 @@ def _contextual_score(
     unknown = list(score.get("unknown_components") or ())
     metric_reasons = ["score_components_unknown:" + ",".join(unknown)] if unknown else []
     confidence = float((score.get("confidence") or {}).get("value") or 0.0)
-    confidence_reasons = [f"confidence_below_75:{confidence:g}"] if confidence < 75.0 else []
+    confidence_reasons = (
+        [f"confidence_below_{AUTO_CONFIDENCE_MINIMUM:g}:{confidence:g}"]
+        if confidence < AUTO_CONFIDENCE_MINIMUM
+        else []
+    )
     score["auto_ineligible_reasons"] = preserved + gate_reasons + metric_reasons + confidence_reasons
     score["auto_eligible"] = not score["auto_ineligible_reasons"]
     score["context_adjustments"] = {
@@ -384,7 +410,11 @@ def _contextual_score(
         "hard_gates_recomputed": sorted({
             "compatible",
             *([context_gate] if context_gate else []),
-            *(["capacity_available"] if capacity_block or budget_block else []),
+            *(
+                ["capacity_available"]
+                if capacity_block or budget_block or capacity_unknown or budget_unknown
+                else []
+            ),
         }),
         "reason": (
             "owner_quota_policy_normalized_for_exact_profile"
@@ -401,21 +431,34 @@ def _apply_contextual_economy(
     """Sustituye economía solo con una política de cuota explícita del owner."""
     forecast = capacity.get("forecast") if isinstance(capacity.get("forecast"), Mapping) else {}
     utilization = forecast.get("utilization")
+    try:
+        numeric = float(utilization)
+        limit = float(forecast.get("limit"))
+        window_hours = int(capacity.get("window_hours"))
+    except (TypeError, ValueError):
+        return []
     if (
         channel != "subscription"
         or forecast.get("source") != "owner_config"
-        or utilization is None
+        or forecast.get("status") not in {"forecast_available", "limit_reached"}
+        or str(forecast.get("unit") or "") not in {"tokens", "runs", "seconds"}
+        or not math.isfinite(numeric)
+        or not 0.0 <= numeric <= 1.0
+        or not math.isfinite(limit)
+        or limit <= 0
+        or window_hours <= 0
     ):
         return []
-    numeric = max(0.0, min(1.0, float(utilization)))
     breakdown = score.get("breakdown")
     if not isinstance(breakdown, dict):
         return []
     breakdown["economy"] = {
         "status": "known",
         "value": round((1.0 - numeric) * 100.0, 4),
-        "weight_percent": 20,
-        "weighted_points": round((1.0 - numeric) * 20.0, 4),
+        "weight_percent": MODEL_ROLE_SCORE_WEIGHTS["economy"],
+        "weighted_points": round(
+            (1.0 - numeric) * MODEL_ROLE_SCORE_WEIGHTS["economy"], 4
+        ),
         "reason": "subscription_quota_headroom_from_owner_policy",
         "source": "subscription_quota_snapshot:owner_config",
         "basis": "subscription_quota_pressure",
@@ -425,7 +468,7 @@ def _apply_contextual_economy(
     known_points = 0.0
     known_weight = 0
     unknown: list[str] = []
-    for name in ("quality", "capability", "reliability", "economy", "speed"):
+    for name in MODEL_ROLE_SCORE_WEIGHTS:
         component = breakdown.get(name)
         if isinstance(component, Mapping) and component.get("status") == "known":
             known_weight += int(component.get("weight_percent") or 0)
@@ -434,10 +477,11 @@ def _apply_contextual_economy(
             unknown.append(name)
     score["known_weight_percent"] = known_weight
     score["unknown_components"] = unknown
-    score["score"] = round(known_points, 4) if known_weight == 100 else None
+    total_weight = sum(MODEL_ROLE_SCORE_WEIGHTS.values())
+    score["score"] = round(known_points, 4) if known_weight == total_weight else None
     score["score_range"] = {
         "minimum": round(known_points, 4),
-        "maximum": round(known_points + (100 - known_weight), 4),
+        "maximum": round(known_points + (total_weight - known_weight), 4),
     }
     confidence = score.get("confidence")
     if isinstance(confidence, dict):
@@ -454,6 +498,25 @@ def _apply_contextual_economy(
 def _state_value(states: Mapping[str, Any], name: str) -> Any:
     row = states.get(name)
     return row.get("value") if isinstance(row, Mapping) else None
+
+
+def _capacity_is_unknown(*, channel: str, capacity: Mapping[str, Any]) -> bool:
+    """Unknown telemetry must remain unknown for automatic selection.
+
+    Owner selection is intentionally governed separately: only observed
+    exhaustion disables that manual action.
+    """
+    if channel == "local":
+        return False
+    if channel not in {"subscription", "free_gateway"}:
+        return str(capacity.get("state") or "") == "capacity_unknown"
+    forecast = capacity.get("forecast")
+    if not isinstance(forecast, Mapping):
+        return True
+    return str(forecast.get("status") or "capacity_unknown") in {
+        "capacity_unknown",
+        "insufficient_usage_coverage",
+    }
 
 
 def _disabled_reason(
@@ -498,15 +561,38 @@ def _default_projection(winner: Mapping[str, Any] | None, runner: Mapping[str, A
     winner_score = winner.get("selection_score") or {}
     runner_score = (runner or {}).get("selection_score") or {}
     advantage: dict[str, Any]
-    if winner_score.get("score") is not None and runner_score.get("score") is not None:
+    winner_value = winner_score.get("score")
+    runner_value = runner_score.get("score")
+    if (
+        winner_value is not None
+        and runner_value is not None
+        and float(winner_value) != float(runner_value)
+    ):
         advantage = {
             "kind": "score_delta",
-            "value": round(float(winner_score["score"]) - float(runner_score["score"]), 4),
+            "value": round(float(winner_value) - float(runner_value), 4),
         }
     elif runner is None:
         advantage = {"kind": "only_auto_eligible", "value": None}
     else:
-        advantage = {"kind": "canonical_tie_break", "value": None}
+        advantage = _tie_break_advantage(winner_score, runner_score)
+        if advantage["kind"] == "canonical_identity_tie_break":
+            return {
+                "candidate_id": None,
+                "action": "preserve_explicit_or_require_owner",
+                "reason": "unresolved_exact_tie",
+                "score": winner_score.get("score"),
+                "confidence": (winner_score.get("confidence") or {}).get("value"),
+                "breakdown": winner_score.get("breakdown") or {},
+                "runner_up_candidate_id": runner.get("candidate_id"),
+                "tied_candidate_ids": sorted(
+                    [
+                        str(winner.get("candidate_id") or ""),
+                        str(runner.get("candidate_id") or ""),
+                    ]
+                ),
+                "advantage": advantage,
+            }
     return {
         "candidate_id": winner.get("candidate_id"),
         "action": "recommend_shadow_only",
@@ -517,3 +603,33 @@ def _default_projection(winner: Mapping[str, Any] | None, runner: Mapping[str, A
         "runner_up_candidate_id": (runner or {}).get("candidate_id"),
         "advantage": advantage,
     }
+
+
+def _tie_break_advantage(
+    winner_score: Mapping[str, Any], runner_score: Mapping[str, Any]
+) -> dict[str, Any]:
+    winner_tie = winner_score.get("tie_break") or {}
+    runner_tie = runner_score.get("tie_break") or {}
+    comparisons = (
+        ("evidence", "evidence_rank", True, None),
+        ("quality", "quality", True, None),
+        ("economy", "economic_burden", False, "economy_comparison_group"),
+        ("speed", "latency_ms", False, "speed_comparison_group"),
+    )
+    for kind, field, higher_wins, group_field in comparisons:
+        left = winner_tie.get(field)
+        right = runner_tie.get(field)
+        if group_field and (
+            winner_tie.get(group_field) is None
+            or winner_tie.get(group_field) != runner_tie.get(group_field)
+        ):
+            continue
+        if left is None or right is None or float(left) == float(right):
+            continue
+        winner_is_better = float(left) > float(right) if higher_wins else float(left) < float(right)
+        if winner_is_better:
+            return {
+                "kind": f"{kind}_tie_break",
+                "value": round(abs(float(left) - float(right)), 4),
+            }
+    return {"kind": "canonical_identity_tie_break", "value": None}

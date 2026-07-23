@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-medium",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "role": "worker",
+  "seed": 3,
+  "wall_seconds": 59.422,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "active_wave": true,
+      "owner": true,
+      "observed_rate": true,
+      "threshold": true,
+      "window": true,
+      "rollback": true,
+      "acceptance": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "prompt.txt"
+  },
+  "artifact": "Checklist causal de decisión creado según los requisitos y estado del issue actualizado a done.\n\n### Checklist causal de decisión:\n\n- **Estado actual**: Wave W3 activa.\n- **Límite y métricas**: Tasa de error es 2,1 % (límite: 1,0 % durante un período de 5 minutos).\n- **Acciones y Rollback**: Pausar W3 y volver a W2.\n- **Roles**: Release Engineer (Owner), Reviewer (Acceptor).\n- **Criterio de aceptación**: El Reviewer acepta cuando los logs y la métrica confirmen la recuperación.\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: prompt.txt",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:7b0d2391-b5a2-4b20-8106-e2f7fbaceafa",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gemini-3.5-flash-medium",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\flash-medium-worker-seed-3\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true
+}

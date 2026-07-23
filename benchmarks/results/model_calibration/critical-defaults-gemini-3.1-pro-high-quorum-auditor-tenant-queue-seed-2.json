@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 7.391,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO",
+    "challenges": [
+      "El checkout actual separa SELECT y UPDATE sin atomicidad ni locking explícito en SQLite, lo que provoca condiciones de carrera y asignación duplicada de issues entre workers concurrentes.",
+      "Activar un rollback mediante un flag durante runs activas puede generar inconsistencias de estado si no existe sincronización bidireccional entre la fuente anterior y SQLite.",
+      "El gate de 100 reinicios en 24 horas únicamente evalúa pérdida de wakeups en reinicios, ignorando la validación de atomicidad bajo alta concurrencia y el aislamiento efectivo por tenant_id."
+    ],
+    "missing_evidence": [
+      "Resultados de pruebas de carga concurrente que demuestren imposibilidad matemática de doble checkout (ej. uso de transacciones IMMEDIATE o UPDATE ... RETURNING en SQLite).",
+      "Estrategia de reconciliación de datos y consistencia de estado ante la activación del rollback en caliente con ejecuciones activas.",
+      "Métricas de rendimiento y contención de cerrojos (SQLITE_BUSY / WAL log contentions) con múltiples workers escribiendo simultáneamente."
+    ],
+    "failure_modes": [
+      "Doble procesamiento de issues por dos workers que obtienen la misma tarea en la ventana entre SELECT y UPDATE.",
+      "Bloqueos de base de datos (SQLITE_BUSY / database is locked) provocados por accesos concurrentes de escritura en SQLite durante runs en vivo.",
+      "Divergencia de estado inconciliable si se activa el flag de regreso al camino anterior mientras existen escrituras parciales en SQLite."
+    ],
+    "recommendation": "NO-GO. Se debe reestructurar la operación de checkout para que sea estrictamente atómica en SQLite y definir un plan de consistencia para el rollback antes de habilitar la migración."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

@@ -32,7 +32,7 @@ import json
 import os
 from typing import Any
 
-from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
+from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult
 from aiteam.pricing import estimate_cost_from_usage
 from aiteam.adapters.work_contract import (
     SUBMIT_WORK_TOOL,
@@ -185,7 +185,7 @@ def _build_system(skill: str, role: str) -> str:
             "Your job is to complete the delegated work described in the user message, "
             "then call submit_work with the operations needed."
         )
-    parts.append(build_execution_contract())
+    parts.append(build_execution_contract(role))
     if role.strip().lower() == "quorum_auditor":
         parts.append(
             "QUORUM AUDITOR — CONTRATO ESTRICTO:\n"

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 6.969,
+  "usage": {},
+  "response": {
+    "verdict": "REJECTED (NO-GO)",
+    "challenges": [
+      "Raza de competencia (race condition) entre workers: Al separar SELECT y UPDATE en la checkout actual, dos workers pueden obtener y procesar la misma issue simultáneamente.",
+      "Aislamiento por tenant_id no garantizado durante migración sin detener runs activas mientras SQLite es la única fuente durable.",
+      "Riesgo de inconsistencia al alternar con el flag para volver al camino anterior cuando hay ejecuciones duplicadas en vuelo."
+    ],
+    "missing_evidence": [
+      "Pruebas de carga y transaccionalidad atómica (ej. SELECT ... FOR UPDATE o transacciones en SQLite por tenant_id) que eliminen la separación entre SELECT y UPDATE.",
+      "Verificación empírica del comportamiento del flag de rollback ante runs activas sin pérdida de contexto ni duplicación de trabajo.",
+      "Resultados completados de la métrica de validación gate: ejecución de 100 reinicios con 0 wakeups perdidos en la ventana continua de 24 horas."
+    ],
+    "failure_modes": [
+      "Doble ejecución de issues en un mismo tenant_id por adquisición concurrente entre dos workers durante el checkout no atómico.",
+      "Pérdida de wakeups o desincronización de cola durante la secuencia de 100 reinicios al no detener runs activas.",
+      "Estado inconsistente del tenant si se activa el rollback flag mientras un worker en el camino nuevo y otro en el antiguo procesan la misma issue."
+    ],
+    "recommendation": "NO-GO. Modificar el checkout para unificar atómicamente el SELECT y UPDATE en SQLite respetando los límites de tenant_id, y no autorizar la migración definitiva hasta certificar empíricamente la superación del gate de 100 reinicios con 0 wakeups perdidos durante 24 horas."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-sol",
+  "role": "architect",
+  "required_cases": [
+    "tenant_queue_migration",
+    "auth_rollout_incident"
+  ],
+  "required_seeds": [
+    1,
+    2,
+    3
+  ],
+  "samples_observed": 6,
+  "samples_passed": 6,
+  "matrix_complete": true,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-auth-rollout-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-auth-rollout-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-auth-rollout-seed-3.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-tenant-queue-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-tenant-queue-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-tenant-queue-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-auth-rollout-seed-1.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "902cfc4169c754d53701dca413716412682e780b858138a5662498130740afc2"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-auth-rollout-seed-2.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "d4d54031bff99a6ff9623369a22ed952ae1f511505391bd4177406e4498b5e09"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-auth-rollout-seed-3.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "7a064d6ca805266b92fc6e4861f48dd2516103bf5ffaf568c89610b3415b09ce"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-tenant-queue-seed-1.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "3715005261c9b5ed91be3355a273c99ee72211ecdddde3f7182798f15ba8c715"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-tenant-queue-seed-2.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "bef5cdc99e6f17ac7a1ecfea9d1edde6fd77868d5deb8b32b504a146929a1149"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-tenant-queue-seed-3.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "611b8359fa2e3465438edaf6af424954b2e04420d2ea6326ff265ee91ac11d64"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "responses_hashed": true
+  },
+  "wall_seconds_median": 19.57,
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "reason": "eligible_for_registry_review",
+    "next_gate": "M.7.4 snapshot vivo y promoción gobernada"
+  }
+}

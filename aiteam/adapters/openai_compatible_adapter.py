@@ -63,6 +63,7 @@ class OpenAICompatibleApiRuntime:
                 error_code="missing_api_key",
             )
         model = str(env.get("AITEAM_MODEL") or self.model)
+        role = env.get("AITEAM_AGENT_ROLE", "").strip() or "agent"
         body: dict[str, Any] = {
             "model": model,
             "messages": [
@@ -113,7 +114,7 @@ class OpenAICompatibleApiRuntime:
                         "content": (
                             "Repair exactly one JSON object to match the submit_work contract. "
                             "Do not add new work, prose, Markdown or operations."
-                            + build_execution_contract()
+                            + build_execution_contract(role)
                         ),
                     },
                     {
@@ -165,7 +166,7 @@ class OpenAICompatibleApiRuntime:
 def _system_prompt(env: dict[str, str]) -> str:
     skill = env.get("AITEAM_AGENT_SKILL", "").strip()
     role = env.get("AITEAM_AGENT_ROLE", "").strip() or "agent"
-    return (skill or f"Eres un agente de AI Teams con rol {role}.") + build_execution_contract()
+    return (skill or f"Eres un agente de AI Teams con rol {role}.") + build_execution_contract(role)
 
 
 def _user_prompt(env: dict[str, str], run: dict[str, Any]) -> str:

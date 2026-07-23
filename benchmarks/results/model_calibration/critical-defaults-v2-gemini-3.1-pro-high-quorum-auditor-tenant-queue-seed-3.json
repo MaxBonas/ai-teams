@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 15.046,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO (Rechazado en el estado actual)",
+    "challenges": [
+      "La separación entre SELECT y UPDATE en el checkout actual permite que dos workers ganen y procesen la misma issue.",
+      "Ejecutar la migración con SQLite como única fuente durable sin detener runs activas introduce riesgo de contención y carreras durante el procesamiento por tenant_id."
+    ],
+    "missing_evidence": [
+      "Certificación del cumplimiento del gate: ejecución de 100 reinicios con cero wakeups perdidos durante 24 horas.",
+      "Pruebas de validación del flag de rollback para volver al camino anterior en caliente sin afectar runs activas.",
+      "Prueba de carga y concurrencia que demuestre la resolución del checkout atómico en SQLite sin bloqueos por tenant_id."
+    ],
+    "failure_modes": [
+      "Doble procesamiento de issues debido a la condición de carrera entre SELECT y UPDATE en workers concurrentes.",
+      "Pérdida de wakeups durante reinicios si la persistencia durable en SQLite falla al recuperar el estado.",
+      "Bloqueos o contención de base de datos en SQLite al manejar escrituras concurrentes sin detener las runs activas.",
+      "Inconsistencia de estado al activar el flag de rollback hacia el camino anterior mientras hay ejecuciones en curso."
+    ],
+    "recommendation": "NO-GO. Se debe unificar el checkout en una operación atómica para evitar que dos workers ganen la misma issue y validar con éxito el gate de 100 reinicios con cero wakeups perdidos durante 24 horas, asegurando la operatividad del flag de rollback antes de proceder con SQLite como única fuente durable."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

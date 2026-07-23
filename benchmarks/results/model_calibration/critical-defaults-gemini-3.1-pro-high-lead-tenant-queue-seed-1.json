@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 8.516,
+  "usage": {},
+  "response": {
+    "objective": "Migrar la cola de tareas (tenant_queue_migration) a un modelo de checkout atómico en SQLite como única fuente durable, resolviendo la condición de carrera por tenant_id entre SELECT y UPDATE sin detener ejecuciones activas y permitiendo revertir los cambios mediante un feature flag.",
+    "work_items": [
+      {
+        "id": "WI-01",
+        "description": "Unificar SELECT y UPDATE en una única consulta o transacción atómica en SQLite por tenant_id para prevenir que dos workers obtengan la misma issue.",
+        "owner": "backend_developer",
+        "acceptor": "lead",
+        "dependencies": []
+      },
+      {
+        "id": "WI-02",
+        "description": "Implementar el feature flag de alternancia entre el mecanismo de checkout previo y el nuevo mecanismo atómico para permitir el rollback sin downtime.",
+        "owner": "infrastructure_engineer",
+        "acceptor": "lead",
+        "dependencies": [
+          "WI-01"
+        ]
+      },
+      {
+        "id": "WI-03",
+        "description": "Desplegar la migración manteniendo activas las runs en ejecución y activar el nuevo flujo bajo supervisión.",
+        "owner": "operations_lead",
+        "acceptor": "lead",
+        "dependencies": [
+          "WI-02"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Dos workers ganan la misma issue durante el flujo no atómico actual.",
+        "mitigation": "Transición inmediata al checkout atómico en SQLite respaldada por el feature flag."
+      },
+      {
+        "risk": "Interrupción de runs activas durante el despliegue.",
+        "mitigation": "Mantener compatibilidad sin detener procesos activos y permitir fallback al camino anterior via flag."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante un periodo continuo de 24 horas.",
+      "durable_storage": "SQLite",
+      "rollback_capability": "Activación del flag hacia el camino anterior en caso de fallo"
+    },
+    "escalation": {
+      "conditions": [
+        "Detección de al menos 1 wakeup perdido durante el periodo de prueba.",
+        "Fallo en la ejecución exitosa de los 100 reinicios continuos.",
+        "Incapacidad de procesar issues sin detener runs activas."
+      ],
+      "protocol": "Desactivar el feature flag para regresar inmediatamente al flujo previo y convocar al lead para revisar la consistencia en SQLite."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

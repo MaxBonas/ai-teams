@@ -49,6 +49,10 @@ ROLE_STATUS = {
     "researcher": "legacy",
 }
 
+# Orden canónico y estable para contratos API/UI. Los aliases nunca aparecen
+# como celdas independientes: solo normalizan identidades persistidas antiguas.
+CANONICAL_ROLES = tuple(ROLE_STATUS)
+
 LEAD_TIER_ROLES = frozenset({"lead", "team_lead", "lead_executor"})
 TIER1_ROLES = LEAD_TIER_ROLES | frozenset({"architect", "quorum_auditor", "quorum_senior"})
 

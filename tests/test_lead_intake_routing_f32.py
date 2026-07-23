@@ -17,6 +17,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.lead_intake import (
     _suggested_issues_for_profile,
@@ -187,6 +189,55 @@ class TestApplyProposalRoutingOverride:
         assert config["selection_intent"]["mode"] == "owner_explicit"
         assert config["selection_intent"]["source"] == "accepted_team_proposal"
         assert config["selection_intent"]["candidate_id"]
+
+    def test_accepted_team_rejects_forged_owner_candidate_before_insert(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = tmp_path / "db.sqlite"
+        _init_db(db_path)
+        write_project_adapter_policy(tmp_path, profile_ids=["openai_api"])
+        record_model_health(
+            "openai_api", "gpt-5.6-terra", available=True, reason="test_fixture"
+        )
+        proposal = {
+            "profile": "full_team",
+            "direct_work": False,
+            "proposed_team": [{
+                "id": "role:reviewer",
+                "role": "reviewer",
+                "name": "Reviewer",
+                "seniority": "standard",
+                "adapter_type": "openai_api",
+                "adapter_config": {
+                    "profile_id": "openai_api",
+                    "model": "gpt-5.6-terra",
+                    "selection_intent": {
+                        "schema_version": "model_selection_intent_v1",
+                        "mode": "owner_explicit",
+                        "source": "tampered_proposal",
+                        "candidate_id": "candidate:forged",
+                    },
+                },
+                "capabilities": ["repo_read"],
+                "supervisor_agent_id": "role:lead",
+            }],
+            "suggested_issues": [],
+        }
+
+        with pytest.raises(ValueError, match="candidate_id does not match"):
+            apply_accepted_team_proposal(
+                db_path,
+                parent_issue_id="issue:root",
+                proposal=proposal,
+                source_run_id="r1",
+            )
+
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT adapter_type, adapter_config_json FROM agents "
+                "WHERE id='role:reviewer'"
+            ).fetchone()
+        assert row == ("manual", "{}")
 
     def test_routing_preserves_role_for_lead_tier(self, tmp_path: Path) -> None:
         """Lead-tier roles (lead, team_lead, lead_executor) are never overridden."""

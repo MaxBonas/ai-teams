@@ -241,5 +241,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.5-cli-0.145.0-seed-1\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n\nObjetivo: migrar autenticación con corte reversible y sin downtime.\n\nDecisiones y restricciones: se mantiene JWT RS256. La rotación de claves usará doble validación durante 24 horas. La clave antigua no se elimina hasta que `legacy_kid_hits` sea cero durante dos horas. Queda fuera de scope migrar sesiones existentes o cambiar el proveedor de identidad.\n\nTrabajo completado: Engineer implementó lector dual en `src/auth/keyring.py` y presentó evidencia `pytest tests/auth -q: 42 passed`. Reviewer aprobó compatibilidad.\n\nEstado actual y próximos pasos: rollback no está automatizado. Engineer debe crear `scripts/rollback_keys.py`; Reviewer debe aceptar el dry-run.\n\nRiesgo/escalado: cachés regionales pueden conservar JWKS durante 15 minutos. Si las respuestas 401 superan 0,5 % durante cinco minutos, se pausa la rotación y se escala al Lead.\n\nRuido descartado: saludos, nombres temporales, estimaciones descartadas y logs no accionables no agregan decisiones nuevas."
+  "summary": "## Síntesis causal\n\nObjetivo: migrar autenticación con corte reversible y sin downtime.\n\nDecisiones y restricciones: se mantiene JWT RS256. La rotación de claves usará doble validación durante 24 horas. La clave antigua no se elimina hasta que `legacy_kid_hits` sea cero durante dos horas. Queda fuera de scope migrar sesiones existentes o cambiar el proveedor de identidad.\n\nTrabajo completado: Engineer implementó lector dual en `src/auth/keyring.py` y presentó evidencia `pytest tests/auth -q: 42 passed`. Reviewer aprobó compatibilidad.\n\nEstado actual y próximos pasos: rollback no está automatizado. Engineer debe crear `scripts/rollback_keys.py`; Reviewer debe aceptar el dry-run.\n\nRiesgo/escalado: cachés regionales pueden conservar JWKS durante 15 minutos. Si las respuestas 401 superan 0,5 % durante cinco minutos, se pausa la rotación y se escala al Lead.\n\nRuido descartado: saludos, nombres temporales, estimaciones descartadas y logs no accionables no agregan decisiones nuevas.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.5",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

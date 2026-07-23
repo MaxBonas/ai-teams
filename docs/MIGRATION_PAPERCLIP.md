@@ -183,9 +183,12 @@ distintos lenguajes mediante capacidades demostradas.
 - `docs/INSTALLATION_AND_INTEGRATION.md` es el onboarding canónico para personas
   y agentes de IA y separa estrictamente lo operativo hoy de los objetivos.
 
-Estado: contrato documental creado el `2026-07-22`; implementación pendiente y
-desglosada en `task.md` P0.I. Windows es el único bootstrap actualmente
-verificado; Linux/macOS y la matriz poliglota no se consideran cerrados.
+Estado: contrato documental creado el `2026-07-22` e I.1.1–I.1.3 implementadas.
+I.1.4 dispone de harness fail-closed y workflow independiente sobre
+`windows-latest`, pero no queda cerrado hasta conservar y auditar un recibo
+verde de esa ejecución. Windows x86_64 sigue `preview`; Linux/macOS y la matriz
+poliglota no se consideran cerrados. El onboarding de OpenCode Zen guía la API
+key personal en el CLI sin copiarla a AI Teams.
 
 ### Fase 1 — Schema v2 paralelo
 
@@ -335,7 +338,10 @@ autenticados, exclusiones explícitas y matriz hermética.
 La evidencia de calidad promovida vive en `aiteam.model_calibration` con
 `calibrated_at`, versión y recibos por par exacto perfil+modelo+rol. El auditor
 mensual bloquea promociones nuevas no registradas o stale y abre atención tras
-30 días, fecha futura, versión cambiada/no observada o recibo ausente. No
+30 días, fecha futura, versión cambiada/no observada, recibo ausente o contenido
+de evidencia inconsistente con el par promovido. El snapshot Codex actual forma
+parte de los gates de inventario y cobertura; health histórico no puede ocultar
+un modelo retirado. No
 convierte por sí solo un default sano en `manual-only`: esa transición exige
 evidencia separada de catálogo, health o calidad.
 
@@ -351,7 +357,7 @@ router multifactor opaco retirado.
   organización proveedora, adapter profile, canal/pool y slug ejecutable.
 - Derivar estados ortogonales de catálogo, configuración, health, verificación,
   compatibilidad, calibración, frescura y elegibilidad automática.
-- Sustituir el `role_score` heurístico por `model_role_score_v1`, versionado y
+- Sustituir el `role_score` heurístico por `model_role_score_v2`, versionado y
   explicable, alimentado por calidad del rol, capacidad, fiabilidad, economía y
   velocidad; publicar confianza/provenance aparte y aplicar hard gates antes.
 - Persistir snapshot, candidatos, breakdown, score version y razón de toda

@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "incident_dependency_handoff",
+  "role": "worker",
+  "seed": 1,
+  "wall_seconds": 18.328,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "incident": true,
+      "owner": true,
+      "observed_lag": true,
+      "threshold": true,
+      "window": true,
+      "freeze": true,
+      "dependency": true,
+      "acceptance": true
+    },
+    "anchors_retained": 8,
+    "anchors_total": 8,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "Payload de delegación de issue:worker e inputs del incidente INC-42; README.md inspeccionado (fixture de incidente; no modificar)."
+  },
+  "artifact": "Checklist causal preparado con los hechos del incidente y condición de aceptación.\n\nChecklist causal de INC-42:\n\n- Estado: incidente activo.\n- Owner: Database SRE.\n- Señal y ventana: replication lag de 47 s, por encima del límite de 10 s durante 3 minutos.\n- Acción requerida: congelar las escrituras.\n- Dependencia: el failover a replica-eu-2 solo puede ejecutarse después de que el checksum coincida.\n- Aceptación: Incident Commander acepta cuando el lag sea < 10 s y el checksum coincida.\n- Opciones descartadas: ninguna incluida; se omite la opción descartada de reiniciar la caché.\n- Evidencia adicional inspeccionada: README.md, que indica que es un fixture de incidente y no debe modificarse.\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: Payload de delegación de issue:worker e inputs del incidente INC-42; README.md inspeccionado (fixture de incidente; no modificar).",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:e9d0d7ab-38c3-46af-b3fa-49761f8fc3b8",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 18053, \"output_tokens\": 756, \"reasoning_output_tokens\": 27}"
+    },
+    "input_tokens": 18053,
+    "output_tokens": 756,
+    "cost_cents": 0,
+    "db": "runtime/bench/m83-incident-luna-worker-s1/.aiteam/aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true,
+  "reevaluation": {
+    "reason": "deterministic_evaluator_contract_update",
+    "provider_rerun": false
+  }
+}

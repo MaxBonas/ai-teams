@@ -222,7 +222,8 @@ async def get_model_role_candidates(
             "criticality": "medium",
             "data_class": "public",
             "required_capabilities": "role_defaults",
-            "selection_score": "not_active_until_M.6",
+            "projection": "base_role_score",
+            "contextual_endpoint": "POST /api/model-catalog/selection",
         },
         counts={
             "candidates": len(candidates),
@@ -243,7 +244,7 @@ async def get_model_role_candidates(
 async def select_model_for_role(
     request: Request, body: ModelSelectionRequest
 ) -> ModelSelectionResponse:
-    """Ranking contextual compartido; en M.6 aún no muta defaults productivos."""
+    """Ranking contextual compartido; esta consulta no muta defaults."""
     _require_api_auth_request(request)
     role_key = _validated_role(body.role)
     db_path = resolve_runtime_dir(get_current_workspace()) / "aiteam.db"

@@ -94,24 +94,39 @@ def model_selection_runtime_context(
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         spent = _spent_today(db_path, day)
         budget = {
-            "status": "limit_reached" if spent >= cap else "available",
-            "source": "cost_events+daily_cost_cap_policy",
+            "status": (
+                "unknown"
+                if spent is None
+                else "limit_reached"
+                if spent >= cap
+                else "available"
+            ),
+            "source": (
+                "cost_events_unavailable+daily_cost_cap_policy"
+                if spent is None
+                else "cost_events+daily_cost_cap_policy"
+            ),
             "day": day,
             "cap_cents": cap,
             "spent_cents": spent,
-            "remaining_cents": max(0, cap - spent),
+            "remaining_cents": None if spent is None else max(0, cap - spent),
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }
     return {"capacity_by_profile": capacity, "budget": budget}
 
 
-def _spent_today(db_path: Path, day: str) -> int:
+def _spent_today(db_path: Path, day: str) -> int | None:
+    if not db_path.is_file():
+        return None
     try:
-        with contextlib.closing(sqlite3.connect(str(db_path), timeout=20.0)) as conn:
+        uri = f"{db_path.resolve().as_uri()}?mode=ro"
+        with contextlib.closing(
+            sqlite3.connect(uri, timeout=20.0, uri=True)
+        ) as conn:
             row = conn.execute(
                 "SELECT COALESCE(SUM(cost_cents), 0) FROM cost_events WHERE substr(created_at,1,10) = ?",
                 (day,),
             ).fetchone()
             return int((row or [0])[0] or 0)
     except sqlite3.Error:
-        return 0
+        return None

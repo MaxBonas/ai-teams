@@ -221,5 +221,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.6-luna-cli-0.145.0-prompt-v2-seed-2\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n\n- Objetivo: migrar la autenticación con corte reversible y sin downtime.\n- Decisiones y alcance: conservar JWT RS256 y rotar claves con doble validación durante 24 h. No borrar la clave antigua hasta que `legacy_kid_hits` sea 0 durante 2 h. Quedan fuera de scope la migración de sesiones existentes y el cambio de proveedor de identidad.\n- Trabajo y evidencia: Engineer implementó el lector dual en `src/auth/keyring.py`; verificación: `pytest tests/auth -q` → 42 passed. Reviewer aprobó la compatibilidad, pero el rollback aún no está automatizado.\n- Próximo trabajo: Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta mediante su dry-run.\n- Riesgo/escalado: cachés regionales pueden conservar JWKS hasta 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar la rotación y escalar al Lead.\n- Estado: lector dual hecho; rollback automatizado pendiente; aceptación del dry-run pendiente; no quedan otros cambios de alcance autorizados."
+  "summary": "## Síntesis causal\n\n- Objetivo: migrar la autenticación con corte reversible y sin downtime.\n- Decisiones y alcance: conservar JWT RS256 y rotar claves con doble validación durante 24 h. No borrar la clave antigua hasta que `legacy_kid_hits` sea 0 durante 2 h. Quedan fuera de scope la migración de sesiones existentes y el cambio de proveedor de identidad.\n- Trabajo y evidencia: Engineer implementó el lector dual en `src/auth/keyring.py`; verificación: `pytest tests/auth -q` → 42 passed. Reviewer aprobó la compatibilidad, pero el rollback aún no está automatizado.\n- Próximo trabajo: Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta mediante su dry-run.\n- Riesgo/escalado: cachés regionales pueden conservar JWKS hasta 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar la rotación y escalar al Lead.\n- Estado: lector dual hecho; rollback automatizado pendiente; aceptación del dry-run pendiente; no quedan otros cambios de alcance autorizados.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

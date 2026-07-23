@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "prompt_version": "v2",
+  "required_cases": [
+    "tenant_queue_migration",
+    "auth_rollout_incident"
+  ],
+  "required_seeds": [
+    1,
+    2,
+    3
+  ],
+  "samples_observed": 6,
+  "samples_passed": 6,
+  "matrix_complete": true,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-auth-rollout-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-auth-rollout-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-auth-rollout-seed-3.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-tenant-queue-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-tenant-queue-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-tenant-queue-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-auth-rollout-seed-1.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "9a1b53f71a25f3ca240f0eb32851ab28fc5460783385105f043b3301dd28638e"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-auth-rollout-seed-2.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "43d3412474af287a0314e6827807008851d9bfab9f0d213486ab197ed86eb27d"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-auth-rollout-seed-3.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "29216f25899874f45ee77d81c7269cdf7f823290423ccf703dca35f347789531"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-tenant-queue-seed-1.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "818a16527f201054444f3d885c4c6779fb6a2f57f46269004b0ec4a95d3ee216"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-tenant-queue-seed-2.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "4eb4eb9413f075200052438d7cc64f32f8ddb7b2d7c16d80fe344e56168ae69f"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-tenant-queue-seed-3.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "fa454b1b82a88a7e1e9af9718fa9f59a453086719450cc1e47367e2348fe0b6a"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "responses_hashed": true,
+    "single_prompt_version": true
+  },
+  "wall_seconds_median": 25.085,
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "reason": "eligible_for_registry_review",
+    "next_gate": "M.7.4 snapshot vivo y promoción gobernada"
+  }
+}

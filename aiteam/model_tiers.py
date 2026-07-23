@@ -162,11 +162,17 @@ def _economy_evidence(
         }
     if channel == "local":
         return {
-            "cost_class": "local_compute",
-            "measurement_basis": "installed_model_health_latency_and_host_resources",
+            "cost_class": "zero_external_cost_local_compute",
+            "measurement_basis": (
+                "zero_external_tokens_and_quota_plus_installed_model_health_"
+                "latency_and_host_resources"
+            ),
             "input_cents_per_mtok": 0,
             "output_cents_per_mtok": 0,
-            "quota_unlimited": False,
+            "quota_unlimited": True,
+            "external_token_consumption": 0,
+            "external_quota_pressure": 0,
+            "host_resource_cost_separate": True,
         }
     return {
         "cost_class": "unknown",

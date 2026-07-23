@@ -228,5 +228,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.5-cli-0.145.0-seed-3\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n\nObjetivo: migrar autenticación con corte reversible y sin downtime.\n\nDecisiones y restricciones: se mantiene JWT RS256. La rotación de claves usará doble validación durante 24 horas. La clave antigua no puede eliminarse hasta que `legacy_kid_hits` sea cero durante dos horas. Quedan fuera de scope migrar sesiones existentes y cambiar el proveedor de identidad.\n\nTrabajo completado: Engineer implementó el lector dual en `src/auth/keyring.py` y aportó evidencia `pytest tests/auth -q: 42 passed`. Reviewer aprobó la compatibilidad.\n\nEstado actual: rollback aún no está automatizado. Engineer queda como owner de crear `scripts/rollback_keys.py`; Reviewer debe aceptar el dry-run.\n\nRiesgo y escalado: las cachés regionales pueden conservar JWKS durante 15 minutos. Si las respuestas 401 superan 0,5 % durante cinco minutos, se pausa la rotación y se escala al Lead.\n\nRuido descartado: saludos, nombres temporales, estimaciones ya descartadas y fragmentos de logs sin relación causal no aportan decisión ni acción nueva."
+  "summary": "## Síntesis causal\n\nObjetivo: migrar autenticación con corte reversible y sin downtime.\n\nDecisiones y restricciones: se mantiene JWT RS256. La rotación de claves usará doble validación durante 24 horas. La clave antigua no puede eliminarse hasta que `legacy_kid_hits` sea cero durante dos horas. Quedan fuera de scope migrar sesiones existentes y cambiar el proveedor de identidad.\n\nTrabajo completado: Engineer implementó el lector dual en `src/auth/keyring.py` y aportó evidencia `pytest tests/auth -q: 42 passed`. Reviewer aprobó la compatibilidad.\n\nEstado actual: rollback aún no está automatizado. Engineer queda como owner de crear `scripts/rollback_keys.py`; Reviewer debe aceptar el dry-run.\n\nRiesgo y escalado: las cachés regionales pueden conservar JWKS durante 15 minutos. Si las respuestas 401 superan 0,5 % durante cinco minutos, se pausa la rotación y se escala al Lead.\n\nRuido descartado: saludos, nombres temporales, estimaciones ya descartadas y fragmentos de logs sin relación causal no aportan decisión ni acción nueva.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.5",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

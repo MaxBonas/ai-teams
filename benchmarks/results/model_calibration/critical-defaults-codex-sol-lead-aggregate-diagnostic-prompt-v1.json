@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "required_cases": [
+    "tenant_queue_migration",
+    "auth_rollout_incident"
+  ],
+  "required_seeds": [
+    1,
+    2,
+    3
+  ],
+  "samples_observed": 6,
+  "samples_passed": 3,
+  "matrix_complete": true,
+  "wall_seconds_median": 22.086,
+  "conclusion": {
+    "exact_pair_calibrated": false,
+    "default_change_allowed": false,
+    "reason": "incomplete_or_failed_exact_pair",
+    "next_gate": "M.7.4 snapshot vivo y promoción gobernada"
+  }
+}

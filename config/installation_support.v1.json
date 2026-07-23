@@ -1,0 +1,311 @@
+{
+  "schema_version": "installation_support_v1",
+  "updated_at": "2026-07-23",
+  "statuses": [
+    "verified",
+    "preview",
+    "planned",
+    "unsupported"
+  ],
+  "acceptance_contract": {
+    "schema_version": "windows_clean_room_acceptance_v1",
+    "platform_id": "windows_native_x86_64",
+    "workflow": ".github/workflows/windows-clean-room.yml",
+    "runner": "windows-latest",
+    "required_steps": [
+      "source_revision",
+      "bootstrap_first",
+      "bootstrap_second",
+      "installation_audit",
+      "start",
+      "backend_health",
+      "frontend_health",
+      "fixture_project_create",
+      "stop",
+      "ports_released"
+    ],
+    "promotion_requires": [
+      "ok=true",
+      "independent_machine=true",
+      "promotion_allowed=true",
+      "recibo redacted conservado como artefacto"
+    ],
+    "limits": [
+      "No instala ni autentica CLIs de proveedores.",
+      "No ejecuta inferencias ni demuestra que un adapter esté verde.",
+      "Una ejecución local valida el harness, pero no cuenta como máquina independiente."
+    ]
+  },
+  "distributions": [
+    {
+      "id": "git_checkout",
+      "status": "preview",
+      "source": "https://github.com/MaxBonas/ai-teams.git",
+      "integrity": "tag o commit SHA explícito",
+      "update": "git pull",
+      "rollback": "checkout de un tag o commit conocido",
+      "notes": "Vía canónica actual; aún no existe una release aceptada en máquina limpia."
+    },
+    {
+      "id": "versioned_release_artifact",
+      "status": "planned",
+      "channel": "GitHub Release",
+      "required_contents": [
+        "versión inmutable",
+        "checksums SHA-256",
+        "SBOM y reporte de licencias",
+        "notas de migración",
+        "instrucciones de actualización y rollback",
+        "test de ausencia de secretos y estado local"
+      ],
+      "notes": "Debe incluir checksum, SBOM/licencias, notas de migración y rollback."
+    },
+    {
+      "id": "container",
+      "status": "planned",
+      "notes": "Será opcional y no sustituirá CLIs, sesiones ni keyrings que viven en el host."
+    }
+  ],
+  "platforms": [
+    {
+      "id": "windows_native_x86_64",
+      "os": "windows",
+      "architecture": "x86_64",
+      "status": "preview",
+      "bootstrap": "scripts\\prepare_dev_env.bat",
+      "tested_versions": {
+        "windows": "10.0.26200",
+        "python": "3.12.10",
+        "node": "24.14.0",
+        "npm": "11.9.0",
+        "powershell": "7.6.3"
+      },
+      "evidence_date": "2026-07-22",
+      "limitations": [
+        "Falta aceptación reproducible en una máquina limpia independiente.",
+        "No existe todavía artefacto de release versionado."
+      ]
+    },
+    {
+      "id": "windows_native_arm64",
+      "os": "windows",
+      "architecture": "arm64",
+      "status": "planned",
+      "bootstrap": "scripts\\prepare_dev_env.bat"
+    },
+    {
+      "id": "linux_x86_64",
+      "os": "linux",
+      "architecture": "x86_64",
+      "status": "planned",
+      "bootstrap": null
+    },
+    {
+      "id": "linux_arm64",
+      "os": "linux",
+      "architecture": "arm64",
+      "status": "planned",
+      "bootstrap": null
+    },
+    {
+      "id": "macos_x86_64",
+      "os": "macos",
+      "architecture": "x86_64",
+      "status": "planned",
+      "bootstrap": null
+    },
+    {
+      "id": "macos_arm64",
+      "os": "macos",
+      "architecture": "arm64",
+      "status": "planned",
+      "bootstrap": null
+    }
+  ],
+  "runtimes": [
+    {
+      "id": "python",
+      "requirement": "required",
+      "minimum_version": "3.10",
+      "recommended_version": "3.12",
+      "version_args": [
+        "--version"
+      ],
+      "commands": [
+        "python",
+        "py"
+      ]
+    },
+    {
+      "id": "node",
+      "requirement": "required",
+      "minimum_version": "22",
+      "recommended_version": "24",
+      "version_args": [
+        "--version"
+      ],
+      "commands": [
+        "node"
+      ],
+      "notes": "Node 20 e inferiores están EOL; 24 es LTS en la fecha del contrato."
+    },
+    {
+      "id": "npm",
+      "requirement": "required",
+      "minimum_version": "10",
+      "recommended_version": "11",
+      "version_args": [
+        "--version"
+      ],
+      "commands": [
+        "npm.cmd",
+        "npm"
+      ]
+    },
+    {
+      "id": "git",
+      "requirement": "required",
+      "minimum_version": "2.23",
+      "recommended_version": null,
+      "version_args": [
+        "--version"
+      ],
+      "commands": [
+        "git"
+      ]
+    },
+    {
+      "id": "powershell",
+      "requirement": "required_on_windows",
+      "minimum_version": "5.1",
+      "recommended_version": "7",
+      "version_args": [
+        "-NoProfile",
+        "-Command",
+        "$PSVersionTable.PSVersion.ToString()"
+      ],
+      "commands": [
+        "pwsh.exe",
+        "powershell.exe"
+      ]
+    }
+  ],
+  "live_run_contract": {
+    "minimum": "Al menos un adapter Lead-capable debe estar instalado, autenticado, compatible y verde.",
+    "primary_options": [
+      "codex_subscription",
+      "antigravity_subscription",
+      "openai_api",
+      "gemini_api",
+      "anthropic_api"
+    ],
+    "rules": [
+      "Encontrar un CLI no demuestra autenticación ni health.",
+      "No se exige instalar todos los canales.",
+      "OpenCode Zen, Ollama y LM Studio no satisfacen por sí solos el mínimo Lead-capable vigente.",
+      "API y suscripción son canales independientes."
+    ]
+  },
+  "adapters": [
+    {
+      "id": "codex_subscription",
+      "cli_id": "codex",
+      "setup_class": "primary_option",
+      "commands": [
+        "codex.cmd",
+        "codex"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "install": {
+        "windows": "powershell -ExecutionPolicy Bypass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"",
+        "portable_alternative": "npm install -g @openai/codex"
+      },
+      "authentication": {
+        "human_required": true,
+        "command": "codex login",
+        "mode": "ChatGPT o API key administrada por Codex"
+      },
+      "automatic_install": false
+    },
+    {
+      "id": "antigravity_subscription",
+      "cli_id": "agy",
+      "setup_class": "primary_option",
+      "commands": [
+        "agy.exe",
+        "agy"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "install": {
+        "windows": "irm https://antigravity.google/cli/install.ps1 | iex"
+      },
+      "authentication": {
+        "human_required": true,
+        "command": "agy",
+        "mode": "keyring del sistema con fallback a Google Sign-In"
+      },
+      "automatic_install": false
+    },
+    {
+      "id": "opencode_zen_free",
+      "cli_id": "opencode",
+      "setup_class": "optional_economy",
+      "commands": [
+        "opencode.cmd",
+        "opencode"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "install": {
+        "windows": "npm install -g opencode-ai@latest"
+      },
+      "authentication": {
+        "human_required": true,
+        "command": "opencode auth login --provider opencode",
+        "mode": "API key personal de OpenCode Zen",
+        "notes": "Precio cero de un modelo no implica gateway anónimo; la oferta y sus límites son temporales."
+      },
+      "data_policy": "non_confidential_only",
+      "automatic_install": false
+    },
+    {
+      "id": "ollama",
+      "cli_id": "ollama",
+      "setup_class": "optional_local",
+      "commands": [
+        "ollama.exe",
+        "ollama"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "authentication": {
+        "human_required": false,
+        "mode": "local"
+      },
+      "automatic_install": false
+    },
+    {
+      "id": "lmstudio",
+      "cli_id": "lms",
+      "setup_class": "optional_local",
+      "commands": [
+        "lms.exe",
+        "lms"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "authentication": {
+        "human_required": false,
+        "mode": "local"
+      },
+      "automatic_install": false
+    }
+  ]
+}

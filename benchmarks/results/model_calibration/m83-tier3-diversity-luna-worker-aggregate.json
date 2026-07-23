@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_behavioral_diversity_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "role": "worker",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_two_family_causal_report_v3",
+  "case_families": [
+    "incident_dependency_handoff",
+    "release_rollback_checklist"
+  ],
+  "case_family_count": 2,
+  "seeds_per_family": 3,
+  "samples_total": 6,
+  "family_checks": [
+    {
+      "case_family": "release_rollback_checklist",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "samples_artifact_passed": 3,
+      "samples_single_attempt": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/codex-luna-worker-low-v2-aggregate.json"
+    },
+    {
+      "case_family": "incident_dependency_handoff",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "samples_artifact_passed": 3,
+      "samples_single_attempt": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/m83-incident-luna-worker-aggregate.json"
+    }
+  ],
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-luna-worker-low-v2-aggregate.json",
+    "benchmarks/results/model_calibration/m83-incident-luna-worker-aggregate.json"
+  ],
+  "source_sha256": [
+    "9061856ce5f899c8b91d9e54afc97b913c3a36b76dd7646861dfe110c2c51f97",
+    "eaabad57516a29cadd425f64ddd6ee040766541f86a9770fa29b5911b721e111"
+  ],
+  "integrity": {
+    "same_exact_pair": true,
+    "two_distinct_families": true,
+    "sources_bound": true,
+    "sources_hashed": true
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "case_diversity_passed": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_two_family_exact_pair",
+    "goodhart_risk": "moderate"
+  }
+}

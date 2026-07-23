@@ -5,7 +5,7 @@
   "cli_version": "0.145.0",
   "contract": "two_causal_slices_three_seeds_each",
   "arms": {
-    "gpt_5_5_control_low": {
+    "gpt_5_5_control_unpinned": {
       "model": "gpt-5.5",
       "samples": 6,
       "accepted": 6,
@@ -20,6 +20,8 @@
       ],
       "input_tokens_median": 22753.0,
       "output_tokens_median": 1784.0,
+      "reasoning_effort_override": null,
+      "validation_errors": [],
       "source_receipts": [
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.5-cli-0.145.0-seed-1.json",
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.5-cli-0.145.0-seed-2.json",
@@ -29,7 +31,7 @@
         "benchmarks/results/model_calibration/context-curator-queue-gpt-5.5-cli-0.145.0-seed-3.json"
       ]
     },
-    "luna_low_original": {
+    "luna_unpinned_original": {
       "model": "gpt-5.6-luna",
       "samples": 6,
       "accepted": 3,
@@ -44,6 +46,8 @@
       ],
       "input_tokens_median": 21431.0,
       "output_tokens_median": 1498.0,
+      "reasoning_effort_override": null,
+      "validation_errors": [],
       "source_receipts": [
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-seed-1.json",
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-seed-2.json",
@@ -53,7 +57,7 @@
         "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-seed-3.json"
       ]
     },
-    "luna_low_prompt_v2": {
+    "luna_unpinned_prompt_v2": {
       "model": "gpt-5.6-luna",
       "samples": 6,
       "accepted": 4,
@@ -68,6 +72,8 @@
       ],
       "input_tokens_median": 21495.5,
       "output_tokens_median": 1420.0,
+      "reasoning_effort_override": null,
+      "validation_errors": [],
       "source_receipts": [
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-prompt-v2-seed-1.json",
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-prompt-v2-seed-2.json",
@@ -92,6 +98,8 @@
       ],
       "input_tokens_median": 21495.0,
       "output_tokens_median": 1700.0,
+      "reasoning_effort_override": "medium",
+      "validation_errors": [],
       "source_receipts": [
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
@@ -101,7 +109,7 @@
         "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json"
       ]
     },
-    "terra_low_diagnostic": {
+    "terra_unpinned_diagnostic": {
       "model": "gpt-5.6-terra",
       "samples": 6,
       "accepted": 5,
@@ -116,6 +124,8 @@
       ],
       "input_tokens_median": 22871.0,
       "output_tokens_median": 1699.0,
+      "reasoning_effort_override": null,
+      "validation_errors": [],
       "source_receipts": [
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-terra-cli-0.145.0-seed-1.json",
         "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-terra-cli-0.145.0-seed-2.json",
@@ -136,6 +146,6 @@
     "quality_gate": "candidate_and_control_6_of_6",
     "gpt_5_5_disposition": "historical_control_not_active_default",
     "terra_disposition": "diagnostic_not_promoted_outside_budget_tier",
-    "low_effort_disposition": "rejected_due_to_silent_causal_anchor_loss"
+    "unpinned_effort_disposition": "historical_only_not_valid_for_effort_comparison"
   }
 }

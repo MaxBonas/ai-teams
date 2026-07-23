@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "qa",
+  "contract_version": "adversarial_qa_fix_cycle_v2",
+  "case_family": "webhook_replay_boundary",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/m83-webhook-terra-seed-1.json",
+    "benchmarks/results/model_calibration/m83-webhook-terra-seed-2.json",
+    "benchmarks/results/model_calibration/m83-webhook-terra-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-webhook-terra-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "056710380bea474558d22bf9038111144c44796ae96efe8c57487e9dd27d19f8"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-webhook-terra-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "412c18987b652ef2fb666dea202312c21073a0f87b5fd63e4ff7b521e63c4df6"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-webhook-terra-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "fc4c063fc9ac47deef863de7439f32e17a1970a3b37797dc9cf8b2302fd09aaa"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true
+  },
+  "checks_passed": 30,
+  "checks_total": 30,
+  "wall_seconds_median": 138.11,
+  "wall_seconds_range": [
+    127.516,
+    145.656
+  ],
+  "usage": {
+    "cached_input_tokens": 759296,
+    "input_tokens": 861919,
+    "output_tokens": 14828,
+    "reasoning_output_tokens": 2764,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "browser QA",
+      "suites multiarchivo",
+      "recovery de entorno de tests roto"
+    ]
+  }
+}

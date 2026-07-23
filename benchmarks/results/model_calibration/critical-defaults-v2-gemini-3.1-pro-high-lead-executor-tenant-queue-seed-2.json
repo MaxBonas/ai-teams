@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 6.484,
+  "usage": {},
+  "response": {
+    "objective": "Ejecutar la migración tenant_queue_migration asegurando que SQLite sea la única fuente durable con aislamiento estricto por tenant_id, atomizando la operación de checkout para eliminar la condición de carrera entre SELECT y UPDATE que permite a dos workers ganar la misma issue, sin detener las runs activas.",
+    "execution_steps": [
+      "Diseñar e implementar la unificación atómica de SELECT y UPDATE en la consulta de checkout sobre SQLite filtrando por tenant_id.",
+      "Desplegar la modificación protegiendo el nuevo camino de ejecución tras el flag de conmutación existente sin pausar runs activas.",
+      "Ejecutar el protocolo de validación de resiliencia sometiendo el sistema a la prueba del gate.",
+      "Verificar la estabilidad del checkout y el aislamiento multitransaccional entre workers."
+    ],
+    "evidence": "Completar la ejecución de 100 reinicios con cero wakeups perdidos durante una ventana continua de 24 horas.",
+    "risks": [
+      "Condición de carrera activa donde dos workers asumen la misma issue debido a la separación entre SELECT y UPDATE en la implementación previa.",
+      "Posible interrupción de runs activas durante el despliegue de los cambios en la cola de tenants."
+    ],
+    "rollback": "Alternar el flag existente para conmutar de inmediato al camino anterior sin afectar el estado en SQLite.",
+    "escalation": "Escalar de inmediato si se detecta cualquier wakeup perdido durante los 100 reinicios en la ventana de 24 horas o si el flag de retorno al camino anterior falla al conmutar."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

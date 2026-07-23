@@ -15,9 +15,12 @@ from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticA
 from aiteam.adapters.work_contract import (
     OPENAI_SUBMIT_WORK_SCHEMA,
     SUBMIT_WORK_SCHEMA,
+    TIER1_FACT_RETENTION_ROLES,
     build_execution_contract,
+    critical_fact_retention_instruction,
     ops_to_actions,
     parse_submit_work,
+    tier3_causal_report_instruction,
 )
 from aiteam.quorum_quality import quorum_audit_contract_instruction
 
@@ -173,6 +176,8 @@ class ClaudeSubscriptionCliRuntime:
                 "http 429",
             )):
                 error_code = "subscription_cli_usage_limit"
+            elif "does not support thinking" in lowered_output:
+                error_code = "subscription_cli_incompatible_reasoning"
             elif (
                 "model requires a newer version" in lowered_output
                 or "requires a newer version of codex" in lowered_output
@@ -402,7 +407,7 @@ def _build_system_prompt(env: dict[str, str]) -> str:
     role = env.get("AITEAM_AGENT_ROLE", "").strip() or "agent"
     skill = env.get("AITEAM_AGENT_SKILL", "").strip()
     base = skill or f"Eres un agente de AI Teams con rol {role}. Completa la delegacion recibida."
-    contract = base + build_execution_contract()
+    contract = base + build_execution_contract(role)
     if role.lower() == "quorum_auditor":
         contract += (
             "\n\nQUORUM AUDITOR — CONTRATO ESTRICTO:\n"
@@ -476,6 +481,8 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         "",
         "=== Instrucciones ===",
     ]
+    if role_key in TIER1_FACT_RETENTION_ROLES:
+        parts.append(critical_fact_retention_instruction())
 
     if is_orchestrator:
         parts += [
@@ -538,6 +545,7 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
     elif is_read_only:
         parts += [
             "Eres un SCOUT de solo lectura. Inspecciona y reporta; NO edites archivos.",
+            tier3_causal_report_instruction(role_key),
             "1. Lee los archivos indicados y responde con un resumen conciso en `add_comment`.",
             "2. Cierra tu tarea añadiendo el op {\"type\":\"set_status\",\"status\":\"done\"} — tu trabajo es de un solo tiro.",
         ]

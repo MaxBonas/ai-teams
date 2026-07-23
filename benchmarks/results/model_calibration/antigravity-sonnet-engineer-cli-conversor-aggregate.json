@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "benchmark": "coding_behavioral_calibration_aggregate",
+  "case": "cli_conversor",
+  "profile_id": "antigravity_subscription",
+  "model": "claude-sonnet-4-6",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "same_case": true,
+  "same_evaluation_contract": true,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-seed-1.json",
+    "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-seed-2.json",
+    "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-seed-1.json",
+      "seed": 1,
+      "evidence_sha256": "426791ba05acd69f2e68b9ae36015fd0682857bef72db8c8bf327a2acf5b4f7a"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-seed-2.json",
+      "seed": 2,
+      "evidence_sha256": "0677a6ddc8770815ee19e14ca236b2337edf2799402dd8905df3809e731fc3ca"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-seed-3.json",
+      "seed": 3,
+      "evidence_sha256": "5ebb7ed58e12ed848df5a8e24277d4ffc227996740567fc0c749a5fc5d7779c5"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true
+  },
+  "samples_passed": 3,
+  "wall_seconds_median": 51.141,
+  "wall_seconds_range": [
+    48.516,
+    53.0
+  ],
+  "attempts": [
+    1,
+    1,
+    1
+  ],
+  "usage": {
+    "available": false,
+    "input_tokens": null,
+    "output_tokens": null,
+    "marginal_cost_cents": 0,
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "goodhart_risk": "residual_hidden_suite_overfit",
+    "unmeasured_constructs": [
+      "repositorios grandes",
+      "cambios multiarchivo",
+      "recovery tras tests fallidos"
+    ]
+  }
+}

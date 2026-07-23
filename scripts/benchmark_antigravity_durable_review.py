@@ -38,7 +38,8 @@ OPENCODE_MODELS = (
     "opencode/laguna-s-2.1-free",
 )
 CODEX_MODELS = ("gpt-5.6-terra",)
-MODELS = (*ANTIGRAVITY_MODELS, *OPENCODE_MODELS, *CODEX_MODELS)
+LOCAL_MODELS = ("gemma4:26b",)
+MODELS = (*ANTIGRAVITY_MODELS, *OPENCODE_MODELS, *CODEX_MODELS, *LOCAL_MODELS)
 
 BROKEN = '''def close_issue(db, issue_id, actor):
     issue = db.query("SELECT * FROM issues WHERE id=?", issue_id)
@@ -66,14 +67,58 @@ FIXED = '''def close_issue(db, issue_id, actor, enqueue_wakeup):
 '''
 
 
-def _init_sample(root: Path, model: str) -> Path:
+def _model_transport(model: str) -> dict[str, Any]:
     is_opencode = model.startswith("opencode/")
     is_codex = model in CODEX_MODELS
-    profile_id = (
-        "opencode_zen_free" if is_opencode
-        else "codex_subscription" if is_codex
-        else "antigravity_subscription"
-    )
+    is_local = model in LOCAL_MODELS
+    if is_local:
+        return {
+            "profile_id": "local_gemma4_ollama",
+            "provider": "ollama",
+            "channel": "local",
+            "cli_version": "0.145.0",
+            "command": ["codex"],
+            "cli_kind": "codex",
+            "extra_config": {
+                "oss": True,
+                "local_provider": "ollama",
+                "model_reasoning_effort": "none",
+            },
+        }
+    if is_opencode:
+        return {
+            "profile_id": "opencode_zen_free",
+            "provider": "opencode-zen",
+            "channel": "free_gateway",
+            "cli_version": "1.18.4",
+            "command": ["opencode.cmd"],
+            "cli_kind": "opencode",
+            "extra_config": {},
+        }
+    if is_codex:
+        return {
+            "profile_id": "codex_subscription",
+            "provider": "openai-codex",
+            "channel": "subscription",
+            "cli_version": "0.145.0",
+            "command": ["codex"],
+            "cli_kind": "codex",
+            "extra_config": {"model_reasoning_effort": "medium"},
+        }
+    return {
+        "profile_id": "antigravity_subscription",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "cli_version": "1.1.5",
+        "command": ["agy"],
+        "cli_kind": "antigravity",
+        "extra_config": {},
+    }
+
+
+def _init_sample(root: Path, model: str) -> Path:
+    transport = _model_transport(model)
+    profile_id = str(transport["profile_id"])
     os.environ["AITEAM_USER_CONFIG_DIR"] = str(root / "user-config")
     record_model_health(
         profile_id, model, available=True,
@@ -85,18 +130,22 @@ def _init_sample(root: Path, model: str) -> Path:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     config_payload = {
         "profile_id": profile_id,
-        "command": ["opencode.cmd"] if is_opencode else ["codex"] if is_codex else ["agy"],
-        "cli_kind": "opencode" if is_opencode else "codex" if is_codex else "antigravity",
+        "command": transport["command"],
+        "cli_kind": transport["cli_kind"],
         "model": model,
         "timeout_sec": 180,
-        "sandbox": "read-only" if is_opencode or is_codex else "workspace-write",
+        "sandbox": (
+            "read-only"
+            if profile_id
+            in {"opencode_zen_free", "codex_subscription", "local_gemma4_ollama"}
+            else "workspace-write"
+        ),
+        **dict(transport["extra_config"]),
     }
-    if is_codex:
-        config_payload["model_reasoning_effort"] = "medium"
     config = json.dumps(config_payload)
     root_meta = json.dumps({
         "profile": "full_team",
-        "data_class": "public" if is_opencode else "internal",
+        "data_class": "public" if profile_id == "opencode_zen_free" else "internal",
     })
     description = (
         "Revisa close_issue.py. Debe impedir cruce de tenant/assignee, persistir status+activity "
@@ -164,8 +213,7 @@ def _latest_report(db_path: Path) -> dict[str, Any] | None:
 
 
 def run_sample(root: Path, *, model: str, seed: int) -> dict[str, Any]:
-    is_opencode = model.startswith("opencode/")
-    is_codex = model in CODEX_MODELS
+    transport = _model_transport(model)
     db_path = _init_sample(root, model)
     reject_seconds = _wake_and_run(db_path, f"reject-seed-{seed}")
     rejected = _latest_report(db_path)
@@ -213,14 +261,10 @@ def run_sample(root: Path, *, model: str, seed: int) -> dict[str, Any]:
         "schema_version": 1,
         "benchmark": "durable_review",
         "seed": seed,
-        "profile_id": (
-            "opencode_zen_free" if is_opencode
-            else "codex_subscription" if is_codex
-            else "antigravity_subscription"
-        ),
-        "provider": "opencode-zen" if is_opencode else "openai-codex" if is_codex else "google-antigravity",
-        "channel": "free_gateway" if is_opencode else "subscription",
-        "cli_version": "1.18.4" if is_opencode else "0.145.0" if is_codex else "1.1.5",
+        "profile_id": transport["profile_id"],
+        "provider": transport["provider"],
+        "channel": transport["channel"],
+        "cli_version": transport["cli_version"],
         "model": model,
         "contract": "same_broken_diff_then_same_fix_v1",
         "reject": {"ok": reject_ok, "seconds": reject_seconds, "report": rejected},
@@ -342,7 +386,9 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
             "tokens_available": all(bool(arm["tokens_available"]) for arm in arms),
             "marginal_cost_cents": 0,
             "quota_note": (
-                "tokens observados por Codex subscription; presión de cuota, no coste API"
+                "modelo local: sin coste API ni presión de cuota externa"
+                if set(str(row.get("channel") or "") for row in reports) == {"local"}
+                else "tokens observados por Codex subscription; presión de cuota, no coste API"
                 if all(bool(arm["tokens_available"]) for arm in arms)
                 else "algún transporte no expone usage comparable por run"
             ),

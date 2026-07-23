@@ -244,5 +244,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-queue-gpt-5.6-luna-cli-0.145.0-prompt-v2-seed-2\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n- Objetivo: desplegar el consumidor asíncrono sin facturas duplicadas y con rollback en menos de 10 minutos.\n- Decisiones: idempotencia por `invoice_id` + `attempt`; feature flag inicial al 10%; consumidor antiguo en shadow 48 h; máximo 3 retries; después DLQ sin confirmar procesamiento.\n- Evidencia: replay de 10.000 mensajes ejecutado por Platform con 0 duplicados.\n- Accountability: Engineer debe crear `scripts/replay_dlq.py`; Reviewer acepta la transición tras reproducir un dry-run de 100 mensajes en staging.\n- Riesgo/escalado: webhooks fuera de orden pueden llegar hasta 20 min tarde y reabrir estados cerrados. Si duplicados >0,1% durante 10 min, SRE desactiva la flag, revierte al consumidor anterior y escala al Lead.\n- Fuera de alcance: migrar de broker y cambiar el esquema de pagos.\n- El resto del slice es repetición no accionable."
+  "summary": "## Síntesis causal\n- Objetivo: desplegar el consumidor asíncrono sin facturas duplicadas y con rollback en menos de 10 minutos.\n- Decisiones: idempotencia por `invoice_id` + `attempt`; feature flag inicial al 10%; consumidor antiguo en shadow 48 h; máximo 3 retries; después DLQ sin confirmar procesamiento.\n- Evidencia: replay de 10.000 mensajes ejecutado por Platform con 0 duplicados.\n- Accountability: Engineer debe crear `scripts/replay_dlq.py`; Reviewer acepta la transición tras reproducir un dry-run de 100 mensajes en staging.\n- Riesgo/escalado: webhooks fuera de orden pueden llegar hasta 20 min tarde y reabrir estados cerrados. Si duplicados >0,1% durante 10 min, SRE desactiva la flag, revierte al consumidor anterior y escala al Lead.\n- Fuera de alcance: migrar de broker y cambiar el esquema de pagos.\n- El resto del slice es repetición no accionable.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

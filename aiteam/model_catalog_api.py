@@ -10,23 +10,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from aiteam.model_catalog_projection import MODEL_CATALOG_STATE_NAMES
 from aiteam.model_role_scoring import rank_model_role_scores
 from aiteam.policies import canonical_role
 
 
-CATALOG_STATE_NAMES = (
-    "catalogued",
-    "configured",
-    "adapter_green",
-    "model_verified",
-    "selectable",
-    "compatible",
-    "calibrated",
-    "stale",
-    "manual_only",
-    "blocked",
-    "retired",
-)
+CATALOG_STATE_NAMES = MODEL_CATALOG_STATE_NAMES
 
 
 def catalog_selection_reason(role_row: Mapping[str, Any]) -> str:

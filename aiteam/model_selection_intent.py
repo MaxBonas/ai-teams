@@ -42,8 +42,10 @@ def normalize_owner_explicit_selection(
         str(old.get("model") or "").strip(),
     ) == (profile_id, model)
     if incoming_intent is None and same_pair and _is_owner_explicit(old_intent):
-        config["selection_intent"] = dict(old_intent)
-        return config
+        # Inherit the owner's source, but re-bind the stored candidate below.
+        # Rows created by an older client or manual DB edits must not bypass the
+        # exact profile+model identity check merely because the pair is stable.
+        incoming_intent = dict(old_intent)
 
     projection = contextual_model_selection(
         Path(db_path),

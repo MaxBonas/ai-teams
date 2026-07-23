@@ -755,7 +755,12 @@ def _subscription_auth_probe(
                 return {
                     "status": "installed",
                     "reason": "opencode_auth_not_verified",
-                    "hint": "Ejecuta `opencode auth login --provider opencode` y acepta las condiciones de privacidad de Zen.",
+                    "hint": (
+                        "OpenCode Zen exige una API key personal incluso para modelos de "
+                        "precio temporalmente cero. Ejecuta "
+                        "`opencode auth login --provider opencode`, conecta tu cuenta y "
+                        "acepta sus condiciones; AI Teams no puede automatizar esa decisión."
+                    ),
                 }
             except Exception as exc:
                 return {

@@ -1356,6 +1356,13 @@ button.status-pill { min-height: 26px; }
 .cli-card.authenticated small.cli-command { color: var(--accent-text); }
 .cli-card button { min-height: 22px; padding: 0 7px; font-size: 0.65rem; }
 .cli-card small { font-size: 0.62rem; color: var(--text-dim); }
+.cli-setup-guide { grid-column: 1/-1; font-weight: 500; color: var(--text-dim); }
+.cli-setup-guide summary { cursor: pointer; color: var(--text-muted); font-size: 0.65rem; }
+.cli-setup-guide p { margin: 5px 0; line-height: 1.4; }
+.cli-setup-guide ol { margin: 5px 0 7px; padding-left: 18px; line-height: 1.45; }
+.cli-setup-guide a { color: var(--accent-text); }
+.cli-setup-guide code { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; }
+.cli-credential-note { border-left: 2px solid var(--accent-dim); padding-left: 6px; }
 .adapter-security-note { margin: 0; font-size: 0.7rem; line-height: 1.35; color: var(--text-dim); }
 .secret-row { display: grid; grid-template-columns: minmax(70px,0.8fr) minmax(0,1fr) auto; gap: 4px; align-items: center; }
 .secret-status-row { display: flex; flex-wrap: wrap; gap: 3px; }
@@ -2677,7 +2684,7 @@ dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 0.8rem; color:
 .provider-pulse { width: 8px; height: 8px; border: 1px solid var(--text-dim); border-radius: 50%; box-shadow: 0 0 0 3px rgba(139, 148, 158, 0.08); }
 .provider-pulse.is-green { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.1), 0 0 12px rgba(63, 185, 80, 0.35); }
 .channel-stamp { padding: 2px 5px; border: 1px solid #34515a; color: var(--model-cyan); font: 0.52rem 'JetBrains Mono', monospace; text-transform: uppercase; }
-.provider-card-counts { display: flex; gap: 10px; margin: 13px 0 10px; color: var(--text-dim); font-size: 0.62rem; }
+.provider-card-counts { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 13px 0 10px; color: var(--text-dim); font-size: 0.62rem; }
 .provider-card-counts strong { color: var(--text); font-family: 'JetBrains Mono', monospace; }
 .provider-card-counts .has-blocked strong { color: var(--blocked); }
 .model-provider-card dl { display: grid; gap: 4px; margin: 0; }

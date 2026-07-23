@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "benchmark": "qa_behavioral_diversity_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "qa",
+  "contract_version": "adversarial_qa_two_family_v3",
+  "case_families": [
+    "authorization_boundary",
+    "webhook_replay_boundary"
+  ],
+  "case_family_count": 2,
+  "seeds_per_family": 3,
+  "samples_total": 6,
+  "family_checks": [
+    {
+      "case_family": "authorization_boundary",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/codex-terra-qa-aggregate.json"
+    },
+    {
+      "case_family": "webhook_replay_boundary",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/m83-webhook-terra-aggregate.json"
+    }
+  ],
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-terra-qa-aggregate.json",
+    "benchmarks/results/model_calibration/m83-webhook-terra-aggregate.json"
+  ],
+  "source_sha256": [
+    "30e0c8980333c954557154e9df9ae946431b7cfd03030ecf0a6f206cabdb17fa",
+    "979dd5e977afed8c47c0cb6af532bb82ad58995eceead34d14fa7918f338a97e"
+  ],
+  "integrity": {
+    "same_exact_pair": true,
+    "two_distinct_families": true,
+    "sources_bound": true,
+    "sources_hashed": true
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "case_diversity_passed": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_two_family_exact_pair",
+    "goodhart_risk": "moderate",
+    "unmeasured_constructs": [
+      "browser QA",
+      "suites multiarchivo",
+      "recovery de infraestructura"
+    ]
+  }
+}

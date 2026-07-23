@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 5.39,
+  "usage": {},
+  "response": {
+    "objective": "Implementar la migración de la cola por inquilino a SQLite como fuente única durable, unificando la selección y actualización de issues por tenant_id en operaciones atómicas sin interrupción de runs activas.",
+    "execution_steps": [
+      "Introducir la nueva lógica de checkout atómico en SQLite combinando la consulta y marcado del estado dentro de una misma transacción por tenant_id deteniendo la condición de carrera entre workers.",
+      "Configurar el flag de características (feature flag) para habilitar de forma gradual o alternable la nueva ruta de checkout manteniéndola desactivada por defecto.",
+      "Desplegar el cambio manteniendo las runs activas en ejecución y activar el flag de características sin reiniciar los servicios existentes.",
+      "Ejecutar suite de pruebas de concurrencia y validación de checkout simulando múltiples workers sobre el mismo tenant_id.",
+      "Iniciar el periodo de prueba de rendimiento y resiliencia ejecutando 100 reinicios supervisados durante 24 horas."
+    ],
+    "evidence": [
+      "Registro de métricas de checkout demostrando cero duplicaciones de asignación de issues entre workers.",
+      "Verificación del cumplimiento del gate: ejecución exitosa de 100 reinicios consecutivos con cero wakeups perdidos en un intervalo continuo de 24 horas.",
+      "Trazabilidad en logs SQLite de transacciones atómicas completadas por tenant_id sin errores de bloqueo."
+    ],
+    "risks": [
+      "Contención de bloqueos en SQLite ante alta concurrencia de escrituras simultáneas de múltiples tenants.",
+      "Posible degradación temporal de latencia durante la transición si coexisten ambos caminos de checkout."
+    ],
+    "rollback": "Desactivar el flag de características para redirigir inmediatamente el tráfico de checkout hacia el camino anterior sin reiniciar servicios ni afectar las runs activas en curso.",
+    "escalation": "Escalar a la dirección técnica en caso de detectar contención crítica de escrituras en SQLite que no se resuelva tuning la transacción o si se pierde algún wakeup durante la ventana del gate de 24 horas."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

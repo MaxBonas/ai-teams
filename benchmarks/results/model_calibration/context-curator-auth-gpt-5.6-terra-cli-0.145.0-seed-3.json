@@ -227,5 +227,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.6-terra-cli-0.145.0-seed-3\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n\n**Objetivo y restricciones.** Migrar la autenticación con un corte reversible y sin downtime. Se mantiene JWT RS256; la rotación usa doble validación durante 24 h. No borrar la clave antigua hasta que `legacy_kid_hits` sea 0 durante 2 h. Fuera de alcance: migrar sesiones existentes o cambiar el proveedor de identidad.\n\n**Hecho y evidencia.** Engineer implementó el lector dual en `src/auth/keyring.py`; `pytest tests/auth -q` pasó 42 pruebas. Reviewer aprobó compatibilidad.\n\n**Pendiente y accountability.** Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta únicamente tras verificar su dry-run. El rollback no está automatizado.\n\n**Riesgo/escalado.** Las cachés regionales pueden retener JWKS 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar la rotación y escalar al Lead."
+  "summary": "## Síntesis causal\n\n**Objetivo y restricciones.** Migrar la autenticación con un corte reversible y sin downtime. Se mantiene JWT RS256; la rotación usa doble validación durante 24 h. No borrar la clave antigua hasta que `legacy_kid_hits` sea 0 durante 2 h. Fuera de alcance: migrar sesiones existentes o cambiar el proveedor de identidad.\n\n**Hecho y evidencia.** Engineer implementó el lector dual en `src/auth/keyring.py`; `pytest tests/auth -q` pasó 42 pruebas. Reviewer aprobó compatibilidad.\n\n**Pendiente y accountability.** Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta únicamente tras verificar su dry-run. El rollback no está automatizado.\n\n**Riesgo/escalado.** Las cachés regionales pueden retener JWKS 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar la rotación y escalar al Lead.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

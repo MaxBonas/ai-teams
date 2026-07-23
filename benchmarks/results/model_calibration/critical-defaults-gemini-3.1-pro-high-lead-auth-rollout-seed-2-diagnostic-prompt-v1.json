@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "auth_rollout_incident",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 7.484,
+  "usage": {},
+  "response": {
+    "objective": "Resolver el incidente auth_rollout_incident mitigando la tasa de error del 2,4 % (límite 1,0 % durante 10 min) en el rollout al 5 % de auth v2, ejecutando el rollback a auth v1 y gestionando la dependencia pendiente de rotación de secrets, descartando cualquier despliegue el jueves.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "task": "Ejecutar rollback del rollout de auth v2 a auth v1",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [],
+        "gate": "Métricas de error estabilizadas por debajo del 1,0 % tras redirigir tráfico a auth v1"
+      },
+      {
+        "id": "WI-2",
+        "task": "Gestionar y completar la rotación de secrets pendiente",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "WI-1"
+        ],
+        "gate": "Verificación de secrets rotados correctamente sin afectar auth v1"
+      }
+    ],
+    "risks": [
+      {
+        "description": "Tasa de error del 2,4 % superando el límite del 1,0 % durante 10 minutos",
+        "impact": "Degradación del servicio de autenticación",
+        "mitigation": "Rollback inmediato a auth v1 disponible"
+      },
+      {
+        "description": "Rotación de secrets pendiente",
+        "impact": "Bloqueo de reintento de rollout de auth v2",
+        "mitigation": "Completar la rotación de secrets como prerrequisito tras el rollback"
+      }
+    ],
+    "verification": {
+      "condition": "El Reviewer acepta solo cuando logs y métricas confirmen la recuperación completa del sistema"
+    },
+    "escalation": {
+      "conditions": [
+        "Persistencia de la tasa de error por encima del 1,0 % tras el rollback a auth v1",
+        "Fallo o bloqueo en la rotación de secrets pendiente"
+      ]
+    }
+  },
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "forbidden_hits": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "disabled_by_contract",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

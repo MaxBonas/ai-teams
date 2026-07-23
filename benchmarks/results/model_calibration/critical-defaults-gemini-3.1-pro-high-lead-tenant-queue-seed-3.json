@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 7.375,
+  "usage": {},
+  "response": {
+    "objective": "Migrar la cola de tenants a SQLite como única fuente durable manteniendo la asociación de tenant_id por issue, eliminando la condición de carrera en el checkout (separación de SELECT y UPDATE que permite la adquisición duplicada por dos workers), realizando una migración en caliente sin detener runs activas y habilitando un feature flag para retorno al camino anterior.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "title": "Diseño e unificación atómica del checkout en SQLite",
+        "description": "Consolidar las operaciones de SELECT y UPDATE en una transacción atómica por tenant_id dentro de SQLite para evitar doble ganador.",
+        "owner": "Senior Backend Engineer",
+        "approver": "Lead",
+        "dependencies": []
+      },
+      {
+        "id": "WI-2",
+        "title": "Implementación de la migración en vivo y Feature Flag",
+        "description": "Desplegar el mecanismo de migración que respeta las runs activas en ejecución y provee un flag de rollback para revertir al sistema previo si fuera necesario.",
+        "owner": "DevOps Engineer",
+        "approver": "Lead",
+        "dependencies": [
+          "WI-1"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Doble adjudicación de issues por workers concurrentes previa a la unificación atómica.",
+        "mitigation": "Aislamiento por transacción inmediata en SQLite asociando explícitamente el tenant_id."
+      },
+      {
+        "risk": "Pérdida o corrupción del estado durante el reinicio o conmutación del flag.",
+        "mitigation": "Validación continua mediante SQLite como única fuente de verdad durable antes del corte final."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar exitosamente 100 reinicios del sistema registrando exactamente cero wakeups perdidos a lo largo de 24 horas continuas.",
+      "conditions": [
+        "SQLite validado como única fuente durable.",
+        "Cero carreras de checkout registradas entre workers.",
+        "Rollback a través del flag probado sin afectación a runs activas."
+      ]
+    },
+    "escalation": {
+      "conditions": [
+        "Pérdida de un wakeup durante la ventana de evaluación de 24 horas o en la suite de 100 reinicios.",
+        "Inconsistencia de estado por interferencia de runs activas durante la migración.",
+        "Fallo crítico en la alternancia mediante el feature flag."
+      ],
+      "escalation_path": "Reversión inmediata al camino anterior mediante el feature flag y notificación directa al Lead para bloqueo del gate."
+    }
+  },
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": false
+    },
+    "anchors_retained": 8,
+    "anchors_total": 9,
+    "missing_anchors": [
+      "role.explicit_acceptor"
+    ],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": false
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": false,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

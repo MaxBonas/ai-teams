@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "job_state_machine_mutation",
+  "role": "test_designer",
+  "seed": 1,
+  "seconds": 83.39,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": true,
+    "all_hidden_mutants_killed": true,
+    "durable_report_done": true,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 0,
+      "stdout": "....................                                                     [100%]\n20 passed in 0.05s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_pending_succeed": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "maps_failure_to_success": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_terminal_restart": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_unknown_event": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "mutates_input": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_job_state.py"
+  ],
+  "run": {
+    "id": "run:fab33091-7e6f-4f15-a567-bdab842d5ddc",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gpt-5.6-terra",
+    "provider": "openai-codex",
+    "channel": "subscription",
+    "usage_json": "{\"cached_input_tokens\": 162304, \"input_tokens\": 179411, \"output_tokens\": 3067, \"reasoning_output_tokens\": 763}"
+  },
+  "report": {
+    "id": "bffcff81-a19f-4759-b515-5f5fb24f5acf",
+    "issue_id": "issue:benchmark_test_designer",
+    "agent_id": "role:benchmark_test_designer",
+    "run_id": "run:fab33091-7e6f-4f15-a567-bdab842d5ddc",
+    "agent_role": "test_designer",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "test_runner",
+    "tech_match": null,
+    "blocker": null,
+    "evidence": null,
+    "valid": 1,
+    "is_assignee": 1,
+    "raw_json": "{\"evidence\": \"\", \"files_created\": \"\", \"issue_id\": \"issue:benchmark_test_designer\", \"issue_status\": \"done\", \"next_owner\": \"test_runner\", \"result\": \"done\", \"role\": \"test_designer\", \"verification\": \"\"}",
+    "created_at": "2026-07-23 14:26:55"
+  },
+  "usage": {
+    "cached_input_tokens": 162304,
+    "input_tokens": 179411,
+    "output_tokens": 3067,
+    "reasoning_output_tokens": 763
+  },
+  "workspace": "runtime/bench/m83-job-state-terra-s1",
+  "ok": true
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_tier_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "role": "worker",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "incident_dependency_handoff",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "samples_artifact_passed": 3,
+  "samples_single_attempt": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/m83-incident-luna-worker-seed-1.json",
+    "benchmarks/results/model_calibration/m83-incident-luna-worker-seed-2.json",
+    "benchmarks/results/model_calibration/m83-incident-luna-worker-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-incident-luna-worker-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "7402eb24011c35018ec6e9eb619682084c05cefbdc5043c745a1370a16f5b145"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-incident-luna-worker-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "e57bf54b5ebbbe874a439a0c93630efe10f60b859bf73ea4bdce772f19375b63"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-incident-luna-worker-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "90f914d2b3d8e0555d58d5698e2356a0afe373cff8234501c159c889012c3c3a"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "artifacts_hashed": true
+  },
+  "checks_passed": 18,
+  "checks_total": 18,
+  "wall_seconds_median": 20.89,
+  "wall_seconds_range": [
+    18.328,
+    36.375
+  ],
+  "usage": {
+    "input_tokens": 216203,
+    "output_tokens": 2754,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "workspaces grandes",
+      "peticiones ambiguas",
+      "inputs binarios"
+    ]
+  }
+}

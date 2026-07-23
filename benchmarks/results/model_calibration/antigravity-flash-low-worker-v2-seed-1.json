@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-low",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "role": "worker",
+  "seed": 1,
+  "wall_seconds": 43.14,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "active_wave": true,
+      "owner": true,
+      "observed_rate": true,
+      "threshold": true,
+      "window": true,
+      "rollback": true,
+      "acceptance": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "README.md, AITEAM_WAKE_PAYLOAD_JSON"
+  },
+  "artifact": "Checklist causal de decisión creado y estado actualizado a done\n\n### Checklist Causal de Decisión\n\n- [x] **Estado actual:** Wave W3 está activa.\n- [x] **Propietario:** Release Engineer es el propietario (owner).\n- [x] **Métrica y Límite:** La tasa de error es del 2,1 %, lo que supera el límite máximo permitido del 1,0 %.\n- [x] **Ventana de tiempo:** La superación del límite ha persistido durante 5 minutos.\n- [x] **Acción requerida:** Pausar la ola W3 y volver a la ola W2.\n- [x] **Criterio de aceptación:** El Reviewer aceptará el trabajo cuando los logs y la métrica confirmen la recuperación del sistema.\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: README.md, AITEAM_WAKE_PAYLOAD_JSON",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:3568da8f-e71a-486a-b1af-71b25ae557f9",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gemini-3.5-flash-low",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\flash-low-worker-seed-1\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import threading
 import time
 from pathlib import Path
@@ -24,14 +25,14 @@ def get_current_model_catalog(
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
         if cached is not None and now - cached[0] <= max_age_seconds:
-            return cached[1]
+            return deepcopy(cached[1])
     read_model = build_current_model_catalog_read_model(db_paths=db_paths)
     with _CACHE_LOCK:
-        _CACHE[key] = (now, read_model)
+        _CACHE[key] = (time.monotonic(), deepcopy(read_model))
         if len(_CACHE) > 8:
             oldest = min(_CACHE, key=lambda item: _CACHE[item][0])
             _CACHE.pop(oldest, None)
-    return read_model
+    return deepcopy(read_model)
 
 
 def invalidate_model_catalog_cache() -> None:

@@ -214,5 +214,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.6-terra-cli-0.145.0-seed-1\\.aiteam\\aiteam.db"
   },
-  "summary": "## Migración de autenticación\n\n**Objetivo y límites.** Ejecutar un corte reversible sin downtime. Se mantienen JWT RS256; quedan fuera de alcance migrar sesiones existentes y cambiar el proveedor de identidad.\n\n**Decisión.** Rotación de claves con doble validación durante 24 h. No borrar la clave anterior hasta que `legacy_kid_hits` sea 0 durante 2 h.\n\n**Completado.** Engineer implementó el lector dual en `src/auth/keyring.py`; `pytest tests/auth -q` pasó: 42 tests. Reviewer aprobó compatibilidad.\n\n**Abierto / accountability.** Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta únicamente tras validar su dry-run. El rollback aún no está automatizado.\n\n**Riesgo y escalado.** Las cachés regionales pueden retener JWKS 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar la rotación y escalar al Lead."
+  "summary": "## Migración de autenticación\n\n**Objetivo y límites.** Ejecutar un corte reversible sin downtime. Se mantienen JWT RS256; quedan fuera de alcance migrar sesiones existentes y cambiar el proveedor de identidad.\n\n**Decisión.** Rotación de claves con doble validación durante 24 h. No borrar la clave anterior hasta que `legacy_kid_hits` sea 0 durante 2 h.\n\n**Completado.** Engineer implementó el lector dual en `src/auth/keyring.py`; `pytest tests/auth -q` pasó: 42 tests. Reviewer aprobó compatibilidad.\n\n**Abierto / accountability.** Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta únicamente tras validar su dry-run. El rollback aún no está automatizado.\n\n**Riesgo y escalado.** Las cachés regionales pueden retener JWKS 15 min. Si las respuestas 401 superan 0,5 % durante 5 min, pausar la rotación y escalar al Lead.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

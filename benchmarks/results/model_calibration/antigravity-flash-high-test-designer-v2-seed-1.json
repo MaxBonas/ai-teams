@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "role": "test_designer",
+  "seed": 1,
+  "seconds": 115.641,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": true,
+    "all_hidden_mutants_killed": true,
+    "durable_report_done": true,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 0,
+      "stdout": ".......                                                                  [100%]\n7 passed in 0.05s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_zero_quantity": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_negative_price": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_discount_over_100": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_discount": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_quantity": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_pricing.py"
+  ],
+  "run": {
+    "id": "run:986e8722-8dc4-4fd1-b83d-1c68dd343eba",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gemini-3.5-flash-high",
+    "provider": "google-antigravity",
+    "channel": "subscription",
+    "usage_json": "{}"
+  },
+  "report": {
+    "id": "3541c150-55e0-49bc-9cd9-16b7ffaf2869",
+    "issue_id": "issue:benchmark_test_designer",
+    "agent_id": "role:benchmark_test_designer",
+    "run_id": "run:986e8722-8dc4-4fd1-b83d-1c68dd343eba",
+    "agent_role": "test_designer",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "test_runner",
+    "tech_match": null,
+    "blocker": null,
+    "evidence": "tests/test_acceptance_pricing.py covers unit_price boundaries (>= 0), quantity boundaries (> 0), discount_pct boundaries (0 to 100 inclusive), default discount (0), and floating-point rounding precision.",
+    "valid": 1,
+    "is_assignee": 1,
+    "raw_json": "{\"evidence\": \"tests/test_acceptance_pricing.py covers unit_price boundaries (>= 0), quantity boundaries (> 0), discount_pct boundaries (0 to 100 inclusive), default discount (0), and floating-point rounding precision.\", \"issue_status\": \"done\", \"next_owner\": \"test_runner\", \"result\": \"done\", \"role\": \"test_designer\"}",
+    "created_at": "2026-07-23 09:39:32"
+  },
+  "usage": {},
+  "workspace": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\antigravity-flash-high-test-designer-seed-1",
+  "ok": true,
+  "contract_version": "independent_test_designer_mutation_v2",
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "exclude_interpreter_cache_from_authored_source_surface"
+  }
+}

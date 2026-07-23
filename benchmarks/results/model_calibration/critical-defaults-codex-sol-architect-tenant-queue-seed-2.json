@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 35.578,
+  "usage": {
+    "input_tokens": 16561,
+    "cached_input_tokens": 0,
+    "output_tokens": 1598
+  },
+  "response": {
+    "decision": {
+      "hechos": [
+        "SQLite será la única fuente durable.",
+        "Cada issue tiene tenant_id.",
+        "El checkout actual separa SELECT y UPDATE, permitiendo que dos workers ganen la misma issue.",
+        "La migración no puede detener runs activas.",
+        "Existe un flag para volver al camino anterior."
+      ],
+      "arquitectura": "Sustituir el checkout separado por una única operación transaccional en SQLite que seleccione y reclame exactamente una issue elegible para un tenant. La propiedad de una issue se representará mediante un lease persistido y verificable. Los wakeups serán únicamente una optimización; la recuperación de trabajo dependerá del estado durable consultado en SQLite.",
+      "limites": [
+        "SQLite conserva issues, tenant_id, estado de checkout y leases.",
+        "Los workers consumen la interfaz de checkout y no seleccionan ni actualizan issues directamente.",
+        "La migración afecta solamente nuevos checkouts; las runs ya activas conservan su propiedad y continúan.",
+        "No se introduce otra cola o fuente durable."
+      ],
+      "supuestos": [
+        "SQLite admite una transacción de escritura que serializa la selección y el reclamo.",
+        "Las runs activas pueden distinguirse de las issues pendientes.",
+        "Existe un identificador único de worker o intento para acreditar la propiedad del lease."
+      ]
+    },
+    "constraints": {
+      "invariantes": [
+        "Una issue no puede tener simultáneamente más de un lease vigente.",
+        "Todo checkout debe respetar tenant_id.",
+        "Una issue solo puede pasar de pendiente a reclamada dentro de la misma transacción.",
+        "La pérdida de un wakeup no puede ocultar indefinidamente trabajo durable.",
+        "Las runs activas no cambian de propietario durante la migración."
+      ],
+      "operativas": [
+        "La activación debe realizarse mediante el flag existente.",
+        "El camino anterior debe permanecer disponible hasta superar el gate.",
+        "El gate exige 100 reinicios, cero wakeups perdidos y una observación continua de 24 horas."
+      ]
+    },
+    "interfaces": {
+      "checkout": {
+        "entrada": [
+          "tenant_id",
+          "worker_id",
+          "lease_duration"
+        ],
+        "salida": [
+          "issue_id",
+          "lease_token",
+          "lease_expires_at"
+        ],
+        "resultado_vacio": "Sin issue elegible para ese tenant.",
+        "garantia": "La respuesta acredita un reclamo confirmado por SQLite antes de ser entregado al worker."
+      },
+      "renew": {
+        "entrada": [
+          "issue_id",
+          "lease_token",
+          "lease_duration"
+        ],
+        "salida": [
+          "lease_expires_at"
+        ],
+        "garantia": "Solo el titular del lease vigente puede renovarlo."
+      },
+      "complete": {
+        "entrada": [
+          "issue_id",
+          "lease_token",
+          "resultado"
+        ],
+        "salida": [
+          "estado_final"
+        ],
+        "garantia": "Solo el titular puede completar la issue; la transición queda persistida en SQLite."
+      },
+      "recovery_scan": {
+        "entrada": [
+          "tenant_id",
+          "now"
+        ],
+        "salida": [
+          "issues_pendientes_o_con_lease_expirado"
+        ],
+        "garantia": "Permite recuperar trabajo aunque no llegue un wakeup."
+      },
+      "feature_flag": {
+        "estados": [
+          "legacy",
+          "atomic_checkout"
+        ],
+        "alcance": "Selecciona el camino para nuevos checkouts y no altera runs activas."
+      }
+    },
+    "risks": {
+      "confirmados": [
+        {
+          "riesgo": "Doble asignación por separar SELECT y UPDATE.",
+          "control": "Checkout transaccional único con lease persistido."
+        }
+      ],
+      "supuestos_a_validar": [
+        {
+          "riesgo": "Contención de escritura en SQLite bajo concurrencia.",
+          "evidencia_requerida": "Métricas de latencia, errores de bloqueo y throughput durante la verificación."
+        },
+        {
+          "riesgo": "Reclamación prematura de trabajo tras expirar un lease de una run todavía viva.",
+          "evidencia_requerida": "Pruebas de renovación, expiración y recuperación con identidad de lease."
+        },
+        {
+          "riesgo": "Diferencias semánticas entre los caminos legacy y atomic_checkout.",
+          "evidencia_requerida": "Comparación de transiciones y resultados para los mismos estados iniciales."
+        }
+      ]
+    },
+    "verification": {
+      "evidencia_verificable": [
+        "Registro durable de cada checkout con issue_id, tenant_id, lease_token y transición confirmada.",
+        "Consulta de SQLite que demuestre ausencia de leases vigentes duplicados por issue.",
+        "Trazas que correlacionen wakeups emitidos, checkouts realizados y recuperaciones mediante scan.",
+        "Resultados identificados de cada uno de los 100 reinicios.",
+        "Ventana continua de 24 horas con contador de wakeups perdidos igual a cero.",
+        "Prueba de migración donde las runs activas continúan sin cambio de propietario."
+      ],
+      "criterios_de_aceptacion": [
+        "Ninguna issue es ganada por dos workers en pruebas concurrentes.",
+        "Ningún checkout devuelve una issue de otro tenant.",
+        "Los 100 reinicios completan sin wakeups perdidos.",
+        "La observación continua de 24 horas registra cero wakeups perdidos.",
+        "Las runs activas sobreviven a activación y desactivación del flag."
+      ],
+      "gate": "La arquitectura no se considera promovible hasta satisfacer simultáneamente los 100 reinicios y las 24 horas continuas con cero wakeups perdidos."
+    },
+    "rollback": {
+      "disparadores": [
+        "Asignación duplicada.",
+        "Cruce de tenant_id.",
+        "Interrupción o cambio de propietario de una run activa.",
+        "Wakup perdido durante el gate.",
+        "Degradación operativa que impida realizar checkouts."
+      ],
+      "procedimiento": [
+        "Cambiar el flag a legacy para todos los nuevos checkouts.",
+        "No modificar ni cancelar runs activas.",
+        "Dejar de crear leases mediante atomic_checkout.",
+        "Conservar en SQLite toda la evidencia y los leases existentes para diagnóstico.",
+        "Permitir que los leases ya concedidos finalicen o expiren antes de que legacy vuelva a considerar esas issues."
+      ],
+      "verificacion": [
+        "Confirmar que todos los nuevos checkouts usan legacy.",
+        "Confirmar que no quedan dos propietarios vigentes por issue.",
+        "Confirmar que las runs activas previas al rollback continúan.",
+        "Reconciliar issues pendientes, completadas y con lease expirado directamente contra SQLite."
+      ]
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:08:44.998477Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:08:44.998544Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:08:45.006229Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:08:45.329484Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:08:45.329506Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

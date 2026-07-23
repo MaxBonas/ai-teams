@@ -60,7 +60,7 @@
     "input_tokens": 66911,
     "output_tokens": 1008,
     "cost_cents": 0,
-    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-terra-mcp-operator-seed-2\\.aiteam\\aiteam.db",
+    "db": ".\\runtime\\bench\\codex-terra-mcp-operator-seed-2\\.aiteam\\aiteam.db",
     "tool_access": [
       {
         "tool_name": "adapter:subscription_cli",
@@ -121,7 +121,7 @@
         ],
         "approved_by": "benchmark_owner",
         "args": [
-          "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\scripts\\mcp_web_scout_fixture.py"
+          ".\\scripts\\mcp_web_scout_fixture.py"
         ],
         "created_at": "2026-07-22T16:32:26.241810+00:00",
         "env_required": [
@@ -129,7 +129,7 @@
           "AITEAM_MCP_CANARY_VERSION"
         ],
         "justification": "Canario local determinista; sin red ni escritura",
-        "source": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\venv\\Scripts\\python.exe",
+        "source": ".\\venv\\Scripts\\python.exe",
         "status": "failed",
         "updated_at": "2026-07-22T16:32:26.292935+00:00",
         "version": "1.0.0",
@@ -148,7 +148,7 @@
         ],
         "approved_by": "benchmark_owner",
         "args": [
-          "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\scripts\\mcp_web_scout_fixture.py"
+          ".\\scripts\\mcp_web_scout_fixture.py"
         ],
         "created_at": "2026-07-22T16:32:26.241810+00:00",
         "env_required": [
@@ -175,11 +175,11 @@
             "digest": "5ec345f50a401ce151219d219dbb936c9b642b64bbea7704ed1c14d29c5c5ba2",
             "files": [
               {
-                "path": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\venv\\Scripts\\python.exe",
+                "path": ".\\venv\\Scripts\\python.exe",
                 "sha256": "0b471133e110cfb53a061cad528ce8e517d7b9ac41a0a396c39ad795a487fc14"
               },
               {
-                "path": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\scripts\\mcp_web_scout_fixture.py",
+                "path": ".\\scripts\\mcp_web_scout_fixture.py",
                 "sha256": "a4a72ca50280222d88f383a79f28218184483e286038efc58f3584816ebec621"
               }
             ]
@@ -188,7 +188,7 @@
           "next_check_at": "2026-07-23T16:32:26.347958+00:00"
         },
         "justification": "Canario local determinista; sin red ni escritura",
-        "source": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\venv\\Scripts\\python.exe",
+        "source": ".\\venv\\Scripts\\python.exe",
         "status": "active",
         "updated_at": "2026-07-22T16:32:26.347958+00:00",
         "version": "1.0.0"
@@ -199,5 +199,7 @@
   "reevaluation": {
     "reason": "deterministic_evaluator_contract_update",
     "provider_rerun": false
-  }
+  },
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "advisory_recovery_governance"
 }

@@ -102,7 +102,7 @@ class GeminiApiRuntime:
 def _system_prompt(env: dict[str, str]) -> str:
     skill = env.get("AITEAM_AGENT_SKILL", "").strip()
     role = env.get("AITEAM_AGENT_ROLE", "").strip() or "agent"
-    return (skill or f"Eres un agente de AI Teams con rol {role}.") + build_execution_contract()
+    return (skill or f"Eres un agente de AI Teams con rol {role}.") + build_execution_contract(role)
 
 
 def _user_prompt(env: dict[str, str], run: dict[str, Any]) -> str:

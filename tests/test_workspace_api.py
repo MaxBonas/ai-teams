@@ -10,10 +10,11 @@ import pytest
 
 import api.main as main_mod
 import api.routers.workspace as workspace_mod
+import aiteam.project_adapters as project_adapters
 from api.routers.workspace import router
-from api.routers.agents import router as agents_router
 from api.utils import get_current_workspace, set_current_workspace
 from aiteam.user_config import model_options, record_model_health
+from aiteam.model_catalog_service import get_current_model_catalog
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +37,86 @@ def _full_client() -> TestClient:
     """Client with both workspace and agents routers (for reconcile tests)."""
     from api.main import app
     return TestClient(app)
+
+
+def test_bootstrap_lead_uses_governed_default_only_without_owner_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    profile = {"id": "profile-a", "adapter_type": "subscription_cli"}
+    monkeypatch.setattr(workspace_mod, "project_profiles", lambda runtime_dir: [profile])
+    observed: dict[str, object] = {}
+
+    def projection(*args, **kwargs):
+        observed.update(kwargs)
+        return {
+            "schema_version": "model_catalog_read_model_v1",
+            "score_version": "model_role_score_v1",
+            "canonical_role": "lead",
+            "default": {"candidate_id": "candidate:a"},
+            "candidates": [{
+                "candidate_id": "candidate:a",
+                "identity": {"profile_id": "profile-a", "model_id": "model-a"},
+                "rank": 1,
+                "selection_reason": "hermetic_bootstrap_canary",
+                "selection_score": {
+                    "score_version": "model_role_score_v1",
+                    "score": 90,
+                    "auto_eligible": True,
+                    "hard_gates": {"calibrated": {"passed": True}},
+                },
+            }],
+        }
+
+    monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "auto")
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection", projection
+    )
+
+    workspace_mod._initialize_project_runtime(
+        project, run_profile="solo_lead", data_class="confidential"
+    )
+
+    assert observed["run_profile"] == "solo_lead"
+    assert observed["data_class"] == "confidential"
+    db = project / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(db) as conn:
+        adapter_type, raw = conn.execute(
+            "SELECT adapter_type, adapter_config_json FROM agents WHERE id='role:lead'"
+        ).fetchone()
+        snapshot = conn.execute(
+            "SELECT selection_scope, auto_applied FROM model_role_score_snapshots"
+        ).fetchone()
+    assert adapter_type == "subscription_cli"
+    assert json.loads(raw)["selection_intent"]["mode"] == "default"
+    assert snapshot == ("bootstrap:new-agent:role:lead", 1)
+
+
+def test_bootstrap_lead_auto_without_winner_aborts_before_agent_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(
+        workspace_mod,
+        "project_profiles",
+        lambda runtime_dir: [{"id": "profile-a", "adapter_type": "subscription_cli"}],
+    )
+    monkeypatch.setattr(
+        workspace_mod,
+        "choose_adapter_for_new_slot",
+        lambda *args, **kwargs: project_adapters._unresolved_model_default(
+            "no_auto_eligible_candidate"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="No auto-eligible Lead model"):
+        workspace_mod._initialize_project_runtime(project, run_profile="solo_lead")
+
+    db = project / ".aiteam" / "aiteam.db"
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT 1 FROM agents WHERE id='role:lead'").fetchone() is None
 
 
 def test_workspace_endpoint_clears_deleted_workspace(tmp_path: Path) -> None:
@@ -81,6 +162,37 @@ def test_create_project_requires_adapter_profile(tmp_path: Path, monkeypatch) ->
 
     assert response.status_code == 400
     assert "adapter" in response.json()["detail"]
+
+
+def test_create_project_auto_without_lead_winner_returns_422_and_removes_partial_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    projects_root = tmp_path / "projects"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setenv("AITEAM_PROJECTS_ROOT", str(projects_root))
+    monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "auto")
+    monkeypatch.setattr(
+        workspace_mod,
+        "choose_adapter_for_new_slot",
+        lambda *args, **kwargs: project_adapters._unresolved_model_default(
+            "no_auto_eligible_candidate"
+        ),
+    )
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={"name": "NoWinner", "adapter_profile_ids": ["openai_api"]},
+        )
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 422
+    assert "No auto-eligible Lead model" in response.json()["detail"]
+    assert not (projects_root / "NoWinner").exists()
 
 
 def test_create_project_warns_when_no_selected_adapter_connected(tmp_path: Path, monkeypatch) -> None:
@@ -266,6 +378,12 @@ def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypa
     monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
     previous = get_current_workspace()
     set_current_workspace(source_root)
+    candidate_id = next(
+        item["candidate_id"]
+        for item in get_current_model_catalog(db_paths=())["candidates"]
+        if item["identity"]["profile_id"] == "anthropic_api"
+        and item["identity"]["model_id"] == "claude-opus-4-8"
+    )
     try:
         response = _client().post(
             "/api/projects/new",
@@ -274,7 +392,7 @@ def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypa
                 "adapter_profile_ids": ["codex_subscription", "anthropic_api"],
                 "lead_adapter_profile_id": "anthropic_api",
                 "lead_model": "claude-opus-4-8",
-                "lead_candidate_id": "model-candidate:anthropic-opus-fixture",
+                "lead_candidate_id": candidate_id,
                 "run_profile": "lead_quorum",
             },
         )
@@ -304,10 +422,39 @@ def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypa
         "schema_version": "model_selection_intent_v1",
         "mode": "owner_explicit",
         "source": "onboarding_model_role_selector",
-        "candidate_id": "model-candidate:anthropic-opus-fixture",
+        "candidate_id": candidate_id,
     }
     assert json.loads(lead["metadata_json"])["selected_by_user"] is True
     assert codex_auditor is not None
+
+
+def test_create_project_rejects_forged_lead_candidate_id(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source_root = tmp_path / "Ai_Teams"
+    source_root.mkdir()
+    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
+    previous = get_current_workspace()
+    set_current_workspace(source_root)
+    try:
+        response = _client().post(
+            "/api/projects/new",
+            json={
+                "name": "ForgedCandidate",
+                "adapter_profile_ids": ["anthropic_api"],
+                "lead_adapter_profile_id": "anthropic_api",
+                "lead_model": "claude-opus-4-8",
+                "lead_candidate_id": "model-candidate:forged",
+                "run_profile": "solo_lead",
+            },
+        )
+    finally:
+        set_current_workspace(previous)
+
+    assert response.status_code == 422
+    assert "candidate_id does not match" in response.json()["detail"]
+    assert not (source_root / "ForgedCandidate").exists()
 
 
 def test_create_project_rejects_lead_profile_outside_project_connections(tmp_path: Path, monkeypatch) -> None:

@@ -205,5 +205,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-queue-gpt-5.6-terra-cli-0.145.0-seed-1\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n\n**Objetivo.** Desplegar el consumidor asíncrono sin duplicar facturas y con rollback en menos de 10 minutos.\n\n**Decisiones.** Idempotencia por `invoice_id` + `attempt`; feature flag para cohorte inicial del 10 %; consumidor previo en *shadow* 48 h. Retry máximo de tres intentos; después, DLQ sin marcar el mensaje como procesado.\n\n**Evidencia y estado.** Platform reprodujo 10.000 mensajes: 0 facturas duplicadas. Engineer debe crear `scripts/replay_dlq.py`; Reviewer solo acepta la transición tras un dry-run reproducible de 100 mensajes en staging.\n\n**Riesgo/escalado.** Webhooks desordenados pueden llegar 20 min tarde y reabrir estados cerrados. Si duplicados >0,1 % durante 10 min, SRE desactiva la flag, revierte al consumidor anterior y escala al Lead.\n\n**Alcance excluido.** No migrar broker ni cambiar esquema de pagos."
+  "summary": "## Síntesis causal\n\n**Objetivo.** Desplegar el consumidor asíncrono sin duplicar facturas y con rollback en menos de 10 minutos.\n\n**Decisiones.** Idempotencia por `invoice_id` + `attempt`; feature flag para cohorte inicial del 10 %; consumidor previo en *shadow* 48 h. Retry máximo de tres intentos; después, DLQ sin marcar el mensaje como procesado.\n\n**Evidencia y estado.** Platform reprodujo 10.000 mensajes: 0 facturas duplicadas. Engineer debe crear `scripts/replay_dlq.py`; Reviewer solo acepta la transición tras un dry-run reproducible de 100 mensajes en staging.\n\n**Riesgo/escalado.** Webhooks desordenados pueden llegar 20 min tarde y reabrir estados cerrados. Si duplicados >0,1 % durante 10 min, SRE desactiva la flag, revierte al consumidor anterior y escala al Lead.\n\n**Alcance excluido.** No migrar broker ni cambiar esquema de pagos.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

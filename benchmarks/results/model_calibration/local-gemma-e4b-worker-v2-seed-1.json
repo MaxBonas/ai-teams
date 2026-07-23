@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "local_gemma4_ollama",
+  "model": "gemma4:e4b",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "role": "worker",
+  "seed": 1,
+  "wall_seconds": 25.563,
+  "attempts": 1,
+  "checks": {
+    "issue_done": false,
+    "run_completed": true,
+    "valid_assignee_report": false,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "active_wave": false,
+      "owner": false,
+      "observed_rate": false,
+      "threshold": false,
+      "window": false,
+      "rollback": false,
+      "acceptance": false
+    },
+    "anchors_retained": 0,
+    "anchors_total": 7,
+    "forbidden_matches": [],
+    "contract_passed": false
+  },
+  "agent_report": null,
+  "artifact": "Provided a comprehensive, structured guide on optimizing server infrastructure across various dimensions (Resource Management, Code/Application Level, Networking, and Scalability).\n\nThe answer is purely informational and does not require any tool calls.",
+  "runtime": {
+    "issue_status": "in_progress",
+    "run": {
+      "id": "run:60f1e909-7c68-4ec6-a2e6-3a8860581bed",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gemma4:e4b",
+      "provider": "ollama",
+      "channel": "local",
+      "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 4102, \"output_tokens\": 1592, \"reasoning_output_tokens\": 0}"
+    },
+    "input_tokens": 4102,
+    "output_tokens": 1592,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\local-gemma-e4b-worker-formal-v2-seed-1\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": false
+}

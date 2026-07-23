@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "benchmark": "opencode_negative_pool_closure",
+  "observed_at": "2026-07-23T13:11:55.302021+02:00",
+  "profile_id": "opencode_zen_free",
+  "cli_version": "1.18.4",
+  "declared_models": [
+    "opencode/deepseek-v4-flash-free",
+    "opencode/laguna-s-2.1-free",
+    "opencode/mimo-v2.5-free",
+    "opencode/nemotron-3-ultra-free",
+    "opencode/north-mini-code-free"
+  ],
+  "discovered_models": [
+    "opencode/big-pickle",
+    "opencode/deepseek-v4-flash-free",
+    "opencode/laguna-s-2.1-free",
+    "opencode/mimo-v2.5-free",
+    "opencode/nemotron-3-ultra-free",
+    "opencode/north-mini-code-free"
+  ],
+  "rejected_discoveries": [
+    "opencode/big-pickle"
+  ],
+  "checks": {
+    "cli_version_unchanged": true,
+    "declared_catalog_present": true,
+    "opaque_discovery_still_rejected": true,
+    "schema_screen_complete": true,
+    "structured_output_still_blocked": true,
+    "deepseek_reviewer_remains_partial_1_of_3": true,
+    "default_change_forbidden": true
+  },
+  "evidence_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/opencode-session-isolation-v1.json",
+      "sha256": "cb0079d8e9c6cecc5dab153a100418754886be33744d258ee5bf29f61d2355f1"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/opencode-durable-review-v1-laguna-vs-deepseek-aggregate.json",
+      "sha256": "18a0b7b370383a02a74bfc85f1296901b12c6709941f9da1a6131cfaa6fd9702"
+    }
+  ],
+  "inference_runs": 0,
+  "decision": {
+    "status": "closed_by_no_change",
+    "deepseek_reviewer": "partial",
+    "other_pairs_promoted": false,
+    "repeat_inference": false,
+    "reopen_when": "cambio de versión, catálogo, transporte o contrato structured output"
+  },
+  "ok": true
+}

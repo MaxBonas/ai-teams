@@ -29,7 +29,7 @@ def _components(channel: str = "api") -> dict:
     basis = {
         "api": "api_cost_per_accepted_task",
         "subscription": "subscription_quota_pressure",
-        "local": "local_resource_throughput",
+        "local": "zero_external_cost",
         "free_gateway": "gateway_capacity_pressure",
     }[channel]
     return {
@@ -55,9 +55,11 @@ def _components(channel: str = "api") -> dict:
 def _evidence(**overrides) -> dict:
     value = {
         "status": "calibrated",
+        "kind": "exact_role_canary",
         "classes": ["behavioral_deterministic", "static_analysis"],
         "seeds": 3,
         "cases": 2,
+        "case_families": ["tenant_boundary", "concurrency"],
         "required_tools": ["repo_write"],
         "covered_tools": ["repo_write"],
         "fresh": True,
@@ -81,6 +83,7 @@ def _gates(**overrides) -> dict:
         "automatic_policy": True,
         "calibrated": True,
         "fresh": True,
+        "case_diversity": True,
         "privacy": True,
         "tools": True,
         "workspace": True,
@@ -139,6 +142,95 @@ def test_confidence_is_separate_and_never_multiplies_score() -> None:
     assert weak["auto_eligible"] is False
 
 
+def test_single_case_family_blocks_auto_without_hiding_quality() -> None:
+    result = _score(
+        evidence=_evidence(
+            cases=3,
+            case_families=["same_fixture"],
+            goodhart_risk="material",
+        ),
+        gates=_gates(case_diversity=False),
+    )
+
+    assert result["score"] == 75.5
+    assert result["auto_eligible"] is False
+    assert "fewer_than_two_case_families" in result["confidence"]["caps"]
+    assert any(
+        reason.startswith("gate:case_diversity:")
+        for reason in result["auto_ineligible_reasons"]
+    )
+
+
+def test_missing_version_or_date_fails_confidence_and_fresh_gate_closed() -> None:
+    result = _score(
+        evidence=_evidence(provider_version=None, evaluated_at=None, unmeasured_constructs=[])
+    )
+
+    assert result["score"] == 75.5
+    assert result["confidence"]["value"] == 70
+    assert result["confidence"]["caps"] == [
+        "provider_version_unobserved",
+        "evaluation_date_unobserved",
+    ]
+    assert result["hard_gates"]["fresh"]["passed"] is False
+    assert result["auto_eligible"] is False
+
+
+def test_unmeasured_constructs_apply_visible_confidence_cap() -> None:
+    result = _score(evidence=_evidence(unmeasured_constructs=["novelty", "security"]),)
+
+    assert result["score"] == 75.5
+    assert result["confidence"]["value"] == 90
+    assert result["confidence"]["caps"] == ["unmeasured_constructs"]
+
+
+def test_string_tool_fields_are_single_ids_not_character_sets() -> None:
+    result = _score(
+        evidence=_evidence(required_tools="repo_write", covered_tools="repo_read")
+    )
+
+    assert result["confidence"]["required_tools"] == ["repo_write"]
+    assert result["confidence"]["covered_tools"] == ["repo_read"]
+    assert result["confidence"]["breakdown"]["tool_coverage"]["value"] == 0
+    assert result["auto_eligible"] is False
+
+
+def test_invalid_freshness_provenance_fails_closed() -> None:
+    result = _score(
+        evidence=_evidence(provider_version="unknown", evaluated_at="not-a-date")
+    )
+
+    assert result["confidence"]["provider_version"] is None
+    assert result["confidence"]["evaluated_at"] is None
+    assert result["hard_gates"]["fresh"]["passed"] is False
+    assert result["auto_eligible"] is False
+
+
+@pytest.mark.parametrize(
+    ("override", "cap"),
+    [
+        ({"classes": ["unknown"]}, "evidence_class_insufficient_for_auto"),
+        ({"seeds": 1}, "fewer_than_three_seeds"),
+        (
+            {"cases": 1, "case_families": ["same_fixture"]},
+            "fewer_than_two_case_families",
+        ),
+        ({"receipts": []}, "evidence_receipts_missing"),
+        ({"goodhart_risk": "material"}, "goodhart_risk_material"),
+        ({"goodhart_risk": "high"}, "goodhart_risk_high"),
+    ],
+)
+def test_material_evidence_gaps_cap_confidence_below_auto(
+    override: dict, cap: str
+) -> None:
+    result = _score(evidence=_evidence(unmeasured_constructs=[], **override))
+
+    assert result["score"] == 75.5
+    assert result["confidence"]["value"] < 75
+    assert cap in result["confidence"]["caps"]
+    assert result["auto_eligible"] is False
+
+
 def test_unknown_component_is_not_zero_or_an_advantage() -> None:
     components = _components()
     components["economy"] = {
@@ -153,9 +245,24 @@ def test_unknown_component_is_not_zero_or_an_advantage() -> None:
     assert result["score_range"] == {"minimum": 63.5, "maximum": 83.5}
     assert result["breakdown"]["economy"]["status"] == "unknown"
     assert "economy" in result["unknown_components"]
-    assert result["confidence"]["evidence_value"] == 100
+    assert result["confidence"]["evidence_value"] == 95
     assert result["confidence"]["value"] == 80
-    assert result["confidence"]["caps"] == ["unknown_score_components"]
+    assert result["confidence"]["caps"] == [
+        "unmeasured_constructs",
+        "unknown_score_components",
+    ]
+    assert result["auto_eligible"] is False
+
+
+def test_numeric_component_without_source_becomes_unknown() -> None:
+    components = _components()
+    components["quality"] = {"value": 100}
+
+    result = _score(components=components)
+
+    assert result["score"] is None
+    assert result["breakdown"]["quality"]["status"] == "unknown"
+    assert result["breakdown"]["quality"]["reason"] == "metric_source_unproven"
     assert result["auto_eligible"] is False
 
 
@@ -164,7 +271,7 @@ def test_unknown_component_is_not_zero_or_an_advantage() -> None:
     [
         ("api", "api_cost_per_accepted_task"),
         ("subscription", "subscription_quota_pressure"),
-        ("local", "local_resource_throughput"),
+        ("local", "zero_external_cost"),
         ("free_gateway", "gateway_capacity_pressure"),
     ],
 )
@@ -222,6 +329,34 @@ def test_out_of_range_component_is_rejected() -> None:
         _score(components=components)
 
 
+def test_unknown_role_and_non_boolean_gate_fail_closed() -> None:
+    with pytest.raises(ValueError, match="known canonical role"):
+        score_model_role(
+            candidate=_candidate(),
+            role="typo_role",
+            components=_components(),
+            evidence=_evidence(),
+            hard_gates=_gates(),
+        )
+
+    gates = _gates()
+    gates["privacy"] = {"passed": 1, "reason": "invalid_bool"}
+    result = _score(gates=gates)
+    assert result["hard_gates"]["privacy"]["passed"] is None
+    assert result["auto_eligible"] is False
+
+    incomplete = _candidate()
+    del incomplete["identity"]["capacity_pool"]
+    with pytest.raises(ValueError, match="operational identity missing: capacity_pool"):
+        score_model_role(
+            candidate=incomplete,
+            role="engineer",
+            components=_components(),
+            evidence=_evidence(),
+            hard_gates=_gates(),
+        )
+
+
 def test_tie_breaks_by_evidence_then_economy_latency_and_identity() -> None:
     lexical = _score(
         "candidate:lexical", evidence=_evidence(classes=["lexical_rubric"])
@@ -275,3 +410,18 @@ def test_non_comparable_economy_is_not_used_as_cross_channel_tie_break() -> None
         "candidate:subscription",
         "candidate:api",
     ]
+
+
+def test_ranking_rejects_duplicate_identity_version_or_role() -> None:
+    first = _score("candidate:a")
+    duplicate = deepcopy(first)
+    with pytest.raises(ValueError, match="duplicate candidate_id"):
+        rank_model_role_scores([first, duplicate])
+
+    wrong_version = {**_score("candidate:b"), "score_version": "legacy"}
+    with pytest.raises(ValueError, match="incompatible score version"):
+        rank_model_role_scores([first, wrong_version])
+
+    wrong_role = {**_score("candidate:c"), "canonical_role": "reviewer"}
+    with pytest.raises(ValueError, match="one canonical role"):
+        rank_model_role_scores([first, wrong_role])

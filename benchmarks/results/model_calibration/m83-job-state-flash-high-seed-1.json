@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "job_state_machine_mutation",
+  "role": "test_designer",
+  "seed": 1,
+  "seconds": 73.36,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": true,
+    "all_hidden_mutants_killed": true,
+    "durable_report_done": true,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 0,
+      "stdout": ".......                                                                  [100%]\n7 passed in 0.08s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_pending_succeed": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "maps_failure_to_success": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_terminal_restart": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_unknown_event": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "mutates_input": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_job_state.py"
+  ],
+  "run": {
+    "id": "run:0f4f1ae3-8946-4cba-8c17-ad46b84d6fb1",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gemini-3.5-flash-high",
+    "provider": "google-antigravity",
+    "channel": "subscription",
+    "usage_json": "{}"
+  },
+  "report": {
+    "id": "2386c049-7af3-48c9-a4da-f1559b54bedd",
+    "issue_id": "issue:benchmark_test_designer",
+    "agent_id": "role:benchmark_test_designer",
+    "run_id": "run:0f4f1ae3-8946-4cba-8c17-ad46b84d6fb1",
+    "agent_role": "test_designer",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "tech_match": null,
+    "blocker": "none",
+    "evidence": "tests/test_acceptance_job_state.py",
+    "valid": 1,
+    "is_assignee": 1,
+    "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests/test_acceptance_job_state.py\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"done\", \"role\": \"test_designer\"}",
+    "created_at": "2026-07-23 14:31:41"
+  },
+  "usage": {},
+  "workspace": "runtime/bench/m83-job-state-flash-high-s1",
+  "ok": true
+}

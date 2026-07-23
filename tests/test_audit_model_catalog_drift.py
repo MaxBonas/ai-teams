@@ -74,6 +74,8 @@ def test_report_passes_with_current_catalogs_and_calibrations() -> None:
         codex_catalog={
             "status": "current",
             "installed_version": "0.145.0",
+            "catalog_client_version": "0.145.0",
+            "coverage_ok": True,
         },
         observed_at=datetime(2026, 7, 22, tzinfo=timezone.utc),
     )
@@ -100,7 +102,12 @@ def test_report_opens_attention_when_promoted_calibration_is_stale() -> None:
             }
         ],
         flow_report={"ok": True},
-        codex_catalog={"status": "current", "installed_version": "0.145.0"},
+        codex_catalog={
+            "status": "current",
+            "installed_version": "0.145.0",
+            "catalog_client_version": "0.145.0",
+            "coverage_ok": True,
+        },
         observed_at=datetime(2026, 7, 22, tzinfo=timezone.utc),
     )
 
@@ -153,3 +160,29 @@ def test_versioned_drift_receipt_records_current_catalog_and_tiers() -> None:
     assert codex["status"] == "fresh"
     assert codex["stale_reasons"] == []
     assert report["policy"]["next_review_due"] == "2026-08-20"
+
+
+def test_report_fails_closed_when_codex_catalog_is_missing_promoted_model() -> None:
+    report = build_report(
+        catalog_rows=[{
+            "profile_id": "antigravity_subscription",
+            "status": "current",
+            "cli_version": "1.1.5",
+            "coverage_ok": True,
+        }],
+        flow_report={"ok": True},
+        codex_catalog={
+            "status": "current",
+            "installed_version": "0.145.0",
+            "catalog_client_version": "0.145.0",
+            "coverage_ok": False,
+            "missing_declared": ["gpt-5.6-luna"],
+        },
+        observed_at=datetime(2026, 7, 22, tzinfo=timezone.utc),
+    )
+
+    assert report["ok"] is False
+    assert report["gates"]["declared_catalog_coverage"] is False
+    assert report["attention_required"] == [
+        {"profile_id": "codex_subscription", "reason": "catalog_drift"}
+    ]

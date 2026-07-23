@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 
 from aiteam.model_calibration import (
     PROMOTED_MODEL_CALIBRATIONS,
@@ -34,6 +37,7 @@ def test_promoted_pairs_are_exact_catalog_roles_with_existing_receipts() -> None
         )
         assert entry["role"] in option["best_for"]
         assert entry["missing_evidence_receipts"] == []
+        assert entry["evidence_validation_errors"] == []
         assert entry["existing_default_action"] == "unchanged"
 
 
@@ -134,3 +138,33 @@ def test_missing_receipts_invalidate_registry_without_touching_defaults(
     assert report["unregistered_promotions_allowed"] is False
     assert all(entry["existing_default_action"] == "unchanged" for entry in report["entries"])
     assert all("evidence_receipt_missing" in entry["stale_reasons"] for entry in report["entries"])
+
+
+def test_tampered_luna_aggregate_invalidates_registry(tmp_path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    receipts = {
+        receipt
+        for calibration in PROMOTED_MODEL_CALIBRATIONS
+        for receipt in calibration["evidence_receipts"]
+    }
+    for receipt in receipts:
+        destination = tmp_path / receipt
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repo_root / receipt, destination)
+    aggregate_path = tmp_path / next(
+        receipt for receipt in receipts if "context-curator-gpt-tier3" in receipt
+    )
+    payload = json.loads(aggregate_path.read_text(encoding="utf-8"))
+    payload["conclusion"]["selected_model"] = "gpt-5.6-terra"
+    aggregate_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = audit_promoted_model_calibrations(
+        observed_at=datetime(2026, 7, 22, tzinfo=timezone.utc),
+        observed_versions=_versions(),
+        repo_root=tmp_path,
+    )
+    luna = next(entry for entry in report["entries"] if entry["model"] == "gpt-5.6-luna")
+
+    assert report["registry_valid"] is False
+    assert luna["stale_reasons"] == ["evidence_receipt_invalid"]
+    assert "selected_model" in luna["evidence_validation_errors"]

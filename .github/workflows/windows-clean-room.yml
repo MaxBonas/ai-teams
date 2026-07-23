@@ -1,0 +1,57 @@
+name: Windows clean-room acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-clean-room.yml"
+      - "config/**"
+      - "scripts/**"
+      - "aiteam/**"
+      - "api/**"
+      - "ide-frontend/**"
+      - "pyproject.toml"
+      - "start_ide.bat"
+      - "stop_ide.bat"
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  windows-clean-room:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v4
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ide-frontend/package-lock.json
+
+      - name: Run I.1.4 acceptance
+        shell: pwsh
+        run: >
+          python scripts/accept_windows_clean_room.py
+          --receipt "${{ runner.temp }}\windows-clean-room-receipt.json"
+          --fixture-root "${{ runner.temp }}\aiteam-fixtures"
+
+      - name: Upload redacted receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-clean-room-receipt
+          path: ${{ runner.temp }}\windows-clean-room-receipt.json
+          if-no-files-found: error
+          retention-days: 30

@@ -227,5 +227,12 @@
     "cost_cents": 0,
     "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3\\.aiteam\\aiteam.db"
   },
-  "summary": "## Síntesis causal\n\n- Objetivo: migrar autenticación con corte reversible y sin downtime.\n- Decisiones: conservar JWT RS256; rotar claves con doble validación durante 24 h. La clave antigua solo se elimina tras `legacy_kid_hits = 0` durante 2 h.\n- Completado: Engineer implementó lector dual en `src/auth/keyring.py`; verificación: `pytest tests/auth -q` → 42 passed. Reviewer aprobó compatibilidad.\n- Pendiente: rollback aún no automatizado. Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta mediante dry-run.\n- Riesgo/escalado: cachés regionales pueden retener JWKS hasta 15 min. Si 401 supera 0,5 % durante 5 min, pausar rotación y escalar al Lead.\n- Fuera de alcance: migrar sesiones existentes y cambiar el proveedor de identidad. Se descartan saludos, nombres temporales, estimaciones y logs sin decisiones accionables."
+  "summary": "## Síntesis causal\n\n- Objetivo: migrar autenticación con corte reversible y sin downtime.\n- Decisiones: conservar JWT RS256; rotar claves con doble validación durante 24 h. La clave antigua solo se elimina tras `legacy_kid_hits = 0` durante 2 h.\n- Completado: Engineer implementó lector dual en `src/auth/keyring.py`; verificación: `pytest tests/auth -q` → 42 passed. Reviewer aprobó compatibilidad.\n- Pendiente: rollback aún no automatizado. Engineer debe crear `scripts/rollback_keys.py`; Reviewer acepta mediante dry-run.\n- Riesgo/escalado: cachés regionales pueden retener JWKS hasta 15 min. Si 401 supera 0,5 % durante 5 min, pausar rotación y escalar al Lead.\n- Fuera de alcance: migrar sesiones existentes y cambiar el proveedor de identidad. Se descartan saludos, nombres temporales, estimaciones y logs sin decisiones accionables.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort_override": "medium",
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
 }

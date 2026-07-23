@@ -13,6 +13,7 @@ def _candidate(candidate_id: str = "candidate:a", *, eligible: bool = True) -> d
     return {
         "candidate_id": candidate_id,
         "score_version": "model_role_score_v1",
+        "canonical_role": "engineer",
         "score": 88,
         "auto_eligible": eligible,
         "breakdown": {"quality": {"value": 90}},
@@ -101,4 +102,24 @@ def test_snapshot_rejects_winner_outside_set_or_ineligible_auto_winner(
             candidates=[_candidate(eligible=False)],
             winner_candidate_id="candidate:a",
             auto_applied=True,
+        )
+
+
+def test_snapshot_rejects_candidate_version_or_role_mismatch(tmp_path: Path) -> None:
+    kwargs = {
+        "db_path": tmp_path / "scores.sqlite",
+        "selection_scope": "scope",
+        "canonical_role": "engineer",
+        "score_version": "model_role_score_v1",
+        "read_model_version": "model_catalog_read_model_v1",
+    }
+    with pytest.raises(ValueError, match="score_version"):
+        persist_model_role_score_snapshot(
+            **kwargs,
+            candidates=[{**_candidate(), "score_version": "legacy"}],
+        )
+    with pytest.raises(ValueError, match="canonical_role"):
+        persist_model_role_score_snapshot(
+            **kwargs,
+            candidates=[{**_candidate(), "canonical_role": "reviewer"}],
         )

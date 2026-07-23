@@ -5,9 +5,14 @@ from aiteam.model_catalog_projection import (
     MODEL_CATALOG_STATE_NAMES,
     build_model_catalog_identity_projection,
 )
+from aiteam.model_catalog_api import CATALOG_STATE_NAMES
 
 
 OBSERVED_AT = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
+
+
+def test_api_uses_the_canonical_identity_state_contract() -> None:
+    assert CATALOG_STATE_NAMES is MODEL_CATALOG_STATE_NAMES
 
 
 def _profiles() -> list[dict]:
@@ -175,3 +180,147 @@ def test_projection_is_deterministic_for_same_inputs_and_timestamp() -> None:
     )
 
     assert first == second
+
+
+def test_old_history_cannot_override_current_catalog_policy() -> None:
+    kwargs = {
+        "profiles": [{
+            "id": "openai_api",
+            "provider": "openai",
+            "channel": "api",
+            "configured": True,
+        }],
+        "declared_options_by_profile": {
+            "openai_api": [{
+                "value": "gpt-5.6-sol",
+                "label": "Current Sol",
+                "selectable": True,
+                "automatic": True,
+                "availability": "verified",
+                "observed_at": "2026-07-22T10:00:00+00:00",
+            }]
+        },
+        "historical_models": [{
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-sol",
+            "label": "Old Sol",
+            "selectable": False,
+            "automatic": False,
+            "availability": "unavailable",
+            "observed_at": "2026-01-01T00:00:00+00:00",
+        }],
+        "observed_at": OBSERVED_AT,
+    }
+
+    row = build_model_catalog_identity_projection(**kwargs)["candidates"][0]
+
+    assert row["label"] == "Current Sol"
+    assert row["states"]["selectable"]["value"] is True
+    assert row["states"]["manual_only"]["value"] is False
+    assert row["states"]["blocked"]["value"] is False
+    assert row["states"]["selectable"]["source"] == "declared_catalog"
+    assert row["states"]["selectable"]["observed_at"] == "2026-07-22T10:00:00+00:00"
+
+
+def test_each_state_keeps_the_provenance_of_its_winning_field() -> None:
+    projection = build_model_catalog_identity_projection(
+        profiles=[{"id": "p", "provider": "openai", "channel": "api"}],
+        declared_options_by_profile={
+            "p": [{
+                "value": "gpt-5.6-sol",
+                "selectable": False,
+                "automatic": True,
+                "availability": "catalogued",
+                "source": "static catalog",
+                "observed_at": "2026-07-20T00:00:00+00:00",
+            }]
+        },
+        discovered_models=[{
+            "profile_id": "p",
+            "model": "gpt-5.6-sol",
+            "selectable": True,
+            "availability": "verified",
+            "verified": True,
+            "source": "provider discovery",
+            "provider_version": "v2",
+            "observed_at": "2026-07-21T00:00:00+00:00",
+        }],
+        historical_models=[{
+            "profile_id": "p",
+            "model": "gpt-5.6-sol",
+            "automatic": False,
+            "source": "newer historical run",
+            "observed_at": "2026-07-22T00:00:00+00:00",
+        }],
+        observed_at=OBSERVED_AT,
+    )
+    states = projection["candidates"][0]["states"]
+
+    assert states["selectable"]["value"] is True
+    assert states["selectable"]["source"] == "provider discovery"
+    assert states["selectable"]["version"] == "v2"
+    assert states["manual_only"]["value"] is False
+    assert states["manual_only"]["source"] == "static catalog"
+
+
+def test_conflicting_duplicate_profile_identity_fails_closed() -> None:
+    profiles = [
+        {"id": "shared", "provider": "openai", "channel": "api"},
+        {"id": "shared", "provider": "anthropic", "channel": "subscription"},
+    ]
+
+    try:
+        build_model_catalog_identity_projection(
+            profiles=profiles,
+            observed_at=OBSERVED_AT,
+        )
+    except ValueError as exc:
+        assert "conflicting profile identity" in str(exc)
+    else:
+        raise AssertionError("conflicting profile identity must fail closed")
+
+
+def test_exact_model_blocked_state_is_not_selectable() -> None:
+    projection = build_model_catalog_identity_projection(
+        profiles=[{"id": "p", "provider": "openai", "channel": "api"}],
+        declared_options_by_profile={
+            "p": [{
+                "value": "gpt-5.6-sol",
+                "availability": "blocked",
+                "availability_reason": "policy_denied",
+                "selectable": True,
+            }]
+        },
+        observed_at=OBSERVED_AT,
+    )
+    states = projection["candidates"][0]["states"]
+
+    assert states["blocked"]["value"] is True
+    assert states["blocked"]["reason"] == "policy_denied"
+    assert states["selectable"]["value"] is False
+
+
+def test_conflicting_historical_operational_identity_fails_closed() -> None:
+    observations = [
+        {
+            "profile_id": "old-profile",
+            "provider": "openai",
+            "channel": "api",
+            "model": "shared-model",
+        },
+        {
+            "profile_id": "old-profile",
+            "provider": "anthropic",
+            "channel": "subscription",
+            "model": "shared-model",
+        },
+    ]
+
+    try:
+        build_model_catalog_identity_projection(
+            profiles=[], historical_models=observations, observed_at=OBSERVED_AT
+        )
+    except ValueError as exc:
+        assert "conflicting operational identity" in str(exc)
+    else:
+        raise AssertionError("conflicting historical identity must fail closed")

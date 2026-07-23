@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-low",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "role": "worker",
+  "seed": 2,
+  "wall_seconds": 418.125,
+  "attempts": 2,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": false
+  },
+  "evaluation": {
+    "anchors": {
+      "active_wave": true,
+      "owner": true,
+      "observed_rate": true,
+      "threshold": true,
+      "window": true,
+      "rollback": true,
+      "acceptance": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "forbidden_matches": [
+      "jueves"
+    ],
+    "contract_passed": false
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "README.md, AITEAM_WAKE_PAYLOAD_JSON"
+  },
+  "artifact": "Checklist causal de decisión generado para el incidente en Wave W3. Se identificó la superación del umbral de tasa de error (2.1% frente al límite de 1.0% durante 5 minutos), lo que determina pausar W3 y volver a W2. La aceptación final requiere que logs y métricas confirmen la recuperación.\n\n### Checklist Causal de Decisión - Incidente Wave W3\n\nA continuación se detalla el checklist causal de decisión conforme a los hechos analizados del incidente:\n\n1. **Estado del Despliegue y Contexto (Scope/Cohort Boundary)**\n   * **Wave Activa:** Wave W3 (actualmente activa).\n   * **Responsable (Owner):** Release Engineer.\n\n2. **Detonador de Alerta (Trigger Metric & Threshold)**\n   * **Métrica Afectada:** Tasa de error en 2.1%.\n   * **Umbral Superado:** Límite máximo admisible del 1.0% durante un periodo sostenido de 5 minutos.\n\n3. **Acción de Mitigación y Recuperación (Required Action / Rollback)**\n   * **Acción Inmediata:** Pausar Wave W3.\n   * **Acción de Rollback:** Volver a Wave W2.\n\n4. **Criterios de Aceptación para Cierre (Acceptance Conditions)**\n   * **Validador:** Reviewer.\n   * **Condición de Aceptación:** Confirmación formal de la recuperación a través de los logs de sistema y métricas correspondientes.\n\n*Nota: La propuesta descartada de desplegar el jueves ha sido omitida intencionalmente de este informe.*\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: README.md, AITEAM_WAKE_PAYLOAD_JSON",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:51aedfe6-a525-479e-8d65-adb73852220f",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gemini-3.5-flash-low",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\flash-low-worker-seed-2\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": false
+}

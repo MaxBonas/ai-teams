@@ -14,11 +14,14 @@ from aiteam.model_catalog_api import (
     rank_catalog_candidates_for_role,
     summarize_catalog_providers,
 )
+from aiteam.model_role_scoring import MODEL_ROLE_SCORE_VERSION
 
 
 def _score(candidate_id: str, value: float, *, eligible: bool, reason: str) -> dict:
     return {
+        "score_version": MODEL_ROLE_SCORE_VERSION,
         "candidate_id": candidate_id,
+        "canonical_role": "reviewer",
         "score": value,
         "score_range": {"minimum": value, "maximum": value},
         "auto_eligible": eligible,
@@ -103,7 +106,7 @@ def _candidate(
 def _read_model() -> dict:
     return {
         "schema_version": "model_catalog_read_model_v1",
-        "score_version": "model_role_score_v1",
+        "score_version": MODEL_ROLE_SCORE_VERSION,
         "content_hash": "fixture-hash",
         "observed_at": "2026-07-22T00:00:00+00:00",
         "rollout": "shadow_only",
@@ -189,6 +192,14 @@ def test_model_catalog_endpoints_publish_openapi_filters_order_and_reasons(
     assert inventory.status_code == 200
     assert inventory.json()["counts"] == {"candidates": 1, "providers": 1}
     assert ranked.status_code == 200
+    assert ranked.json()["compatibility_context"] == {
+        "run_profile": None,
+        "criticality": "medium",
+        "data_class": "public",
+        "required_capabilities": "role_defaults",
+        "projection": "base_role_score",
+        "contextual_endpoint": "POST /api/model-catalog/selection",
+    }
     assert [item["candidate_id"] for item in ranked.json()["candidates"]] == [
         "candidate-a",
         "candidate-b",
@@ -235,7 +246,19 @@ def test_contextual_selection_endpoint_is_explicitly_shadow_only(monkeypatch) ->
         }],
     })
     monkeypatch.setattr(selection_context, "model_selection_runtime_context", lambda *_args, **_kwargs: {
-        "capacity_by_profile": {},
+        "capacity_by_profile": {
+            profile_id: {
+                "profile_id": profile_id,
+                "state": "metered",
+                "source": "fixture",
+                "window_hours": 168,
+                "forecast": {
+                    "status": "forecast_available", "source": "test_proven_available",
+                    "unit": "runs", "limit": 100, "utilization": 0.1,
+                },
+            }
+            for profile_id in ("p1", "p2")
+        },
         "budget": {"status": "unbounded", "source": "fixture"},
     })
     client = TestClient(app)
@@ -280,7 +303,7 @@ def test_shadow_default_endpoint_persists_decision_without_applying(
     monkeypatch.setattr(catalog_router, "resolve_runtime_dir", lambda *_args: tmp_path)
     projection = {
         "schema_version": "model_catalog_read_model_v1",
-        "score_version": "model_role_score_v1",
+        "score_version": MODEL_ROLE_SCORE_VERSION,
         "canonical_role": "reviewer",
         "default": {"candidate_id": "candidate-a"},
         "candidates": [{

@@ -1,6 +1,6 @@
 # Índice y autoridad documental
 
-Actualizado: `2026-07-22`
+Actualizado: `2026-07-23`
 
 Este índice distingue contratos activos e historial. Objetivos, pendientes y
 orden de ejecución viven juntos en `../task.md`; no existen planes paralelos.

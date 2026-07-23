@@ -4,6 +4,8 @@
   "profile_id": "codex_subscription",
   "model": "gpt-5.6-terra",
   "role": "test_designer",
+  "contract_version": null,
+  "case_family": "pricing_boundary_mutation",
   "seeds": [
     1,
     2,
@@ -11,6 +13,35 @@
   ],
   "matrix_complete": true,
   "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-terra-test-designer-seed-1.json",
+    "benchmarks/results/model_calibration/codex-terra-test-designer-seed-2.json",
+    "benchmarks/results/model_calibration/codex-terra-test-designer-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-test-designer-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "3ebd5eaf7a75de415e7f09edcccdde94316b6b26c15215e24ab6852e912d8533"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-test-designer-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "fabf2059d634b921a8f1e06ffec4d766c7a1f5028e80e7603c3fde6ae1a0503d"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-test-designer-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "7c57a0634240321f6c5288b909a83ea25160ed99b1f97bdea7c2a3d5a9942e19"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true
+  },
   "checks_passed": 24,
   "checks_total": 24,
   "wall_seconds_median": 73.172,
@@ -24,7 +55,8 @@
     "output_tokens": 7956,
     "reasoning_output_tokens": 1451,
     "marginal_cost_cents": 0,
-    "note": "presión de cuota; no coste API"
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
   },
   "conclusion": {
     "exact_pair_calibrated": true,

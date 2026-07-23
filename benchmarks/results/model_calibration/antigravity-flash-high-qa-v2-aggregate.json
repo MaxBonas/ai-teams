@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa_aggregate",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "role": "qa",
+  "contract_version": "adversarial_qa_fix_cycle_v2",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/antigravity-flash-high-qa-v2-seed-1.json",
+    "benchmarks/results/model_calibration/antigravity-flash-high-qa-v2-seed-2-evaluator-fix.json",
+    "benchmarks/results/model_calibration/antigravity-flash-high-qa-v2-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-flash-high-qa-v2-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "490439f6fd57ebb2efe7942dba85019414c3106ecadade53addda3d32015a4e5"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-flash-high-qa-v2-seed-2-evaluator-fix.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "d8652cadcdcdec393718a6f15714d45356019f6ac372a0995207461244c4da2d"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-flash-high-qa-v2-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "99a817aa294117d18100651244607e1b95faf7035ae54f7f51fe9c1e2c001fa2"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true
+  },
+  "checks_passed": 30,
+  "checks_total": 30,
+  "wall_seconds_median": 130.733,
+  "wall_seconds_range": [
+    115.594,
+    158.781
+  ],
+  "usage": {
+    "marginal_cost_cents": 0,
+    "telemetry_status": "unknown",
+    "note": "Antigravity no expone usage headless comparable"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "browser QA",
+      "suites multiarchivo",
+      "recovery de entorno de tests roto"
+    ]
+  }
+}

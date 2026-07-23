@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -85,6 +85,7 @@ interface RoleEvaluation {
     metric_sources?: string[];
   };
   score?: RoleScore;
+  score_inputs?: Record<string, unknown>;
   input_hash?: string;
 }
 
@@ -254,6 +255,10 @@ function scoreText(score?: number | null): string {
   return score === null || score === undefined ? '—' : score.toFixed(score % 1 ? 1 : 0);
 }
 
+function percentText(value?: number | null): string {
+  return value === null || value === undefined ? '—' : `${Math.round(value)}%`;
+}
+
 function stateClass(value: StateValue): string {
   if (value === true) return 'is-yes';
   if (value === false) return 'is-no';
@@ -302,7 +307,7 @@ function RoleCell({
   const evaluation = candidateRole(candidate, role);
   if (!evaluation) return <span className="role-cell-empty" aria-label={`${ROLE_LABELS[role] || role}: sin evaluación`}>·</span>;
   const score = evaluation.score;
-  const confidence = score?.confidence?.value ?? 0;
+  const confidence = score?.confidence?.value;
   const status = evaluation.evaluation?.status || 'untested';
   const allowed = evaluation.compatibility?.allowed !== false;
   return (
@@ -310,11 +315,11 @@ function RoleCell({
       type="button"
       className={`role-score-cell ${allowed ? '' : 'is-denied'} ${score?.auto_eligible ? 'is-eligible' : ''}`}
       onClick={() => onOpen(candidate, role)}
-      aria-label={`${candidate.label || candidate.identity.model_id}, ${ROLE_LABELS[role] || role}: score ${scoreText(score?.score)}, confianza ${confidence}`}
+      aria-label={`${candidate.label || candidate.identity.model_id}, ${ROLE_LABELS[role] || role}: score ${scoreText(score?.score)}, confianza ${percentText(confidence)}`}
       data-testid={`model-cell-${candidate.identity.model_id}-${role}`}
     >
       <span className="role-score-value">{scoreText(score?.score)}</span>
-      <span className="role-score-confidence">{Math.round(confidence)}%</span>
+      <span className="role-score-confidence">{percentText(confidence)}</span>
       <span className={`role-evidence-pip status-${status}`} title={humanize(status)} />
     </button>
   );
@@ -326,7 +331,11 @@ function ProviderCard({ provider }: { provider: ProviderSummary }) {
   return (
     <article className={`model-provider-card ${allGreen ? 'is-green' : ''}`} data-testid={`provider-${provider.profile_id}`}>
       <header>
-        <span className={`provider-pulse ${allGreen ? 'is-green' : ''}`} />
+        <span
+          className={`provider-pulse ${allGreen ? 'is-green' : ''}`}
+          role="img"
+          aria-label={allGreen ? 'Adapter verde' : 'Adapter no completamente verde'}
+        />
         <div>
           <strong>{humanize(provider.provider)}</strong>
           <small>{provider.profile_id}</small>
@@ -335,6 +344,8 @@ function ProviderCard({ provider }: { provider: ProviderSummary }) {
       </header>
       <div className="provider-card-counts">
         <span><strong>{provider.model_count}</strong> modelos</span>
+        <span><strong>{provider.configured_count}</strong> configurados</span>
+        <span><strong>{provider.green_count}</strong> verdes</span>
         <span><strong>{provider.selectable_count}</strong> seleccionables</span>
         <span className={provider.blocked_count ? 'has-blocked' : ''}><strong>{provider.blocked_count}</strong> bloqueados</span>
       </div>
@@ -347,6 +358,8 @@ function ProviderCard({ provider }: { provider: ProviderSummary }) {
 }
 
 function CandidateDetail({ selection, onClose }: { selection: DetailSelection; onClose: () => void }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const { candidate, role } = selection;
   const evaluation = candidateRole(candidate, role);
   const score = evaluation?.score;
@@ -355,23 +368,49 @@ function CandidateDetail({ selection, onClose }: { selection: DetailSelection; o
     ...(evaluation?.provenance?.diagnostic_receipts || []),
   ];
   useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    const handleDialogKeys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button, a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
+      ) || [])].filter((element) => !element.hasAttribute('disabled'));
+      if (!focusable.length) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialogRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', handleDialogKeys);
+    return () => {
+      window.removeEventListener('keydown', handleDialogKeys);
+      previouslyFocused?.focus();
+    };
   }, [onClose]);
 
   return (
     <div className="model-detail-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <aside className="model-detail" role="dialog" aria-modal="true" aria-labelledby="model-detail-title" data-testid="model-detail">
+      <aside ref={dialogRef} className="model-detail" role="dialog" aria-modal="true" aria-labelledby="model-detail-title" data-testid="model-detail" tabIndex={-1}>
         <header className="model-detail-header">
           <div>
             <span className="eyebrow">Ficha operacional · {ROLE_LABELS[role] || humanize(role)}</span>
             <h2 id="model-detail-title">{candidate.label || candidate.identity.model_id}</h2>
             <p>{candidate.identity.provider_org} · {humanize(candidate.identity.channel)} · {candidate.identity.profile_id}</p>
           </div>
-          <button type="button" className="model-detail-close" onClick={onClose} aria-label="Cerrar detalle"><X size={18} /></button>
+          <button ref={closeButtonRef} type="button" className="model-detail-close" onClick={onClose} aria-label="Cerrar detalle"><X size={18} /></button>
         </header>
 
         <section className="detail-score-hero">
@@ -386,7 +425,7 @@ function CandidateDetail({ selection, onClose }: { selection: DetailSelection; o
             </span>
             <p>{evaluation?.compatibility?.reason || humanize(candidate.selection_reason || score?.auto_ineligible_reasons?.[0])}</p>
             <div className="detail-inline-metrics">
-              <span>Confianza <strong>{Math.round(score?.confidence?.value || 0)}%</strong></span>
+              <span>Confianza <strong>{percentText(score?.confidence?.value)}</strong></span>
               <span>Cobertura <strong>{score?.known_weight_percent || 0}%</strong></span>
               <span>Evidencia <strong>{humanize(evaluation?.evaluation?.status)}</strong></span>
             </div>
@@ -454,7 +493,7 @@ function CandidateDetail({ selection, onClose }: { selection: DetailSelection; o
 
         <details className="detail-raw">
           <summary>Provenance y métricas crudas</summary>
-          <pre>{JSON.stringify({ runtime_metrics: evaluation?.runtime_metrics, provenance: evaluation?.provenance, input_hash: evaluation?.input_hash }, null, 2)}</pre>
+          <pre>{JSON.stringify({ runtime_metrics: evaluation?.runtime_metrics, provenance: evaluation?.provenance, score_inputs: evaluation?.score_inputs, input_hash: evaluation?.input_hash }, null, 2)}</pre>
         </details>
       </aside>
     </div>
@@ -470,6 +509,7 @@ export function ModelCatalog() {
   const [error, setError] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [detail, setDetail] = useState<DetailSelection | null>(null);
+  const closeDetail = useCallback(() => setDetail(null), []);
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -577,7 +617,7 @@ export function ModelCatalog() {
         <div className="catalog-kpis" aria-label="Resumen del catálogo">
           <div><strong>{catalog.counts.candidates}</strong><span>modelos</span></div>
           <div><strong>{catalog.counts.providers}</strong><span>perfiles/canal</span></div>
-          <div><strong>{autoEligible}</strong><span>auto-elegibles</span></div>
+          <div><strong>{filters.role ? autoEligible : '—'}</strong><span>{filters.role ? 'auto-elegibles' : 'elige un rol'}</span></div>
           <div className="kpi-shadow"><strong>SHADOW</strong><span>{catalog.score_version}</span></div>
         </div>
         <button className="catalog-refresh" type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={loading || roleLoading} title="Actualizar catálogo">
@@ -605,7 +645,7 @@ export function ModelCatalog() {
           <label><span>Proveedor</span><select value={filters.provider} onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))}><option value="">Todos</option>{providers.map((provider) => <option key={provider}>{provider}</option>)}</select></label>
           <label><span>Canal</span><select value={filters.channel} onChange={(event) => setFilters((current) => ({ ...current, channel: event.target.value }))}><option value="">Todos</option><option value="api">API</option><option value="subscription">Suscripción</option><option value="local">Local</option><option value="free_gateway">Gateway free</option></select></label>
           <label><span>Tier</span><select value={filters.tier} onChange={(event) => setFilters((current) => ({ ...current, tier: event.target.value }))}><option value="">Todos</option><option value="premium">Premium</option><option value="standard">Standard</option><option value="budget">Budget</option></select></label>
-          <label><span>Estado</span><select value={filters.state} onChange={(event) => setFilters((current) => ({ ...current, state: event.target.value }))} data-testid="model-state-filter"><option value="">Todos</option><option value="configured">Configurado</option><option value="adapter_green">Adapter verde</option><option value="model_verified">Verificado</option><option value="selectable">Seleccionable</option><option value="blocked">Bloqueado</option><option value="manual_only">Solo manual</option></select></label>
+          <label><span>Estado</span><select value={filters.state} onChange={(event) => setFilters((current) => ({ ...current, state: event.target.value }))} data-testid="model-state-filter"><option value="">Todos</option>{Object.entries(STATE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           {activeFilterCount ? <button type="button" className="clear-filters" onClick={() => setFilters(INITIAL_FILTERS)}><X size={13} /> Limpiar {activeFilterCount}</button> : null}
         </div>
 
@@ -655,10 +695,10 @@ export function ModelCatalog() {
         <span><ShieldCheck size={14} /> Fuente: {catalog.schema_version}</span>
         <span>Observado {formatObservedAt(catalog.observed_at)}</span>
         <span className="catalog-hash">{catalog.content_hash.slice(0, 12)}</span>
-        <span className="catalog-policy"><ArrowUpRight size={13} /> La selección contextual se activa en M.6</span>
+        <span className="catalog-policy"><ArrowUpRight size={13} /> Selección contextual: API canónica activa</span>
       </footer>
 
-      {detail ? <CandidateDetail selection={detail} onClose={() => setDetail(null)} /> : null}
+      {detail ? <CandidateDetail selection={detail} onClose={closeDetail} /> : null}
     </section>
   );
 }

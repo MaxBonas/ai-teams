@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer_aggregate",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "role": "test_designer",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/antigravity-flash-high-test-designer-v2-seed-1.json",
+    "benchmarks/results/model_calibration/antigravity-flash-high-test-designer-v2-seed-2.json",
+    "benchmarks/results/model_calibration/antigravity-flash-high-test-designer-v2-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-flash-high-test-designer-v2-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "d74c249c9cd0dc488c40f943d427e8969345f7e5b95396eb89a07d95ff44f5eb"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-flash-high-test-designer-v2-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "83a12f8a50c1ffe1b199b5e86da00748e946abe18d9604f98d839ea684106cc8"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/antigravity-flash-high-test-designer-v2-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "a2f9e3554f9d2838a5ed77e8316624b0352c350640e7816f863d9b8b55091359"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true
+  },
+  "checks_passed": 24,
+  "checks_total": 24,
+  "wall_seconds_median": 55.266,
+  "wall_seconds_range": [
+    42.282,
+    115.641
+  ],
+  "usage": {
+    "marginal_cost_cents": 0,
+    "telemetry_status": "unknown",
+    "note": "Antigravity no expone usage headless comparable"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "integración multi-módulo",
+      "tests de browser",
+      "property-based testing"
+    ]
+  }
+}

@@ -347,6 +347,35 @@ interface CliStatus {
   login_hint?: string;
   login_command?: string;
   alternate_login_commands?: string[];
+  setup_url?: string;
+  setup_url_label?: string;
+  setup_steps?: string[];
+  credential_storage?: string;
+  post_login_check?: string;
+}
+
+function CliSetupGuide({ item }: { item: CliStatus }) {
+  if (!item.setup_steps?.length && !item.setup_url && !item.credential_storage) return null;
+  return (
+    <details className="cli-setup-guide">
+      <summary>Guía de configuración</summary>
+      {item.login_hint && <p>{item.login_hint}</p>}
+      {item.setup_steps?.length ? (
+        <ol>
+          {item.setup_steps.map((step) => <li key={step}>{step}</li>)}
+        </ol>
+      ) : null}
+      {item.setup_url && (
+        <a href={item.setup_url} target="_blank" rel="noreferrer">
+          {item.setup_url_label || 'Abrir documentación oficial'}
+        </a>
+      )}
+      {item.credential_storage && <p className="cli-credential-note">{item.credential_storage}</p>}
+      {item.post_login_check && (
+        <p>Comprobación manual: <code>{item.post_login_check}</code></p>
+      )}
+    </details>
+  );
 }
 
 interface AdapterHealth {
@@ -1997,7 +2026,8 @@ export default function App() {
     finally { setChatSending(false); }
   };
 
-  // Pre-fetch role-aware model options for every member visible in hiring panels
+  // Cache the canonical contextual projection only for the profile currently
+  // assigned to each visible member. ModelRoleSelector owns the global list.
   useEffect(() => {
     pendingInteractions.forEach((interaction) => {
       if (interaction.kind !== 'suggest_tasks') return;
@@ -2006,9 +2036,8 @@ export default function App() {
       team.forEach((member) => {
         const role = member.role || '';
         const interactionIssue = issues.find((item) => item.id === interaction.issue_id) || selectedIssue;
-        if (role) adapterProfiles.forEach((profile) => {
-          void fetchRoleModelOptions(profile.id, role, interactionIssue);
-        });
+        const profileId = String(member.adapter_profile_id || member.adapter_config?.profile_id || '');
+        if (role && profileId) void fetchRoleModelOptions(profileId, role, interactionIssue);
       });
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2016,18 +2045,17 @@ export default function App() {
 
   useEffect(() => {
     if (!configModalAgent?.role) return;
-    adapterProfiles.forEach((profile) => {
-      void fetchRoleModelOptions(profile.id, configModalAgent.role || '', selectedIssue);
-    });
+    const profileId = String(configModalAgent.adapter_config?.profile_id || '');
+    if (profileId) void fetchRoleModelOptions(profileId, configModalAgent.role, selectedIssue);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configModalAgent?.id, adapterProfiles, selectedIssue]);
 
   useEffect(() => {
-    adapterProfiles.forEach((profile) => {
-      void fetchRoleModelOptions(profile.id, 'lead', onboardingCompatibilityIssue);
-    });
+    if (leadAdapterProfileId) {
+      void fetchRoleModelOptions(leadAdapterProfileId, 'lead', onboardingCompatibilityIssue);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapterProfiles, newProjectRunProfile, newProjectDataClass]);
+  }, [leadAdapterProfileId, newProjectRunProfile, newProjectDataClass]);
 
   const createProject = async () => {
     setLoading(true);
@@ -2271,9 +2299,15 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...agentDraft,
+          issue_id: selectedIssue?.id || '',
           run_profile: issueCompatibilityContext(selectedIssue).runProfile,
           criticality: issueCompatibilityContext(selectedIssue).criticality,
           data_class: issueCompatibilityContext(selectedIssue).dataClass,
+          required_capabilities: (
+            agentDraft.capabilities
+            || configModalAgent?.capabilities
+            || []
+          ),
         }),
       });
       const json = await response.json();
@@ -2478,7 +2512,7 @@ export default function App() {
             )}
           </div>
 
-          {/* Compatibilidad legacy visible hasta retirar el endpoint por perfil. */}
+          {/* Estado técnico del perfil; la compatibilidad viene del selector contextual. */}
           <div className="agent-form-field">
             {activeModelProfile?.model_catalog?.status === 'cli_update_required' && (
               <small className="field-warning">
@@ -2625,6 +2659,7 @@ export default function App() {
     setLoading(true);
     try {
       const profile = adapterProfiles.find((item) => item.id === catalogHire.profileId);
+      const context = issueCompatibilityContext(selectedIssue);
       if (catalogHire.roleId === 'role:quorum_auditor_1' || catalogHire.roleId === 'role:quorum_auditor_2') {
         const response = await apiFetch('/api/agents/quorum/reconcile', {
           method: 'POST',
@@ -2634,6 +2669,7 @@ export default function App() {
             profile_id: catalogHire.profileId,
             model: catalogHire.model,
             candidate_id: catalogHire.candidateId,
+            issue_id: selectedIssue?.id || '',
           }),
         });
         const payload = await response.json();
@@ -2659,6 +2695,10 @@ export default function App() {
               },
             },
             supervisor_agent_id: lead?.id || null,
+            issue_id: selectedIssue?.id || '',
+            run_profile: context.runProfile,
+            criticality: context.criticality,
+            data_class: context.dataClass,
           }),
         });
         const payload = await response.json();
@@ -2746,17 +2786,49 @@ export default function App() {
     const key = modelOptionCacheKey(profileId, role, issue);
     if (roleModelOptions[key]) return roleModelOptions[key];
     try {
-      const params = new URLSearchParams({
-        profile_id: profileId,
-        role,
-        run_profile: context.runProfile,
-        criticality: context.criticality,
-        data_class: context.dataClass,
+      const res = await apiFetch('/api/model-catalog/selection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role,
+          issue_id: issue?.id === 'new-project' ? '' : issue?.id || '',
+          run_profile: context.runProfile,
+          criticality: context.criticality,
+          data_class: context.dataClass || 'public',
+          required_capabilities: [],
+        }),
       });
-      const res = await apiFetch(`/api/user-adapters/models?${params.toString()}`);
       if (!res.ok) return [];
-      const json = (await res.json()) as { options?: RoleModelOption[] };
-      const opts = json.options || [];
+      const json = (await res.json()) as {
+        default?: { candidate_id?: string | null };
+        candidates?: Array<{
+          candidate_id: string;
+          label?: string;
+          identity?: { profile_id?: string; model_id?: string };
+          model_metadata?: { tier?: string; price_note?: string };
+          states?: Record<string, { value?: boolean }>;
+          selection_score?: { score?: number | null };
+          contextual_compatibility?: RoleModelOption['compatibility'];
+          owner_selectable?: boolean;
+          disabled_reason?: string | null;
+          selection_reason?: string;
+        }>;
+      };
+      const opts: RoleModelOption[] = (json.candidates || [])
+        .filter((candidate) => candidate.identity?.profile_id === profileId)
+        .map((candidate) => ({
+          value: String(candidate.identity?.model_id || ''),
+          label: candidate.label || String(candidate.identity?.model_id || ''),
+          recommended: candidate.candidate_id === json.default?.candidate_id,
+          fit_reason: candidate.selection_reason,
+          role_score: candidate.selection_score?.score ?? undefined,
+          tier: candidate.model_metadata?.tier,
+          price_note: candidate.model_metadata?.price_note,
+          available: candidate.states?.selectable?.value,
+          selectable: candidate.owner_selectable === true,
+          availability_reason: candidate.disabled_reason || undefined,
+          compatibility: candidate.contextual_compatibility,
+        }));
       setRoleModelOptions((prev) => ({ ...prev, [key]: opts }));
       return opts;
     } catch {
@@ -3111,8 +3183,9 @@ export default function App() {
                           onClick={() => void launchCliLogin(item.id)}
                           disabled={loading || !item.available}
                         >
-                          {authOk ? 'Re-login' : 'Login'}
+                          {authOk ? 'Reconectar' : (item.id === 'opencode' ? 'Conectar OpenCode Zen' : 'Login')}
                         </button>
+                        <CliSetupGuide item={item} />
                       </div>
                     );
                   })}
@@ -4795,9 +4868,10 @@ export default function App() {
                                 disabled={loading || !item.available}
                                 title={item.login_hint}
                               >
-                                Login
+                                {item.id === 'opencode' ? 'Conectar OpenCode Zen' : 'Login'}
                               </button>
                             )}
+                            <CliSetupGuide item={item} />
                           </div>
                         ))}
                       </div>

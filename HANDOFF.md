@@ -2,7 +2,7 @@
 
 # Handoff actual
 
-Fecha: `2026-07-22`
+Fecha: `2026-07-23`
 
 AI Teams ya no está en reconstrucción inicial. Es un control plane multiagente Paperclip-like funcional, centrado en SQLite, y se encuentra en fase de endurecimiento operativo, validación con proveedores reales y medición frente a un agente único.
 
@@ -44,8 +44,252 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
+Siguiente unidad ejecutable: **P0.I.1.4.3**, ejecutar la aceptación Windows en
+el runner efímero y conservar/auditar su recibo. M.8 queda abierto como
+mantenimiento por evento/mes; sus 25 pares
+calibrados ya tienen quality exacta, 21 abren diversidad y los cuatro restantes
+no deben repetirse hasta un cambio material.
+
 ## Trabajo reciente
 
+- I.1.4.1–I.1.4.2 añaden un harness Windows fail-closed y un workflow sobre
+  `windows-latest`. Comprueban revisión, bootstrap doble, auditoría, start/stop,
+  health, proyecto SQLite fixture, puertos liberados y que no aparezcan CLIs
+  globales implícitos. Un recibo local se etiqueta `local_existing_host` y no
+  permite promoción. La ejecución local integral pasa 10/10 pasos, una issue y
+  26 tablas; corrigió un bloqueo por handles heredados en el primer intento.
+  I.1.4 continúa abierto hasta obtener el artefacto independiente con SHA y
+  provenance de GitHub Actions coincidentes. Config añade una guía expandible de OpenCode Zen con enlace a
+  la key personal, login en terminal, `opencode auth list` y probe posterior,
+  sin recoger la credencial. Verificación: 41 tests focalizados, Ruff y
+  typecheck limpios, 1461 tests backend y teardown sin listeners residuales.
+- I.1.1–I.1.3 fijan `installation_support_v1` como fuente única de plataformas,
+  runtimes, distribución y clases de adapter. El bootstrap ejecuta un auditor
+  read-only que recomienda sin instalar: hace falta un solo canal Lead-capable
+  verde; Codex/Antigravity son opciones primarias, OpenCode es economía opcional
+  con API key personal y Ollama/LM Studio son locales opcionales. La máquina
+  actual reporta Windows x86_64 `preview`, control plane listo, Codex 0.145.0,
+  Antigravity 1.1.5 y OpenCode 1.18.4 presentes, sin fingir auth/health. El caso
+  externo del 2026-07-22 queda en RUN-018; la parte no programativa abre P0.J y
+  recibe mitigación inmediata en la skill del Lead. Verificación: bootstrap
+  completo, 37 tests dirigidos, Ruff limpio y 1456 tests backend. El contrato
+  de release exige versión, SHA-256, SBOM/licencias, migración y rollback; su
+  materialización permanece en I.8.
+- M.8.3.1–M.8.3.2 separan evidencia con `model_evidence_taxonomy_v1` y elevan
+  el scorer a `model_role_score_v2`. Benchmarks generales, canarios de rol y
+  fixtures de tools no se sustituyen; cuatro `research_score` quedan visibles
+  pero fuera del score. `case_diversity` exige dos familias independientes para
+  automática: 21/25 calibraciones cumplen y 4 conservan quality pero quedan
+  bloqueadas por mono-familia/Goodhart material. Catálogo: 23 canarios de rol,
+  2 fixtures exactos, cero auto y cero fallos. El snapshot v2 conserva
+  `recommend`. M.8.3.3–M.8.3.4 quedan cerrados; Sonnet/Engineer, Flash High/QA,
+  Flash High/Test Designer y Flash Low/File Scout fueron evaluados pero siguen
+  mono-familia hasta cambio material. Verificación: 117 tests focalizados, Ruff
+  limpio y 1451 tests backend.
+- M.8.3.3 Coding queda ejecutado con una segunda familia `config_redactor`.
+  Terra/Engineer pasa tres seeds, 9/9 tests ocultos y Ruff; su agregado
+  diversity-aware enlaza 6/6 muestras entre dos familias y abre el gate.
+  Sonnet/Engineer pasa 3/3 ocultos en seed 1 pero falla Ruff por un import
+  `pytest` sin usar; fail-fast detiene seeds 2–3, conserva diagnóstico y no abre
+  diversidad. No se parcheó la salida ni se promovió ningún default.
+- M.8.3.3 QA usa una segunda familia de firma, expiración y replay de webhooks.
+  Terra/QA pasa tres seeds y 30/30 gates; su agregado enlaza 6/6 muestras y abre
+  diversidad. Flash High/QA pasa el ataque de seed 1, pero la reverificación
+  termina en `subscription_cli_timeout` tras 240 s; fail-fast detiene seeds 2–3.
+  Es diagnóstico operacional, no fallo de calidad ni permiso de promoción.
+- M.8.3.3 Test Designer usa una máquina de estados como segunda familia. Terra
+  pasa tres seeds, 24/24 gates y 15/15 mutantes; su agregado enlaza 6/6 muestras
+  y abre diversidad. Flash High pasa seed 1; seed 2 mata 5/5 mutantes pero
+  expira antes del reporte durable, por lo que fail-fast detiene seed 3 y el
+  gate permanece cerrado.
+- M.8.3.3 Tier 3 añade familias por función. Luna/Worker, Flash Medium/Worker y
+  Luna/Web Scout completan 3/3 seeds y agregados de 6/6 muestras, por lo que
+  abren diversidad. Flash Low/File Scout falla seed 1 con
+  `subscription_cli_parse_error` antes de un submit estructurado; fail-fast
+  detiene seeds 2–3 y mantiene la calibración anterior sin abrir el gate.
+- M.8.3.3 MCP Operator añade política de dependencias como segundo dominio.
+  Terra completa 3/3 seeds y 36/36 gates de recovery y gobernanza; el agregado
+  enlaza 6/6 muestras y abre diversidad. Los receipts antiguos se versionaron
+  por reevaluación determinista, sin repetir proveedor.
+- M.8.2 queda cerrado: 46 candidatos × 17 roles canónicos =
+  782 celdas. `CANONICAL_ROLES` excluye aliases; 666 incompatibilidades quedan
+  explicadas y sin score. La automática ahora exige política global y nominación
+  exacta en `best_for`: 71 combinaciones compatibles no nominadas permanecen
+  manuales, sin perder compatibilidad. De las 45 nominadas, no queda ninguna
+  ruta operativa sin evidencia. Luna/File Scout y Flash Low/Worker ya tenían
+  agregados íntegros de tres semillas; sus resultados parciales no se repiten ni
+  reciben quality. El auditor falla ante matriz incompleta, score incompatible,
+  política rol divergente o ruta automática operativa sin recibo. Hay 25
+  calibraciones exactas, cero scores completos, cero auto-elegibles, cero
+  fallos y un warning stale. No se consumieron inferencias nuevas.
+  Verificación: 84 tests dirigidos, Ruff limpio y 1434 tests backend.
+- M.8.1 conecta por fin calibraciones y read model productivo mediante
+  `model_normalized_metrics_v1`. Las 25 celdas calibradas reciben calidad
+  normalizada y metadata de evidencia; parciales/negativas/no probadas quedan
+  unknown. No se inventan capability, fiabilidad, economía o velocidad: siguen
+  cero candidatos auto-elegibles. El fallback de versión usa únicamente el
+  último drift autenticado fresco y conserva provenance. Recibo vivo: 46
+  candidatos, 25 métricas exactas, cero fallos y deuda explícita por celda.
+  Verificación: 48 tests dirigidos, Ruff en alcance, 1429 backend y dos JSON
+  válidos/sin secretos.
+- M.7.4 queda cerrado con promoción solo a `recommend`, nunca `auto`. El
+  snapshot vivo persiste 14 roles × 46 candidatos: hashes válidos, cero
+  `auto_applied` y cero mutaciones. Economía declarada 644/644, pero únicamente
+  17 normalizadas; 392 adapters rojos y capacidad desconocida/no-data en las
+  644 observaciones impiden ganador. La matriz negativa falla cerrado para
+  health, incompatibilidad, precio, cuota, stale, empate y override. El rollout
+  revalida el ganador y los empates exactos ya exigen owner. `.env.example`
+  propone `recommend`; `shadow` sigue siendo fallback y rollback. Verificación:
+  124 tests dirigidos, Ruff en alcance, 1424 backend y recibo válido/sin
+  secretos.
+- M.7.3 queda cerrado como pool no bloqueante y sin promociones. OpenCode 1.18.4
+  conserva catálogo/transportes y se cierra sin nuevas inferencias mediante un
+  recibo con hashes; DeepSeek Reviewer sigue `partial` 1/3. GPT-OSS 120B falla
+  `submit_work` en los tres roles exactos y se detiene por fail-fast. En Ollama
+  0.32.1, Qwen 14B y Gemma E4B fallan sus contratos; Gemma 26B Engineer queda
+  `partial` 1/3 y Reviewer/Test Designer fallan. Cada celda mantiene diagnóstico
+  durable. La economía local queda aclarada: coste/API/tokens/cuota externos
+  siempre 0 y cuota ilimitada; recursos, energía y latencia son capacidad del
+  host separada. El scorer asigna economía local conocida 100/100 sin inventar
+  calidad. Cobertura: 25 calibrados, 5 parciales, 15 canarios, 4 fixtures, 3
+  manuales y 79 bloqueados. Verificación: 140 tests dirigidos, Ruff en alcance,
+  1420 backend y 18 JSON válidos/sin secretos. Próxima unidad: M.7.4 snapshot
+  vivo de promoción.
+- M.7.2.3 y la cohorte M.7.2 quedan cerradas como evaluación, no como promoción
+  automática. El harness Tier 3 es ahora multiperfil y no atribuye esfuerzo ni
+  tokens inexistentes a Antigravity. Flash Medium/`worker` pasa 3/3 (mediana
+  70,640 s); Flash Low/`file_scout` pasa 3/3 (80,080 s); Low/`context_curator`
+  pasa auth+queue 6/6 (96,300 s; 42,300–169,700). Low/`worker` queda parcial
+  2/3: una célula sufre timeout de 240 s, requiere recovery y repite el hecho
+  prohibido “jueves”. No se re-rollea ni se promociona. Los agregados enlazan
+  recibos, fixtures y hashes, el auditor detecta tampering y usage queda
+  `unknown`. Cobertura: 25 calibrados, 4 parciales, 16 canarios, 4 fixtures, 3
+  manuales y 79 bloqueados. Verificación: 20 tests dirigidos, 1409 backend,
+  Ruff limpio en el alcance y 19 JSON activos válidos/sin secretos; Ruff global
+  conserva 137 incidencias fuera de esta unidad. Próxima unidad: M.7.3 o, para
+  la cohorte principal, M.7.4 snapshot vivo de promoción.
+- M.7.2.2 calibra Gemini 3.5 Flash High en los dos contratos Tier 2 pendientes
+  sin extrapolar Reviewer. Los harnesses de Terra aceptan ahora perfil+modelo
+  manteniendo casos y jueces: QA pasa 3/3 ciclos ataque→fix→verificación y
+  30/30 gates (mediana 130,733 s); Test Designer pasa 3/3, mata 15/15 mutantes
+  y supera 24/24 gates (mediana 55,266 s). El juez QA amplía `active=False` a
+  constructores y la superficie authored ignora únicamente caches Python; las
+  muestras se reevaluaron sin rerun. Usage Antigravity sigue `unknown`.
+  Agregados con fuentes+hashes y tampering test dejan ambos pares calibrados.
+  Cobertura: 22 calibrados, 4 parciales, 19 canarios, 4 fixtures, 3 manuales y
+  79 bloqueados. Verificación: 17 tests dirigidos, Ruff, 1403 tests backend y
+  8 artefactos activos íntegros/sin secretos. Próxima unidad: M.7.2.3, Flash
+  Medium/Low Tier 3.
+- M.7.2.1 mejora Luna Tier 3 sin subir esfuerzo: un contrato causal/report v2 y
+  una skill ausente de `worker` corrigen fallos reales de producto; el canario
+  de `file_scout` deja de pedir review/recomendaciones incompatibles con su rol.
+  Luna `low` completa `worker` 3/3 en una run y `web_scout` 3/3 con MCP
+  gobernado; ambos quedan calibrados. `file_scout` retiene calidad 3/3, pero
+  solo cierra en una run 1/3 y queda parcial. Los agregados enlazan fuentes y
+  hashes y el auditor detecta tampering. Cobertura: 20 calibrados, 4 parciales,
+  21 canarios, 4 fixtures, 3 manuales y 79 bloqueados. Próxima unidad:
+  M.7.2.2, Flash 3.5 High en QA y Test Designer. Verificación: 109 tests
+  dirigidos, Ruff, 1396 tests backend y 12 artefactos JSON íntegros/sin secretos.
+- M.7.1 queda cerrada: el contrato productivo Tier 1 incorpora una pasada de
+  retención causal compartida por adapters y por el prompt consolidado Codex.
+  El screening pareado v1→v2 mejora las cinco familias débiles de 1/3 o 2/3 a
+  3/3; los casos complementarios también pasan, para 30/30 muestras v2 y cinco
+  matrices nuevas 6/6. Sol y Gemini 3.1 Pro High quedan calibrados en los cinco
+  roles exactos (`architect`, `lead`, `lead_executor`, `quorum_auditor` y
+  `team_lead`). El harness rechaza versiones mezcladas y el registro valida
+  `prompt_version`, fuentes y hashes. Cobertura: 18 calibrados, 4 parciales, 23
+  canarios, 4 fixtures, 3 manuales y 79 bloqueados. Los recibos v1 negativos se
+  conservan como historial, no como diagnóstico vigente. Verificación: 110
+  tests dirigidos, Ruff, 1392 tests backend y auditoría de los 40 artefactos v2
+  sin JSON inválido, mezcla de versión ni patrones de secretos.
+- M.7.1/`architect` completa 6/6 en Sol y 6/6 en Gemini 3.1 Pro High.
+  Los agregados enlazan seis fuentes exactas y hashes de respuesta; cobertura
+  recalcula identidad, rol, caso, semilla, versión, resultado y hash, y un test
+  demuestra que manipular una muestra degrada el par a `partial`. Ambos pares
+  quedan `calibrated` como calidad por rol, pero `default_change_allowed=false`
+  hasta M.7.4. El snapshot 2026-07-23 pasa drift 6/6 y deja 10 calibrados,
+  5 parciales, 30 canarios, 4 fixtures, 3 manuales y 79 bloqueados. `lead`
+  permanece fuera: Sol 4/6 y Pro High 5/6, visibles como diagnóstico.
+  Verificación: 38 tests dirigidos, Ruff y 1386 tests backend verdes.
+- M.7.1 queda dividido en unidades verificables y dispone de un harness común
+  para Sol y Gemini 3.1 Pro High: cinco roles exactos, dos familias causales y
+  tres semillas por familia, sin extrapolar `lead` a aliases. La primera unidad
+  viva (`lead`) produce resultados negativos útiles: Sol 4/6 por omitir la
+  ventana de 10 minutos en dos incidentes; Pro High 5/6 por omitir el aceptador
+  en una migración. Ninguno se calibra ni autoriza defaults. Los recibos
+  pre-fix se preservan como diagnósticos; el juez nombra anclas ausentes y puede
+  reevaluar sin repetir inferencia. Codex 0.145.0 expone tokens de suscripción;
+  Antigravity 1.1.5 los mantiene unknown.
+- M.6.3 y el bloque completo M.6 quedan reauditados y cerrados con doble check.
+  La intención owner heredada se vuelve a vincular al candidato canónico incluso
+  si perfil/modelo no cambian; onboarding deja de confiar en el candidate ID de
+  React. Filas, propuestas o altas manipuladas fallan antes de mutar y un
+  `default` sólo nace desde snapshot M.7 sellado. Evidencia: 240 tests dirigidos,
+  Ruff, TypeScript, ESLint, build, 8/8 E2E y 1378 tests backend globales.
+- M.6.2 reauditado y cerrado con doble check. Create/PATCH de agentes validan
+  ahora las capabilities efectivas, no sólo las declaradas aparte por el
+  cliente; alta directa y quorum transportan `issue_id`; proposal inicial,
+  quorum automático y liveness heredan profile, criticidad, data class y tools
+  antes de elegir. Los `[0]` restantes son exclusivamente probes manuales y el
+  GET legacy no tiene consumidores productivos. Evidencia: 275 tests dirigidos,
+  Ruff, TypeScript, ESLint, build, 8/8 E2E, smoke Playwright Python sin errores
+  de página y 1372 tests backend globales.
+- M.6.1 reauditado: la lectura de presupuesto diario es read-only y falla
+  cerrado; una SQLite ausente/corrupta conserva gasto desconocido en vez de
+  inventar cero. Cuota o presupuesto desconocidos dejan el gate automático en
+  `null`, mientras solo agotamiento/límite observado bloquea la elección manual.
+  El contexto une capabilities de toda la ascendencia de la issue y conserva la
+  criticidad más cercana. Economía solo cambia con política owner completa y
+  normalizada; los empates explican evidencia, calidad, magnitudes comparables o
+  identidad canónica. Evidencia: 113 tests dirigidos, build/lint, 4 E2E del
+  selector, 8/8 E2E frontend, smoke Playwright Python y 1367 tests globales.
+- Cerrada la mutación silenciosa residual de M.6.2: review cross-provider de
+  criticidad alta y recovery cross-adapter ahora proponen una asignación
+  contextual mediante interaction durable y bloquean sin tocar `agents`.
+  Accept revalida el catálogo vivo y persiste `owner_explicit`; reject conserva
+  el bloqueo; cambios manuales concurrentes válidos prevalecen y alternativas
+  que rompen el gate se rechazan. Las resoluciones son transiciones
+  deterministas exentas de gates de inferencia. Evidencia dirigida: 10 tests.
+- Retirado el último consumidor productivo de
+  `GET /api/user-adapters/models`: onboarding, Equipo y hiring derivan ahora su
+  estado auxiliar del mismo `POST /api/model-catalog/selection` que
+  `ModelRoleSelector`, y solo cargan el perfil actualmente asignado. El GET
+  permanece como compatibilidad externa sin gobernar decisiones; el probe vive
+  separado en `POST /api/user-adapters/test`. TypeScript y ESLint verdes; E2E
+  confirma al menos un POST contextual y cero requests al GET legacy.
+- Preflight M.7 vivo regenerado sin inferencias: drift pasa sus 6/6 gates con
+  Codex 0.145.0 y el inventario Antigravity actual. Cobertura: 46 modelos y 131
+  pares modelo×rol; 8 calibrados, 5 parciales, 32 requieren canario, 4 fixture
+  de tools y 79 permanecen bloqueados. La matriz pendiente queda separada en
+  cohortes premium Codex+Antigravity, económica/tools y pools experimentales;
+  estos últimos no deben bloquear ni autorizar el rollout de defaults.
+  Reauditoría: Codex participa directamente en inventario+cobertura y los
+  recibos promovidos se validan por contenido; Luna ausente o evidencia
+  manipulada hacen fallar cerrado el preflight.
+- M.1 reauditado: la proyección de identidad ya no permite que histórico viejo
+  sobrescriba catálogo/config/discovery, asigna provenance por estado, rechaza
+  identidades conflictivas y comparte una única enumeración con la API.
+- M.2 reauditado: confidence falla cerrado ante provenance/evidencia material
+  incompleta, ranking valida versión+rol+identidad y selección contextual consume
+  las constantes canónicas. Smoke shadow: 46 candidatos/124 pares, cero auto.
+- M.3 reauditado: el colector read-only deduplica aliases de una misma SQLite,
+  cada fila publica los inputs exactos y el auditor recalcula hash+score aunque
+  se vuelva a sellar el payload exterior. Snapshots rechazan versión/rol
+  explícitos contradictorios y conservan compatibilidad con filas envolventes.
+  Auditor real: 46 candidatos, 124 pares, cero auto y cero fallos; 76 tests
+  dirigidos, Ruff y 1360 tests globales verdes.
+- M.4 reauditado: la caché del catálogo devuelve copias aisladas y ya no puede
+  contaminarse por mutación de un consumidor; `/candidates` distingue el score
+  base y enlaza el selector contextual vigente. OpenAPI, filtros, orden, detalle
+  y shim legacy mantienen paridad. Smoke real: 48 candidatos, 12 perfiles, 13
+  reviewer, 0 auto, 28 configurados, 20 no configurados y 5 bloqueados; 145
+  tests dirigidos, Ruff y 1360 tests globales verdes.
+- M.5 reauditado en navegador: detalle con foco confinado/restaurado, unknown
+  visible como `—`, once estados filtrables, tarjetas con configurados/verdes y
+  metadata de M.6 vigente. Los fixtures Modelos y orientación consumen ya el
+  POST contextual actual. Build/lint verdes, 3 E2E M.5 y 7/7 frontend; capturas
+  desktop/móvil inspeccionadas y smoke Python Playwright con `networkidle`, foco
+  correcto y cero errores de página; 1360 tests backend globales verdes.
 - El informe económico por entrega/proyecto sigue deliberadamente sin
   construirse: el proyecto activo no aporta volumen y el nuevo auditor read-only
   `scripts/audit_cost_report_readiness.py` falla cerrado hasta que una misma
@@ -156,8 +400,9 @@ La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims 
 - El primer canario Luna/auth quedó como diagnóstico de la instalación antigua:
   Codex CLI `0.128.0` no podía ejecutar el catálogo cacheado para `0.145.0`.
   El CLI ya está actualizado a `0.145.0`, el cache enumera Sol/Terra/Luna y un
-  probe efímero read-only de Luna devuelve `LUNA_OK`. GPT-5.5 continúa como
-  Context Curator hasta completar el A/B causal auth+queue.
+  probe efímero read-only de Luna devuelve `LUNA_OK`. El A/B causal auth+queue
+  ya terminó: GPT-5.5 queda como control histórico y Luna `medium` es el Tier 3
+  activo de Context Curator.
 - Lifecycle de modelos completado: `model_unavailable` bloquea la issue y crea
   una propuesta idempotente del mejor modelo ejecutable del mismo perfil,
   indicando cambios de familia/tier. Solo el owner puede aceptarla; la
@@ -332,8 +577,10 @@ La frescura de calibración queda implementada sin mezclarse con health. El
 registro canónico contiene tres pares promovidos: Luna/`context_curator` y
 Sonnet 4.6/`engineer`+`software_engineer`, con fecha, versión y recibos. El
 auditor de drift pasa 6/6 gates con Codex 0.145.0. El A/B causal auth+queue deja
-GPT-5.5 como control histórico 6/6 y promueve Luna `medium` 6/6 como Tier 3 para
-`context_curator`; Luna `low` 3/6 y prompt v2 4/6 quedan como fallos preservados.
+GPT-5.5 sin override de esfuerzo queda como control histórico 6/6 y promueve
+Luna `medium` 6/6 como Tier 3 para `context_curator`; Luna original 3/6 y prompt
+v2 4/6, también sin override, quedan como fallos preservados y no como evidencia
+causal de un esfuerzo `low`.
 El inventario nuevo de cobertura conductual separa la matriz estructural de la
 evidencia real: 46 modelos/131 destinos semánticos, con 8 calibrados, 5
 parciales, 32 canarios ejecutables, 4 fixtures de tools pendientes, 3 manuales y
@@ -497,22 +744,35 @@ mediante `c9dd733` tras 1229 tests en verde y revisión de secretos/diff.
   `adapter_config`; reconcile conserva intactos perfil, modelo, candidate id y
   modo `owner_explicit`. Create/update y aceptación de hiring validan ya la
   identidad canónica, rechazan IDs falsificados y un E2E cubre guardado → recarga
-  de estado → recarga de UI. Solo queda `mode=default`, dependiente de M.7.
+  de estado → recarga de UI. `mode=default` solo nace desde un snapshot M.7
+  sellado y auto-elegible; ningún cliente owner puede fabricarlo.
   M.6.1 deriva ahora cuota/capacidad y presupuesto desde SQLite/configuración:
   agotamiento bloquea antes del ranking, unknown sigue unknown y solo una
-  política de cuota explícita puede sustituir economía con provenance. Dos E2E
-  cubren orden, deny por cuota, elección owner y ausencia segura de default.
-  Las tools específicas se heredan mediante `issue_id` y
-  `issue_compatibility_context`. Onboarding, alta directa, quorum y fallback
+  política de cuota completa puede sustituir economía con provenance. Cuatro
+  E2E cubren orden, deny por cuota, elección owner, reload, explicación de
+  empate y ausencia segura de default. Las tools específicas se unen desde la
+  issue y todos sus ancestros mediante `issue_compatibility_context`.
+  Onboarding, alta directa, quorum y fallback
   conservan el modelo exacto elegido con `owner_explicit`. M.6.2 queda pendiente
   solo de retirar defaults residuales/primer-modelo y delegar gradualmente el
-  endpoint legacy por perfil. M.6.3 queda pendiente solo del modo durable
-  `default`, que ningún cliente owner puede fabricar antes de M.7.
+  endpoint legacy por perfil. M.6.3 distingue ya `owner_explicit` de `default`:
+  sólo M.7 crea el segundo desde snapshot sellado y ningún cliente owner puede
+  fabricarlo; falta únicamente completar el reload visual específico de default.
   M.7 dispone ya de evaluación shadow durable y endpoint explícito. El smoke
   local persistió seis snapshots idempotentes de 48 candidatos, obtuvo seis
   `no_winner` y confirmó cero cambios en `agents`. El constructor de
   `mode=default` recalcula el hash y exige snapshot `auto_applied` con ganador
-  elegible; aún no existe flag ni conexión a plazas nuevas.
+  elegible. `AITEAM_MODEL_DEFAULT_ROLLOUT` aporta `shadow|recommend|auto`, con
+  fallback de valores inválidos a shadow y rollback sin mutar agentes. Las
+  cohortes conectadas son plazas dinámicas de issues/liveness, bootstrap Lead,
+  Tier 3 y quorum. Recommend conserva el selector vigente y auto aplica solo el
+  ganador sellado; sin ganador Tier 3/quorum persisten `default_unresolved` sobre
+  `role_builtin`, protegido frente a reconcile, y bootstrap Lead aborta+limpia.
+  Quorum excluye perspectivas ya usadas cuando existen alternativas y confirma
+  cada alta antes del snapshot siguiente para evitar locks SQLite; ensure sigue
+  siendo idempotente ante caída parcial. Los canarios herméticos cubren dos
+  canales, no-winner, pin owner y persistencia, pero falta la matriz viva completa.
+  Verificación: 238 tests dirigidos y 1329 tests globales en verde.
 - Prompts externos o antiguos que mencionen `AITEAM_AUTO_QUORUM` están obsoletos: el único disparador vivo es el perfil explícito `lead_quorum`.
 - Windows puede retener handles de SQLite o temporales de pytest. El 2026-07-21
   se confirmó que `.pytest-workspace-tmp` y `.pytest-user-config-tmp` están
@@ -522,24 +782,24 @@ mediante `c9dd733` tras 1229 tests en verde y revisión de secretos/diff.
 
 ## Verificación
 
-Suite completa verificada el `2026-07-22`:
+Suite completa verificada el `2026-07-23` después de reauditar M.6.3 y cerrar M.6:
 
 ```powershell
 .\scripts\pytest_local.bat tests -q --tb=short
-# 1309 passed in 203.15s
+# 1378 passed in 241.04s
 ```
 
 Después de retirar el duplicado sombreado `GET /api/runs/{run_id}`, los 77 tests
 API pasan sin warnings OpenAPI.
 
-Frontend M.5 verificado:
+Frontend M.5–M.6.2 verificado:
 
 ```powershell
 Set-Location ide-frontend
 npm run build
 npm run lint
 npm run test:e2e
-# 3 passed
+# 8 passed
 ```
 
 Canario e2e:

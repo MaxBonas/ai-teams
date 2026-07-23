@@ -34,7 +34,15 @@ MODEL_CATALOG_STATE_NAMES = (
 _BLOCKED_PROFILE_STATES = frozenset(
     {"blocked", "blocked_by_provider", "disabled", "retired"}
 )
-_BLOCKED_MODEL_STATES = frozenset({"unavailable", "rate_limited"})
+_BLOCKED_MODEL_STATES = frozenset(
+    {"blocked", "disabled", "unavailable", "rate_limited"}
+)
+_OPTION_SOURCE_PRIORITY = {
+    "historical_run": 0,
+    "declared_catalog": 10,
+    "configured_profile": 20,
+    "authenticated_discovery": 30,
+}
 
 
 def build_model_catalog_identity_projection(
@@ -55,11 +63,15 @@ def build_model_catalog_identity_projection(
     ``value=None`` hasta que M.2/M.3 aporten ese contexto.
     """
     timestamp = _iso_timestamp(observed_at)
-    profile_rows = {
-        str(profile.get("id") or "").strip(): dict(profile)
-        for profile in profiles
-        if str(profile.get("id") or "").strip()
-    }
+    profile_rows: dict[str, dict[str, Any]] = {}
+    for profile in profiles:
+        profile_id = str(profile.get("id") or "").strip()
+        if not profile_id:
+            continue
+        normalized = dict(profile)
+        if profile_id in profile_rows and profile_rows[profile_id] != normalized:
+            raise ValueError(f"conflicting profile identity for {profile_id!r}")
+        profile_rows[profile_id] = normalized
     candidates: dict[tuple[str, str], dict[str, Any]] = {}
 
     declared = declared_options_by_profile or {}
@@ -80,12 +92,20 @@ def build_model_catalog_identity_projection(
             if not model:
                 continue
             row = _candidate(candidates, profile_id, model, profile, timestamp)
-            _merge_option(row, option)
+            option_observed_at = str(option.get("observed_at") or timestamp)
+            _merge_option(
+                row,
+                option,
+                kind=source,
+                observed_at=option_observed_at,
+                source=str(option.get("source") or source),
+                version=_optional_text(option.get("provider_version")),
+            )
             _add_source(
                 row,
                 kind=source,
                 source=str(option.get("source") or source),
-                observed_at=str(option.get("observed_at") or timestamp),
+                observed_at=option_observed_at,
                 version=_optional_text(option.get("provider_version")),
             )
 
@@ -138,9 +158,6 @@ def _candidate(
     profile: Mapping[str, Any],
     timestamp: str,
 ) -> dict[str, Any]:
-    key = (profile_id, model)
-    if key in candidates:
-        return candidates[key]
     normalized_profile = dict(profile)
     normalized_profile.setdefault("id", profile_id)
     identity = profile_identity(normalized_profile, selected_model=model)
@@ -153,6 +170,13 @@ def _candidate(
         "capacity_pool": identity["capacity_pool"],
         "model_id": model,
     }
+    key = (profile_id, model)
+    if key in candidates:
+        if candidates[key]["identity"] != operational_identity:
+            raise ValueError(
+                f"conflicting operational identity for {profile_id!r}/{model!r}"
+            )
+        return candidates[key]
     encoded = json.dumps(
         operational_identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
@@ -163,6 +187,8 @@ def _candidate(
         "roles_declared": set(),
         "sources": [],
         "option": {},
+        "option_field_ranks": {},
+        "option_field_provenance": {},
         "profile": normalized_profile,
         "first_observed_at": timestamp,
     }
@@ -189,24 +215,56 @@ def _merge_observation(
         "config": {"capacity_pool": str(item.get("capacity_pool") or profile_id)},
     }
     row = _candidate(candidates, profile_id, model, profile, timestamp)
-    _merge_option(row, item)
+    observation_time = str(item.get("observed_at") or timestamp)
+    _merge_option(
+        row,
+        item,
+        kind=kind,
+        observed_at=observation_time,
+        source=str(item.get("source") or kind),
+        version=_optional_text(item.get("provider_version")),
+    )
     _add_source(
         row,
         kind=kind,
         source=str(item.get("source") or kind),
-        observed_at=str(item.get("observed_at") or timestamp),
+        observed_at=observation_time,
         version=_optional_text(item.get("provider_version")),
         verified=item.get("verified") is True,
     )
 
 
-def _merge_option(row: dict[str, Any], option: Mapping[str, Any]) -> None:
+def _merge_option(
+    row: dict[str, Any],
+    option: Mapping[str, Any],
+    *,
+    kind: str,
+    observed_at: str,
+    source: str,
+    version: str | None,
+) -> None:
     current = row["option"]
+    field_ranks = row["option_field_ranks"]
+    field_provenance = row["option_field_provenance"]
+    priority = _OPTION_SOURCE_PRIORITY[kind]
     for key, value in option.items():
-        if value is not None:
+        if value is None:
+            continue
+        rank = (priority, observed_at)
+        previous_rank = field_ranks.get(key)
+        replace = previous_rank is None or rank > previous_rank
+        if rank == previous_rank:
+            replace = _stable_value(value) < _stable_value(current.get(key))
+        if replace:
             current[key] = value
-    if option.get("label"):
-        row["label"] = str(option["label"])
+            field_ranks[key] = rank
+            field_provenance[key] = {
+                "source": source,
+                "version": version,
+                "observed_at": observed_at,
+            }
+            if key == "label" and value:
+                row["label"] = str(value)
     for role in option.get("best_for") or ():
         role_name = canonical_role(str(role))
         if role_name:
@@ -237,6 +295,8 @@ def _add_source(
 def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
     profile = row.pop("profile")
     option = row.pop("option")
+    row.pop("option_field_ranks")
+    field_provenance = row.pop("option_field_provenance")
     sources = sorted(
         row["sources"],
         key=lambda item: (item["observed_at"], item["kind"], item["source"]),
@@ -280,6 +340,26 @@ def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
         "version": latest["version"],
         "observed_at": latest["observed_at"],
     }
+
+    def option_provenance(*fields: str) -> dict[str, Any]:
+        for field in fields:
+            if field in field_provenance:
+                return field_provenance[field]
+        return provenance
+
+    availability_provenance = option_provenance(
+        "verification_status", "availability"
+    )
+    verified_sources = [item for item in sources if item["verified"]]
+    verified_provenance = (
+        {
+            "source": verified_sources[-1]["source"],
+            "version": verified_sources[-1]["version"],
+            "observed_at": verified_sources[-1]["observed_at"],
+        }
+        if verified_sources
+        else availability_provenance
+    )
     states = {
         "catalogued": _state(
             True, "candidate_seen_in_catalog_discovery_or_history", **provenance
@@ -289,7 +369,7 @@ def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
             "profile_configuration_observed"
             if configured
             else "profile_configuration_not_proven",
-            **provenance,
+            **option_provenance("configured", "value", "model"),
         ),
         "adapter_green": _state(
             adapter_green,
@@ -303,7 +383,7 @@ def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
             "exact_model_execution_verified"
             if model_verified
             else "discovery_is_not_execution",
-            **provenance,
+            **verified_provenance,
         ),
         "selectable": _state(
             selectable,
@@ -311,7 +391,7 @@ def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
                 option.get("availability_reason")
                 or ("selection_allowed" if selectable else "selection_not_proven")
             ),
-            **provenance,
+            **option_provenance("selectable", "availability_reason"),
         ),
         "compatible": _state(
             None,
@@ -339,17 +419,17 @@ def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
             "automatic_policy_disabled_or_probe_required"
             if manual_only
             else "automatic_policy_not_disabled",
-            **provenance,
+            **option_provenance("automatic", "requires_probe"),
         ),
         "blocked": _state(
             blocked,
             str(option.get("availability_reason") or profile_status or availability),
-            **provenance,
+            **availability_provenance,
         ),
         "retired": _state(
             retired,
             "profile_or_exact_model_retired" if retired else "no_retirement_evidence",
-            **provenance,
+            **option_provenance("availability", "verification_status"),
         ),
     }
     assert tuple(states) == MODEL_CATALOG_STATE_NAMES
@@ -405,3 +485,7 @@ def _iso_timestamp(value: datetime | str | None) -> str:
 def _optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _stable_value(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
