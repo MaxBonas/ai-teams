@@ -33,12 +33,12 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aiteam.platform_runtime import venv_python_candidates
 # ── colour helpers (work on Windows with ENABLE_VIRTUAL_TERMINAL_PROCESSING) ──
 
 _RESET = "\033[0m"
@@ -128,16 +128,7 @@ def _db_connect(db_path: Path) -> sqlite3.Connection:
 
 def _resolve_python() -> str:
     """Return path to the venv Python on this machine."""
-    if sys.platform == "win32":
-        candidates = [
-            _PROJECT_ROOT / "venv" / "Scripts" / "python.exe",
-        ]
-    else:
-        candidates = [
-            _PROJECT_ROOT / "venv" / "bin" / "python",
-            _PROJECT_ROOT / "venv" / "bin" / "python3",
-        ]
-    for c in candidates:
+    for c in venv_python_candidates(_PROJECT_ROOT):
         if c.exists():
             return str(c)
     return sys.executable
@@ -194,7 +185,6 @@ def _table(rows: list[dict[str, Any]], cols: list[str]) -> None:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     """Start the FastAPI backend (and optionally the heartbeat loop)."""
-    from api.utils import get_current_workspace, resolve_runtime_dir
     python = _resolve_python()
 
     host = args.host
@@ -210,10 +200,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if reload_flag:
         uvicorn_cmd.append("--reload")
 
-    print(_head(f"\n  AI Teams — backend server"))
+    print(_head("\n  AI Teams — backend server"))
     print(f"  API   → {_c(_CYAN, f'http://{host}:{port}')}")
     if not no_hb:
-        print(f"  Heartbeat loop runs inside uvicorn (via lifespan)")
+        print("  Heartbeat loop runs inside uvicorn (via lifespan)")
     print(_dim("  Press Ctrl+C to stop\n"))
 
     try:
@@ -636,7 +626,7 @@ def cmd_run_trigger(args: argparse.Namespace) -> int:
         db_path,
         agent_id=agent_id,
         source="cli_manual",
-        reason=f"Manually triggered via CLI by operator",
+        reason="Manually triggered via CLI by operator",
         payload={"issue_id": issue_id},
         idempotency_key=f"cli_manual:{agent_id}:{issue_id}:{int(time.time())}",
     )

@@ -22,6 +22,7 @@ from aiteam.extensions import (
     set_mcp_server_status,
     slugify_skill_name,
 )
+from aiteam.platform_runtime import process_group_popen_options, terminate_process_tree
 
 
 class McpHealthError(ValueError):
@@ -335,6 +336,7 @@ def _probe_stdio(
         errors="replace",
         shell=False,
         env=env,
+        **process_group_popen_options(),
     )
     def _exchange(message: dict[str, Any]) -> dict[str, Any]:
         messages: queue.Queue[str] = queue.Queue(maxsize=1)
@@ -420,13 +422,7 @@ def _probe_stdio(
             raise McpHealthError("MCP server exposes no tools")
         return initialized, tools
     finally:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=2)
+        terminate_process_tree(proc, grace_sec=2)
 
 
 def _persist_health(runtime_dir: Path, name: str, **health: Any) -> None:

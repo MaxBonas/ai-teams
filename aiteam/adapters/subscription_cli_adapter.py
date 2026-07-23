@@ -22,6 +22,7 @@ from aiteam.adapters.work_contract import (
     parse_submit_work,
     tier3_causal_report_instruction,
 )
+from aiteam.platform_runtime import resolve_executable, run_command
 from aiteam.quorum_quality import quorum_audit_contract_instruction
 
 # Output schema for Codex CLI. Includes an `ops` array so codex agents can
@@ -126,13 +127,6 @@ class ClaudeSubscriptionCliRuntime:
                 run_kwargs: dict[str, Any] = dict(
                     env={**merged_env, **spec.get("env_updates", {})},
                     cwd=spec.get("cwd", effective_cwd),
-                    capture_output=True,
-                    # Force UTF-8 for stdin/stdout: the prompt carries non-ASCII
-                    # (Spanish accents) and codex reads/writes UTF-8. Without this
-                    # Windows uses cp1252 → codex rejects the stdin prompt
-                    # ("input is not valid UTF-8") and stdout comes back mojibake.
-                    encoding="utf-8",
-                    errors="replace",
                     timeout=self.timeout_sec,
                 )
                 if stdin_input is not None:
@@ -143,7 +137,7 @@ class ClaudeSubscriptionCliRuntime:
                     # No stdin payload — close it so the CLI never blocks
                     # waiting for keyboard input.
                     run_kwargs["stdin"] = subprocess.DEVNULL
-                proc = subprocess.run(spec["command"], **run_kwargs)
+                proc = run_command(spec["command"], **run_kwargs)
                 raw_output = spec["read_output"](proc)
         except subprocess.TimeoutExpired as exc:
             stdout = _coerce_output(exc.stdout)
@@ -818,18 +812,17 @@ def _resolve_cli_cmd(name: str) -> str:
     On Windows, npm global scripts install as ``<name>.cmd`` wrappers.
     ``shutil.which('codex')`` may not find them; we try ``codex.cmd`` first.
     """
-    if os.name == "nt" and not name.lower().endswith((".exe", ".cmd", ".bat")):
-        for candidate in (f"{name}.cmd", f"{name}.exe"):
-            resolved = shutil.which(candidate)
-            if resolved:
-                return resolved
-    resolved = shutil.which(name)
-    if resolved is None and os.name == "nt" and name.lower() == "agy":
+    known: list[Path] = []
+    if os.name == "nt" and name.lower() == "agy":
         local_app_data = os.environ.get("LOCALAPPDATA")
-        candidate = Path(local_app_data) / "agy" / "bin" / "agy.exe" if local_app_data else None
-        if candidate is not None and candidate.is_file():
-            return str(candidate)
-    return resolved or name
+        if local_app_data:
+            known.append(Path(local_app_data) / "agy" / "bin" / "agy.exe")
+    return resolve_executable(
+        name,
+        known_candidates=known,
+        os_id="windows" if os.name == "nt" else "linux",
+        which=shutil.which,
+    ) or name
 
 
 def _parse_codex_output(value: Any) -> dict[str, Any]:

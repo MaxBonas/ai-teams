@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
+from aiteam.platform_runtime import run_command
 
 
 @dataclass
@@ -30,12 +31,10 @@ class SubprocessAdapterRuntime:
         merged_env = {**os.environ, **env}
         cwd = str(self.cwd) if self.cwd else None
         try:
-            proc = subprocess.run(
+            proc = run_command(
                 self.command,
                 env=merged_env,
                 cwd=cwd,
-                capture_output=True,
-                text=True,
                 timeout=self.timeout_sec,
             )
         except subprocess.TimeoutExpired as exc:

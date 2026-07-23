@@ -1,0 +1,118 @@
+{
+  "schema_version": "configuration_layers_v1",
+  "precedence_low_to_high": [
+    {
+      "id": "versioned_defaults",
+      "owner": "aiteam_maintainer",
+      "locations": ["aiteam defaults", "config/*.example.json"],
+      "portable": true,
+      "may_contain_secrets": false
+    },
+    {
+      "id": "user_machine",
+      "owner": "machine_owner",
+      "locations": [
+        "%LOCALAPPDATA%/AI Teams",
+        "$XDG_CONFIG_HOME/aiteams",
+        "~/.config/aiteams"
+      ],
+      "portable": false,
+      "may_contain_secrets": false
+    },
+    {
+      "id": "environment",
+      "owner": "process_launcher",
+      "locations": ["allowlisted AITEAM_* variables"],
+      "portable": false,
+      "may_contain_secrets": false
+    },
+    {
+      "id": "project",
+      "owner": "project_owner",
+      "locations": [".aiteam/project_config.json", ".aiteam/instructions.md"],
+      "portable": true,
+      "may_contain_secrets": false
+    },
+    {
+      "id": "run_override",
+      "owner": "run_owner",
+      "locations": ["durable run/agent assignment"],
+      "portable": false,
+      "may_contain_secrets": false
+    }
+  ],
+  "secrets": {
+    "owner": "machine_owner",
+    "locations": [
+      "OS credential store",
+      "local AI Teams secret store",
+      "provider CLI session",
+      "allowlisted process secret variable"
+    ],
+    "transport": "reference_only",
+    "precedence": "injected after resolution and never persisted in resolved configuration"
+  },
+  "state_not_configuration": [
+    "runtime/",
+    "venv/",
+    "node_modules/",
+    "*.db",
+    "adapter_health.json",
+    "current_workspace.json",
+    "provider CLI sessions"
+  ],
+  "project_limits": {
+    "allowed_roots": [
+      "adapter_profile_ids",
+      "adapter_policy",
+      "autonomy",
+      "instructions",
+      "team"
+    ],
+    "forbidden_roots": [
+      "projects_root",
+      "user_config_dir",
+      "secrets",
+      "credentials",
+      "cli_executable"
+    ]
+  },
+  "upgrade_contract": {
+    "source": "git pull --ff-only",
+    "entrypoint_windows": "scripts/update_windows.bat",
+    "preserves": [
+      "user machine settings",
+      "secret references and local secret store",
+      "provider CLI sessions",
+      "project .aiteam state",
+      "local JSON overrides"
+    ],
+    "never_automatic": [
+      "discard tracked changes",
+      "install or authenticate provider CLIs",
+      "copy secrets or runtime state between machines",
+      "apply a database migration",
+      "rollback user project data"
+    ]
+  },
+  "portable_export_contract": {
+    "schema_version": "aiteam_portable_config_v1",
+    "entrypoint": "scripts/config_portability.py",
+    "default_import_mode": "preflight",
+    "apply_requires": "--apply",
+    "includes": [
+      "allowlisted non-path user settings",
+      "redacted custom adapter profile intent and governance",
+      "optional structured project policy"
+    ],
+    "excludes": [
+      "projects_root and other absolute machine paths",
+      "inline credentials and secret-bearing containers",
+      "secret store and provider CLI sessions",
+      "adapter health and model probe state",
+      "runtime, virtual environments, dependencies and active databases",
+      "live team assignments, runs, costs and telemetry"
+    ],
+    "post_import_gate": "configure local channel and pass health plus exact-model probe"
+  }
+}

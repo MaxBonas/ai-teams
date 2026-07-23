@@ -15,6 +15,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from aiteam.configuration_layers import deep_merge, resolve_configuration
+from aiteam.platform_runtime import (
+    executable_candidates,
+    is_usable_executable_path,
+)
 from aiteam.policies import canonical_role
 from aiteam.model_compatibility import compatibility_decision
 from aiteam.model_tiers import annotate_model_tier
@@ -602,6 +607,25 @@ def get_app_settings() -> dict[str, Any]:
     return _read_json(user_config_dir() / "settings.json")
 
 
+def get_effective_app_settings() -> dict[str, Any]:
+    """Return resolved machine settings plus leaf-level source information."""
+    environment: dict[str, Any] = {}
+    projects_root = os.environ.get("AITEAM_PROJECTS_ROOT", "").strip()
+    if projects_root:
+        environment["projects_root"] = projects_root
+    resolution = resolve_configuration(
+        [
+            ("versioned_defaults", {"projects_root": ""}),
+            ("user_machine", get_app_settings()),
+            ("environment", environment),
+        ]
+    )
+    return {
+        "values": resolution.values,
+        "provenance": resolution.provenance,
+    }
+
+
 def update_app_settings(updates: dict[str, Any]) -> None:
     """Merge *updates* into the persisted application settings."""
     settings_path = user_config_dir() / "settings.json"
@@ -612,18 +636,19 @@ def update_app_settings(updates: dict[str, Any]) -> None:
 
 def get_projects_root() -> Path | None:
     """Return the user-configured projects root, or None if not set."""
-    raw = str(get_app_settings().get("projects_root") or "").strip()
+    raw = str(get_effective_app_settings()["values"].get("projects_root") or "").strip()
     return Path(raw).resolve() if raw else None
 
 
 def load_adapter_profiles() -> list[dict[str, Any]]:
     path = user_config_dir() / "adapter_profiles.json"
     custom = _read_json(path).get("profiles", [])
-    profiles = {p["id"]: p for p in DEFAULT_ADAPTER_PROFILES}
+    profiles = {p["id"]: deep_merge({}, p) for p in DEFAULT_ADAPTER_PROFILES}
     if isinstance(custom, list):
         for item in custom:
             if isinstance(item, dict) and str(item.get("id") or "").strip():
-                profiles[str(item["id"])] = item
+                profile_id = str(item["id"])
+                profiles[profile_id] = deep_merge(profiles.get(profile_id, {}), item)
     health = _read_json(user_config_dir() / "adapter_health.json").get("profiles", {})
     out = []
     for profile in profiles.values():
@@ -691,8 +716,8 @@ def resolve_adapter_config(adapter_type: str, adapter_config: dict[str, Any]) ->
                 merged["adapter_type_mismatch"] = profile.get("adapter_type")
             profile_config = profile.get("config")
             if isinstance(profile_config, dict):
-                merged.update(profile_config)
-    merged.update(adapter_config)
+                merged = deep_merge(merged, profile_config)
+    merged = deep_merge(merged, adapter_config)
     if profile_id and merged.get("model"):
         merged["model"] = _canonical_model_id(profile_id, str(merged["model"]))
     if str(merged.get("cli_kind") or "").strip().lower() == "codex":
@@ -1675,20 +1700,26 @@ def launch_subscription_login(cli_id: str) -> dict[str, Any]:
 
 
 def _resolve_cli_executable(command: str) -> str | None:
+    target_os = "windows" if os.name == "nt" else "linux"
     key = _safe_key(command).replace("-", "_").upper()
     override = os.environ.get(f"AITEAM_{key}_CLI", "").strip()
     if override:
-        return override if Path(override).exists() else shutil.which(override)
+        resolved_override = override if Path(override).exists() else shutil.which(override)
+        return (
+            resolved_override
+            if resolved_override
+            and is_usable_executable_path(resolved_override, os_id=target_os)
+            else None
+        )
     for candidate in _known_cli_candidates(command):
-        if candidate.exists():
+        if candidate.exists() and is_usable_executable_path(
+            str(candidate), os_id=target_os
+        ):
             return str(candidate)
     for candidate in _where_candidates(command):
         if _is_usable_cli_path(candidate):
             return candidate
-    candidates = [command]
-    if os.name == "nt" and not command.lower().endswith((".exe", ".cmd", ".bat")):
-        candidates.extend([f"{command}.cmd", f"{command}.exe"])
-    for candidate in candidates:
+    for candidate in executable_candidates(command, os_id=target_os):
         resolved = shutil.which(candidate)
         if resolved and _is_usable_cli_path(resolved):
             return resolved
@@ -1720,18 +1751,12 @@ def _where_candidates(command: str) -> list[str]:
 
 
 def _is_usable_cli_path(value: str) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    if os.name == "nt" and "\\windowsapps\\" in text.lower():
-        # Store app execution targets often exist in PATH but deny direct process execution.
-        # Prefer the vendor shim in AppData or an explicit AITEAM_*_CLI override.
-        return False
-    if os.name == "nt" and Path(text).suffix.lower() not in {".exe", ".cmd", ".bat"}:
-        # ``where`` returns npm's extensionless POSIX shim before the .cmd
-        # launcher. CreateProcess cannot execute that file directly on Windows.
-        return False
-    return True
+    # Store aliases and extensionless npm POSIX shims are not CreateProcess
+    # targets on Windows. The shared boundary keeps probes and dispatch equal.
+    return is_usable_executable_path(
+        value,
+        os_id="windows" if os.name == "nt" else "linux",
+    )
 
 
 def _write_windows_login_launcher(cli_key: str, command: list[str]) -> Path:

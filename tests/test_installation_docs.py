@@ -11,6 +11,9 @@ def _read(relative_path: str) -> str:
 def test_documented_windows_entrypoints_and_templates_exist() -> None:
     for relative_path in (
         "scripts/prepare_dev_env.bat",
+        "scripts/update_windows.bat",
+        "scripts/update_windows.ps1",
+        "scripts/config_portability.py",
         "start_ide.bat",
         "stop_ide.bat",
         "scripts/python_local.bat",
@@ -19,6 +22,7 @@ def test_documented_windows_entrypoints_and_templates_exist() -> None:
         "scripts/accept_windows_clean_room.py",
         ".github/workflows/windows-clean-room.yml",
         "config/installation_support.v1.json",
+        "config/configuration_layers.v1.json",
         "config/control_plane.example.json",
         "config/agents.example.json",
     ):
@@ -43,6 +47,9 @@ def test_installation_guide_is_linked_and_does_not_overclaim_platforms() -> None
     assert "API key personal" in guide
     assert "windows-clean-room.yml" in guide
     assert "windows-clean-room-f2a20ed.json" in guide
+    assert "aiteam_portable_config_v1" in guide
+    assert "config_portability.py import" in guide
+    assert "--apply" in guide
 
 
 def test_documented_migration_validation_remains_a_dry_run() -> None:

@@ -64,8 +64,8 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 6. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próxima unidad ejecutable sin esperar un trigger externo: **I.2.1**, formalizar
-capas, precedencia y ownership de configuración por máquina. M.8 permanece
+Próxima unidad ejecutable sin esperar un trigger externo: **I.3.1**, definir el
+schema estable y el inventario read-only del `doctor` de máquina. M.8 permanece
 abierto solo por mantenimiento continuo; sus cuatro diagnósticos mono-familia
 no se repiten hasta cambio material.
 
@@ -139,27 +139,79 @@ no se repiten hasta cambio material.
   - Cierre: instalación desde cero y actualización verificadas por plataforma,
     sin pasos implícitos ni afirmaciones de soporte sin evidencia fechada.
 
-- [ ] **I.2 Hacer portable la configuración y el estado por máquina**.
-  - [ ] **I.2.1** Formalizar capas: defaults versionados, `config/*.example.json`, ajustes
-    de usuario por OS, variables de entorno, secrets locales y overrides por
-    proyecto bajo `.aiteam/`; documentar precedencia y ownership.
-  - [ ] Añadir export/import redacted de configuración operativa. Nunca incluir
-    keys, tokens, sesiones CLI, `runtime/`, `venv/`, `node_modules/`, DB activas
-    ni rutas absolutas de otra máquina.
-  - [ ] Auditar rutas, separadores, encoding, permisos, case sensitivity, señales
-    y lanzamiento de procesos; aislar las diferencias de OS detrás de helpers.
+- [x] **I.2 Hacer portable la configuración y el estado por máquina**.
+  - [x] **I.2.1 Formalizar capas, precedencia, ownership y actualización in-place**.
+    - [x] `config/configuration_layers.v1.json` fija defaults → usuario →
+      entorno allowlisted → proyecto → run, owners, ubicaciones y límites.
+      Secrets se inyectan por referencia después del merge; DB, health,
+      sesiones CLI y runtime quedan clasificados como estado, no configuración.
+    - [x] `aiteam.configuration_layers` aporta merge profundo y provenance por
+      campo. Settings expone la fuente efectiva de `projects_root`; autonomía
+      conserva proyecto sobre entorno y los overrides de adapter conservan
+      defaults anidados nuevos.
+    - [x] `ensure_local_runtime.ps1` actualiza instalaciones heredadas mediante
+      merge conservador: valores locales ganan, defaults ausentes se añaden,
+      se crea backup inicial y JSON inválido falla sin sobrescritura.
+    - [x] `scripts/update_windows.bat` detiene, exige Git limpio, usa
+      `pull --ff-only`, ejecuta bootstrap y registra revisión/resultado sin
+      stash, reset, migración, login o instalación global. Existe transición
+      documentada para checkouts anteriores al script.
+    - Verificación: 74 tests focalizados, incluida actualización real contra
+      remote Git fixture, rechazo de checkout sucio, preservación de runtime
+      local, segunda sincronización idempotente, merge de tres vías y herencia
+      de defaults; suite backend completa 1472/1472, Ruff y typecheck frontend
+      limpios.
+  - [x] **I.2.2 Export/import redacted de configuración operativa**.
+    - [x] `aiteam_portable_config_v1` conserva settings allowlisted, perfiles
+      custom y política estructurada opcional del proyecto, con SHA-256 sobre
+      JSON canónico y provenance de omisiones.
+    - [x] Sanitización recursiva retira credenciales inline, formatos de secreto
+      conocidos, `env`/headers, rutas absolutas y referencias a
+      `runtime`/`venv`/`node_modules`/DB. No lee stores de secretos, health,
+      sesiones, bases, assignments, runs, costes ni telemetría.
+    - [x] `scripts/config_portability.py` ofrece `export`, `inspect` e `import`.
+      Import es preflight por defecto, exige `--apply`, mergea sin borrar
+      settings/perfiles ajenos, deja secretos intactos e invalida health de los
+      perfiles importados hasta probe local exacto.
+    - [x] La política de proyecto requiere destino explícito, no transporta path
+      o nombre de origen y nunca crea/copia DB. Asignaciones vivas se rehacen en
+      destino mediante hiring/reconcile gated.
+    - Verificación: matriz conjunta I.2.1/I.2.2 80/80, suite backend
+      1478/1478, Ruff y typecheck frontend limpios; export real de esta máquina
+      validado sin persistir el artefacto.
+  - [x] **I.2.3 Auditar y aislar diferencias de filesystem/procesos por OS**.
+    - [x] `aiteam.platform_runtime` centraliza IDs OS/arquitectura, semántica de
+      paths, shims ejecutables, layout de `venv`, streams/entorno UTF-8, grupos
+      de proceso y teardown del árbol completo en timeout.
+    - [x] Adapters genérico/suscripción, probes MCP, notificaciones, CLI y
+      discovery consumen esa frontera. El notifier ya no usa shell; los dos
+      scripts NordVPN ya no contienen rutas personales, son opcionales,
+      preservan entradas, hacen dry-run y exigen `-Apply` admin con backup.
+    - [x] `platform_portability_audit_v1` prueba espacios/Unicode, encoding,
+      permisos, case sensitivity y timeout; escanea rutas personales,
+      `shell=True` y consumidores críticos. Es read-only fuera del fixture y
+      nunca promociona soporte.
+    - Verificación: auditor real Windows x86_64 `ok=true` (teardown
+      `windows_taskkill_tree`), 107 tests dirigidos y suite backend 1493/1493;
+      typecheck frontend y Ruff de las superficies cambiadas limpios. Linux,
+      macOS y ARM64 conservan estado `planned` hasta aceptación independiente.
   - Cierre: un checkout limpio reconstruye el entorno y una mudanza conserva
     intención/configuración no secreta sin copiar estado local.
 
 - [ ] **I.3 Crear un `doctor` de máquina seguro y legible por humanos/IA**.
-  - [ ] Inventariar OS/arquitectura, Python, Node/npm, Git, SQLite, puertos,
-    permisos, toolchains, CLIs/adapters y health; discovery siempre read-only y
-    sin imprimir secretos.
-  - [ ] Ofrecer salida humana y `--json` con estado, versión observada, fuente,
-    bloqueo y siguiente acción. Distinguir ausente, no autenticado, incompatible,
-    no verificado y degradado.
-  - [ ] No instalar runtimes, paquetes globales ni CLIs automáticamente. Cualquier
-    mutación requiere comando explícito y conserva un recibo reproducible.
+  - [ ] **I.3.1 Schema e inventario base read-only**: definir
+    `machine_doctor_v1` e inventariar OS/arquitectura, Python, Node/npm, Git,
+    SQLite, puertos y permisos sin imprimir entorno, secretos ni paths
+    personales.
+  - [ ] **I.3.2 Toolchains y adapters**: observar CLIs, versiones, fuente,
+    autenticación/health del par exacto y toolchains del proyecto sin instalar
+    ni ejecutar inferencias.
+  - [ ] **I.3.3 Diagnóstico y presentación**: salida humana y `--json` estable
+    con bloqueo y siguiente acción; distinguir ausente, no autenticado,
+    incompatible, no verificado y degradado.
+  - [ ] **I.3.4 Recibo y contrato de no mutación**: demostrar que discovery no
+    escribe ni instala; cualquier remediation queda en un comando separado,
+    explícito y con recibo reproducible.
   - Cierre: una IA puede decidir si la máquina está lista usando solo el JSON y
     puede explicar cada bloqueo sin inferirlo de logs libres.
 

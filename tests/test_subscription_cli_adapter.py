@@ -46,14 +46,14 @@ class TestResolveCLICmd:
         result = _resolve_cli_cmd("codex")
         assert result == "C:/npm/codex.cmd"
 
-    def test_falls_back_to_plain_which_on_windows(self, monkeypatch):
+    def test_rejects_extensionless_alias_on_windows(self, monkeypatch):
         monkeypatch.setattr(os, "name", "nt")
         monkeypatch.setattr(
             "aiteam.adapters.subscription_cli_adapter.shutil.which",
             lambda name: "C:/bin/codex" if name == "codex" else None,
         )
         result = _resolve_cli_cmd("codex")
-        assert result == "C:/bin/codex"
+        assert result == "codex"
 
     def test_returns_plain_which_on_posix(self, monkeypatch):
         monkeypatch.setattr(os, "name", "posix")
@@ -639,7 +639,7 @@ class TestReadOnlySandboxForOrchestrators:
                        payload={"issue_id": "issue:intake", "wake_reason": "manual"})
         dispatch = HeartbeatScheduler(db).dispatch_next(agent_id="role:lead")
         assert dispatch is not None
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", side_effect=fake_run):
             executor.execute(dispatch)
 
         cmd = captured.get("command") or []
@@ -681,7 +681,7 @@ class TestReadOnlySandboxForOrchestrators:
         )
         dispatch = HeartbeatScheduler(db).dispatch_next(agent_id="role:lead")
         assert dispatch is not None
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", side_effect=fake_run):
             RunExecutor(db, build_default_registry()).execute(dispatch)
 
         cmd = captured["command"]
@@ -855,7 +855,7 @@ class TestExecuteCodexPath:
         rt = self._make_runtime()
         env = self._make_env(str(tmp_path))
 
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc) as mock_run:
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", return_value=mock_proc):
             # Also patch _command_context's read_output to return the output
             with patch(
                 "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
@@ -878,7 +878,7 @@ class TestExecuteCodexPath:
         rt = self._make_runtime()
         env = self._make_env(str(tmp_path))
 
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", return_value=mock_proc):
             with patch(
                 "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
                 return_value={
@@ -899,7 +899,7 @@ class TestExecuteCodexPath:
         rt = self._make_runtime()
         env = self._make_env(str(tmp_path))
 
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", return_value=mock_proc):
             with patch(
                 "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
                 return_value={
@@ -923,7 +923,7 @@ class TestExecuteCodexPath:
         rt = self._make_runtime()
         env = self._make_env(str(tmp_path))
 
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", return_value=mock_proc):
             with patch(
                 "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
                 return_value={
@@ -947,7 +947,7 @@ class TestExecuteCodexPath:
         rt = self._make_runtime()
 
         with patch(
-            "aiteam.adapters.subscription_cli_adapter.subprocess.run",
+            "aiteam.adapters.subscription_cli_adapter.run_command",
             return_value=mock_proc,
         ):
             result = rt.execute(
@@ -972,7 +972,7 @@ class TestExecuteCodexPath:
         rt = self._make_runtime()
         env = self._make_env(str(tmp_path))
 
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", return_value=mock_proc):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", return_value=mock_proc):
             with patch(
                 "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
                 return_value={
@@ -991,7 +991,7 @@ class TestExecuteCodexPath:
         env = self._make_env(str(tmp_path))
 
         with patch(
-            "aiteam.adapters.subscription_cli_adapter.subprocess.run",
+            "aiteam.adapters.subscription_cli_adapter.run_command",
             side_effect=FileNotFoundError("codex not found"),
         ):
             with patch(
@@ -1022,7 +1022,7 @@ class TestExecuteCodexPath:
             captured_kwargs.update(kwargs)
             return mock_proc
 
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", side_effect=fake_run):
             with patch(
                 "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
                 return_value={"command": ["codex"], "read_output": lambda proc: output},
@@ -1048,7 +1048,7 @@ class TestExecuteCodexPath:
             return mock_proc
 
         big_prompt = "y" * 20000
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", side_effect=fake_run):
             with patch(
                 "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
                 return_value={"command": ["codex", "-"], "read_output": lambda proc: output, "stdin_input": big_prompt},
@@ -1057,12 +1057,9 @@ class TestExecuteCodexPath:
 
         assert captured_kwargs.get("input") == big_prompt
         assert captured_kwargs.get("stdin") != _subprocess.DEVNULL
-        # Non-ASCII prompts require UTF-8; cp1252 (Windows default) makes codex
-        # reject the stdin prompt as invalid UTF-8.
-        assert captured_kwargs.get("encoding") == "utf-8"
 
     def test_effective_cwd_passed_to_subprocess(self, tmp_path):
-        """subprocess.run must receive the resolved workspace as cwd."""
+        """The shared process boundary receives the resolved workspace as cwd."""
         output = json.dumps({"status": "completed", "summary": "ok", "add_comment": ""})
         mock_proc = MagicMock()
         mock_proc.returncode = 0
@@ -1076,7 +1073,7 @@ class TestExecuteCodexPath:
             captured_kwargs.update(kwargs)
             return mock_proc
 
-        with patch("aiteam.adapters.subscription_cli_adapter.subprocess.run", side_effect=fake_run):
+        with patch("aiteam.adapters.subscription_cli_adapter.run_command", side_effect=fake_run):
             with patch(
                 "aiteam.adapters.subscription_cli_adapter._command_context.__enter__",
                 return_value={"command": ["codex"], "read_output": lambda proc: output},
@@ -1169,7 +1166,7 @@ class TestReconcilePreservesExplicitTransport:
             encoding="utf-8",
         )
 
-        repaired = reconcile_project_agent_policy(db_path)
+        reconcile_project_agent_policy(db_path)
 
         # Engineer already has subscription_cli — nothing to repair for capabilities (they're set)
         # adapter_type is already correct, supervisor may be wired
@@ -1235,7 +1232,6 @@ class TestPythonToolchainInjection:
     tenia ningun Python resoluble en PATH y el cierre acabo escalando."""
 
     def test_prefers_workspace_venv(self, tmp_path):
-        import os as _os
         from aiteam.adapters.subscription_cli_adapter import _inject_python_toolchain
 
         bin_dir = tmp_path / "venv" / "Scripts"

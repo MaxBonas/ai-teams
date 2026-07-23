@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
 
+from aiteam.configuration_layers import resolve_configuration
 from aiteam.tools.catalog import default_capabilities_for_role
 from aiteam.provider_identity import profile_perspective_key
 from aiteam.model_compatibility import compatibility_decision
@@ -36,7 +38,6 @@ from aiteam.policies import (  # noqa: E402
     SENIOR_ROLES,
     TIER3_ROLES,
     cost_policy_enforced as _cost_policy_enforced,
-    default_autonomy,
 )
 
 # Default Tier 3 agents created in every project.
@@ -82,8 +83,22 @@ def project_autonomy(runtime_dir: Path) -> str:
     Stored in project_config.json under 'autonomy'; falls back to the
     machine-wide AITEAM_AUTONOMY env default when unset/invalid.
     """
-    mode = str(read_project_adapter_policy(runtime_dir).get("autonomy") or "").strip().lower()
-    return mode if mode in AUTONOMY_MODES else default_autonomy()
+    project_mode = str(
+        read_project_adapter_policy(runtime_dir).get("autonomy") or ""
+    ).strip().lower()
+    project_layer = {"autonomy": project_mode} if project_mode in AUTONOMY_MODES else {}
+    environment_mode = os.environ.get("AITEAM_AUTONOMY", "").strip().lower()
+    environment_layer = (
+        {"autonomy": environment_mode} if environment_mode in AUTONOMY_MODES else {}
+    )
+    resolution = resolve_configuration(
+        [
+            ("versioned_defaults", {"autonomy": "supervised"}),
+            ("environment", environment_layer),
+            ("project", project_layer),
+        ]
+    )
+    return str(resolution.values["autonomy"])
 
 
 def set_project_autonomy(runtime_dir: Path, mode: str) -> dict[str, Any]:

@@ -1,81 +1,102 @@
-# nordvpn_split_tunnel.ps1
-# Configura NordVPN Split Tunneling para excluir Python del VPN
-# Ejecutar como Administrador: Right-click > Run as Administrator
-# O desde PowerShell admin: .\scripts\nordvpn_split_tunnel.ps1
-
-$ErrorActionPreference = "Stop"
-$SettingsFile = "C:\ProgramData\NordVPN\settings\2B256B1C.json"
-
-# Apps a excluir del VPN (usarán conexión directa, sin VPN)
-$AppsToExclude = @(
-    "C:\Python312\python.exe",
-    "C:\Users\Max\Antigravity Projects\Ai_Teams\venv\Scripts\python.exe",
-    "C:\Windows\py.exe"
+[CmdletBinding()]
+param(
+    [string]$SettingsFile = "",
+    [string[]]$PythonPath = @(),
+    [switch]$Apply
 )
 
-Write-Host "`nNordVPN Split Tunnel Setup" -ForegroundColor Cyan
-Write-Host "==========================" -ForegroundColor Cyan
+# Utilidad opcional para instalaciones que necesiten excluir Python de NordVPN.
+# Por defecto solo muestra el plan. La escritura exige -Apply y PowerShell admin.
+$ErrorActionPreference = "Stop"
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 
-# Verificar que el archivo existe
-if (-not (Test-Path $SettingsFile)) {
-    Write-Host "ERROR: No se encuentra $SettingsFile" -ForegroundColor Red
-    exit 1
+if (-not $SettingsFile) {
+    $SettingsRoot = Join-Path $env:ProgramData "NordVPN\settings"
+    $SettingsFile = Get-ChildItem -LiteralPath $SettingsRoot -Filter "*.json" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
 }
 
-# Backup
+if (-not $SettingsFile -or -not (Test-Path -LiteralPath $SettingsFile -PathType Leaf)) {
+    throw "No se encontró un settings JSON de NordVPN. Indícalo con -SettingsFile."
+}
+
+$Candidates = [System.Collections.Generic.List[string]]::new()
+foreach ($Path in $PythonPath) {
+    if ($Path) {
+        $Candidates.Add($Path)
+    }
+}
+$Candidates.Add((Join-Path $RepoRoot "venv\Scripts\python.exe"))
+foreach ($CommandName in @("python.exe", "py.exe")) {
+    $Resolved = Get-Command $CommandName -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty Source
+    if ($Resolved) {
+        $Candidates.Add($Resolved)
+    }
+}
+
+$ValidApps = @(
+    $Candidates |
+        Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+        ForEach-Object { (Resolve-Path -LiteralPath $_).Path } |
+        Sort-Object -Unique
+)
+if ($ValidApps.Count -eq 0) {
+    throw "No se encontró ningún ejecutable Python válido para excluir."
+}
+
+$Json = Get-Content -LiteralPath $SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $Json.SettingsDto) {
+    throw "El JSON no contiene SettingsDto; no se modificará."
+}
+$ExistingApps = @($Json.SettingsDto.SplitTunnelingApps | Where-Object { $_ })
+$MergedApps = @($ExistingApps + $ValidApps | Sort-Object -Unique)
+
+Write-Host "NordVPN split tunneling (utilidad opcional)" -ForegroundColor Cyan
+Write-Host "Settings: $SettingsFile"
+Write-Host "Se conservarán $($ExistingApps.Count) exclusiones existentes."
+Write-Host "Python detectado:"
+$ValidApps | ForEach-Object { Write-Host "  $_" }
+
+if (-not $Apply) {
+    Write-Host "Dry-run: no se cambió nada. Repite desde PowerShell admin con -Apply." -ForegroundColor Yellow
+    exit 0
+}
+
+$Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$Principal = [Security.Principal.WindowsPrincipal]::new($Identity)
+if (-not $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "-Apply requiere PowerShell ejecutado como administrador."
+}
+
 $BackupFile = "$SettingsFile.backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-Copy-Item $SettingsFile $BackupFile
-Write-Host "Backup creado: $BackupFile" -ForegroundColor Green
+Copy-Item -LiteralPath $SettingsFile -Destination $BackupFile
+Write-Host "Backup recuperable: $BackupFile" -ForegroundColor Green
 
-# Leer config actual
-$json = Get-Content $SettingsFile -Raw | ConvertFrom-Json
-
-# Mostrar estado actual
-Write-Host "`nEstado actual:" -ForegroundColor Yellow
-Write-Host "  IsSplitTunnelingEnabled: $($json.SettingsDto.IsSplitTunnelingEnabled)"
-Write-Host "  SplitTunnelingMode:      $($json.SettingsDto.SplitTunnelingMode)"
-Write-Host "  SplitTunnelingApps:      $($json.SettingsDto.SplitTunnelingApps.Count) apps"
-
-# Detener servicio NordVPN
-Write-Host "`nDeteniendo nordvpn-service..." -ForegroundColor Yellow
+$ServiceStopped = $false
 try {
-    Stop-Service -Name "nordvpn-service" -Force
-    Start-Sleep -Seconds 2
-    Write-Host "Servicio detenido." -ForegroundColor Green
-} catch {
-    Write-Host "AVISO: No se pudo detener el servicio: $_" -ForegroundColor Yellow
-    Write-Host "Intentando editar de todas formas..." -ForegroundColor Yellow
+    $Service = Get-Service -Name "nordvpn-service" -ErrorAction Stop
+    if ($Service.Status -ne "Stopped") {
+        Stop-Service -Name "nordvpn-service" -Force
+        $Service.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15))
+        $ServiceStopped = $true
+    }
+
+    $Json.SettingsDto.IsSplitTunnelingEnabled = $true
+    $Json.SettingsDto.SplitTunnelingMode = "vpnDisabledForApps"
+    $Json.SettingsDto.SplitTunnelingApps = $MergedApps
+    $Json | ConvertTo-Json -Depth 20 |
+        Set-Content -LiteralPath $SettingsFile -Encoding UTF8
+}
+catch {
+    Copy-Item -LiteralPath $BackupFile -Destination $SettingsFile -Force
+    throw "No se pudo aplicar la configuración; se restauró el backup. $($_.Exception.Message)"
+}
+finally {
+    if ($ServiceStopped) {
+        Start-Service -Name "nordvpn-service"
+    }
 }
 
-# Filtrar solo los ejecutables que existen
-$ValidApps = $AppsToExclude | Where-Object { Test-Path $_ }
-Write-Host "`nApps validas encontradas:" -ForegroundColor Cyan
-$ValidApps | ForEach-Object { Write-Host "  $_" -ForegroundColor White }
-
-# Aplicar configuracion
-$json.SettingsDto.IsSplitTunnelingEnabled = $true
-$json.SettingsDto.SplitTunnelingMode = "vpnDisabledForApps"
-$json.SettingsDto.SplitTunnelingApps = $ValidApps
-
-# Guardar
-$json | ConvertTo-Json -Depth 10 | Set-Content $SettingsFile -Encoding UTF8
-Write-Host "`nConfiguracion guardada." -ForegroundColor Green
-
-# Reiniciar servicio
-Write-Host "Reiniciando nordvpn-service..." -ForegroundColor Yellow
-try {
-    Start-Service -Name "nordvpn-service"
-    Start-Sleep -Seconds 3
-    $status = (Get-Service -Name "nordvpn-service").Status
-    Write-Host "Servicio: $status" -ForegroundColor Green
-} catch {
-    Write-Host "ERROR reiniciando servicio: $_" -ForegroundColor Red
-    Write-Host "Reinicia manualmente el servicio NordVPN." -ForegroundColor Yellow
-}
-
-Write-Host "`nListo! Python ahora bypasea el VPN." -ForegroundColor Green
-Write-Host "Prueba providers desde el futuro adapter registry v2 cuando este conectado a ejecucion real." -ForegroundColor Cyan
-Write-Host "`nSi no funciona, hazlo manual en NordVPN > Ajustes > Split Tunneling:" -ForegroundColor Yellow
-Write-Host "  1. Activar Split Tunneling" -ForegroundColor White
-Write-Host "  2. Modo: 'Deshabilitar VPN para apps seleccionadas'" -ForegroundColor White
-Write-Host "  3. Añadir: python.exe, python3.exe, py.exe" -ForegroundColor White
+Write-Host "Configuración aplicada; exclusiones totales: $($MergedApps.Count)." -ForegroundColor Green

@@ -45,9 +45,39 @@ y su [run de GitHub Actions](https://github.com/MaxBonas/ai-teams/actions/runs/3
 Esto no declara autenticados los adapters ni sustituye sus probes.
 
 El bootstrap crea o actualiza dependencias locales del checkout y materializa
-configuración runtime desde `config/*.example.json`. Es seguro repetirlo. No
+configuración runtime desde `config/*.example.json`. En una actualización,
+añade defaults ausentes sin sustituir valores locales y conserva un backup de
+la primera fusión. Es seguro repetirlo. No
 copies desde otra máquina `venv/`, `runtime/`, `node_modules/`, bases activas,
 sesiones CLI ni archivos con secretos.
+
+### Actualizar una instalación Windows existente
+
+Con el checkout limpio, la entrada habitual es:
+
+```powershell
+.\scripts\update_windows.bat
+.\start_ide.bat
+```
+
+El actualizador detiene los servicios, exige que no haya cambios Git pendientes,
+usa exclusivamente `git pull --ff-only`, reconstruye dependencias y deja un
+recibo local en `runtime/last_update.json`. No hace `stash`, `reset`, migraciones
+de DB, login ni instalación de CLIs; tampoco borra proyectos, `.aiteam/`,
+settings, secretos o sesiones de proveedor.
+
+Para una instalación anterior a la existencia del actualizador:
+
+```powershell
+.\stop_ide.bat
+git status --short
+git pull --ff-only
+.\scripts\update_windows.bat -SkipPull -SkipStop
+.\start_ide.bat
+```
+
+Si `git status --short` muestra archivos, deben revisarse o commitearse antes;
+no se deben descartar automáticamente.
 
 Al terminar imprime un diagnóstico de instalación:
 
@@ -66,8 +96,13 @@ El mismo diagnóstico puede repetirse sin mutar la máquina:
 
 ## Configuración
 
+- La precedencia es defaults versionados → usuario de la máquina → variables
+  de entorno allowlisted → `.aiteam/` del proyecto → override de run. El
+  contrato legible por máquina está en
+  [`config/configuration_layers.v1.json`](config/configuration_layers.v1.json).
 - La carpeta de proyectos se elige en la UI o mediante
-  `AITEAM_PROJECTS_ROOT`.
+  `AITEAM_PROJECTS_ROOT`; la variable de entorno gana y la API expone la fuente
+  efectiva para evitar que la UI parezca ignorada.
 - Los perfiles de adapters, modelos y su health se administran en Config. El
   catálogo vivo es la fuente; este README no congela nombres de modelos.
 - `AITEAM_MODEL_DEFAULT_ROLLOUT` gobierna defaults nuevos: `shadow` es el
@@ -81,14 +116,49 @@ El mismo diagnóstico puede repetirse sin mutar la máquina:
 - Los artefactos que AI Teams crea en proyectos externos viven bajo `.aiteam/`.
   El producto nunca crea `AGENTS.md`, `CLAUDE.md` o `GEMINI.md` allí.
 
+### Exportar configuración a otra máquina
+
+La exportación conserva intención no secreta y puede incluir la política
+estructurada de un proyecto:
+
+```powershell
+.\scripts\python_local.bat scripts\config_portability.py export `
+  --output "$env:TEMP\aiteam-portable.json" `
+  --project "C:\ruta\al\proyecto"
+.\scripts\python_local.bat scripts\config_portability.py inspect `
+  --input "$env:TEMP\aiteam-portable.json"
+```
+
+En destino, importar sin `--apply` solo hace preflight. La mutación requiere
+confirmación explícita:
+
+```powershell
+.\scripts\python_local.bat scripts\config_portability.py import `
+  --input "$env:TEMP\aiteam-portable.json" `
+  --project "D:\ruta\al\proyecto"
+.\scripts\python_local.bat scripts\config_portability.py import `
+  --input "$env:TEMP\aiteam-portable.json" `
+  --project "D:\ruta\al\proyecto" `
+  --apply
+```
+
+El paquete lleva hash, no contiene `projects_root`, secretos, health, sesiones,
+DB, runtime ni dependencias. Todo perfil importado queda `untested`: debe
+configurarse y probarse en la máquina destino antes de ser seleccionable.
+
 ## Verificación de desarrollo
 
 ```powershell
+.\scripts\python_local.bat scripts\audit_platform_portability.py --json --strict
 .\scripts\pytest_local.bat tests -q --tb=short
 .\scripts\python_local.bat scripts\migrate_to_v2.py --json
 Set-Location ide-frontend
 node_modules\.bin\tsc.cmd -b
 ```
+
+El auditor de portabilidad prueba filesystem UTF-8, espacios/Unicode, permisos
+y teardown de procesos, y revisa rutas personales/`shell=True`; es local y no
+promociona soporte de nuevas plataformas.
 
 El actual `aiteam system-check` comprueba que el registro de adapters puede
 cargarse y enumera sus tipos; no prueba conectividad, autenticación ni health y

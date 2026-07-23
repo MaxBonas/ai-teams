@@ -44,14 +44,38 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad ejecutable: **P0.I.2.1**, formalizar capas, precedencia y
-ownership de configuración portable por máquina. M.8 queda abierto como
+Siguiente unidad ejecutable: **P0.I.3.1**, schema e inventario read-only del
+`doctor` de máquina. M.8 queda abierto como
 mantenimiento por evento/mes; sus 25 pares
 calibrados ya tienen quality exacta, 21 abren diversidad y los cuatro restantes
 no deben repetirse hasta un cambio material.
 
 ## Trabajo reciente
 
+- I.2 queda cerrado. I.2.3 añade `aiteam.platform_runtime` para semántica de
+  paths, shims ejecutables, layout de venv, UTF-8 y teardown de árboles de
+  proceso; adapters, MCP, notifier, CLI y probes usan la frontera. El notifier
+  deja `shell=True` y las utilidades NordVPN eliminan paths personales y pasan
+  a dry-run con `-Apply`/backup. `scripts/audit_platform_portability.py`
+  produjo `ok=true` en Windows x86_64 sin promocionar soporte; 107 pruebas
+  dirigidas, suite backend 1493/1493, typecheck frontend y Ruff acotado a
+  superficies cambiadas pasan. El siguiente bloque es I.3.
+- I.2.2 añade `aiteam_portable_config_v1` y
+  `scripts/config_portability.py export|inspect|import`. El paquete hasheado
+  conserva settings allowlisted, perfiles custom y política estructurada
+  opcional; excluye paths, secretos, health, sesiones, runtime, dependencias,
+  DB y estado vivo. Import hace preflight salvo `--apply`, mergea sin borrar
+  configuración ajena e invalida health hasta probe local. Matriz I.2 conjunta
+  80/80, suite backend 1478/1478, Ruff/typecheck limpios y exportación real
+  efímera válida.
+- I.2.1 queda cerrado: `configuration_layers_v1` fija cinco capas con owner y
+  provenance, separa secretos/estado y conecta la precedencia real a settings,
+  autonomía y adapters. La actualización Windows usa `pull --ff-only`, rechaza
+  worktrees sucios y fusiona defaults en JSON heredado sin perder overrides; un
+  JSON inválido se conserva y bloquea. El recorrido para instalaciones
+  anteriores al script está documentado. 74 tests focalizados incluyen remote
+  Git real, bootstrap, preservación local, merge de tres vías, idempotencia y
+  fail-closed. Suite backend 1472/1472, Ruff y typecheck frontend limpios.
 - I.1 queda cerrado. El run independiente
   `https://github.com/MaxBonas/ai-teams/actions/runs/30023876549` prueba la
   revisión exacta `f2a20ed`: cinco runtimes listos, 10/10 pasos, bootstrap

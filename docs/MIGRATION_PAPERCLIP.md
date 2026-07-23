@@ -189,7 +189,15 @@ bootstrap, audit, start/stop y fixture sin instalar CLIs globales. Git checkout
 y ese alcance del control plane pasan a `verified`; adapters vivos, releases,
 ARM64, Linux/macOS y la matriz poliglota conservan gates separados. El
 onboarding de OpenCode Zen guía la API key personal en el CLI sin copiarla a AI
-Teams. El siguiente bloque es I.2, portabilidad de configuración/estado.
+Teams. I.2.1 fija el contrato `configuration_layers_v1`, provenance, merge
+conservador de defaults y actualización Windows `pull --ff-only` para
+instalaciones activas sin copiar ni borrar estado local. I.2.2 añade un paquete
+hasheado con perfiles/política no secreta,
+preflight y aplicación explícita que invalida health hasta retest local. No
+transporta DB ni assignments. I.2.3 cierra el bloque con una frontera común de
+filesystem/procesos, ejecución UTF-8, teardown del árbol, resolución portable
+de ejecutables y un auditor local que no promociona plataformas. El siguiente
+bloque es I.3, `doctor` de máquina read-only con salida humana/JSON estable.
 
 ### Fase 1 — Schema v2 paralelo
 

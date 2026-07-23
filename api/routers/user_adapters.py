@@ -48,6 +48,7 @@ from aiteam.model_catalog_service import (
     get_current_model_catalog,
     invalidate_model_catalog_cache,
 )
+from aiteam.platform_runtime import resolve_executable
 
 router = APIRouter()
 
@@ -773,16 +774,17 @@ def _subscription_auth_probe(
 
 
 def _resolve_cli_executable_for_probe(name: str) -> str | None:
-    resolved = shutil.which(name)
-    if resolved:
-        return resolved
+    known: list[Path] = []
     if os.name == "nt" and name.lower() == "agy":
-        candidate = (
-            Path(os.environ.get("LOCALAPPDATA") or "") / "agy" / "bin" / "agy.exe"
-        )
-        if candidate.is_file():
-            return str(candidate)
-    return None
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            known.append(Path(local_app_data) / "agy" / "bin" / "agy.exe")
+    return resolve_executable(
+        name,
+        known_candidates=known,
+        os_id="windows" if os.name == "nt" else "linux",
+        which=shutil.which,
+    )
 
 
 def _local_runtime_probe(config: dict[str, Any]) -> dict[str, Any]:

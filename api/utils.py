@@ -20,13 +20,10 @@ def get_configured_projects_root() -> Path:
     """Return the user-configured projects root.
 
     Precedence:
-      1. ``AITEAM_PROJECTS_ROOT`` env var (useful for CI / portable installs).
-      2. ``projects_root`` in ``~/.config/aiteams/settings.json`` (set via UI).
-      3. Fallback: parent of the source-code directory (legacy behaviour).
+      1. Effective setting resolved by ``aiteam.configuration_layers``:
+         environment over machine-user configuration.
+      2. Fallback: parent of the source-code directory (legacy behaviour).
     """
-    env_override = os.environ.get("AITEAM_PROJECTS_ROOT", "").strip()
-    if env_override:
-        return Path(env_override).resolve()
     try:
         from aiteam.user_config import get_projects_root as _get_projects_root
         configured = _get_projects_root()

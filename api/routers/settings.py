@@ -7,7 +7,11 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from api.utils import _require_api_auth_request, get_configured_projects_root
-from aiteam.user_config import get_app_settings, update_app_settings
+from aiteam.user_config import (
+    get_app_settings,
+    get_effective_app_settings,
+    update_app_settings,
+)
 
 router = APIRouter()
 
@@ -21,10 +25,12 @@ async def get_settings(request: Request):
     """Return current application settings."""
     _require_api_auth_request(request)
     raw = get_app_settings()
+    effective = get_effective_app_settings()
     configured_root = str(get_configured_projects_root().as_posix())
     return {
         "projects_root": raw.get("projects_root") or "",
         "projects_root_effective": configured_root,
+        "projects_root_source": effective["provenance"].get("projects_root"),
         "configured": bool(raw.get("projects_root")),
     }
 
@@ -49,9 +55,11 @@ async def update_settings(payload: SettingsPayload, request: Request):
         update_app_settings(updates)
 
     current = get_app_settings()
+    effective = get_effective_app_settings()
     return {
         "success": True,
         "projects_root": current.get("projects_root") or "",
         "projects_root_effective": str(get_configured_projects_root().as_posix()),
+        "projects_root_source": effective["provenance"].get("projects_root"),
         "configured": bool(current.get("projects_root")),
     }

@@ -186,14 +186,77 @@ señales, procesos, permisos, encoding y rutas deben probarse.
 
 ## Configuración por máquina
 
-La precedencia prevista y que debe preservarse al implementar el export/import
-es:
+La precedencia implementada es:
 
 1. defaults y plantillas versionadas;
 2. configuración de usuario de la máquina;
 3. variables de entorno explícitas;
 4. configuración del proyecto bajo `.aiteam/`, dentro de sus límites;
 5. overrides explícitos de una run.
+
+La fuente ejecutable es `config/configuration_layers.v1.json`. Cada capa declara
+owner, ubicación, portabilidad y frontera de secretos. El resolver
+`aiteam.configuration_layers` hace merge profundo y conserva provenance por
+campo. Solo recibe variables de entorno mapeadas expresamente: nunca incorpora
+todo el entorno del proceso.
+
+Los secretos no son una sexta capa. La configuración conserva referencias
+`secret:proveedor:nombre`; el valor se obtiene del store local y se inyecta
+después de resolver, sin persistirlo en el resultado. Health, sesiones CLI,
+bases SQLite y workspace actual son estado local, no configuración exportable.
+
+### Export/import redacted
+
+El formato `aiteam_portable_config_v1` conserva solo:
+
+- settings de usuario explícitamente allowlisted y no ligados a paths;
+- perfiles custom con identidad, canal, modelos y gobernanza;
+- opcionalmente `project_config.json` estructurado bajo sus límites permitidos.
+
+Excluye `projects_root`, rutas absolutas, credenciales inline, contenedores
+`env`/headers, store de secretos, health, sesiones CLI, `runtime/`, entornos,
+dependencias, bases, assignments, runs, costes y telemetría. Las referencias
+`secret:...` pueden viajar porque no contienen el valor y permiten explicar qué
+credencial local falta.
+
+Exportar e inspeccionar:
+
+```powershell
+.\scripts\python_local.bat scripts\config_portability.py export `
+  --output "$env:TEMP\aiteam-portable.json" `
+  --project "C:\proyectos\mi-proyecto"
+.\scripts\python_local.bat scripts\config_portability.py inspect `
+  --input "$env:TEMP\aiteam-portable.json"
+```
+
+El proyecto es opcional. Si se incluye, el paquete nunca contiene su nombre o
+path de origen. `instructions.md` y otros textos libres permanecen en el Git
+del proyecto; no se duplican dentro del paquete.
+
+En la máquina destino:
+
+```powershell
+# Preflight: valida schema, SHA-256, paths, secretos y destino; no escribe.
+.\scripts\python_local.bat scripts\config_portability.py import `
+  --input "$env:TEMP\aiteam-portable.json" `
+  --project "D:\proyectos\mi-proyecto"
+
+# Aplicación explícita y atómica por archivo.
+.\scripts\python_local.bat scripts\config_portability.py import `
+  --input "$env:TEMP\aiteam-portable.json" `
+  --project "D:\proyectos\mi-proyecto" `
+  --apply
+```
+
+La importación hace merge; no reemplaza el store de secretos ni borra perfiles
+ajenos. Invalida el health de cada perfil importado con
+`portable_configuration_imported_requires_retest`. Después se instala/localiza
+el canal exacto, se autentica localmente y se ejecutan health y probe del modelo.
+Un perfil no se vuelve verde por aparecer en el paquete.
+
+Las asignaciones vivas del equipo están en SQLite y se excluyen. En destino se
+reconcilia o forma de nuevo el equipo usando los perfiles que pasen los gates;
+no se copia una selección que podría ser incompatible o no estar disponible.
 
 Ubicación actual de configuración de usuario:
 
@@ -212,11 +275,42 @@ fuera de AI Teams y después comprobar el adapter. Nunca usar `npx -y` o un
 instalador implícito como comando de producción: cambiaría binarios durante una
 run y ocultaría la versión real.
 
+### Frontera de filesystem y procesos
+
+`aiteam.platform_runtime` concentra las diferencias que no deben dispersarse
+por adapters y routers:
+
+- comparación de paths sensible a mayúsculas en POSIX e insensible en Windows;
+- resolución de ejecutables y shims `.cmd`/`.exe`, rechazando aliases
+  `WindowsApps` y paths extensionless que `CreateProcess` no puede ejecutar;
+- layout del Python de `venv` por plataforma;
+- stdin/stdout/stderr UTF-8 y entorno Python hijo UTF-8;
+- grupos de proceso separados y teardown del árbol completo al vencer timeout;
+- fixtures temporales con espacios, caracteres Unicode y permisos ejecutables.
+
+Auditoría local, read-only salvo sus fixtures temporales:
+
+```powershell
+.\scripts\python_local.bat scripts\audit_platform_portability.py --json --strict
+```
+
+La salida `platform_portability_audit_v1` no incluye secretos ni paths
+absolutos de la máquina. Comprueba además que los consumidores críticos usan la
+frontera, que el código activo no contiene rutas personales ni `shell=True` y
+declara siempre `support_promotion=false`: pasarla localmente no convierte
+Linux, macOS o ARM64 en plataformas soportadas.
+
+Los scripts de NordVPN son utilidades opcionales, no parte del bootstrap.
+Detectan paths de esta instalación, conservan exclusiones existentes y hacen
+dry-run por defecto; modificar el settings del proveedor exige PowerShell admin
+y `-Apply`, crea backup y restaura ante fallo.
+
 ## Validación mínima
 
 Después de preparar el checkout:
 
 ```powershell
+.\scripts\python_local.bat scripts\audit_platform_portability.py --json --strict
 .\scripts\pytest_local.bat tests -q --tb=short
 .\scripts\python_local.bat scripts\migrate_to_v2.py --json
 .\scripts\python_local.bat -m aiteam.cli system-check
@@ -233,13 +327,58 @@ de forma intencional.
 
 ## Traslado y actualización
 
+### Actualización en la misma máquina Windows
+
+Para instalaciones que ya incluyen el actualizador:
+
+```powershell
+.\scripts\update_windows.bat
+.\start_ide.bat
+```
+
+El script:
+
+1. aborta si encuentra cambios tracked o untracked sin resolver;
+2. detiene backend/frontend;
+3. ejecuta `git pull --ff-only`, nunca `reset`, `stash` o checkout destructivo;
+4. repite el bootstrap;
+5. fusiona JSON a tres vías: plantilla anterior, plantilla nueva y cambios
+   locales, manteniendo solo los overrides reales del owner;
+6. deja `runtime/last_update.json` con revisión anterior, nueva y resultado;
+7. no arranca automáticamente, para que un fallo sea visible antes de reanudar.
+
+La primera fusión de un JSON heredado conserva
+`*.pre_template_sync.bak`. Un JSON inválido no se reemplaza: el bootstrap falla
+con diagnóstico y deja el archivo intacto. Los perfiles de adapter que
+personalizan un perfil incorporado heredan campos nuevos del default y solo
+sobrescriben los campos declarados localmente.
+
+Una instalación anterior a `scripts/update_windows.bat` debe hacer una única
+transición manual:
+
+```powershell
+.\stop_ide.bat
+git status --short
+git pull --ff-only
+.\scripts\update_windows.bat -SkipPull -SkipStop
+.\start_ide.bat
+```
+
+Si `git status --short` no está vacío, detenerse y revisar. No usar
+`git reset --hard` ni copiar encima un checkout nuevo. Las sesiones Codex,
+Antigravity/OpenCode y el store de secretos son locales y se conservan; su
+health se debe volver a comprobar después de actualizar.
+
+### Traslado a otra máquina
+
 1. Commit/push de código y configuración versionable; verificar que no contiene
    secretos ni estado local.
 2. En destino, clonar o hacer `git pull` sobre una copia limpia.
 3. Ejecutar el bootstrap local; no copiar `venv/`, `node_modules/` o `runtime/`.
 4. Configurar la nueva raíz de proyectos y las credenciales/sesiones locales.
-5. Ejecutar la validación mínima y guardar versiones/resultados.
-6. Migrar una DB solo con backup y el migrador canónico. Una DB de proyecto es
+5. Opcionalmente importar el paquete redacted, primero sin `--apply`.
+6. Ejecutar la validación mínima y guardar versiones/resultados.
+7. Migrar una DB solo con backup y el migrador canónico. Una DB de proyecto es
    dato del usuario, no parte del paquete de aplicación.
 
 Las releases con checksum, notas de migración y rollback son trabajo pendiente
