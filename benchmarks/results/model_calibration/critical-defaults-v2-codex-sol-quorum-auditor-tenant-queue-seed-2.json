@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 27.64,
+  "usage": {
+    "input_tokens": 16675,
+    "cached_input_tokens": 0,
+    "output_tokens": 886
+  },
+  "response": {
+    "verdict": "NO-GO: la propuesta no demuestra todavía exclusión atómica por issue, aislamiento por tenant_id ni migración segura mientras continúan runs activas.",
+    "challenges": [
+      "Contraejemplo: dos workers ejecutan el SELECT antes de que cualquiera haga UPDATE; ambos observan la misma issue disponible y ambos completan el checkout.",
+      "Contraejemplo: un checkout sin predicado tenant_id o con validación posterior puede asignar una issue del tenant A a un worker del tenant B.",
+      "Contraejemplo: durante la migración, una run activa usa el camino anterior mientras otra usa el nuevo; ambas reclaman la misma issue con protocolos incompatibles.",
+      "Contraejemplo: el flag restaura el camino anterior, pero no revierte estados parciales ni reconcilia leases, propietarios o issues ya reclamadas.",
+      "El gate de 100 reinicios con cero wakeups perdidos durante 24 horas no prueba por sí solo ausencia de doble checkout, cruces entre tenants, corrupción, starvation ni recuperación de estados intermedios."
+    ],
+    "missing_evidence": [
+      "Diseño y prueba de un checkout atómico en SQLite, por ejemplo mediante una transacción con UPDATE condicional y verificación inequívoca de una sola fila ganadora.",
+      "Pruebas concurrentes que demuestren que exactamente un worker gana cada issue bajo contención real.",
+      "Pruebas explícitas de aislamiento por tenant_id en selección, actualización, índices, reintentos y recuperación.",
+      "Protocolo de coexistencia entre runs activas y ambos caminos durante la migración, incluyendo el punto exacto de corte.",
+      "Definición operativa de wakeup perdido, instrumentación, carga, número de workers, distribución de tenants y criterio para iniciar y completar la ventana de 24 horas.",
+      "Resultados del gate obligatorio: 100 reinicios y cero wakeups perdidos durante 24 horas.",
+      "Pruebas de crash en cada frontera transaccional, recuperación tras reinicio y comportamiento ante SQLITE_BUSY, timeouts y reintentos.",
+      "Procedimiento probado de rollback mediante el flag, con criterios de activación, responsable, aceptador y reconciliación de estados creados por el camino nuevo.",
+      "Métricas y alertas para doble ejecución, cruces de tenant, backlog, latencia, starvation, errores SQLite y divergencias entre caminos."
+    ],
+    "failure_modes": [
+      "Doble procesamiento de una issue por la separación entre SELECT y UPDATE.",
+      "Violación de aislamiento entre tenants por filtros incompletos o actualizaciones no acotadas por tenant_id.",
+      "Bloqueos, SQLITE_BUSY o starvation al aumentar la contención sobre SQLite como única fuente durable.",
+      "Wakeup perdido por commit incompleto, reinicio, carrera entre registro y notificación o transición no atómica.",
+      "Runs activas atrapadas entre esquemas o protocolos de checkout distintos durante la migración.",
+      "Rollback lógico incompleto: el flag cambia el código ejecutado, pero deja estados incompatibles o trabajo duplicado.",
+      "Reintentos no idempotentes que amplifican dobles ejecuciones después de fallos.",
+      "Falsa aprobación porque el gate observa wakeups, pero no detecta duplicados, pérdida de issues, cruces de tenant o degradación sostenida."
+    ],
+    "recommendation": {
+      "decision": "NO-GO",
+      "required_action": "No migrar hasta eliminar la carrera con checkout atómico, demostrar aislamiento estricto por tenant_id, validar convivencia con runs activas y probar un rollback reconciliable mediante el flag.",
+      "acceptance_gate": "Ejecutar el gate congelado de 100 reinicios con cero wakeups perdidos durante 24 horas y, adicionalmente, verificar cero dobles checkouts, cero cruces entre tenants y recuperación correcta ante fallos transaccionales.",
+      "escalation_trigger": "Escalar y detener la migración ante cualquier wakeup perdido, doble checkout, cruce de tenant_id, estado irrecuperable, fallo de rollback o incapacidad de completar las 100 reiniciaciones dentro de la observación de 24 horas."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T09:04:13.780036Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T09:04:13.780099Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T09:04:13.792443Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T09:04:14.164321Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T09:04:14.164351Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

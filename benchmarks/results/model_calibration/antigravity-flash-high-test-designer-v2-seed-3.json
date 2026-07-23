@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "role": "test_designer",
+  "seed": 3,
+  "seconds": 42.282,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": true,
+    "all_hidden_mutants_killed": true,
+    "durable_report_done": true,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 0,
+      "stdout": ".......                                                                  [100%]\n7 passed in 0.04s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_zero_quantity": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_negative_price": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_discount_over_100": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_discount": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_quantity": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_pricing.py"
+  ],
+  "run": {
+    "id": "run:997308cd-2337-42e2-b6f8-ca158f0eecc1",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gemini-3.5-flash-high",
+    "provider": "google-antigravity",
+    "channel": "subscription",
+    "usage_json": "{}"
+  },
+  "report": {
+    "id": "c8329506-03e1-4c68-9b4e-aa2e8d6b8877",
+    "issue_id": "issue:benchmark_test_designer",
+    "agent_id": "role:benchmark_test_designer",
+    "run_id": "run:997308cd-2337-42e2-b6f8-ca158f0eecc1",
+    "agent_role": "test_designer",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "tech_match": null,
+    "blocker": "none",
+    "evidence": "tests/test_acceptance_pricing.py",
+    "valid": 1,
+    "is_assignee": 1,
+    "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests/test_acceptance_pricing.py\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"done\", \"role\": \"test_designer\"}",
+    "created_at": "2026-07-23 09:47:48"
+  },
+  "usage": {},
+  "workspace": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\antigravity-flash-high-test-designer-v2-seed-3",
+  "ok": true
+}

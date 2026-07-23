@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_tier_role_canary_aggregate",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-medium",
+  "role": "worker",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "incident_dependency_handoff",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "samples_artifact_passed": 3,
+  "samples_single_attempt": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/m83-incident-flash-medium-worker-seed-1.json",
+    "benchmarks/results/model_calibration/m83-incident-flash-medium-worker-seed-2.json",
+    "benchmarks/results/model_calibration/m83-incident-flash-medium-worker-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-incident-flash-medium-worker-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "33e86e30836f5756da12625a72c95d357bca290ea01b53647c35c2403ac15e99"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-incident-flash-medium-worker-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "94a21446eca6e7e92e6874db306eee4c2c1f52625b8a1d0dd99eb92a394039d0"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-incident-flash-medium-worker-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "898c1ede7fc6e69867633351b07549223f48243e92d7eb0aafef0b3b24683328"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "artifacts_hashed": true
+  },
+  "checks_passed": 18,
+  "checks_total": 18,
+  "wall_seconds_median": 65.453,
+  "wall_seconds_range": [
+    17.234,
+    74.547
+  ],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "unknown",
+    "note": "el CLI no expone usage headless comparable"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "workspaces grandes",
+      "peticiones ambiguas",
+      "inputs binarios"
+    ]
+  }
+}

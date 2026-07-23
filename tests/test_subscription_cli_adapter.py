@@ -25,7 +25,7 @@ from aiteam.adapters.subscription_cli_adapter import (
     _resolve_cli_cmd,
 )
 from aiteam.adapters.registry import AdapterDescriptor
-from aiteam.adapters.work_contract import parse_submit_work
+from aiteam.adapters.work_contract import build_execution_contract, parse_submit_work
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.project_adapters import reconcile_project_agent_policy
 from aiteam.user_config import record_model_health
@@ -447,6 +447,60 @@ def test_codex_quorum_auditor_prompt_treats_lead_as_owner_and_forbids_implementa
     assert "Lead real del proyecto" in prompt
     assert "No implementes, no edites archivos" in prompt
     assert "---QUORUM-AUDIT---" in prompt
+    assert "Tier 1 causal fact retention" in prompt
+    assert "metric with value, unit, window and required action" in prompt
+
+
+def test_codex_tier1_fact_retention_is_not_added_to_engineer() -> None:
+    lead_prompt = _build_codex_prompt(
+        {"AITEAM_AGENT_ROLE": "lead_executor"},
+        {"issue_id": "issue:lead-executor"},
+    )
+    engineer_prompt = _build_codex_prompt(
+        {"AITEAM_AGENT_ROLE": "engineer"},
+        {"issue_id": "issue:engineer"},
+    )
+    assert "Tier 1 causal fact retention" in lead_prompt
+    assert "Tier 1 causal fact retention" not in engineer_prompt
+
+
+def test_shared_execution_contract_contains_tier1_fact_retention() -> None:
+    lead_contract = build_execution_contract("lead")
+    assert "Tier 1 causal fact retention" in lead_contract
+    assert "tenant or authorization boundary" in lead_contract
+    assert "owner and acceptor" in lead_contract
+    assert "Tier 1 causal fact retention" not in build_execution_contract("engineer")
+
+
+def test_tier3_prompt_requires_exact_causal_report_without_affecting_engineer() -> None:
+    worker_prompt = _build_codex_prompt(
+        {"AITEAM_AGENT_ROLE": "worker"},
+        {"issue_id": "issue:worker"},
+    )
+    engineer_prompt = _build_codex_prompt(
+        {"AITEAM_AGENT_ROLE": "engineer"},
+        {"issue_id": "issue:engineer"},
+    )
+    assert "Tier 3 causal report" in worker_prompt
+    assert "role: worker" in worker_prompt
+    assert "result: done | blocked" in worker_prompt
+    assert "Tier 3 causal report" not in engineer_prompt
+
+
+def test_codex_context_curator_prompt_requires_full_causal_coverage_pass():
+    prompt = _build_codex_prompt(
+        {
+            "AITEAM_AGENT_ROLE": "context_curator",
+            "AITEAM_WAKE_PAYLOAD_JSON": json.dumps(
+                {"context_curation_target": {"target_issue_id": "issue:root"}}
+            ),
+        },
+        {"issue_id": "issue:curator"},
+    )
+
+    assert "pasada de cobertura sobre todo el slice" in prompt
+    assert "límite de alcance" in prompt
+    assert "regla de retry/recovery" in prompt
 
 
 def test_user_directives_are_presented_after_project_skill_and_override_it():
@@ -522,13 +576,21 @@ class TestParseCodexOutput:
 # ---------------------------------------------------------------------------
 
 
-def _make_runtime(*, model: str | None = None, oss: bool = False, local_provider: str | None = None, cwd: Path | None = None) -> ClaudeSubscriptionCliRuntime:
+def _make_runtime(
+    *,
+    model: str | None = None,
+    model_reasoning_effort: str | None = None,
+    oss: bool = False,
+    local_provider: str | None = None,
+    cwd: Path | None = None,
+) -> ClaudeSubscriptionCliRuntime:
     descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
     return ClaudeSubscriptionCliRuntime(
         descriptor=descriptor,
         cli_kind="codex",
         command=["codex"],
         model=model,
+        model_reasoning_effort=model_reasoning_effort,
         oss=oss,
         local_provider=local_provider,
         cwd=cwd,
@@ -662,6 +724,11 @@ class TestBuildCodexPrompt:
         assert "solo lectura" in prompt.lower()
         assert "set_status" in prompt
 
+    def test_worker_prompt_is_read_only_and_closes(self):
+        prompt = _build_codex_prompt(self._env("worker"), {"issue_id": "issue:x"})
+        assert "solo lectura" in prompt.lower()
+        assert "set_status" in prompt
+
 
 class TestBuildCodexCommand:
     def test_no_ask_for_approval_flag(self):
@@ -710,6 +777,14 @@ class TestBuildCodexCommand:
         rt = _make_runtime(model="gemma-3-4b-it", local_provider="lmstudio")
         cmd = rt._build_codex_command("task", schema_path="/s.json", output_path="/o.json", effective_cwd=None)
         assert "--model" in cmd
+
+    def test_codex_reasoning_effort_is_explicit_when_configured(self):
+        rt = _make_runtime(model="gpt-5.6-luna", model_reasoning_effort="medium")
+        cmd = rt._build_codex_command(
+            "task", schema_path="/s.json", output_path="/o.json", effective_cwd=None
+        )
+
+        assert 'model_reasoning_effort="medium"' in cmd
 
     def test_cd_passed_when_effective_cwd_set(self, tmp_path):
         rt = _make_runtime()
@@ -860,6 +935,32 @@ class TestExecuteCodexPath:
 
         assert result.status == "failed"
         assert result.error_code == "model_unavailable"
+
+    def test_local_model_without_thinking_is_not_marked_unavailable(self, tmp_path):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stdout = (
+            "Model metadata for `qwen2.5-coder:14b` not found. Unknown model. "
+            '"qwen2.5-coder:14b" does not support thinking'
+        )
+        mock_proc.stderr = ""
+        rt = self._make_runtime()
+
+        with patch(
+            "aiteam.adapters.subscription_cli_adapter.subprocess.run",
+            return_value=mock_proc,
+        ):
+            result = rt.execute(
+                {"issue_id": "issue-1"},
+                {
+                    "AITEAM_RUN_ID": "run-1",
+                    "AITEAM_WORKSPACE_ROOT": str(tmp_path),
+                    "AITEAM_ROLE": "file_scout",
+                },
+            )
+
+        assert result.status == "failed"
+        assert result.error_code == "subscription_cli_incompatible_reasoning"
 
     def test_add_comment_synthesised_as_op(self, tmp_path):
         output = json.dumps({"status": "completed", "summary": "ok", "add_comment": "check the tests"})

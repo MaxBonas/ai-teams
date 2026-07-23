@@ -75,6 +75,38 @@ def test_lead_quorum_assigns_distinct_providers_when_available() -> None:
     assert len(proposal["suggested_issues"]) == 2
 
 
+def test_team_proposal_propagates_issue_capabilities_to_adapter_policy(monkeypatch) -> None:
+    observed: list[dict] = []
+
+    def apply(member, profiles, **context):
+        observed.append({"role": member["role"], **context})
+        return dict(member)
+
+    monkeypatch.setattr("aiteam.lead_intake.apply_adapter_policy_to_member", apply)
+
+    proposal = build_team_proposal(
+        {
+            "id": "issue:mcp",
+            "title": "Integrar MCP",
+            "criticality": "high",
+            "metadata_json": (
+                '{"profile":"full_team","data_class":"internal",'
+                '"required_capabilities":["external_mcp"]}'
+            ),
+        },
+        adapter_profiles=[],
+    )
+
+    assert proposal["profile"] == "full_team"
+    assert {item["role"] for item in observed} == {"engineer", "reviewer"}
+    assert {item["run_profile"] for item in observed} == {"full_team"}
+    assert {item["criticality"] for item in observed} == {"high"}
+    assert {item["data_class"] for item in observed} == {"internal"}
+    assert {
+        tuple(item["required_capabilities"]) for item in observed
+    } == {("external_mcp",)}
+
+
 def test_full_team_blueprint_models_programming_team_and_cost_delegation() -> None:
     blueprint = build_default_team_blueprint(
         "CHAT-FULL",

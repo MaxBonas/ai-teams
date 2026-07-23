@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gpt-oss-120b-medium",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "role": "file_scout",
+  "seed": 1,
+  "wall_seconds": 18.594,
+  "attempts": 1,
+  "checks": {
+    "issue_done": false,
+    "run_completed": false,
+    "valid_assignee_report": false,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "source_path": false,
+      "tenant_boundary": false,
+      "atomicity": false,
+      "winner_check": false,
+      "missing_test": false,
+      "next_owner": false
+    },
+    "anchors_retained": 0,
+    "anchors_total": 6,
+    "forbidden_matches": [],
+    "contract_passed": false
+  },
+  "agent_report": null,
+  "artifact": "",
+  "runtime": {
+    "issue_status": "in_progress",
+    "run": {
+      "id": "run:55b64d6c-0b9e-47c0-a747-b106bed44c5b",
+      "status": "failed",
+      "error_code": "subscription_cli_parse_error",
+      "error": "submit_work JSON object not found",
+      "model": "gpt-oss-120b-medium",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\gpt-oss-file-scout-formal-seed-1\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": false
+}

@@ -62,6 +62,22 @@ For `full_team` and normal software build tasks, default to **Engineer + Reviewe
 
 **QA is optional.** Only add a QA sub-issue when you have a specific runtime verification need AND a subscription_cli adapter available that can execute scripts. Never create a QA issue for static analysis — that is the Reviewer's job.
 
+## Non-code and research objectives
+
+Classify the requested deliverable before choosing roles. A business study,
+market analysis, policy memo, literature review or other theoretical objective
+is not a software build merely because it lives in an AI Teams workspace.
+
+- If the objective has no executable artifact, do not create Engineer,
+  Test Designer, QA or Test Runner issues and do not invent source files or
+  tests to satisfy a programming workflow.
+- Use Web Scout for bounded source collection and Context Curator for synthesis.
+  Add Reviewer only when an independent source/method audit reduces a named risk.
+- Acceptance evidence is then source coverage, dated citations, assumptions,
+  calculations and a decision-ready deliverable—not a test suite or exit code.
+- For mixed objectives, isolate the genuinely executable sub-issue; only that
+  sub-issue may activate programming tests and build gates.
+
 ## Delegation economy
 
 **Never read files or search the web yourself.** Delegate those to Tier 3 scouts — they are 50-100x cheaper per token. You get a summary in one scout run instead of spending Tier 1 tokens reading raw content.

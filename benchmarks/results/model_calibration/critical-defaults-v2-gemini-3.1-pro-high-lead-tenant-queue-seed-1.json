@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 8.735,
+  "usage": {},
+  "response": {
+    "objective": "Migrar la cola a tenant_queue_migration manteniendo a SQLite como la única fuente durable, garantizando el aislamiento por tenant_id en cada issue y resolviendo la condición de carrera del checkout (donde SELECT y UPDATE separados permiten que dos workers ganen la misma issue). La migración se realizará sin detener runs activas, manteniendo un flag para retornar al camino anterior y superando el gate de 100 reinicios con cero wakeups perdidos durante 24 horas.",
+    "work_items": [
+      {
+        "id": "WI-01",
+        "title": "Unificación atómica del checkout SELECT y UPDATE en SQLite",
+        "description": "Refactorizar la consulta de checkout en SQLite para consolidar SELECT y UPDATE en una operación atómica por tenant_id, evitando que dos workers adquieran la misma issue.",
+        "owner": "Lead Executor",
+        "acceptor": "Architect",
+        "dependencies": []
+      },
+      {
+        "id": "WI-02",
+        "title": "Implementación del flag de rollback y compatibilidad en caliente",
+        "description": "Configurar el flag de conmutación para permitir alternar entre el camino anterior y la nueva lógica en SQLite sin interrupción de runs activas.",
+        "owner": "Team Lead",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-01"
+        ]
+      },
+      {
+        "id": "WI-03",
+        "title": "Ejecución del test de resiliencia del gate de 100 reinicios",
+        "description": "Ejecutar la validación de 100 reinicios del sistema observando la pérdida de wakeups y el aislamiento por tenant_id.",
+        "owner": "Quorum Auditor",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-02"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "id": "R-01",
+        "description": "Condición de carrera persistente si el checkout no es atómico antes de desactivar el camino anterior.",
+        "impact": "Dos workers ganan la misma issue violando la consistencia del tenant_id.",
+        "mitigation": "Uso estricto de transacciones atómicas SQLite y verificación mediante el flag antes del corte final."
+      },
+      {
+        "id": "R-02",
+        "description": "Interrupción de runs activas durante la transición al nuevo esquema SQLite.",
+        "impact": "Fallo en el requisito de migración en vivo sin detener ejecuciones en curso.",
+        "mitigation": "Despliegue gradual protegido por el flag para retornar al camino anterior si se detectan interrupciones."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas.",
+      "metrics": {
+        "value": 0,
+        "unit": "wakeups perdidos",
+        "window": "24 horas",
+        "required_action": "Validar tras 100 reinicios continuos que no exista pérdida de eventos de wakeup en SQLite."
+      },
+      "rollback_path": "Conmutar el flag activo para regresar de inmediato al camino anterior sin perder la durabilidad en SQLite."
+    },
+    "escalation": {
+      "triggers": [
+        "Detección de 1 o más wakeups perdidos durante la ventana de 24 horas o los 100 reinicios.",
+        "Ocurrencia de conflicto donde dos workers ganan la misma issue con tenant_id.",
+        "Fallo o indisponibilidad del flag de rollback al intentar alternar al camino anterior."
+      ],
+      "action": "Escalar inmediatamente al Lead y Team Lead para abortar la migración, activar el flag de regreso al camino anterior y pausar el gate."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

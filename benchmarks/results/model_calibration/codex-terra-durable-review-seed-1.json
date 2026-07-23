@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "benchmark": "durable_review",
+  "seed": 1,
+  "profile_id": "codex_subscription",
+  "provider": "openai-codex",
+  "channel": "subscription",
+  "cli_version": "0.145.0",
+  "model": "gpt-5.6-terra",
+  "contract": "same_broken_diff_then_same_fix_v1",
+  "reject": {
+    "ok": true,
+    "seconds": 34.594,
+    "report": {
+      "id": "bfb7b76f-1213-486e-8955-543775a2c944",
+      "issue_id": "issue:review",
+      "agent_id": "role:reviewer",
+      "run_id": "run:b5cc36b8-f83b-439d-aa3b-194c39f50d6b",
+      "agent_role": "reviewer",
+      "result": "changes_requested",
+      "issue_status": "done",
+      "next_owner": "engineer",
+      "tech_match": "yes",
+      "blocker": "missing tenant/assignee authorization, atomic transaction, error propagation, and guarded idempotent parent wakeup",
+      "evidence": "close_issue.py:2-10",
+      "valid": 1,
+      "is_assignee": 1,
+      "raw_json": "{\"blocker\": \"missing tenant/assignee authorization, atomic transaction, error propagation, and guarded idempotent parent wakeup\", \"evidence\": \"close_issue.py:2-10\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"reviewer\", \"tech_match\": \"yes\"}",
+      "created_at": "2026-07-22 14:44:02"
+    }
+  },
+  "approve": {
+    "ok": true,
+    "seconds": 29.406,
+    "report": {
+      "id": "16c74408-1cea-4a55-8998-20afff897a16",
+      "issue_id": "issue:review",
+      "agent_id": "role:reviewer",
+      "run_id": "run:7e4c660b-bf80-41e4-8f04-437e81756b13",
+      "agent_role": "reviewer",
+      "result": "approved",
+      "issue_status": "done",
+      "next_owner": "lead",
+      "tech_match": "yes",
+      "blocker": "none",
+      "evidence": "close_issue.py:2-14",
+      "valid": 1,
+      "is_assignee": 1,
+      "raw_json": "{\"blocker\": \"none\", \"evidence\": \"close_issue.py:2-14\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"approved\", \"role\": \"reviewer\", \"tech_match\": \"yes\"}",
+      "created_at": "2026-07-22 14:44:32"
+    }
+  },
+  "runs": [
+    {
+      "id": "run:b5cc36b8-f83b-439d-aa3b-194c39f50d6b",
+      "status": "completed",
+      "adapter_type": "subscription_cli",
+      "provider": "openai-codex",
+      "model": "gpt-5.6-terra",
+      "channel": "subscription",
+      "error": null,
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 18691, \"output_tokens\": 1432, \"reasoning_output_tokens\": 81}",
+      "result_json": "{\"output_preview\": \"Revisión estática completada: close_issue.py incumple los controles de tenant/asignación, atomicidad, propagación de errores e idempotencia de wakeups.\"}",
+      "stdout_excerpt": null,
+      "stderr_excerpt": null,
+      "started_at": "2026-07-22T14:43:28.223975+00:00",
+      "finished_at": "2026-07-22T14:44:02.618765+00:00"
+    },
+    {
+      "id": "run:7747aebc-4ed3-41c6-ab97-b761c61e24a3",
+      "status": "completed",
+      "adapter_type": "lead_builtin",
+      "provider": "aiteams",
+      "model": "structured-lead-intake",
+      "channel": "local",
+      "error": null,
+      "error_code": null,
+      "usage_json": "{}",
+      "result_json": "{\"output_preview\": \"Lead — Ciclo de corrección #1 iniciado automáticamente\\n\\nEl Reviewer reportó `changes_requested`. Se ha iniciado un ciclo de corrección:\\n\\n1. El Reviewer ha sido restablecido a `todo` — se volverá a ejecutar automáticamente cuando las correcciones estén list\"}",
+      "stdout_excerpt": null,
+      "stderr_excerpt": null,
+      "started_at": "2026-07-22T14:44:02.657273+00:00",
+      "finished_at": "2026-07-22T14:44:02.707289+00:00"
+    },
+    {
+      "id": "run:7e4c660b-bf80-41e4-8f04-437e81756b13",
+      "status": "completed",
+      "adapter_type": "subscription_cli",
+      "provider": "openai-codex",
+      "model": "gpt-5.6-terra",
+      "channel": "subscription",
+      "error": null,
+      "error_code": null,
+      "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 19175, \"output_tokens\": 1323, \"reasoning_output_tokens\": 102}",
+      "result_json": "{\"output_preview\": \"Revisión estática aprobada: `close_issue.py` cumple los controles requeridos. No hay elementos que requieran cambios.\"}",
+      "stdout_excerpt": null,
+      "stderr_excerpt": null,
+      "started_at": "2026-07-22T14:44:02.909670+00:00",
+      "finished_at": "2026-07-22T14:44:32.045659+00:00"
+    },
+    {
+      "id": "run:74da0650-c01e-4b3f-ba8e-16523e399c0b",
+      "status": "completed",
+      "adapter_type": "lead_builtin",
+      "provider": "aiteams",
+      "model": "structured-lead-intake",
+      "channel": "local",
+      "error": null,
+      "error_code": null,
+      "usage_json": "{}",
+      "result_json": "{\"output_preview\": \"Resumen del Lead\\n\\nEstado de delegaciones:\\n- [✓] Implementación → role:engineer (done)\\n- [✓] Revisar close_issue.py → role:reviewer (done) | resultado: approved | evidencia: close_issue.py:2-14\\n- [✓] Fix #1: correcciones solicitadas por Reviewer → role:engi\"}",
+      "stdout_excerpt": null,
+      "stderr_excerpt": null,
+      "started_at": "2026-07-22T14:44:32.083673+00:00",
+      "finished_at": "2026-07-22T14:44:32.138902+00:00"
+    }
+  ],
+  "quota_observation": {
+    "provider_calls": 2,
+    "product_runs": 4,
+    "wall_seconds": 64.0,
+    "tokens": {
+      "input_tokens": 37866,
+      "output_tokens": 2755,
+      "reasoning_output_tokens": 183,
+      "cached_input_tokens": 0
+    },
+    "marginal_cost_cents": 0
+  },
+  "liveness": {
+    "live_runs": 0,
+    "claimed_wakeups": 0
+  },
+  "ok": true
+}

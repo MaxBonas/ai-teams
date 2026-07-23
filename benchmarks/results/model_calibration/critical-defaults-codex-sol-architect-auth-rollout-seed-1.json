@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "architect",
+  "case_id": "auth_rollout_incident",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 16.078,
+  "usage": {
+    "input_tokens": 16585,
+    "cached_input_tokens": 0,
+    "output_tokens": 625
+  },
+  "response": {
+    "decision": {
+      "action": "detener auth v2 y revertir el 5 % del tráfico a auth v1",
+      "owner": "Release Engineer",
+      "status": "rollback requerido",
+      "facts": [
+        "La tasa de error es 2,4 % durante 10 minutos y supera el límite de 1,0 %.",
+        "Auth v1 sigue disponible."
+      ],
+      "assumptions": [
+        "El enrutamiento permite devolver todo el tráfico afectado a auth v1 sin cambiar contratos externos."
+      ]
+    },
+    "constraints": {
+      "error_limit": "1,0 %",
+      "observed_error_rate": "2,4 %",
+      "observation_window": "10 minutos",
+      "current_rollout": "5 %",
+      "dependency": "La rotación de secrets está pendiente.",
+      "boundary": "No reanudar auth v2 ni ampliar tráfico hasta completar la dependencia y obtener aceptación del Reviewer."
+    },
+    "interfaces": {
+      "traffic_control": {
+        "owner": "Release Engineer",
+        "input": "porcentaje de tráfico dirigido a auth v2",
+        "output": "tráfico dirigido a auth v1 o auth v2"
+      },
+      "observability": {
+        "input": "logs y métricas de autenticación",
+        "output": "tasa de error y evidencia de recuperación"
+      },
+      "review_gate": {
+        "owner": "Reviewer",
+        "input": "logs y métricas posteriores al rollback",
+        "output": "aceptación o rechazo de la recuperación"
+      },
+      "secrets": {
+        "input": "confirmación de rotación completada",
+        "output": "dependencia desbloqueada para una futura reanudación"
+      }
+    },
+    "risks": [
+      {
+        "risk": "Persistencia de errores durante la reversión.",
+        "mitigation": "Mantener detenido el rollout y observar métricas hasta confirmar recuperación."
+      },
+      {
+        "risk": "Reanudar auth v2 con secrets sin rotar.",
+        "mitigation": "Mantener la rotación como bloqueo obligatorio."
+      },
+      {
+        "risk": "Aceptar recuperación sin evidencia suficiente.",
+        "mitigation": "Exigir confirmación conjunta mediante logs y métricas."
+      }
+    ],
+    "verification": {
+      "success_criteria": [
+        "El tráfico de auth v2 queda en 0 %.",
+        "La tasa de error vuelve a ser igual o inferior a 1,0 %.",
+        "Logs y métricas confirman recuperación.",
+        "El Reviewer acepta la recuperación."
+      ],
+      "evidence": [
+        "Configuración verificable de distribución de tráfico.",
+        "Serie temporal de la tasa de error posterior al rollback.",
+        "Logs de autenticación posteriores al rollback.",
+        "Registro explícito de aceptación del Reviewer."
+      ]
+    },
+    "rollback": {
+      "target": "auth v1",
+      "trigger": "Tasa de error de 2,4 % por encima del límite de 1,0 % durante 10 minutos.",
+      "procedure": [
+        "Detener cualquier incremento del rollout.",
+        "Dirigir a auth v1 el 5 % asignado a auth v2.",
+        "Confirmar que auth v2 recibe 0 % del tráfico.",
+        "Recopilar logs y métricas hasta demostrar recuperación.",
+        "Solicitar la aceptación del Reviewer."
+      ],
+      "abort_condition": "Si auth v1 no recibe correctamente el tráfico, mantener congelados nuevos cambios y escalar al Release Engineer con la evidencia observada."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": true,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:09:44.265658Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:09:44.265696Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:09:44.271805Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:09:44.596749Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:09:44.596772Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

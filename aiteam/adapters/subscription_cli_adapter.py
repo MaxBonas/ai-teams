@@ -15,9 +15,12 @@ from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticA
 from aiteam.adapters.work_contract import (
     OPENAI_SUBMIT_WORK_SCHEMA,
     SUBMIT_WORK_SCHEMA,
+    TIER1_FACT_RETENTION_ROLES,
     build_execution_contract,
+    critical_fact_retention_instruction,
     ops_to_actions,
     parse_submit_work,
+    tier3_causal_report_instruction,
 )
 from aiteam.quorum_quality import quorum_audit_contract_instruction
 
@@ -44,6 +47,13 @@ CODEX_OUTPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+_CODEX_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
+
+
+def _normalize_codex_reasoning_effort(value: Any, *, fallback: str | None = None) -> str | None:
+    candidate = str(value or fallback or "").strip().lower()
+    return candidate if candidate in _CODEX_REASONING_EFFORTS else None
+
 
 @dataclass
 class ClaudeSubscriptionCliRuntime:
@@ -53,6 +63,7 @@ class ClaudeSubscriptionCliRuntime:
     command: list[str] | None = None
     cli_kind: str = "claude"
     model: str | None = None
+    model_reasoning_effort: str | None = None
     permission_mode: str = "auto"
     sandbox: str = "workspace-write"
     approval_policy: str = "never"
@@ -77,6 +88,10 @@ class ClaudeSubscriptionCliRuntime:
             command=command_list,
             cli_kind=str(config.get("cli_kind") or self.cli_kind or "claude"),
             model=str(config.get("model") or self.model or "").strip() or None,
+            model_reasoning_effort=_normalize_codex_reasoning_effort(
+                config.get("model_reasoning_effort"),
+                fallback=self.model_reasoning_effort,
+            ),
             permission_mode=str(config.get("permission_mode") or self.permission_mode or "auto"),
             sandbox=str(config.get("sandbox") or self.sandbox or "workspace-write"),
             approval_policy=str(config.get("approval_policy") or self.approval_policy or "never"),
@@ -161,6 +176,8 @@ class ClaudeSubscriptionCliRuntime:
                 "http 429",
             )):
                 error_code = "subscription_cli_usage_limit"
+            elif "does not support thinking" in lowered_output:
+                error_code = "subscription_cli_incompatible_reasoning"
             elif (
                 "model requires a newer version" in lowered_output
                 or "requires a newer version of codex" in lowered_output
@@ -362,6 +379,10 @@ class ClaudeSubscriptionCliRuntime:
                 command.extend(["--model", self.model])
             else:
                 command.extend(["-c", f'model="{self.model}"'])
+        if self.model_reasoning_effort:
+            command.extend(
+                ["-c", f'model_reasoning_effort="{self.model_reasoning_effort}"']
+            )
         if self.oss:
             command.append("--oss")
         if self.local_provider:
@@ -386,7 +407,7 @@ def _build_system_prompt(env: dict[str, str]) -> str:
     role = env.get("AITEAM_AGENT_ROLE", "").strip() or "agent"
     skill = env.get("AITEAM_AGENT_SKILL", "").strip()
     base = skill or f"Eres un agente de AI Teams con rol {role}. Completa la delegacion recibida."
-    contract = base + build_execution_contract()
+    contract = base + build_execution_contract(role)
     if role.lower() == "quorum_auditor":
         contract += (
             "\n\nQUORUM AUDITOR — CONTRATO ESTRICTO:\n"
@@ -406,7 +427,7 @@ def _build_system_prompt(env: dict[str, str]) -> str:
 # NOT edit workspace files themselves. Everything else is an executor.
 _ORCHESTRATION_ROLES = frozenset({"lead", "team_lead"})
 # Tier 3 scouts inspect/report only — they never edit files.
-_READ_ONLY_ROLES = frozenset({"file_scout", "web_scout", "context_curator"})
+_READ_ONLY_ROLES = frozenset({"worker", "file_scout", "web_scout", "context_curator"})
 
 
 def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
@@ -460,6 +481,8 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
         "",
         "=== Instrucciones ===",
     ]
+    if role_key in TIER1_FACT_RETENTION_ROLES:
+        parts.append(critical_fact_retention_instruction())
 
     if is_orchestrator:
         parts += [
@@ -507,6 +530,8 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
             "Lee exclusivamente payload.context_curation_target y conserva decisiones, restricciones, riesgos, evidencia, owners y escalados.",
             "Checklist antes de responder: cada owner debe quedar unido explícitamente a su próximo entregable; "
             "cada reviewer/aceptador a su criterio o evidencia pendiente; cada umbral debe conservar métrica, valor, ventana y acción. "
+            "Haz además una pasada de cobertura sobre todo el slice: conserva cada límite de alcance, regla de cohorte/rollout, "
+            "regla de retry/recovery y resultado de verificación distintos. No omitas uno porque ya exista otro de la misma clase. "
             "No sustituyas esas relaciones por estados vagos como 'pendiente de revisión'.",
             "Tu artefacto obligatorio NO es add_comment: emite un op append_context_summary con path=target_issue_id, "
             "body=<síntesis causal>, start_comment_id, end_comment_id, char_count_original, start_char_offset y end_char_offset copiados exactamente del payload.",
@@ -520,6 +545,7 @@ def _build_codex_prompt(env: dict[str, str], run: dict[str, Any]) -> str:
     elif is_read_only:
         parts += [
             "Eres un SCOUT de solo lectura. Inspecciona y reporta; NO edites archivos.",
+            tier3_causal_report_instruction(role_key),
             "1. Lee los archivos indicados y responde con un resumen conciso en `add_comment`.",
             "2. Cierra tu tarea añadiendo el op {\"type\":\"set_status\",\"status\":\"done\"} — tu trabajo es de un solo tiro.",
         ]

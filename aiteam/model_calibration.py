@@ -1,6 +1,7 @@
 """Provenance y frescura de promociones de modelo por contrato de rol."""
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -15,14 +16,18 @@ CALIBRATION_MAX_AGE_DAYS = 30
 PROMOTED_MODEL_CALIBRATIONS: tuple[dict[str, Any], ...] = (
     {
         "profile_id": "codex_subscription",
-        "model": "gpt-5.5",
+        "model": "gpt-5.6-luna",
         "role": "context_curator",
-        "calibrated_at": "2026-07-20",
-        "provider_version": "0.128.0",
+        "calibrated_at": "2026-07-22",
+        "provider_version": "0.145.0",
         "evidence_receipts": (
-            "benchmarks/results/context-curator-codex-senior-seed-1-rubric-v5.json",
-            "benchmarks/results/context-curator-codex-senior-seed-2-rubric-v5.json",
-            "benchmarks/results/context-curator-queue-codex-senior-seed-1-rubric-v4.json",
+            "benchmarks/results/model_calibration/context-curator-gpt-tier3-cli-0.145.0-aggregate-v3.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json",
         ),
     },
     {
@@ -50,6 +55,103 @@ PROMOTED_MODEL_CALIBRATIONS: tuple[dict[str, Any], ...] = (
 
 def _observation_date(value: datetime | date) -> date:
     return value.date() if isinstance(value, datetime) else value
+
+
+def _validate_evidence_content(
+    calibration: dict[str, Any], *, repo_root: Path, receipts: list[str]
+) -> list[str]:
+    payloads: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    for receipt in receipts:
+        path = repo_root / receipt
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            errors.append(f"invalid_json:{receipt}")
+            continue
+        if not isinstance(payload, dict):
+            errors.append(f"invalid_payload:{receipt}")
+            continue
+        payloads[receipt] = payload
+
+    profile_id = str(calibration.get("profile_id") or "")
+    model = str(calibration.get("model") or "")
+    role = str(calibration.get("role") or "")
+    provider_version = str(calibration.get("provider_version") or "")
+    if profile_id == "codex_subscription":
+        aggregates = [
+            (receipt, payload) for receipt, payload in payloads.items()
+            if payload.get("benchmark") == "context_curator_gpt_tier3_calibration_aggregate"
+        ]
+        if len(aggregates) != 1:
+            return [*errors, "codex_aggregate_missing_or_duplicate"]
+        aggregate_receipt, aggregate = aggregates[0]
+        conclusion = aggregate.get("conclusion") or {}
+        candidate = (aggregate.get("arms") or {}).get("luna_medium_prompt_v3") or {}
+        checks = {
+            "cli_version": aggregate.get("cli_version") == provider_version,
+            "matrix_balanced": aggregate.get("matrix_balanced") is True,
+            "promotion_allowed": conclusion.get("promotion_allowed") is True,
+            "selected_model": conclusion.get("selected_model") == model,
+            "selected_role": conclusion.get("selected_role") == role,
+            "reasoning_effort": conclusion.get("reasoning_effort") == "medium",
+            "candidate_model": candidate.get("model") == model,
+            "candidate_effort": candidate.get("reasoning_effort_override") == "medium",
+            "candidate_6_of_6": candidate.get("samples") == 6 and candidate.get("accepted") == 6,
+            "candidate_valid": candidate.get("validation_errors") == [],
+        }
+        errors.extend(name for name, valid in checks.items() if not valid)
+        expected_sources = set(receipts) - {aggregate_receipt}
+        if set(candidate.get("source_receipts") or []) != expected_sources:
+            errors.append("candidate_source_receipts_mismatch")
+        for receipt in expected_sources:
+            payload = payloads.get(receipt)
+            if payload is None:
+                continue
+            config = payload.get("execution_config") or {}
+            runtime = payload.get("runtime") or {}
+            run = runtime.get("run") or {}
+            individual_checks = {
+                "accepted": payload.get("accepted") is True,
+                "profile": payload.get("profile_id") == profile_id,
+                "model": (payload.get("adapter") or {}).get("model") == model,
+                "role": config.get("role") == role,
+                "config_model": config.get("model") == model,
+                "effort": config.get("reasoning_effort_override") == "medium",
+                "run_status": run.get("status") == "completed",
+                "agent": run.get("agent_id") == f"role:{role}",
+                "issue_status": runtime.get("issue_status") == "done",
+            }
+            errors.extend(
+                f"{name}:{receipt}" for name, valid in individual_checks.items() if not valid
+            )
+    elif profile_id == "antigravity_subscription":
+        aggregates = [
+            payload for payload in payloads.values()
+            if payload.get("benchmark") == "antigravity_coding_behavioral_calibration"
+        ]
+        if len(aggregates) != 1:
+            return [*errors, "antigravity_aggregate_missing_or_duplicate"]
+        aggregate = aggregates[0]
+        model_row = (aggregate.get("models") or {}).get(model) or {}
+        integrity = aggregate.get("integrity") or {}
+        conclusion = aggregate.get("conclusion") or {}
+        hidden_total = int(model_row.get("hidden_total") or 0)
+        hidden_passed = model_row.get("hidden_passed") or []
+        checks = {
+            "model_samples": model_row.get("samples") == 3,
+            "model_done": model_row.get("done") == 3,
+            "hidden_suite": hidden_total > 0 and hidden_passed == [hidden_total] * 3,
+            "integrity": integrity.get("promotion_contract_complete") is True
+            and integrity.get("promotion_allowed") is True
+            and not integrity.get("missing_cells")
+            and not integrity.get("duplicate_cells"),
+            "promotion_allowed": conclusion.get("promotion_allowed") is True,
+        }
+        errors.extend(name for name, valid in checks.items() if not valid)
+    return errors
 
 
 def audit_promoted_model_calibrations(
@@ -94,6 +196,9 @@ def audit_promoted_model_calibrations(
         missing_receipts = [
             receipt for receipt in receipts if not (repo_root / receipt).is_file()
         ]
+        evidence_validation_errors = _validate_evidence_content(
+            calibration, repo_root=repo_root, receipts=receipts
+        )
         stale_reasons: list[str] = []
         if age_days < 0:
             stale_reasons.append("calibration_date_in_future")
@@ -105,6 +210,8 @@ def audit_promoted_model_calibrations(
             stale_reasons.append("provider_version_changed")
         if not receipts or missing_receipts:
             stale_reasons.append("evidence_receipt_missing")
+        if evidence_validation_errors:
+            stale_reasons.append("evidence_receipt_invalid")
 
         fresh = not stale_reasons
         entries.append(
@@ -119,6 +226,7 @@ def audit_promoted_model_calibrations(
                 "observed_provider_version": observed_version or None,
                 "evidence_receipts": receipts,
                 "missing_evidence_receipts": missing_receipts,
+                "evidence_validation_errors": evidence_validation_errors,
                 "status": "fresh" if fresh else "stale",
                 "stale_reasons": stale_reasons,
                 "new_promotion_allowed": fresh,
@@ -131,6 +239,7 @@ def audit_promoted_model_calibrations(
         and len(entries) == len(PROMOTED_MODEL_CALIBRATIONS)
         and all(
             entry["evidence_receipts"] and not entry["missing_evidence_receipts"]
+            and not entry["evidence_validation_errors"]
             for entry in entries
         )
     )

@@ -1,0 +1,255 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "queue_rollout_causal_v4",
+  "source_chars": 8610,
+  "summary_chars": 866,
+  "causal_units": [
+    {
+      "id": "obj-rollout",
+      "kind": "objective",
+      "statement": "Desplegar el consumidor asíncrono sin facturas duplicadas y con rollback en menos de 10 minutos.",
+      "links": [],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "dec-idempotency",
+      "kind": "decision",
+      "statement": "Usar clave de idempotencia compuesta por invoice_id y attempt.",
+      "links": [
+        "scope:consumidor asíncrono"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "dec-rollout",
+      "kind": "decision",
+      "statement": "Activar el consumidor con feature flag para una cohorte inicial del 10% y mantener el consumidor antiguo en shadow durante 48 horas.",
+      "links": [
+        "cohort:10%",
+        "shadow:48 horas"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "dec-retry",
+      "kind": "decision",
+      "statement": "Limitar retry a 3 intentos; luego enviar a dead-letter queue sin confirmar el mensaje como procesado.",
+      "links": [
+        "retry:max 3",
+        "recovery:DLQ sin ack"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "evidence-replay",
+      "kind": "evidence",
+      "statement": "Platform ejecutó replay de 10.000 mensajes y obtuvo cero facturas duplicadas.",
+      "links": [
+        "owner:Platform",
+        "metric:facturas duplicadas",
+        "result:0/10000"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "acct-engineer",
+      "kind": "accountability",
+      "statement": "Engineer debe crear scripts/replay_dlq.py.",
+      "links": [
+        "owner:Engineer",
+        "deliverable:scripts/replay_dlq.py",
+        "accepted_by:Lead"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "acct-reviewer",
+      "kind": "accountability",
+      "statement": "Reviewer aceptará la transición solo después de reproducir un dry-run de 100 mensajes en staging.",
+      "links": [
+        "owner:Reviewer",
+        "deliverable:dry-run reproducible de 100 mensajes en staging",
+        "accepted_by:Reviewer"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "risk-ordering",
+      "kind": "risk",
+      "statement": "Webhooks fuera de orden pueden llegar hasta 20 minutos tarde y reabrir estados ya cerrados.",
+      "links": [
+        "metric:latencia webhook",
+        "threshold:20 minutos"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "esc-duplicates",
+      "kind": "escalation",
+      "statement": "Ante duplicados superiores a 0,1% durante 10 minutos, SRE desactiva la feature flag, revierte al consumidor anterior y escala al Lead.",
+      "links": [
+        "metric:tasa de facturas duplicadas",
+        "threshold:>0,1%",
+        "window:10 minutos",
+        "action:SRE desactiva flag, revierte consumidor y escala al Lead"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    },
+    {
+      "id": "scope-excluded",
+      "kind": "scope",
+      "statement": "Quedan fuera de alcance migrar de broker y cambiar el esquema de pagos.",
+      "links": [
+        "scope:excluido"
+      ],
+      "source_comment_ids": [
+        "164ab743-4a5d-4ce7-8fac-87cc854f00ba"
+      ]
+    }
+  ],
+  "causal_index_chars": 2732,
+  "artifact_chars": 3599,
+  "artifact_ratio": 0.418,
+  "compression_ratio": 0.1006,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 9,
+  "required_total": 9,
+  "required_retention_rate": 1.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": true,
+  "accepted": true,
+  "criteria": [
+    {
+      "id": "idempotency_key",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "invoice_id.{0,30}attempt"
+      ]
+    },
+    {
+      "id": "cohort_shadow",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cohorte.{0,30}10 ?%|10 ?%.{0,30}cohorte",
+        "shadow.{0,30}48 ?(h|horas)|48 ?(h|horas).{0,30}shadow"
+      ]
+    },
+    {
+      "id": "retry_dlq",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "tres intentos.{0,60}(dead-letter|DLQ)|3 intentos.{0,60}(dead-letter|DLQ)|retries?.{0,30}3.{0,60}(dead-letter|DLQ)"
+      ]
+    },
+    {
+      "id": "replay_evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "10[., ]?000\\s+mensajes.{0,40}(0|cero).{0,30}duplicad"
+      ]
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,80}replay_dlq\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,160}(dry-run|100 mensajes)|(dry-run|100 mensajes).{0,160}Reviewer"
+      ]
+    },
+    {
+      "id": "late_webhook_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "webhooks?.{0,80}(20 ?min|20 minutos).{0,80}(tarde|fuera de orden)|webhooks?.{0,80}fuera de orden.{0,80}(20 ?min|20 minutos)"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0[,.]1 ?%.{0,60}(10 ?min|diez minutos).{0,100}(desactiva|apagar|rollback|consumidor (anterior|previo))"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de (scope|alcance).{0,80}(broker|esquema de pagos)"
+      ]
+    }
+  ],
+  "profile_id": "codex_subscription",
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "gpt-5.6-luna",
+    "channel": "subscription"
+  },
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:4f050315-cd3f-44ee-86f5-26059a8b9c7a",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "attempts": 1,
+    "wall_seconds": 30.0,
+    "input_tokens": 21509,
+    "output_tokens": 1417,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-queue-gpt-5.6-luna-cli-0.145.0-prompt-v2-seed-2\\.aiteam\\aiteam.db"
+  },
+  "summary": "## Síntesis causal\n- Objetivo: desplegar el consumidor asíncrono sin facturas duplicadas y con rollback en menos de 10 minutos.\n- Decisiones: idempotencia por `invoice_id` + `attempt`; feature flag inicial al 10%; consumidor antiguo en shadow 48 h; máximo 3 retries; después DLQ sin confirmar procesamiento.\n- Evidencia: replay de 10.000 mensajes ejecutado por Platform con 0 duplicados.\n- Accountability: Engineer debe crear `scripts/replay_dlq.py`; Reviewer acepta la transición tras reproducir un dry-run de 100 mensajes en staging.\n- Riesgo/escalado: webhooks fuera de orden pueden llegar hasta 20 min tarde y reabrir estados cerrados. Si duplicados >0,1% durante 10 min, SRE desactiva la flag, revierte al consumidor anterior y escala al Lead.\n- Fuera de alcance: migrar de broker y cambiar el esquema de pagos.\n- El resto del slice es repetición no accionable.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_tier_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "role": "web_scout",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "governed_advisory_lookup",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "samples_artifact_passed": 3,
+  "samples_single_attempt": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-luna-web-scout-low-v2-seed-1.json",
+    "benchmarks/results/model_calibration/codex-luna-web-scout-low-v2-seed-2.json",
+    "benchmarks/results/model_calibration/codex-luna-web-scout-low-v2-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-luna-web-scout-low-v2-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "3fea643ce483bdc62bfa02945907500d040f86cf5ff748fafc1143beaad6aece"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-luna-web-scout-low-v2-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "e0273206851d38315b7dd2b5f6f81b1337a2180b377357676ffa7fe7846c4ec0"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-luna-web-scout-low-v2-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "601bfa353f9b618a51087b05dceccad895f4644ef686dfe2d68773884d6f7d03"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "artifacts_hashed": true
+  },
+  "checks_passed": 30,
+  "checks_total": 30,
+  "wall_seconds_median": 26.531,
+  "wall_seconds_range": [
+    26.094,
+    35.093
+  ],
+  "usage": {
+    "input_tokens": 222132,
+    "output_tokens": 3247,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "MCP remoto",
+      "credenciales reales",
+      "recovery durante una llamada activa"
+    ]
+  }
+}

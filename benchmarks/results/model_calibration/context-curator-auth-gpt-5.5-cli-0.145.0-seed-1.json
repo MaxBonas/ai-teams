@@ -1,0 +1,252 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "auth_migration_causal_v5",
+  "source_chars": 8501,
+  "summary_chars": 990,
+  "causal_units": [
+    {
+      "id": "obj-auth-migration-reversible",
+      "kind": "objective",
+      "statement": "Migrar autenticación con corte reversible y sin downtime.",
+      "links": [],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd"
+      ]
+    },
+    {
+      "id": "decision-keep-jwt-rs256-dual-validation",
+      "kind": "decision",
+      "statement": "Mantener JWT RS256 y rotar claves mediante doble validación durante 24 horas.",
+      "links": [
+        "tech:JWT_RS256",
+        "rotation:dual_validation",
+        "duration:24h"
+      ],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd"
+      ]
+    },
+    {
+      "id": "constraint-old-key-removal-gate",
+      "kind": "constraint",
+      "statement": "La clave antigua no puede borrarse hasta que legacy_kid_hits sea cero durante dos horas.",
+      "links": [
+        "metric:legacy_kid_hits",
+        "threshold:0",
+        "window:2h",
+        "action:allow_old_key_deletion"
+      ],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd"
+      ]
+    },
+    {
+      "id": "evidence-dual-reader-tests",
+      "kind": "evidence",
+      "statement": "Engineer implementó lector dual en src/auth/keyring.py y aportó pytest tests/auth -q: 42 passed.",
+      "links": [
+        "owner:Engineer",
+        "file:src/auth/keyring.py",
+        "test:pytest tests/auth -q",
+        "result:42 passed"
+      ],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd"
+      ]
+    },
+    {
+      "id": "accountability-rollback-script",
+      "kind": "accountability",
+      "statement": "Engineer debe crear scripts/rollback_keys.py y Reviewer debe aceptar su dry-run.",
+      "links": [
+        "owner:Engineer",
+        "deliverable:scripts/rollback_keys.py",
+        "accepted_by:Reviewer",
+        "acceptance:dry-run"
+      ],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd"
+      ]
+    },
+    {
+      "id": "risk-regional-jwks-cache",
+      "kind": "risk",
+      "statement": "Cachés regionales pueden conservar JWKS durante 15 minutos durante la rotación.",
+      "links": [
+        "component:regional_caches",
+        "artifact:JWKS",
+        "duration:15m"
+      ],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd"
+      ]
+    },
+    {
+      "id": "escalation-401-rate-rotation-pause",
+      "kind": "escalation",
+      "statement": "Si aparecen más de 0,5 % de respuestas 401 durante cinco minutos, pausar la rotación y escalar al Lead.",
+      "links": [
+        "metric:401_response_rate",
+        "threshold:>0.5%",
+        "window:5m",
+        "action:pause_rotation_and_escalate_to_Lead"
+      ],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd"
+      ]
+    },
+    {
+      "id": "scope-exclusions-auth-migration",
+      "kind": "scope",
+      "statement": "Fuera de scope: migrar sesiones existentes o cambiar el proveedor de identidad.",
+      "links": [
+        "excluded:migrate_existing_sessions",
+        "excluded:change_identity_provider"
+      ],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd"
+      ]
+    },
+    {
+      "id": "rejected-noisy-thread-content",
+      "kind": "rejected_option",
+      "statement": "Conversaciones repetidas, nombres temporales, estimaciones descartadas y logs no accionables se descartan por no aportar causalidad nueva.",
+      "links": [
+        "reason:no_decision_or_actionable_context"
+      ],
+      "source_comment_ids": [
+        "42cebe59-fd7e-4dbc-9f3b-952956431ffd",
+        "5dbf844c-a421-4ac6-881d-ad1500ef825d",
+        "2149bd28-235a-4d5a-a6f9-7a92f7655f7a",
+        "6a54f45f-2f36-487f-8e83-f711c6eaca04",
+        "e90380cb-d409-4a14-a4ed-17e540d30e71"
+      ]
+    }
+  ],
+  "causal_index_chars": 2884,
+  "artifact_chars": 3875,
+  "artifact_ratio": 0.4558,
+  "compression_ratio": 0.1165,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 9,
+  "required_total": 9,
+  "required_retention_rate": 1.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": true,
+  "accepted": true,
+  "criteria": [
+    {
+      "id": "jwt_rs256",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "JWT.{0,20}RS256"
+      ]
+    },
+    {
+      "id": "dual_validation_24h",
+      "kind": "decision",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "doble validaci[oó]n.{0,40}24 ?(h|horas)|24[- ]hour.{0,40}dual(-key)? validation|dual(-key)? validation.{0,40}24[- ]hour"
+      ]
+    },
+    {
+      "id": "legacy_kid_gate",
+      "kind": "constraint",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "legacy_kid_hits.{0,80}(0|cero).{0,40}(2 ?h|dos horas|2 consecutive hours)"
+      ]
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "42 (tests )?passed"
+      ]
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Engineer.{0,80}rollback_keys\\.py"
+      ]
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "Reviewer.{0,40}dry-run|dry-run.{0,40}Reviewer"
+      ]
+    },
+    {
+      "id": "regional_cache_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "cach[eé]s\\s+regionales.{0,50}15 ?(min|minutos)|regional JWKS caches.{0,60}15 ?(min|minutes)"
+      ]
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "0[,.]5 ?%.{0,50}401.{0,50}(5 ?min|cinco minutos|5-minute)|401.{0,50}0[,.]5 ?%.{0,50}(5 ?min|cinco minutos|5-minute)"
+      ]
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": true,
+      "matched": [
+        "fuera de (scope|alcance).{0,70}(sesiones|proveedor de identidad)|scope exclusions.{0,70}(session migration|identity provider)"
+      ]
+    }
+  ],
+  "profile_id": "codex_subscription",
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "gpt-5.5",
+    "channel": "subscription"
+  },
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:816fe782-cdec-4117-8dc5-ea963013de5f",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "attempts": 1,
+    "wall_seconds": 38.0,
+    "input_tokens": 22729,
+    "output_tokens": 1768,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\context-curator-auth-gpt-5.5-cli-0.145.0-seed-1\\.aiteam\\aiteam.db"
+  },
+  "summary": "## Síntesis causal\n\nObjetivo: migrar autenticación con corte reversible y sin downtime.\n\nDecisiones y restricciones: se mantiene JWT RS256. La rotación de claves usará doble validación durante 24 horas. La clave antigua no se elimina hasta que `legacy_kid_hits` sea cero durante dos horas. Queda fuera de scope migrar sesiones existentes o cambiar el proveedor de identidad.\n\nTrabajo completado: Engineer implementó lector dual en `src/auth/keyring.py` y presentó evidencia `pytest tests/auth -q: 42 passed`. Reviewer aprobó compatibilidad.\n\nEstado actual y próximos pasos: rollback no está automatizado. Engineer debe crear `scripts/rollback_keys.py`; Reviewer debe aceptar el dry-run.\n\nRiesgo/escalado: cachés regionales pueden conservar JWKS durante 15 minutos. Si las respuestas 401 superan 0,5 % durante cinco minutos, se pausa la rotación y se escala al Lead.\n\nRuido descartado: saludos, nombres temporales, estimaciones descartadas y logs no accionables no agregan decisiones nuevas.",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "codex_subscription",
+    "model": "gpt-5.5",
+    "reasoning_effort_override": null,
+    "source": "recovered_read_only_from_original_runtime_db"
+  }
+}

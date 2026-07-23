@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "test_designer",
+  "seed": 1,
+  "seconds": 71.235,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": true,
+    "all_hidden_mutants_killed": true,
+    "durable_report_done": true,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 0,
+      "stdout": "..........                                                               [100%]\n10 passed in 0.04s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_zero_quantity": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_negative_price": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_discount_over_100": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_discount": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_quantity": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_pricing.py"
+  ],
+  "run": {
+    "id": "run:820110e9-6553-47e3-9943-26c426112feb",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gpt-5.6-terra",
+    "provider": "openai-codex",
+    "channel": "subscription",
+    "usage_json": "{\"cached_input_tokens\": 100608, \"input_tokens\": 126135, \"output_tokens\": 2496, \"reasoning_output_tokens\": 466}"
+  },
+  "report": {
+    "id": "2ff29f4e-4d21-4c41-83e8-0984e46e7aa2",
+    "issue_id": "issue:benchmark_test_designer",
+    "agent_id": "role:benchmark_test_designer",
+    "run_id": "run:820110e9-6553-47e3-9943-26c426112feb",
+    "agent_role": "test_designer",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "test_runner",
+    "tech_match": null,
+    "blocker": null,
+    "evidence": null,
+    "valid": 1,
+    "is_assignee": 1,
+    "raw_json": "{\"evidence\": \"\", \"files_created\": \"\", \"issue_status\": \"done\", \"next_owner\": \"test_runner\", \"result\": \"done\", \"role\": \"test_designer\", \"verification\": \"\"}",
+    "created_at": "2026-07-22 16:18:27"
+  },
+  "usage": {
+    "cached_input_tokens": 100608,
+    "input_tokens": 126135,
+    "output_tokens": 2496,
+    "reasoning_output_tokens": 466
+  },
+  "workspace": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-terra-test-designer-seed-1",
+  "ok": true
+}

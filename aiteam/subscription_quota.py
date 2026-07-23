@@ -267,8 +267,15 @@ def _profile_snapshot(
 
 
 def _load_rows(db_path: Path) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
     try:
-        with contextlib.closing(_connect(db_path)) as conn:
+        uri = f"{db_path.resolve().as_uri()}?mode=ro"
+        with contextlib.closing(
+            sqlite3.connect(uri, timeout=20.0, isolation_level=None, uri=True)
+        ) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout = 20000")
             rows = conn.execute(
                 """
                 SELECT p.profile_id, p.provider, p.model, p.channel, p.quota_policy_json,

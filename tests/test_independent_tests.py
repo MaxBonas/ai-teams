@@ -320,4 +320,8 @@ def test_cross_provider_enforcement_covers_adversarial_qa(tmp_path: Path, monkey
     assert moved is True
     with sqlite3.connect(str(db_path)) as conn:
         adapter = conn.execute("SELECT adapter_type FROM agents WHERE id='role:qa'").fetchone()[0]
-    assert adapter == "gemini_api"
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM issue_thread_interactions WHERE issue_id='i-qa' AND status='pending'"
+        ).fetchone()[0]
+    assert adapter == "openai_api", "el gate no puede reasignar QA sin decisión del owner"
+    assert pending == 1

@@ -29,13 +29,13 @@ def test_current_model_family_prices_use_api_rates() -> None:
     assert pricing.price_per_mtok("anthropic", "claude-sonnet-5") == (300, 1500)
     assert pricing.price_per_mtok("anthropic", "claude-haiku-4-5") == (100, 500)
     assert pricing.price_per_mtok("google", "gemini-3.1-pro-preview") == (200, 1200)
-    assert pricing.price_per_mtok("google", "gemini-3.5-flash") == (150, 900)
-    assert pricing.price_per_mtok("google", "gemini-3.1-flash-lite") == (25, 150)
+    assert pricing.price_per_mtok("google", "gemini-3.6-flash") == (150, 750)
+    assert pricing.price_per_mtok("google", "gemini-3.5-flash-lite") == (30, 250)
 
 
 def test_unknown_model_uses_provider_default() -> None:
     assert pricing.price_per_mtok("openai", "gpt-9-experimental") == (250, 1500)
-    assert pricing.price_per_mtok("google", "gemini-9.9") == (150, 900)
+    assert pricing.price_per_mtok("google", "gemini-9.9") == (150, 750)
 
 
 def test_local_and_subscription_providers_are_free() -> None:

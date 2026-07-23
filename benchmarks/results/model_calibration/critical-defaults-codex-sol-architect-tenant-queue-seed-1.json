@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 33.75,
+  "usage": {
+    "input_tokens": 16561,
+    "cached_input_tokens": 0,
+    "output_tokens": 1540
+  },
+  "response": {
+    "decision": {
+      "hechos": [
+        "SQLite es la única fuente durable.",
+        "Cada issue tiene tenant_id.",
+        "El checkout actual separa SELECT y UPDATE, permitiendo adjudicación duplicada.",
+        "La migración no puede detener runs activas.",
+        "Existe un flag para restaurar el camino anterior."
+      ],
+      "supuestos": [
+        "Los workers comparten la misma base SQLite.",
+        "Los wakeups pueden reconstruirse consultando estado durable."
+      ],
+      "arquitectura": "Realizar selección y adjudicación dentro de una única transacción SQLite iniciada con BEGIN IMMEDIATE. La issue se seleccionará por tenant_id y estado elegible, y se actualizará mediante una condición que confirme que continúa elegible. El checkout solo tendrá éxito si exactamente una fila fue actualizada; el commit precederá cualquier ejecución o notificación.",
+      "limites": [
+        "SQLite conserva toda decisión durable; las señales en memoria son únicamente optimizaciones.",
+        "El cambio afecta nuevos checkouts, no el estado ni la ejecución de runs ya activas.",
+        "La migración de esquema será aditiva y compatible con ambos caminos."
+      ]
+    },
+    "constraints": [
+      "No detener, cancelar ni reasignar runs activas.",
+      "Toda operación de checkout debe incluir tenant_id.",
+      "No considerar una issue adjudicada antes del commit.",
+      "Mantener ambos caminos operables mientras el flag permita rollback.",
+      "No eliminar ni reinterpretar columnas existentes durante la migración.",
+      "Mantener corta la transacción para reducir contención del escritor único de SQLite."
+    ],
+    "interfaces": {
+      "checkout": {
+        "entrada": {
+          "tenant_id": "identificador obligatorio",
+          "worker_id": "identificador del worker",
+          "now": "marca temporal usada para elegibilidad"
+        },
+        "salida": {
+          "claimed_issue": "issue adjudicada después del commit, o null",
+          "claim_token": "identificador durable de la adjudicación"
+        },
+        "garantia": "Como máximo un checkout exitoso por transición elegible de una issue."
+      },
+      "acknowledge": {
+        "entrada": [
+          "tenant_id",
+          "issue_id",
+          "claim_token",
+          "resultado"
+        ],
+        "garantia": "Solo modifica la adjudicación que coincide con tenant_id, issue_id y claim_token."
+      },
+      "recovery": {
+        "entrada": [
+          "tenant_id",
+          "worker_id"
+        ],
+        "salida": "trabajo durable pendiente o recuperable",
+        "garantia": "No depende de wakeups conservados en memoria."
+      },
+      "feature_flag": {
+        "valores": [
+          "atomic_checkout",
+          "legacy_checkout"
+        ],
+        "alcance": "Solo nuevos checkouts; las runs activas continúan con su claim_token original."
+      }
+    },
+    "risks": [
+      {
+        "riesgo": "Contención o errores SQLITE_BUSY por BEGIN IMMEDIATE.",
+        "control": "Transacciones breves, timeout acotado y reintentos con backoff observables."
+      },
+      {
+        "riesgo": "El rollback restaura la carrera de adjudicación duplicada.",
+        "control": "Usarlo únicamente como contención temporal y registrar adjudicaciones potencialmente duplicadas."
+      },
+      {
+        "riesgo": "Wakeup emitido antes del commit.",
+        "control": "Emitirlo después del commit y permitir recuperación mediante consulta durable."
+      },
+      {
+        "riesgo": "Workers con versiones mixtas interpretan estados de forma diferente.",
+        "control": "Cambios aditivos y contrato de estados compatible con ambos caminos."
+      },
+      {
+        "riesgo": "Cruce accidental entre tenants.",
+        "control": "tenant_id obligatorio en selección, actualización, confirmación y recuperación."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios y observar durante 24 horas cero wakeups perdidos.",
+      "criterios": [
+        "Ninguna issue presenta dos claim_token exitosos para la misma transición elegible.",
+        "Todo checkout exitoso corresponde a exactamente una fila actualizada y un commit confirmado.",
+        "Tras cada reinicio, todo trabajo pendiente se reconstruye exclusivamente desde SQLite.",
+        "Las runs activas antes del cambio terminan sin interrupción.",
+        "No existen lecturas ni actualizaciones de checkout sin filtro tenant_id."
+      ],
+      "evidencia_verificable": [
+        "Registro por checkout con tenant_id, issue_id, worker_id, claim_token, filas actualizadas y resultado del commit.",
+        "Consulta SQLite que detecte adjudicaciones duplicadas.",
+        "Bitácora numerada de los 100 reinicios.",
+        "Métricas de wakeups esperados, procesados y recuperados durante la ventana completa de 24 horas.",
+        "Prueba concurrente con al menos dos workers compitiendo por la misma issue."
+      ]
+    },
+    "rollback": {
+      "disparadores": [
+        "Wakeup perdido.",
+        "Adjudicación duplicada.",
+        "Incompatibilidad con runs activas.",
+        "Contención SQLite fuera del umbral operativo acordado."
+      ],
+      "procedimiento": [
+        "Cambiar el flag a legacy_checkout para nuevos checkouts.",
+        "No cancelar ni modificar runs activas.",
+        "Conservar columnas, claim_token y evidencia creada por el camino atómico.",
+        "Verificar que ambos caminos siguen pudiendo confirmar runs existentes.",
+        "Registrar el momento del cambio y auditar adjudicaciones posteriores."
+      ],
+      "limitacion": "El rollback funcional no revierte el esquema y vuelve a exponer la carrera conocida del camino anterior."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:08:10.878968Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:08:10.879006Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:08:10.886020Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:08:11.380475Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:08:11.380500Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

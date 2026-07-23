@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "lead_executor",
+  "case_id": "auth_rollout_incident",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 14.188,
+  "usage": {
+    "input_tokens": 16595,
+    "cached_input_tokens": 0,
+    "output_tokens": 460
+  },
+  "response": {
+    "objective": "Detener el deterioro de auth v2 y recuperar una tasa de error inferior o igual al 1,0 %.",
+    "execution_steps": [
+      "Solicitar al Release Engineer que congele inmediatamente el rollout en el 5 %.",
+      "Preparar y aplicar el rollback de auth v2 a auth v1.",
+      "Verificar que todo el tráfico vuelve a auth v1 y que no quedan rutas dependientes de auth v2.",
+      "Observar logs y métricas durante al menos 10 minutos después del rollback.",
+      "Entregar al Reviewer la evidencia de recuperación y solicitar su aceptación.",
+      "Mantener bloqueado un nuevo rollout hasta completar la rotación de secrets y validar nuevamente el procedimiento."
+    ],
+    "evidence": [
+      "Tasa de error global y por versión durante la ventana previa y los 10 minutos posteriores al rollback.",
+      "Logs de autenticación sin incremento sostenido de errores.",
+      "Métrica que confirme el 100 % del tráfico atendido por auth v1.",
+      "Confirmación del Release Engineer sobre la reversión aplicada.",
+      "Aceptación explícita del Reviewer basada en logs y métricas."
+    ],
+    "risks": [
+      "El error puede persistir si su causa no está limitada a auth v2.",
+      "La reversión puede dejar tráfico residual en auth v2.",
+      "La rotación de secrets pendiente puede bloquear o comprometer un nuevo intento de rollout.",
+      "Una observación insuficiente puede producir una falsa recuperación."
+    ],
+    "rollback": {
+      "target": "auth v1",
+      "owner": "Release Engineer",
+      "trigger": "Tasa de error del 2,4 %, superior al límite del 1,0 % durante 10 minutos.",
+      "success_criteria": "Todo el tráfico vuelve a auth v1 y la tasa de error se mantiene en el 1,0 % o menos durante al menos 10 minutos, con logs y métricas consistentes."
+    },
+    "escalation": "Si el rollback no reduce la tasa de error al 1,0 % o menos, escalar inmediatamente al Release Engineer y al owner operativo de autenticación, mantener auth v2 congelado y no reanudar el rollout hasta resolver la causa y completar la rotación de secrets."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": true,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true
+    },
+    "anchors_retained": 10,
+    "anchors_total": 10,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:28:28.324440Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:28:28.324482Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:28:28.332460Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:28:28.715257Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:28:28.715282Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

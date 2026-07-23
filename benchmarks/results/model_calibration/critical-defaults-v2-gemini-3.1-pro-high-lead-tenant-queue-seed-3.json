@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 9.547,
+  "usage": {},
+  "response": {
+    "objective": {
+      "role": "lead",
+      "seed": 3,
+      "case": "tenant_queue_migration",
+      "description": "Descomponer y gestionar la migración de tenant_queue asegurando SQLite como única fuente durable. Cada issue cuenta con tenant_id. Se debe resolver el problema del checkout actual que separa SELECT y UPDATE permitiendo que dos workers ganen la misma issue. La migración no puede detener runs activas y debe contar con un flag de rollback al camino anterior. El gate de éxito es ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas."
+    },
+    "work_items": [
+      {
+        "id": "WI-01",
+        "title": "Rediseño de Checkout Atómico en SQLite",
+        "owner": "Lead Backend Engineer",
+        "acceptor": "Lead Architect",
+        "dependencies": [],
+        "description": "Consolidar la operación de checkout (actualmente SELECT y UPDATE separados) en una única transacción atómica en SQLite para evitar que dos workers ganen la misma issue asociada a un tenant_id."
+      },
+      {
+        "id": "WI-02",
+        "title": "Implementación del Feature Flag de Rollback",
+        "owner": "Senior Systems Engineer",
+        "acceptor": "Lead Backend Engineer",
+        "dependencies": [],
+        "description": "Desarrollar un flag de configuración que permita alternar dinámicamente entre la nueva lógica de checkout atómico y el camino anterior sin interrupción."
+      },
+      {
+        "id": "WI-03",
+        "title": "Estrategia de Migración Sin Interrupciones (Zero Downtime)",
+        "owner": "DevOps Lead",
+        "acceptor": "Lead Architect",
+        "dependencies": [
+          "WI-01",
+          "WI-02"
+        ],
+        "description": "Ejecutar la migración garantizando que SQLite sea la única fuente durable y que las runs activas en ejecución no sean detenidas ni alteradas durante el despliegue."
+      }
+    ],
+    "risks": [
+      {
+        "id": "RISK-01",
+        "description": "Condición de carrera entre dos workers por separación de SELECT y UPDATE en el checkout actual.",
+        "impact": "Alto",
+        "mitigation": "Transicionar a una consulta/transacción atómica en SQLite antes de habilitar el tráfico de producción."
+      },
+      {
+        "id": "RISK-02",
+        "description": "Interrupción de runs activas durante el proceso de migración.",
+        "impact": "Crítico",
+        "mitigation": "Desplegar mediante cambios retrocompatibles y uso del flag para mantener la ejecución continua."
+      },
+      {
+        "id": "RISK-03",
+        "description": "Pérdida de wakeups durante los reinicios de verificación.",
+        "impact": "Crítico",
+        "mitigation": "Validación estricta del gate de 100 reinicios con monitoreo de eventos en SQLite."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante una ventana de 24 horas.",
+      "metrics": [
+        {
+          "metric": "Reinicios ejecutados",
+          "value": 100,
+          "unit": "reinicios",
+          "window": "24 horas",
+          "required_action": "Completar la totalidad de los 100 reinicios en la ventana especificada."
+        },
+        {
+          "metric": "Wakeups perdidos",
+          "value": 0,
+          "unit": "wakeups",
+          "window": "24 horas",
+          "required_action": "Mantener exactamente 0 wakeups perdidos durante y entre los reinicios."
+        }
+      ],
+      "rollback_path": "Activar el flag de alternancia para revertir inmediatamente al camino anterior si se detectan wakeups perdidos o interferencia con runs activas."
+    },
+    "escalation": {
+      "triggers": [
+        "Detección de 1 o más wakeups perdidos (>0) durante los 100 reinicios o en la ventana de 24 horas.",
+        "Cualquier interrupción o detención sufrida por runs activas debido a la migración.",
+        "Ocurrencia de doble ganador de issue (conflicto entre workers por SELECT/UPDATE separados) tras la activación."
+      ],
+      "action": "Ejecutar rollback inmediato mediante el flag de retorno al camino anterior y convocar a la mesa de incidentes liderada por el Lead."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+import aiteam.project_adapters as project_adapters
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.project_adapters import (
     _profile_score, choose_adapter_for_role,
+    choose_adapter_for_new_slot,
     ensure_quorum_agents, ensure_tier3_agents, reconcile_project_agent_policy,
 )
 from aiteam.user_config import record_model_health
@@ -72,7 +74,8 @@ def test_reconcile_repairs_missing_profile_with_governed_model(tmp_path: Path, m
     ('claude', not installed) and racked up 89 straight failed runs while
     every sibling carried codex_subscription."""
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
-    record_model_health("codex_subscription", "gpt-5.5", available=True, reason="test")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="test")
     db_path = tmp_path / "aiteam.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -105,7 +108,7 @@ def test_reconcile_repairs_missing_profile_with_governed_model(tmp_path: Path, m
 
     assert "role:engineer" in repaired
     assert config.get("profile_id") == "codex_subscription"
-    assert config.get("model") == "gpt-5.5"  # modelo legacy fuera de catálogo sustituido por uno verificado
+    assert config.get("model") == "gpt-5.6-terra"  # modelo legacy fuera de catálogo sustituido por uno verificado
     assert lead_config.get("model") == "gpt-5.5"  # healthy config untouched
 
 
@@ -144,6 +147,92 @@ def test_reconcile_does_not_restore_profile_outside_drifted_allowlist(tmp_path: 
     assert row["adapter_type"] == "subscription_cli"
     assert config.get("profile_id") is None
     assert config.get("model") == "gpt-5.4"
+
+
+def test_reconcile_preserves_explicit_owner_selection_intent(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="test")
+    db_path = tmp_path / "aiteam.db"
+    explicit = {
+        "profile_id": "codex_subscription",
+        "model": "gpt-5.6-terra",
+        "selection_intent": {
+            "schema_version": "model_selection_intent_v1",
+            "mode": "owner_explicit",
+            "source": "model_role_selector",
+            "candidate_id": "model-candidate:fixture",
+        },
+    }
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executemany(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, adapter_config_json, capabilities_json, supervisor_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("role:lead", "lead", "Lead", "lead", "subscription_cli",
+                 json.dumps(explicit), '["skill_run"]', None),
+                ("role:reviewer", "reviewer", "Reviewer", "senior", "subscription_cli",
+                 json.dumps(explicit), '["repo_read"]', "role:lead"),
+            ],
+        )
+        conn.commit()
+    (tmp_path / "project_config.json").write_text(
+        json.dumps({"version": 1, "adapter_profile_ids": ["codex_subscription"]}),
+        encoding="utf-8",
+    )
+
+    reconcile_project_agent_policy(db_path, include_tier3=False)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        stored = json.loads(conn.execute(
+            "SELECT adapter_config_json FROM agents WHERE id = 'role:reviewer'"
+        ).fetchone()[0])
+    assert stored == explicit
+
+
+def test_reconcile_preserves_governed_default_selection_intent_byte_for_byte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="test")
+    db_path = tmp_path / "aiteam.db"
+    governed = {
+        "profile_id": "codex_subscription",
+        "model": "gpt-5.6-terra",
+        "selection_intent": {
+            "schema_version": "model_selection_intent_v1",
+            "mode": "default",
+            "source": "model_default_rollout_v1",
+            "candidate_id": "model-candidate:fixture",
+            "snapshot_id": "snapshot:fixture",
+            "snapshot_hash": "hash:fixture",
+        },
+    }
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executemany(
+            "INSERT INTO agents (id, role, name, seniority, adapter_type, adapter_config_json, capabilities_json, supervisor_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("role:lead", "lead", "Lead", "lead", "subscription_cli",
+                 json.dumps(governed), '["skill_run"]', None),
+                ("role:reviewer", "reviewer", "Reviewer", "senior", "subscription_cli",
+                 json.dumps(governed), '["repo_read"]', "role:lead"),
+            ],
+        )
+        conn.commit()
+    (tmp_path / "project_config.json").write_text(
+        json.dumps({"version": 1, "adapter_profile_ids": ["codex_subscription"]}),
+        encoding="utf-8",
+    )
+
+    reconcile_project_agent_policy(db_path, include_tier3=False)
+
+    with sqlite3.connect(db_path) as conn:
+        stored = json.loads(conn.execute(
+            "SELECT adapter_config_json FROM agents WHERE id = 'role:reviewer'"
+        ).fetchone()[0])
+    assert stored == governed
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +293,7 @@ class TestProfileScore:
         assert result is not None
         assert result["adapter_type"] == "openai_api"
 
-    def test_codex_context_curator_uses_calibrated_premium_model(self):
+    def test_codex_context_curator_uses_calibrated_budget_model(self):
         profile = {
             **_make_profile("subscription_cli", channel="subscription"),
             "id": "codex_subscription",
@@ -212,7 +301,8 @@ class TestProfileScore:
         }
         result = choose_adapter_for_role("context_curator", "cheap", [profile])
         assert result is not None
-        assert result["model"] == "gpt-5.5"
+        assert result["model"] == "gpt-5.6-luna"
+        assert result["adapter_config"]["model_reasoning_effort"] == "medium"
 
     @pytest.mark.parametrize(
         ("profile_id", "role", "expected"),
@@ -228,8 +318,8 @@ class TestProfileScore:
             ("anthropic_api", "engineer", "claude-sonnet-5"),
             ("anthropic_api", "context_curator", "claude-haiku-4-5"),
             ("gemini_api", "lead", "gemini-3.1-pro-preview"),
-            ("gemini_api", "engineer", "gemini-3.5-flash"),
-            ("gemini_api", "file_scout", "gemini-3.1-flash-lite"),
+            ("gemini_api", "engineer", "gemini-3.6-flash"),
+            ("gemini_api", "file_scout", "gemini-3.5-flash-lite"),
             ("antigravity_subscription", "lead", "gemini-3.1-pro-high"),
             ("antigravity_subscription", "engineer", "claude-sonnet-4-6"),
             ("antigravity_subscription", "reviewer", "gemini-3.5-flash-high"),
@@ -307,7 +397,201 @@ def _init_quorum_db(db_path: Path) -> None:
         conn.commit()
 
 
+def _rollout_projection(profiles: list[dict], *, role: str, winner: bool) -> dict:
+    candidates = []
+    for rank, profile in enumerate(profiles, start=1):
+        profile_id = str(profile["id"])
+        candidate_id = f"candidate:{profile_id}:{role}"
+        candidates.append({
+            "candidate_id": candidate_id,
+            "identity": {
+                "profile_id": profile_id,
+                "model_id": f"{profile_id}-{role}-model",
+            },
+            "rank": rank,
+            "selection_reason": "hermetic_rollout_canary",
+            "selection_score": {
+                "score_version": "model_role_score_v1",
+                "score": 90 - rank,
+                "auto_eligible": winner and rank == 1,
+                "hard_gates": {"calibrated": {"passed": winner and rank == 1}},
+            },
+        })
+    winner_id = candidates[0]["candidate_id"] if winner and candidates else None
+    return {
+        "schema_version": "model_catalog_read_model_v1",
+        "score_version": "model_role_score_v1",
+        "canonical_role": role,
+        "default": {"candidate_id": winner_id},
+        "candidates": candidates,
+    }
+
+
 class TestEnsureQuorumAgents:
+    def test_automatic_quorum_selection_inherits_issue_context(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        with sqlite3.connect(db) as conn:
+            conn.execute("INSERT INTO goals (id, title) VALUES ('goal:q', 'Quorum')")
+            conn.execute(
+                """
+                INSERT INTO issues (
+                    id, goal_id, title, status, criticality, metadata_json
+                ) VALUES ('issue:q', 'goal:q', 'Auditar', 'todo', 'high', ?)
+                """,
+                (json.dumps({
+                    "profile": "lead_quorum",
+                    "data_class": "internal",
+                    "required_capabilities": ["external_mcp"],
+                }),),
+            )
+        observed: list[dict] = []
+
+        def choose(*args, **kwargs):
+            observed.append(kwargs)
+            return project_adapters._unresolved_model_default(
+                "no_auto_eligible_candidate"
+            )
+
+        monkeypatch.setattr(project_adapters, "choose_adapter_for_new_slot", choose)
+
+        ensure_quorum_agents(db, profiles=[], issue_id="issue:q")
+
+        assert len(observed) == 2
+        assert {item["issue_id"] for item in observed} == {"issue:q"}
+        assert {item["run_profile"] for item in observed} == {"lead_quorum"}
+        assert {item["criticality"] for item in observed} == {"high"}
+        assert {item["data_class"] for item in observed} == {"internal"}
+        assert {
+            tuple(item["required_capabilities"]) for item in observed
+        } == {("external_mcp",)}
+
+    def test_auto_quorum_canary_persists_two_diverse_applied_snapshots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profiles = [
+            {**_make_profile("subscription_cli", channel="subscription"),
+             "id": "codex_subscription", "provider": "openai-codex"},
+            {**_make_profile("anthropic_sonnet", channel="api"),
+             "id": "anthropic_api", "provider": "anthropic"},
+        ]
+        monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "auto")
+        monkeypatch.setattr(
+            "aiteam.model_selection_context.contextual_model_selection",
+            lambda *args, **kwargs: _rollout_projection(
+                kwargs["profiles"], role=str(kwargs["role"]), winner=True
+            ),
+        )
+
+        ensure_quorum_agents(db, profiles=profiles)
+
+        with sqlite3.connect(db) as conn:
+            configs = [json.loads(row[0]) for row in conn.execute(
+                "SELECT adapter_config_json FROM agents WHERE role='quorum_auditor' ORDER BY id"
+            )]
+            snapshots = conn.execute(
+                "SELECT selection_scope, auto_applied FROM model_role_score_snapshots ORDER BY selection_scope"
+            ).fetchall()
+        assert {item["profile_id"] for item in configs} == {
+            "codex_subscription", "anthropic_api"
+        }
+        assert all(item["selection_intent"]["mode"] == "default" for item in configs)
+        assert snapshots == [
+            ("quorum:new-agent:role:quorum_auditor_1", 1),
+            ("quorum:new-agent:role:quorum_auditor_2", 1),
+        ]
+
+    def test_governed_defaults_preserve_perspective_diversity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profiles = [
+            {
+                **_make_profile("subscription_cli", channel="subscription"),
+                "id": "codex_subscription",
+                "provider": "openai-codex",
+            },
+            {
+                **_make_profile("anthropic_sonnet", channel="api"),
+                "id": "anthropic_api",
+                "provider": "anthropic",
+            },
+        ]
+        observed_profile_sets: list[list[str]] = []
+
+        def governed(*args, **kwargs):
+            candidates = kwargs["profiles"]
+            observed_profile_sets.append([str(item["id"]) for item in candidates])
+            profile = candidates[0]
+            profile_id = str(profile["id"])
+            model = f"{profile_id}-model"
+            return {
+                "adapter_type": profile["adapter_type"],
+                "adapter_profile_id": profile_id,
+                "adapter_config": {
+                    "profile_id": profile_id,
+                    "model": model,
+                    "selection_intent": {
+                        "schema_version": "model_selection_intent_v1",
+                        "mode": "default",
+                        "candidate_id": f"candidate:{profile_id}",
+                    },
+                },
+                "model": model,
+            }
+
+        monkeypatch.setattr(project_adapters, "choose_adapter_for_new_slot", governed)
+
+        ensure_quorum_agents(db, profiles=profiles)
+
+        assert observed_profile_sets == [
+            ["codex_subscription", "anthropic_api"],
+            ["anthropic_api"],
+        ]
+        with sqlite3.connect(db) as conn:
+            configs = [
+                json.loads(row[0])
+                for row in conn.execute(
+                    "SELECT adapter_config_json FROM agents WHERE role='quorum_auditor' ORDER BY id"
+                )
+            ]
+        assert {item["profile_id"] for item in configs} == {
+            "codex_subscription",
+            "anthropic_api",
+        }
+        assert {item["selection_intent"]["mode"] for item in configs} == {"default"}
+
+    def test_auto_quorum_without_winner_never_invents_openai_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        monkeypatch.setattr(
+            project_adapters,
+            "choose_adapter_for_new_slot",
+            lambda *args, **kwargs: project_adapters._unresolved_model_default(
+                "no_auto_eligible_candidate"
+            ),
+        )
+
+        ensure_quorum_agents(db, profiles=[])
+
+        with sqlite3.connect(db) as conn:
+            rows = conn.execute(
+                "SELECT adapter_type, adapter_config_json FROM agents "
+                "WHERE role='quorum_auditor' ORDER BY id"
+            ).fetchall()
+        assert [row[0] for row in rows] == ["role_builtin", "role_builtin"]
+        assert all(
+            json.loads(row[1])["model_default_rollout"]["state"] == "default_unresolved"
+            for row in rows
+        )
+
     def test_assigns_distinct_providers_when_available(self, tmp_path: Path):
         db = tmp_path / "aiteam.db"
         _init_quorum_db(db)
@@ -373,6 +657,84 @@ class TestEnsureQuorumAgents:
         assert rows["role:quorum_auditor_1"]["supervisor_agent_id"] == "role:lead"
         assert rows["role:quorum_auditor_2"]["supervisor_agent_id"] == "role:lead"
         assert rows["role:quorum_auditor_1"]["seniority"] == "senior"
+
+    def test_explicit_quorum_selection_persists_owner_intent_for_only_target(self, tmp_path: Path):
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profile = {
+            **_make_profile("subscription_cli", channel="subscription"),
+            "id": "codex_subscription",
+            "provider": "openai-codex",
+        }
+
+        created = ensure_quorum_agents(
+            db,
+            profiles=[profile],
+            explicit_selections={
+                "role:quorum_auditor_1": {
+                    "profile_id": "codex_subscription",
+                    "model": "gpt-5.6-sol",
+                    "candidate_id": "codex_subscription::gpt-5.6-sol",
+                }
+            },
+            target_agent_ids=["role:quorum_auditor_1"],
+        )
+
+        assert created == ["role:quorum_auditor_1"]
+        with sqlite3.connect(str(db)) as conn:
+            raw = conn.execute(
+                "SELECT adapter_config_json FROM agents WHERE id='role:quorum_auditor_1'"
+            ).fetchone()[0]
+            auditor_2 = conn.execute(
+                "SELECT 1 FROM agents WHERE id='role:quorum_auditor_2'"
+            ).fetchone()
+        config = json.loads(raw)
+        assert config["model"] == "gpt-5.6-sol"
+        assert config["selection_intent"] == {
+            "schema_version": "model_selection_intent_v1",
+            "mode": "owner_explicit",
+            "source": "model_role_selector",
+            "candidate_id": "codex_subscription::gpt-5.6-sol",
+        }
+        assert auditor_2 is None
+
+    def test_explicit_quorum_selection_rejects_duplicate_perspective(self, tmp_path: Path):
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profiles = [
+            {
+                **_make_profile("subscription_cli", channel="subscription"),
+                "id": "codex_a",
+                "provider": "openai-codex",
+            },
+            {
+                **_make_profile("subscription_cli", channel="subscription"),
+                "id": "codex_b",
+                "provider": "openai-codex",
+            },
+        ]
+        ensure_quorum_agents(
+            db,
+            profiles=profiles,
+            explicit_selections={
+                "role:quorum_auditor_1": {
+                    "profile_id": "codex_a", "model": "gpt-a", "candidate_id": "a"
+                }
+            },
+            target_agent_ids=["role:quorum_auditor_1"],
+        )
+
+        with pytest.raises(ValueError, match="perspective diversity"):
+            ensure_quorum_agents(
+                db,
+                profiles=profiles,
+                explicit_selections={
+                    "role:quorum_auditor_2": {
+                        "profile_id": "codex_b", "model": "gpt-b", "candidate_id": "b"
+                    }
+                },
+                target_agent_ids=["role:quorum_auditor_2"],
+            )
 
     def test_works_with_no_profiles(self, tmp_path: Path):
         """When no adapter profiles exist, still creates agents with openai_api default."""
@@ -474,6 +836,76 @@ class TestIssueApiQuorumBootstrap:
 # ── ensure_tier3_agents ───────────────────────────────────────────────────────
 
 class TestEnsureTier3Agents:
+    def test_auto_tier3_no_winner_canary_persists_three_denied_snapshots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profiles = [{
+            **_make_profile("subscription_cli", channel="subscription"),
+            "id": "codex_subscription",
+            "provider": "openai-codex",
+        }]
+        monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "auto")
+        monkeypatch.setattr(
+            "aiteam.model_selection_context.contextual_model_selection",
+            lambda *args, **kwargs: _rollout_projection(
+                kwargs["profiles"], role=str(kwargs["role"]), winner=False
+            ),
+        )
+
+        ensure_tier3_agents(db, profiles=profiles)
+
+        with sqlite3.connect(db) as conn:
+            agents = conn.execute(
+                "SELECT adapter_type, adapter_config_json FROM agents "
+                "WHERE role IN ('file_scout', 'web_scout', 'context_curator') ORDER BY id"
+            ).fetchall()
+            snapshots = conn.execute(
+                "SELECT selection_scope, auto_applied FROM model_role_score_snapshots ORDER BY selection_scope"
+            ).fetchall()
+        assert all(row[0] == "role_builtin" for row in agents)
+        assert all(
+            json.loads(row[1])["model_default_rollout"]["state"] == "default_unresolved"
+            for row in agents
+        )
+        assert len(snapshots) == 3
+        assert all(row[1] == 0 for row in snapshots)
+
+    def test_auto_tier3_without_winner_stays_builtin_and_explained(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        scopes: list[str] = []
+
+        def unresolved(*args, **kwargs):
+            scopes.append(str(kwargs["selection_scope"]))
+            return project_adapters._unresolved_model_default(
+                "no_auto_eligible_candidate"
+            )
+
+        monkeypatch.setattr(project_adapters, "choose_adapter_for_new_slot", unresolved)
+
+        ensure_tier3_agents(db, profiles=[])
+
+        assert scopes == [
+            "tier3:new-agent:role:file_scout",
+            "tier3:new-agent:role:web_scout",
+            "tier3:new-agent:role:context_curator",
+        ]
+        with sqlite3.connect(db) as conn:
+            rows = conn.execute(
+                "SELECT adapter_type, adapter_config_json FROM agents "
+                "WHERE role IN ('file_scout', 'web_scout', 'context_curator') ORDER BY id"
+            ).fetchall()
+        assert len(rows) == 3
+        assert all(row[0] == "role_builtin" for row in rows)
+        assert all(
+            json.loads(row[1])["model_default_rollout"]["state"] == "default_unresolved"
+            for row in rows
+        )
+
     def test_creates_all_three_scouts_when_absent(self, tmp_path: Path):
         db = tmp_path / "aiteam.db"
         _init_quorum_db(db)  # reuse helper — creates schema + lead agent
@@ -536,3 +968,131 @@ class TestEnsureTier3Agents:
         assert "role:file_scout" in ids
         assert "role:web_scout" in ids
         assert "role:context_curator" in ids
+
+
+def test_new_slot_recommend_records_but_preserves_legacy_assignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "recommend")
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        lambda *args, **kwargs: {"candidates": []},
+    )
+    observed: dict[str, str] = {}
+
+    def no_assignment(*args, **kwargs):
+        observed["rollout"] = kwargs["rollout"]
+        return None
+
+    monkeypatch.setattr(project_adapters, "select_model_default_for_new_slot", no_assignment)
+    profile = {"id": "profile-a", "adapter_type": "subscription_cli"}
+
+    selected = choose_adapter_for_new_slot(
+        tmp_path / "aiteam.db",
+        role="reviewer",
+        seniority="senior",
+        profiles=[profile],
+        selection_scope="test:recommend",
+    )
+
+    assert observed == {"rollout": "recommend"}
+    assert selected is not None
+    assert selected["adapter_profile_id"] == "profile-a"
+
+
+def test_new_slot_auto_uses_only_governed_winner_and_never_legacy_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "auto")
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        lambda *args, **kwargs: {"candidates": []},
+    )
+    governed = {
+        "adapter_type": "subscription_cli",
+        "adapter_profile_id": "profile-a",
+        "adapter_config": {"profile_id": "profile-a", "model": "model-a"},
+        "model": "model-a",
+    }
+    monkeypatch.setattr(
+        project_adapters,
+        "select_model_default_for_new_slot",
+        lambda *args, **kwargs: governed,
+    )
+    profile = {"id": "profile-a", "adapter_type": "subscription_cli"}
+    kwargs = {
+        "db_path": tmp_path / "aiteam.db",
+        "role": "reviewer",
+        "seniority": "senior",
+        "profiles": [profile],
+        "selection_scope": "test:auto",
+    }
+
+    assert choose_adapter_for_new_slot(**kwargs) is governed
+    monkeypatch.setattr(
+        project_adapters,
+        "select_model_default_for_new_slot",
+        lambda *args, **kwargs: None,
+    )
+    unresolved = choose_adapter_for_new_slot(**kwargs)
+    assert unresolved is not None
+    assert unresolved["adapter_type"] == "role_builtin"
+    assert unresolved["model"] is None
+    assert unresolved["adapter_config"]["model_default_rollout"]["state"] == "default_unresolved"
+
+
+def test_invalid_new_slot_rollout_rolls_back_to_shadow_without_new_selector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "invalid")
+    monkeypatch.setattr(
+        project_adapters,
+        "select_model_default_for_new_slot",
+        lambda *args, **kwargs: pytest.fail("shadow rollback must not apply a default"),
+    )
+
+    selected = choose_adapter_for_new_slot(
+        tmp_path / "aiteam.db",
+        role="reviewer",
+        seniority="senior",
+        profiles=[{"id": "profile-a", "adapter_type": "subscription_cli"}],
+        selection_scope="test:rollback",
+    )
+
+    assert selected is not None
+    assert selected["adapter_profile_id"] == "profile-a"
+
+
+def test_reconcile_preserves_unresolved_auto_default_without_legacy_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    marker = {
+        "model_default_rollout": {
+            "schema_version": "model_default_rollout_v1",
+            "mode": "auto",
+            "state": "default_unresolved",
+            "reason": "no_auto_eligible_candidate",
+        }
+    }
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE agents SET adapter_config_json = ? WHERE id = 'role:engineer'",
+            (json.dumps(marker, sort_keys=True),),
+        )
+        conn.commit()
+    monkeypatch.setattr(
+        project_adapters,
+        "project_profiles",
+        lambda runtime_dir: [{"id": "profile-a", "adapter_type": "subscription_cli"}],
+    )
+
+    reconcile_project_agent_policy(db_path, include_tier3=False)
+
+    with sqlite3.connect(db_path) as conn:
+        adapter_type, raw_config = conn.execute(
+            "SELECT adapter_type, adapter_config_json FROM agents WHERE id = 'role:engineer'"
+        ).fetchone()
+    assert adapter_type == "role_builtin"
+    assert json.loads(raw_config) == marker

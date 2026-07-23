@@ -278,8 +278,54 @@ SUBMIT_WORK_TOOL: dict[str, Any] = {
 }
 
 
-def build_execution_contract() -> str:
+def critical_fact_retention_instruction() -> str:
+    """Coverage pass for Tier 1 reasoning without exposing benchmark anchors."""
     return (
+        "\n## Tier 1 causal fact retention\n"
+        "- Before submitting Lead, Team Lead, Lead Executor, Architect or Quorum Auditor work, "
+        "make one silent coverage pass over the full input.\n"
+        "- Preserve every acceptance-critical scope/cohort boundary; tenant or authorization "
+        "boundary; metric with value, unit, window and required action; owner and acceptor; "
+        "dependency; rollback path; and explicit escalation trigger.\n"
+        "- Do not replace an exact value with a vague summary and do not include rejected/noise "
+        "options merely to prove that you saw them.\n"
+    )
+
+
+TIER1_FACT_RETENTION_ROLES = frozenset(
+    {"lead", "team_lead", "lead_executor", "architect", "quorum_auditor", "quorum_senior"}
+)
+TIER3_CAUSAL_REPORT_ROLES = frozenset({"worker", "file_scout", "web_scout"})
+
+
+def tier3_causal_report_instruction(role: str) -> str:
+    """Exact close contract for cheap read-only roles."""
+    role_key = role.strip().lower()
+    if role_key not in TIER3_CAUSAL_REPORT_ROLES:
+        return ""
+    return (
+        "\n## Tier 3 causal report\n"
+        "- Before responding, make one coverage pass over the complete request and inputs. "
+        "Answer every distinct question, scope boundary, metric/window/action, source and "
+        "acceptance condition that materially affects the requested summary.\n"
+        "- Stay within read-only authority. Report neutral evidence; do not turn a file-reading "
+        "request into code review or implementation advice.\n"
+        "- Put the complete artifact in the final add_comment body. That body must end with "
+        "exactly one block using these keys and allowed values:\n"
+        "---AGENT-REPORT---\n"
+        f"role: {role_key}\n"
+        "result: done | blocked\n"
+        "issue_status: done | blocked\n"
+        "next_owner: lead\n"
+        "blocker: none | <specific blocker>\n"
+        "evidence: <files, sources or input facts actually inspected>\n"
+        "- Then emit set_status with the same terminal status. Never place the report only in "
+        "summary or use free prose as the result value.\n"
+    )
+
+
+def build_execution_contract(role: str | None = None) -> str:
+    contract = (
         "\n\n## Execution contract\n"
         "- Read AITEAM_WAKE_PAYLOAD_JSON for issue context.\n"
         "- Return exactly one JSON object matching the submit_work schema.\n"
@@ -395,9 +441,9 @@ def build_execution_contract() -> str:
         "- If 'workspace_files' is empty, the workspace is genuinely empty — state this explicitly and "
         "either start creating the required files (Engineer) or report that no files were available (Reviewer/QA).\n"
         "- NEVER fabricate test results, pass/fail verdicts, or code quality assessments without actual file evidence.\n"
-        "\n## Tier 3 scout roles (file_scout, web_scout, context_curator, test_runner)\n"
+        "\n## Tier 3 read-only roles (worker, file_scout, web_scout, context_curator, test_runner)\n"
         "- Your only job is to read inputs (or execute commands) and produce the role artifact.\n"
-        "- file_scout, web_scout and test_runner use add_comment, then set_status: done.\n"
+        "- worker, file_scout, web_scout and test_runner use add_comment, then set_status: done.\n"
         "- Do NOT create sub-issues, interactions, update_plan, or write files.\n"
         "- Append the ---AGENT-REPORT--- block as the last part of any report comment before setting status.\n"
         "- context_curator ONLY: payload.context_curation_target contains the exact parent-thread slice. "
@@ -407,6 +453,9 @@ def build_execution_contract() -> str:
         "Accountability requires owner/deliverable/accepted_by links; escalation requires metric/threshold/window/action; "
         "rejected_option requires reason. Markdown stays at or below 30%; compact causal_units have a separate 4096-char cap. "
         "The summary must retain decisions, constraints, risks, evidence, owners and escalations. "
+        "Before emitting the artifact, make one coverage pass over the whole slice: every distinct scope boundary, "
+        "rollout/cohort rule, retry or recovery rule, and verification result must appear in the summary or a causal unit. "
+        "Do not omit a fact merely because another fact of the same class was already retained. "
         "Keep every owner explicitly linked to its deliverable, every reviewer to its acceptance evidence, "
         "and every threshold to metric, value, window and action.\n"
         "\n## Workspace listing (fallback — rarely seen)\n"
@@ -415,13 +464,17 @@ def build_execution_contract() -> str:
         "- In practice, Engineers always receive 'workspace_files' (full content) and will not see 'workspace_listing'.\n"
         "- If you do see 'workspace_listing', use it to see which files exist, then continue work without recreating them.\n"
     )
+    if (role or "").strip().lower() in TIER1_FACT_RETENTION_ROLES:
+        contract += critical_fact_retention_instruction()
+    contract += tier3_causal_report_instruction(role or "")
+    return contract
 
 
 # ── Tier 3 op filter ─────────────────────────────────────────────────────────
 
 # The per-tier op permission matrix lives in aiteam.policies (fase 5) —
 # aliases kept here for existing imports/tests.
-from aiteam.policies import (  # noqa: E402
+from aiteam.policies import (  # noqa: E402, F401
     OPS_FORBIDDEN_FOR_TIER2 as _OPS_FORBIDDEN_FOR_TIER2,
     OPS_FORBIDDEN_FOR_TIER3 as _OPS_FORBIDDEN_FOR_TIER3,
     TIER2_ROLES as _TIER2_ROLES_FOR_VALIDATION,

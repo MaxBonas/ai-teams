@@ -166,6 +166,170 @@ def test_team_api_rejects_incompatible_model_patch(client) -> None:
     assert response.json()["detail"]["code"] == "model_tier_insufficient"
 
 
+def test_team_api_validates_agent_capabilities_on_create_and_patch(client) -> None:
+    incompatible = {
+        "profile_id": "openai_api",
+        "model": "gpt-5.6-terra",
+    }
+    response = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer MCP",
+        "adapter_type": "openai_api",
+        "adapter_config": incompatible,
+        "capabilities": ["repo_read", "external_mcp"],
+        "data_class": "public",
+    })
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "external_mcp_unsupported"
+
+    created = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer",
+        "adapter_type": "openai_api",
+        "adapter_config": incompatible,
+        "capabilities": ["repo_read"],
+        "data_class": "public",
+    })
+    assert created.status_code == 200
+
+    response = client.patch(
+        f"/api/agents/{created.json()['agent']['id']}",
+        json={
+            "capabilities": ["repo_read", "external_mcp"],
+            "data_class": "public",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "external_mcp_unsupported"
+
+
+def test_team_api_derives_compatibility_from_issue_context(client) -> None:
+    issue = client.post("/api/issues", json={
+        "title": "Integrar MCP externo",
+        "run_profile": "full_team",
+        "criticality": "high",
+        "metadata": {"required_capabilities": ["external_mcp"]},
+    })
+    assert issue.status_code == 200
+
+    response = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer contextual",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+        },
+        "issue_id": issue.json()["issue"]["id"],
+    })
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "external_mcp_unsupported"
+    assert detail["role"] == "reviewer"
+
+
+def test_agent_owner_selection_intent_survives_create_patch_and_reload(client) -> None:
+    created = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer explícito",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+        },
+        "data_class": "internal",
+    })
+    assert created.status_code == 200
+    agent_id = created.json()["agent"]["id"]
+    initial = created.json()["agent"]["adapter_config"]
+    assert initial["selection_intent"]["schema_version"] == "model_selection_intent_v1"
+    assert initial["selection_intent"]["mode"] == "owner_explicit"
+    assert initial["selection_intent"]["source"] == "agent_create_api"
+    assert initial["selection_intent"]["candidate_id"]
+
+    patched = client.patch(f"/api/agents/{agent_id}", json={
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+            "model_reasoning_effort": "high",
+        },
+        "data_class": "internal",
+    })
+    assert patched.status_code == 200
+    patched_config = patched.json()["agent"]["adapter_config"]
+    assert patched_config["selection_intent"] == initial["selection_intent"]
+    assert patched_config["model_reasoning_effort"] == "high"
+
+    reloaded = client.get(f"/api/agents/{agent_id}")
+    assert reloaded.status_code == 200
+    assert reloaded.json()["agent"]["adapter_config"] == patched_config
+
+
+def test_agent_api_rejects_selection_intent_for_another_candidate(client) -> None:
+    response = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer inconsistente",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+            "selection_intent": {
+                "schema_version": "model_selection_intent_v1",
+                "mode": "owner_explicit",
+                "source": "model_role_selector",
+                "candidate_id": "candidate:forged",
+            },
+        },
+        "data_class": "internal",
+    })
+
+    assert response.status_code == 400
+    assert "candidate_id does not match" in response.json()["detail"]
+
+
+def test_agent_patch_rejects_forged_intent_inherited_from_existing_row(
+    client, tmp_path: Path
+) -> None:
+    created = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+        },
+        "data_class": "internal",
+    })
+    assert created.status_code == 200
+    agent_id = created.json()["agent"]["id"]
+    forged = dict(created.json()["agent"]["adapter_config"])
+    forged["selection_intent"] = {
+        **forged["selection_intent"],
+        "candidate_id": "candidate:forged",
+    }
+    db_path = utils.resolve_runtime_dir(tmp_path, utils.PROJECT_ROOT) / "aiteam.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE agents SET adapter_config_json = ? WHERE id = ?",
+            (json.dumps(forged), agent_id),
+        )
+
+    response = client.patch(f"/api/agents/{agent_id}", json={
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+            "model_reasoning_effort": "high",
+        },
+        "data_class": "internal",
+    })
+
+    assert response.status_code == 400
+    assert "candidate_id does not match" in response.json()["detail"]
+    reloaded = client.get(f"/api/agents/{agent_id}").json()["agent"]["adapter_config"]
+    assert reloaded == forged
+
+
 # ── Issues ────────────────────────────────────────────────────────────────────
 
 def test_issue_crud(client):

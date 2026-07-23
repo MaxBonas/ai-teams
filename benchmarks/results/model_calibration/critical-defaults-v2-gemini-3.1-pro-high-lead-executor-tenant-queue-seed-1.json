@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 23.797,
+  "usage": {},
+  "response": {
+    "objective": "Migrar la cola a SQLite como única fuente durable asegurando el aislamiento por tenant_id, unificar de forma atómica el checkout (que actualmente separa SELECT y UPDATE permitiendo que dos workers ganen la misma issue), realizar la migración sin detener runs activas y superar el gate de 100 reinicios con cero wakeups perdidos durante 24 horas contando con el flag de rollback al camino anterior.",
+    "execution_steps": [
+      "Diseñar y refactorizar la operación de checkout en SQLite para que el SELECT y UPDATE se realicen en una única transacción atómica filtrada por tenant_id.",
+      "Integrar el flag de control que permite conmutar entre el comportamiento anterior (SELECT y UPDATE separados) y el nuevo checkout atómico en SQLite.",
+      "Desplegar la modificación de manera no disruptiva para evitar la interrupción o detención de las runs activas.",
+      "Ejecutar el plan de pruebas de resiliencia aplicando 100 reinicios al sistema y monitoreando el procesamiento de eventos durante 24 horas consecutivas."
+    ],
+    "evidence": "Informe de métricas y telemetría que demuestre la realización de 100 reinicios con 0 wakeups perdidos durante la ventana de evaluación de 24 horas sobre SQLite como fuente durable.",
+    "risks": [
+      "Incapacidad de garantizar la atomicidad en SQLite provocando que dos workers vuelvan a ganar la misma issue.",
+      "Pérdida o duplicación de wakeups durante la ejecución de los 100 reinicios del servicio.",
+      "Detención no planificada de runs activas durante el despliegue de la migración."
+    ],
+    "rollback": "Conmutar el flag habilitado para revertir de inmediato la lógica al camino anterior (SELECT y UPDATE separados) sin reiniciar el servicio ni afectar las runs activas en curso.",
+    "escalation": "Escalar de forma inmediata al equipo directivo de arquitectura si se registra cualquier wakeup perdido durante los 100 reinicios en la ventana de 24 horas o si la conmutación por flag presenta fallos."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_luna_tier3_role_canary",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
+  "role": "file_scout",
+  "seed": 1,
+  "wall_seconds": 42.938,
+  "attempts": 2,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": false
+  },
+  "evaluation": {
+    "anchors": {
+      "source_path": true,
+      "tenant_boundary": false,
+      "atomicity": false,
+      "winner_check": false,
+      "missing_test": true,
+      "next_owner": true
+    },
+    "anchors_retained": 3,
+    "anchors_total": 6,
+    "forbidden_matches": [],
+    "contract_passed": false
+  },
+  "agent_report": {
+    "role": "file_scout",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "src/tenant_checkout.py, tests/test_checkout.py"
+  },
+  "artifact": "Leídos `src/tenant_checkout.py` (306 bytes) y `tests/test_checkout.py` (83 bytes). El checkout selecciona cualquier issue `todo` sin filtrar por tenant; el test existente solo cubre la cola vacía. Falta un test que demuestre aislamiento entre tenants; siguiente owner recomendado: Lead para asignar una tarea de implementación al Engineer.\n\n⚙ Sistema: el rol de solo lectura intentó cerrar sin un AGENT-REPORT válido. El cierre no cuenta y se permite un único reintento de formato.\n\nLeídos los dos archivos solicitados. `checkout` selecciona cualquier issue `todo` sin filtrar por tenant; el único test existente cubre solo la cola vacía. Siguiente owner: Lead para asignar implementación al Engineer.\n\nFiles read:\n- `src/tenant_checkout.py` — 306 bytes\n- `tests/test_checkout.py` — 83 bytes\n\nSummary:\n- `checkout(conn, worker_id)` ejecuta `SELECT id FROM issues WHERE status='todo' ORDER BY priority LIMIT 1`, sin condición de tenant, y cambia la issue seleccionada a `in_progress`.\n- El test existente solo verifica que una cola vacía devuelve `None`.\n- No se encontró un test que verifique aislamiento entre tenants.\n\nWhat was NOT found:\n- No faltan archivos de la lista indicada; ambos fueron legibles.\n\n---AGENT-REPORT---\nrole: file_scout\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: src/tenant_checkout.py, tests/test_checkout.py",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:105fdd96-e929-4d65-999a-5bc498e0504c",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "usage_json": "{\"cached_input_tokens\": 18176, \"input_tokens\": 37783, \"output_tokens\": 765, \"reasoning_output_tokens\": 93}"
+    },
+    "input_tokens": 56180,
+    "output_tokens": 1279,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-luna-file-scout-low-seed-1-gated\\.aiteam\\aiteam.db"
+  },
+  "ok": false
+}

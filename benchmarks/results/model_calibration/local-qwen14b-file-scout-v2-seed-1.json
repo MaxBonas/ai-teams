@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "local_qwen_ollama",
+  "model": "qwen2.5-coder:14b",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "role": "file_scout",
+  "seed": 1,
+  "wall_seconds": 73.0,
+  "attempts": 2,
+  "checks": {
+    "issue_done": false,
+    "run_completed": true,
+    "valid_assignee_report": false,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": false
+  },
+  "evaluation": {
+    "anchors": {
+      "source_path": true,
+      "tenant_boundary": false,
+      "atomicity": false,
+      "winner_check": true,
+      "missing_test": true,
+      "next_owner": false
+    },
+    "anchors_retained": 3,
+    "anchors_total": 6,
+    "forbidden_matches": [],
+    "contract_passed": false
+  },
+  "agent_report": null,
+  "artifact": "La función `checkout` en `src/tenant_checkout.py` selecciona y reserva una tarea atómica. El test en `tests/test_checkout.py` verifica que se devuelve None cuando la cola está vacía.\n\n⚙ Sistema: el rol de solo lectura intentó cerrar sin un AGENT-REPORT válido. El cierre no cuenta y se permite un único reintento de formato.\n\nEl archivo `src/tenant_checkout.py` define la función `checkout` que selecciona y reserva una tarea atómicamente. El archivo `tests/test_checkout.py` contiene pruebas unitarias para verificar el comportamiento del `checkout`, incluyendo un caso en que se devuelve None cuando la cola está vacía.\n\n⚙ Sistema: segundo cierre sin AGENT-REPORT válido; la tarea queda bloqueada y vuelve al supervisor para reasignación o ajuste de modelo.",
+  "runtime": {
+    "issue_status": "blocked",
+    "run": {
+      "id": "run:b93df66a-544d-4b4d-aa1e-741f42751245",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "qwen2.5-coder:14b",
+      "provider": "ollama",
+      "channel": "local",
+      "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 2050, \"output_tokens\": 1233, \"reasoning_output_tokens\": 0}"
+    },
+    "input_tokens": 4100,
+    "output_tokens": 1710,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\local-qwen14b-file-scout-none-v2-seed-1\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": false
+}

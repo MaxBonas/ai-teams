@@ -1,0 +1,2336 @@
+{
+  "schema_version": 1,
+  "benchmark": "model_role_evaluation_coverage",
+  "observed_at": "2026-07-22T22:29:34.989263+02:00",
+  "policy": {
+    "scope": "automatic_best_for_pairs",
+    "manual_candidates": "evaluate_before_promotion",
+    "removal_rule": "age_alone_never_retires_a_model"
+  },
+  "models": 46,
+  "role_pairs": 131,
+  "pair_counts": {
+    "calibrated": 8,
+    "partial": 5,
+    "requires_canary": 32,
+    "requires_tool_fixture": 4,
+    "manual_candidate": 3,
+    "blocked": 79
+  },
+  "rows": [
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "requires_canary",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "team_lead",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/deepseek-v4-flash-free",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "reviewer",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/opencode-durable-review-v1-laguna-vs-deepseek-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.18.4",
+          "evaluation_reason": "durable_review_behavioral_1_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/mimo-v2.5-free",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "requires_canary",
+      "roles": [
+        {
+          "role": "reviewer",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "requires_tool_fixture",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/laguna-s-2.1-free",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/north-mini-code-free",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "requires_canary",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "requires_tool_fixture",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-sol",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "tokens_runs_duration_and_rate_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "quality_first",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": true,
+      "model_status": "requires_canary",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "team_lead",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-terra",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "tokens_runs_duration_and_rate_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "balanced",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": true,
+      "model_status": "calibrated",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/codex-terra-engineer-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "evaluation_reason": "coding_hidden_suite_and_ruff_3_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "mcp_operator",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/codex-terra-mcp-operator-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "evaluation_reason": "governed_mcp_allow_deny_health_recovery_3_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "qa",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/codex-terra-qa-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "evaluation_reason": "adversarial_test_then_fix_3_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/codex-terra-durable-review-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "evaluation_reason": "durable_review_behavioral_3_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/codex-terra-test-designer-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "evaluation_reason": "independent_suite_kills_hidden_mutants_3_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-luna",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "tokens_runs_duration_and_rate_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/context-curator-gpt-tier3-cli-0.145.0-aggregate-v3.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": "low_and_medium_screening_failed_semantic_contract",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/codex-luna-file-scout-low-seed-1-gated.json",
+            "benchmarks/results/model_calibration/codex-luna-file-scout-medium-seed-1.json"
+          ]
+        },
+        {
+          "role": "web_scout",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/codex-luna-web-scout-low-seed-1-v2.json",
+            "benchmarks/results/model_calibration/codex-luna-web-scout-low-seed-2.json",
+            "benchmarks/results/model_calibration/codex-luna-web-scout-low-seed-3.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "evaluation_reason": "governed_mcp_behavioral_2_of_3_single_attempt",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "worker",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": "low_invalid_result_and_medium_missing_report",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/codex-luna-worker-low-seed-1.json",
+            "benchmarks/results/model_calibration/codex-luna-worker-medium-seed-1.json"
+          ]
+        }
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-sol",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 500,
+        "output_cents_per_mtok": 3000,
+        "quota_unlimited": false
+      },
+      "speed_class": "quality_first",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-terra",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 250,
+        "output_cents_per_mtok": 1500,
+        "quota_unlimited": false
+      },
+      "speed_class": "balanced",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-luna",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 100,
+        "output_cents_per_mtok": 600,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "worker",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.1-pro-preview",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 200,
+        "output_cents_per_mtok": 1200,
+        "quota_unlimited": false
+      },
+      "speed_class": "quality_first",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.6-flash",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 150,
+        "output_cents_per_mtok": 750,
+        "quota_unlimited": false
+      },
+      "speed_class": "balanced_fast",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.5-flash-lite",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 30,
+        "output_cents_per_mtok": 250,
+        "quota_unlimited": false
+      },
+      "speed_class": "fastest",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api_free",
+      "model": "gemini-3.6-flash",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "balanced_fast",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api_free",
+      "model": "gemini-3.5-flash-lite",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fastest",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "openai/gpt-oss-120b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "very_fast",
+      "speed_source": "groq_official_tokens_per_second",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "qwen/qwen3.6-27b",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "very_fast",
+      "speed_source": "groq_official_tokens_per_second",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "openai/gpt-oss-20b",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "very_fast",
+      "speed_source": "groq_official_tokens_per_second",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.6-flash-high",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.6-flash-medium",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "aiteam_durable_review_v4",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.6-flash-low",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.1-pro-high",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-1.1.5-role-calibration-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.1.5",
+          "evaluation_reason": "screening_structural_3_of_3_goodhart_material",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "team_lead",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.1-pro-low",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": true,
+      "model_status": "manual_candidate",
+      "roles": [
+        {
+          "role": null,
+          "status": "manual_candidate",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-high",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "moderate",
+      "speed_source": "aiteam_durable_review_v4",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "qa",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-durable-review-v4-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.1.5",
+          "evaluation_reason": "durable_review_behavioral_3_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "claude-opus-4-6-thinking",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "manual_candidate",
+      "roles": [
+        {
+          "role": null,
+          "status": "manual_candidate",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "claude-sonnet-4-6",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "calibrated",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-aggregate-v3.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.1.5",
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-medium",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "requires_canary",
+      "roles": [
+        {
+          "role": "worker",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-low",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-1.1.5-role-calibration-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.1.5",
+          "evaluation_reason": "scout_surrogate_structural_3_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "requires_tool_fixture",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "worker",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gpt-oss-120b-medium",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "file_scout",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-1.1.5-role-calibration-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.1.5",
+          "evaluation_reason": "scout_surrogate_structural_3_of_3",
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "requires_tool_fixture",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "worker",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-opus-4-8",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 500,
+        "output_cents_per_mtok": 2500,
+        "quota_unlimited": false
+      },
+      "speed_class": "moderate",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-fable-5",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 1000,
+        "output_cents_per_mtok": 5000,
+        "quota_unlimited": false
+      },
+      "speed_class": "slow",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-sonnet-5",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 300,
+        "output_cents_per_mtok": 1500,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-haiku-4-5",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 100,
+        "output_cents_per_mtok": 500,
+        "quota_unlimited": false
+      },
+      "speed_class": "fastest",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "worker",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-opus-4-8",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "moderate",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-fable-5",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "slow",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-sonnet-5",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-haiku-4-5",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fastest",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "worker",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen3-coder:30b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "local_compute",
+        "measurement_basis": "installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen2.5-coder:14b",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "local_compute",
+        "measurement_basis": "installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "requires_canary",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen2.5-coder:32b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "local_compute",
+        "measurement_basis": "installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "manual_candidate",
+      "roles": [
+        {
+          "role": null,
+          "status": "manual_candidate",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "gemma-3-4b-it",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "local_compute",
+        "measurement_basis": "installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "worker",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "gemma-3-12b-it",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "local_compute",
+        "measurement_basis": "installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "google/gemma-4-26b-a4b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "local_compute",
+        "measurement_basis": "installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:e4b",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "local_compute",
+        "measurement_basis": "installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "requires_canary",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "file_scout",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "worker",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:26b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "local_compute",
+        "measurement_basis": "installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "requires_canary",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "reviewer",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        },
+        {
+          "role": "test_designer",
+          "status": "requires_canary",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "evaluation_reason": null,
+          "diagnostic_reason": null,
+          "diagnostic_receipts": []
+        }
+      ]
+    }
+  ],
+  "complete": false
+}

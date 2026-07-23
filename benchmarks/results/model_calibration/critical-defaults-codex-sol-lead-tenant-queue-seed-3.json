@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 26.891,
+  "usage": {
+    "input_tokens": 16560,
+    "cached_input_tokens": 0,
+    "output_tokens": 1363
+  },
+  "response": {
+    "objective": {
+      "name": "tenant_queue_migration",
+      "outcome": "Migrar el checkout de issues a un mecanismo atómico en SQLite, única fuente durable, aislado por tenant_id, sin detener runs activas y con retorno controlado mediante el flag existente.",
+      "accountable": "lead",
+      "success_gate": "Completar 100 reinicios y observar cero wakeups perdidos durante 24 horas."
+    },
+    "work_items": [
+      {
+        "id": "WI-1",
+        "deliverable": "Definir el contrato de checkout atómico, incluyendo tenant_id, estados y comportamiento durante runs activas.",
+        "owner": "architecture_owner",
+        "acceptor": "lead",
+        "dependencies": [],
+        "gate": "El diseño elimina la separación entre SELECT y UPDATE y documenta invariantes comprobables."
+      },
+      {
+        "id": "WI-2",
+        "deliverable": "Implementar en SQLite la adquisición atómica de una issue por un único worker y tenant.",
+        "owner": "storage_owner",
+        "acceptor": "architecture_owner",
+        "dependencies": [
+          "WI-1"
+        ],
+        "gate": "Dos workers concurrentes no pueden adquirir la misma issue."
+      },
+      {
+        "id": "WI-3",
+        "deliverable": "Integrar el nuevo checkout sin interrumpir runs activas ni cambiar a otra fuente durable.",
+        "owner": "runtime_owner",
+        "acceptor": "lead",
+        "dependencies": [
+          "WI-2"
+        ],
+        "gate": "Las runs activas continúan y todo estado durable permanece en SQLite."
+      },
+      {
+        "id": "WI-4",
+        "deliverable": "Conectar y validar el flag existente para volver al camino anterior.",
+        "owner": "release_owner",
+        "acceptor": "runtime_owner",
+        "dependencies": [
+          "WI-3"
+        ],
+        "gate": "El retorno puede activarse sin detener runs activas y restaura el checkout anterior."
+      },
+      {
+        "id": "WI-5",
+        "deliverable": "Ejecutar pruebas de concurrencia multi-worker y aislamiento por tenant_id.",
+        "owner": "test_owner",
+        "acceptor": "storage_owner",
+        "dependencies": [
+          "WI-2",
+          "WI-3"
+        ],
+        "gate": "No hay doble adquisición ni cruce de issues entre tenants."
+      },
+      {
+        "id": "WI-6",
+        "deliverable": "Ejecutar la validación operativa de 100 reinicios y monitorizar wakeups durante 24 horas.",
+        "owner": "operations_owner",
+        "acceptor": "lead",
+        "dependencies": [
+          "WI-4",
+          "WI-5"
+        ],
+        "gate": "100 reinicios completados con cero wakeups perdidos durante 24 horas."
+      },
+      {
+        "id": "WI-7",
+        "deliverable": "Autorizar la migración definitiva o activar el retorno.",
+        "owner": "lead",
+        "acceptor": "service_owner",
+        "dependencies": [
+          "WI-6"
+        ],
+        "gate": "Solo se autoriza si el gate completo se cumple; cualquier incumplimiento obliga a no avanzar."
+      }
+    ],
+    "risks": [
+      {
+        "id": "R-1",
+        "risk": "Doble checkout por mantener SELECT y UPDATE separados.",
+        "owner": "storage_owner",
+        "mitigation": "Sustituirlos por una única operación atómica en SQLite.",
+        "trigger": "Una issue aparece adquirida por más de un worker.",
+        "response": "Bloquear la migración y activar el flag de retorno."
+      },
+      {
+        "id": "R-2",
+        "risk": "Pérdida de wakeups durante reinicios.",
+        "owner": "operations_owner",
+        "mitigation": "Ejecutar 100 reinicios y observar durante 24 horas.",
+        "trigger": "Cualquier wakeup perdido.",
+        "response": "Fallar el gate, conservar o restaurar el camino anterior e investigar."
+      },
+      {
+        "id": "R-3",
+        "risk": "Interrupción o corrupción lógica de runs activas.",
+        "owner": "runtime_owner",
+        "mitigation": "Hacer compatible la transición con runs en curso.",
+        "trigger": "Una run activa se detiene o cambia incorrectamente de estado.",
+        "response": "Detener el avance y usar el flag de retorno."
+      },
+      {
+        "id": "R-4",
+        "risk": "Cruce de trabajo entre tenants.",
+        "owner": "test_owner",
+        "mitigation": "Incluir tenant_id en adquisición, consultas y pruebas de aislamiento.",
+        "trigger": "Una issue se entrega fuera de su tenant.",
+        "response": "Bloquear la migración y corregir antes de repetir toda la verificación."
+      },
+      {
+        "id": "R-5",
+        "risk": "Dependencia durable fuera de SQLite.",
+        "owner": "architecture_owner",
+        "mitigation": "Revisar que todo estado necesario para recuperación permanezca en SQLite.",
+        "trigger": "La recuperación requiere otra fuente durable.",
+        "response": "Rechazar el diseño o la implementación."
+      }
+    ],
+    "verification": {
+      "accountable": "lead",
+      "cycles": 3,
+      "checks": [
+        {
+          "check": "Atomicidad concurrente",
+          "owner": "test_owner",
+          "acceptor": "storage_owner",
+          "pass_condition": "Cada issue tiene como máximo un worker ganador."
+        },
+        {
+          "check": "Aislamiento por tenant",
+          "owner": "test_owner",
+          "acceptor": "architecture_owner",
+          "pass_condition": "Toda adquisición respeta tenant_id."
+        },
+        {
+          "check": "Continuidad de runs activas",
+          "owner": "runtime_owner",
+          "acceptor": "lead",
+          "pass_condition": "La migración no detiene runs activas."
+        },
+        {
+          "check": "Retorno por flag",
+          "owner": "release_owner",
+          "acceptor": "runtime_owner",
+          "pass_condition": "El camino anterior puede restaurarse mediante el flag existente."
+        },
+        {
+          "check": "Gate operativo",
+          "owner": "operations_owner",
+          "acceptor": "lead",
+          "pass_condition": "100 reinicios, cero wakeups perdidos y 24 horas completas de observación."
+        }
+      ],
+      "release_condition": "Todos los checks deben ser aceptados; el gate operativo no admite excepciones."
+    },
+    "escalation": [
+      {
+        "condition": "Cualquier doble checkout, cruce entre tenants o dependencia durable fuera de SQLite.",
+        "from": "owner del hallazgo",
+        "to": "lead",
+        "action": "Bloquear inmediatamente la migración y exigir corrección y reverificación completa."
+      },
+      {
+        "condition": "Cualquier wakeup perdido durante los 100 reinicios o las 24 horas.",
+        "from": "operations_owner",
+        "to": "lead",
+        "action": "Declarar fallido el gate y activar el retorno si el nuevo camino está habilitado."
+      },
+      {
+        "condition": "Cualquier impacto sobre runs activas.",
+        "from": "runtime_owner",
+        "to": "lead",
+        "action": "Detener el avance y restaurar el camino anterior mediante el flag."
+      },
+      {
+        "condition": "Desacuerdo entre owner y acceptor o dependencia bloqueada.",
+        "from": "acceptor",
+        "to": "lead",
+        "action": "Resolver ownership, criterio de aceptación y prioridad antes de continuar."
+      },
+      {
+        "condition": "El lead solicita una excepción al gate.",
+        "from": "lead",
+        "to": "service_owner",
+        "action": "Rechazar la promoción hasta cumplir literalmente 100 reinicios, cero wakeups perdidos y 24 horas."
+      }
+    ]
+  },
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T07:55:55.493273Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:55:55.493308Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:55:55.500231Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T07:55:55.825460Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:55:55.825482Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

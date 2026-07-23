@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-sol",
+  "role": "quorum_auditor",
+  "required_cases": [
+    "tenant_queue_migration",
+    "auth_rollout_incident"
+  ],
+  "required_seeds": [
+    1,
+    2,
+    3
+  ],
+  "samples_observed": 6,
+  "samples_passed": 4,
+  "matrix_complete": true,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-3.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-tenant-queue-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-tenant-queue-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-tenant-queue-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-1.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 1,
+      "ok": false,
+      "response_sha256": "deba94f75c3d5da83a9c1a1cb96cc575d8f4049eae2a1e7bbffefb17ac371906"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-2.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 2,
+      "ok": false,
+      "response_sha256": "c6b830e65c927be2f275f10ea6bb9f52c6d77b87901e2b8e96f46b0e9a5b67fc"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-3.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "07e3f78172624270df378f2aabbc4efc978f49900dd342c86e4122cbfab3987f"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-tenant-queue-seed-1.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "38b33bf2ddb4afb4214dd2b3b1b68026e291dc2942f0e46dbafd2883a63dac4d"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-tenant-queue-seed-2.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "a167b9cc141ddf3597ba2d1415aa00349cbc8d10e0ddc7ea4ce52a5316b24f20"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-tenant-queue-seed-3.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "3e3274b8aa9ac3ade677715af82aff6abf9a43d188db95d8dd13f30d275c9006"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "responses_hashed": true
+  },
+  "wall_seconds_median": 14.265,
+  "conclusion": {
+    "exact_pair_calibrated": false,
+    "default_change_allowed": false,
+    "reason": "incomplete_or_failed_exact_pair",
+    "next_gate": "M.7.4 snapshot vivo y promoción gobernada"
+  }
+}

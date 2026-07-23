@@ -9,7 +9,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from api.utils import PROJECT_ROOT, _require_api_auth_request, _workspace_from_request, get_current_workspace, resolve_runtime_dir
+from api.utils import (
+    PROJECT_ROOT,
+    _require_api_auth_request,
+    _workspace_from_request,
+    get_current_workspace,
+    resolve_runtime_dir,
+)
 from aiteam.db.runs import append_run_event
 
 router = APIRouter()
@@ -50,23 +56,12 @@ async def list_runs(
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
     params.append(max(1, min(int(limit), 500)))
     try:
-        rows = _fetch_all(db, f"SELECT * FROM runs {where} ORDER BY created_at DESC LIMIT ?", params)
+        rows = _fetch_all(
+            db, f"SELECT * FROM runs {where} ORDER BY created_at DESC LIMIT ?", params
+        )
     except sqlite3.OperationalError as exc:
         raise _schema_err(exc)
     return {"success": True, "runs": [_decode(r) for r in rows]}
-
-
-@router.get("/api/runs/{run_id}")
-async def get_run(run_id: str, request: Request):
-    _require_api_auth_request(request)
-    db = _db(request)
-    try:
-        rows = _fetch_all(db, "SELECT * FROM runs WHERE id = ? LIMIT 1", [run_id])
-    except sqlite3.OperationalError as exc:
-        raise _schema_err(exc)
-    if not rows:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return {"success": True, "run": _decode(rows[0])}
 
 
 @router.get("/api/runs/{run_id}/events")

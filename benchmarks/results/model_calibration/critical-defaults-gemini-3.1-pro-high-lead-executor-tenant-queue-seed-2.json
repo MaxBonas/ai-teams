@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 8.719,
+  "usage": {},
+  "response": {
+    "objective": "Unificar el checkout de issues por tenant_id en SQLite mediante una operación atómica para eliminar la condición de carrera entre workers, garantizando migración sin paradas activas y cumpliendo el gate de 100 reinicios sin wakeups perdidos durante 24 horas.",
+    "execution_steps": [
+      "Auditar el flujo de checkout legacy (SELECT y UPDATE separados) y definir la consulta atómica con tenant_id en SQLite.",
+      "Implementar el nuevo checkout atómico en SQLite usando transacciones inmediatas (IMMEDIATE transaction) o UPDATE...RETURNING con filtrado por tenant_id.",
+      "Integrar el feature flag de migración para alternar dinámicamente entre la lógica legacy y el checkout atómico.",
+      "Desplegar la actualización en producción sin detener las runs activas en ejecución.",
+      "Someter el entorno al gate de validación ejecutando 100 reinicios controlados de workers mientras se monitorea la pérdida de wakeups durante 24 horas."
+    ],
+    "evidence": [
+      "Registros de auditoría confirmando 0 asignaciones duplicadas de issues entre workers.",
+      "Métricas del gate de validación mostrando 100 reinicios completados con cero wakeups perdidos en 24 horas.",
+      "Confirmación de durabilidad en SQLite asegurando la integridad de datos por tenant_id."
+    ],
+    "risks": [
+      "Bloqueos de concurrencia de SQLite (SQLITE_BUSY) bajo alta contención entre workers de distintos tenants.",
+      "Latencia en la actualización del estado del feature flag entre nodos distanciados.",
+      "Falta de índices adecuados en la tabla de issues por tenant_id y status, afectando el rendimiento del UPDATE."
+    ],
+    "rollback": [
+      "Conmutar el feature flag a estado deshabilitado para retornar inmediatamente al camino anterior de checkout.",
+      "Preservar la información durable en SQLite sin borrar ni corromper las issues asignadas.",
+      "Validar que las runs en ejecución continúen procesando normalmente tras el cambio de flag."
+    ],
+    "escalation": [
+      "Escalar al equipo core de Base de Datos si la contención en SQLite genera SQLITE_BUSY persistente que no se resuelva con WAL mode o retry/busy_timeout.",
+      "Escalar al Lead de Plataforma si ocurre alguna pérdida de wakeup durante los 100 reinicios del gate de 24 horas."
+    ]
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

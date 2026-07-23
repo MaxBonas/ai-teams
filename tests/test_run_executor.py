@@ -268,7 +268,7 @@ def _dispatch_one(db_path: Path) -> Any:
 @pytest.mark.parametrize(
     ("owner_action", "expected_model", "expected_status", "expected_queued"),
     [
-        ("accept", "gpt-5.5", "todo", 1),
+        ("accept", "gpt-5.6-terra", "todo", 1),
         ("reject", "gpt-5.6-luna", "blocked", 0),
     ],
 )
@@ -291,7 +291,7 @@ def test_model_unavailable_requires_owner_before_same_profile_fallback(
         "catalog_client_version": "0.145.0",
         "models": [],
     })
-    record_model_health("codex_subscription", "gpt-5.5", available=True, reason="run_completed")
+    record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="run_completed")
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             "UPDATE agents SET adapter_config_json = ? WHERE id = 'agent-1'",
@@ -318,7 +318,7 @@ def test_model_unavailable_requires_owner_before_same_profile_fallback(
     payload = json.loads(interaction["payload_json"])
     assert payload["reason"] == "model_fallback_required"
     assert payload["failed_model"] == "gpt-5.6-luna"
-    assert payload["proposed_model"] == "gpt-5.5"
+    assert payload["proposed_model"] == "gpt-5.6-terra"
     assert payload["changes_tier"] is True
 
     resolve_interaction(
@@ -3887,8 +3887,7 @@ def test_delegation_churn_accept_allows_another_round(tmp_path: Path, monkeypatc
 
 
 def test_adapter_recovery_reopens_exhausted_issue_with_alternative_adapter(tmp_path: Path, monkeypatch) -> None:
-    """RUN-003: continuation exhaustion swaps the agent to another connected
-    adapter, reopens the issue and wakes the agent — exactly once."""
+    """RUN-003: recovery is proposed once and only an owner accept applies it."""
     from aiteam.project_adapters import write_project_adapter_policy
     from aiteam.user_config import store_secret
 
@@ -3954,16 +3953,41 @@ def test_adapter_recovery_reopens_exhausted_issue_with_alternative_adapter(tmp_p
         conn.row_factory = sqlite3.Row
         agent = conn.execute("SELECT adapter_type FROM agents WHERE id = 'agent-1'").fetchone()
         issue = conn.execute("SELECT status FROM issues WHERE id = 'issue-1'").fetchone()
-        recoveries = conn.execute(
-            "SELECT COUNT(*) FROM activity_log WHERE action = 'issue.adapter_recovery' AND target_id = 'issue-1'"
-        ).fetchone()
-        wakeup = conn.execute(
-            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id = 'agent-1' AND source = 'adapter_recovery' AND status = 'queued'"
+        interaction = conn.execute(
+            """
+            SELECT id, status, payload_json FROM issue_thread_interactions
+            WHERE issue_id = 'issue-1' AND idempotency_key LIKE 'assignment_change:adapter_recovery_required:%'
+            """
         ).fetchone()
 
+    assert agent["adapter_type"] == "openai_api", "proponer no puede mutar la asignación"
+    assert issue["status"] == "blocked"
+    assert interaction is not None and interaction["status"] == "pending"
+    assert json.loads(interaction["payload_json"])["proposed"]["adapter_type"] == "gemini_api"
+
+    resolve_interaction(
+        db_path,
+        interaction_id=str(interaction["id"]),
+        action="accept",
+        resolved_by_user_id="owner",
+    )
+    accepted_dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="agent-1")
+    assert accepted_dispatch is not None
+    executor.execute(accepted_dispatch)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        agent = conn.execute("SELECT adapter_type FROM agents WHERE id = 'agent-1'").fetchone()
+        issue = conn.execute("SELECT status FROM issues WHERE id = 'issue-1'").fetchone()
+        accepted = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'issue.assignment_change_accepted' AND target_id = 'issue-1'"
+        ).fetchone()
+        wakeup = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id = 'agent-1' AND source = 'assignment_change' AND status = 'queued'"
+        ).fetchone()
     assert agent["adapter_type"] == "gemini_api"
     assert issue["status"] == "todo"
-    assert int(recoveries[0]) == 1
+    assert int(accepted[0]) == 1
     assert int(wakeup[0]) == 1
 
     # Second exhaustion on the same issue must NOT trigger another recovery.
@@ -4499,10 +4523,17 @@ def _cross_review_db(tmp_path: Path, *, criticality: str = "high") -> Path:
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
-        conn.execute(
-            "INSERT INTO agents (id, role, name, adapter_type, adapter_config_json) VALUES "
-            "('role:engineer', 'engineer', 'E', 'openai_api', '{}'),"
-            "('role:reviewer', 'reviewer', 'R', 'openai_api', '{}')"
+        explicit_openai = json.dumps({
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-sol",
+            "selection_intent": {"mode": "owner_explicit", "source": "test"},
+        })
+        conn.executemany(
+            "INSERT INTO agents (id, role, name, adapter_type, adapter_config_json) VALUES (?, ?, ?, ?, ?)",
+            [
+                ("role:engineer", "engineer", "E", "openai_api", explicit_openai),
+                ("role:reviewer", "reviewer", "R", "openai_api", explicit_openai),
+            ],
         )
         conn.execute(
             "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES "
@@ -4520,7 +4551,7 @@ def _cross_review_db(tmp_path: Path, *, criticality: str = "high") -> Path:
     return db_path
 
 
-def test_cross_provider_review_repoints_reviewer_on_high_criticality(tmp_path: Path, monkeypatch) -> None:
+def test_cross_provider_review_requires_owner_before_repointing(tmp_path: Path, monkeypatch) -> None:
     from aiteam.project_adapters import write_project_adapter_policy
     from aiteam.user_config import store_secret
 
@@ -4533,25 +4564,238 @@ def test_cross_provider_review_repoints_reviewer_on_high_criticality(tmp_path: P
     db_path = _cross_review_db(tmp_path, criticality="high")
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
 
-    executor = RunExecutor(db_path, AdapterRegistry([]))
+    executor = RunExecutor(db_path, build_default_registry())
     moved = executor._enforce_cross_provider_review(
         issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
     )
 
     assert moved is True
+    assert executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    ) is True, "una proposal pendiente sigue pausando sin crear otra tarjeta"
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         reviewer = conn.execute("SELECT adapter_type FROM agents WHERE id='role:reviewer'").fetchone()
-        audit = conn.execute(
-            "SELECT COUNT(*) FROM activity_log WHERE action='review.cross_provider_enforced' AND target_id='issue-rev'"
+        interaction = conn.execute(
+            "SELECT id, status FROM issue_thread_interactions WHERE issue_id='issue-rev'"
+        ).fetchone()
+        proposals = conn.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action='issue.assignment_change_proposed' AND target_id='issue-rev'"
         ).fetchone()[0]
-    assert reviewer["adapter_type"] == "gemini_api", "el juez debe salir de la familia del engineer"
-    assert audit == 1
+    assert reviewer["adapter_type"] == "openai_api"
+    assert interaction is not None and interaction["status"] == "pending"
+    assert proposals == 1
+
+    resolve_interaction(
+        db_path,
+        interaction_id=str(interaction["id"]),
+        action="accept",
+        resolved_by_user_id="owner",
+    )
+    dispatch = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:reviewer")
+    assert dispatch is not None
+    executor.execute(dispatch)
+    with sqlite3.connect(str(db_path)) as conn:
+        reviewer = conn.execute("SELECT adapter_type FROM agents WHERE id='role:reviewer'").fetchone()
+    assert reviewer[0] == "gemini_api", "solo aceptar puede cambiar la perspectiva del juez"
 
     # Segunda pasada: ya es cross-provider → no-op.
     assert executor._enforce_cross_provider_review(
         issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
     ) is False
+
+
+def test_assignment_change_reject_keeps_issue_blocked_and_assignment_unchanged(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from aiteam.project_adapters import write_project_adapter_policy
+    from aiteam.user_config import store_secret
+
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    store_secret(provider="google", name="default", secret="gemini-key")
+    for option in model_options().get("gemini_api", []):
+        record_model_health(
+            "gemini_api", str(option["value"]), available=True, reason="reject fixture"
+        )
+    db_path = _cross_review_db(tmp_path, criticality="high")
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    executor = RunExecutor(db_path, build_default_registry())
+    assert executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        interaction_id = conn.execute(
+            "SELECT id FROM issue_thread_interactions WHERE issue_id='issue-rev'"
+        ).fetchone()[0]
+    resolve_interaction(
+        db_path, interaction_id=interaction_id, action="reject", resolved_by_user_id="owner"
+    )
+
+    result = executor._resolved_assignment_change_result(
+        run={"id": ""},
+        agent_id="role:reviewer",
+        issue_id="issue-rev",
+        ctx={
+            "wake_reason": "interaction_resolved",
+            "kind": "request_confirmation",
+            "interaction_id": interaction_id,
+            "action": "reject",
+        },
+    )
+
+    assert result is not None and result.status == "skipped"
+    with sqlite3.connect(str(db_path)) as conn:
+        adapter = conn.execute("SELECT adapter_type FROM agents WHERE id='role:reviewer'").fetchone()[0]
+        status = conn.execute("SELECT status FROM issues WHERE id='issue-rev'").fetchone()[0]
+    assert adapter == "openai_api"
+    assert status == "blocked"
+
+
+def test_assignment_change_preserves_newer_valid_owner_override(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from aiteam.model_selection_context import contextual_model_selection
+    from aiteam.project_adapters import write_project_adapter_policy
+    from aiteam.user_config import load_adapter_profiles, store_secret
+
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    store_secret(provider="google", name="default", secret="gemini-key")
+    gemini_models = [str(option["value"]) for option in model_options().get("gemini_api", [])]
+    for model in gemini_models:
+        record_model_health("gemini_api", model, available=True, reason="override fixture")
+    db_path = _cross_review_db(tmp_path, criticality="high")
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    executor = RunExecutor(db_path, build_default_registry())
+    assert executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        interaction = conn.execute(
+            "SELECT id, payload_json FROM issue_thread_interactions WHERE issue_id='issue-rev'"
+        ).fetchone()
+        proposed_model = json.loads(interaction[1])["proposed"]["model"]
+        override_model = next(
+            str((candidate.get("identity") or {}).get("model_id") or "")
+            for candidate in contextual_model_selection(
+                db_path,
+                role="reviewer",
+                issue_id="issue-rev",
+                profiles=[
+                    profile for profile in load_adapter_profiles()
+                    if profile.get("id") in {"openai_api", "gemini_api"}
+                ],
+            ).get("candidates") or ()
+            if candidate.get("owner_selectable") is True
+            and str((candidate.get("identity") or {}).get("profile_id") or "") == "gemini_api"
+            and str((candidate.get("identity") or {}).get("model_id") or "") != proposed_model
+        )
+        conn.execute(
+            "UPDATE agents SET adapter_type='gemini_api', adapter_config_json=? WHERE id='role:reviewer'",
+            (json.dumps({
+                "profile_id": "gemini_api",
+                "model": override_model,
+                "selection_intent": {"mode": "owner_explicit", "source": "team_editor"},
+            }),),
+        )
+        conn.commit()
+    interaction_id = str(interaction[0])
+    resolve_interaction(
+        db_path, interaction_id=interaction_id, action="accept", resolved_by_user_id="owner"
+    )
+
+    result = executor._resolved_assignment_change_result(
+        run={"id": ""},
+        agent_id="role:reviewer",
+        issue_id="issue-rev",
+        ctx={
+            "wake_reason": "interaction_resolved",
+            "kind": "request_confirmation",
+            "interaction_id": interaction_id,
+            "action": "accept",
+        },
+    )
+
+    assert result is not None and "manual_override_preserved" in str(result.output)
+    with sqlite3.connect(str(db_path)) as conn:
+        config = json.loads(conn.execute(
+            "SELECT adapter_config_json FROM agents WHERE id='role:reviewer'"
+        ).fetchone()[0])
+        status = conn.execute("SELECT status FROM issues WHERE id='issue-rev'").fetchone()[0]
+    assert config["model"] == override_model
+    assert status == "todo"
+
+
+def test_assignment_change_rejects_owner_alternative_that_breaks_diversity_gate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from aiteam.model_selection_context import contextual_model_selection
+    from aiteam.project_adapters import write_project_adapter_policy
+    from aiteam.user_config import load_adapter_profiles, store_secret
+
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    store_secret(provider="google", name="default", secret="gemini-key")
+    for profile_id in ("openai_api", "gemini_api"):
+        for option in model_options().get(profile_id, []):
+            record_model_health(
+                profile_id, str(option["value"]), available=True, reason="diversity fixture"
+            )
+    db_path = _cross_review_db(tmp_path, criticality="high")
+    write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    executor = RunExecutor(db_path, build_default_registry())
+    assert executor._enforce_cross_provider_review(
+        issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
+    )
+    same_perspective = next(
+        candidate
+        for candidate in contextual_model_selection(
+            db_path,
+            role="reviewer",
+            issue_id="issue-rev",
+            profiles=[
+                profile for profile in load_adapter_profiles()
+                if profile.get("id") in {"openai_api", "gemini_api"}
+            ],
+        ).get("candidates") or ()
+        if candidate.get("owner_selectable") is True
+        and str((candidate.get("identity") or {}).get("profile_id") or "") == "openai_api"
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        interaction_id = conn.execute(
+            "SELECT id FROM issue_thread_interactions WHERE issue_id='issue-rev'"
+        ).fetchone()[0]
+    identity = same_perspective["identity"]
+    resolve_interaction(
+        db_path,
+        interaction_id=interaction_id,
+        action="accept",
+        resolution_data={
+            "model_selection": {
+                "candidateId": same_perspective["candidate_id"],
+                "profileId": identity["profile_id"],
+                "model": identity["model_id"],
+            }
+        },
+        resolved_by_user_id="owner",
+    )
+
+    result = executor._resolved_assignment_change_result(
+        run={"id": ""},
+        agent_id="role:reviewer",
+        issue_id="issue-rev",
+        ctx={
+            "wake_reason": "interaction_resolved",
+            "kind": "request_confirmation",
+            "interaction_id": interaction_id,
+            "action": "accept",
+        },
+    )
+
+    assert result is not None and result.error_code == "assignment_change_selection_stale"
+    with sqlite3.connect(str(db_path)) as conn:
+        adapter = conn.execute("SELECT adapter_type FROM agents WHERE id='role:reviewer'").fetchone()[0]
+        status = conn.execute("SELECT status FROM issues WHERE id='issue-rev'").fetchone()[0]
+    assert adapter == "openai_api"
+    assert status == "blocked"
 
 
 def test_cross_provider_review_ignores_normal_criticality(tmp_path: Path, monkeypatch) -> None:
@@ -4636,11 +4880,18 @@ def test_scout_closing_done_auto_reports_to_supervisor(tmp_path: Path) -> None:
             return {"AITEAM_RUN_ID": run_id}
 
         def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
-            # Cierra done SIN notify_supervisor — como el LLM real.
+            # Cierra con evidencia válida pero SIN notify_supervisor — como el LLM real.
             return ExecutionResult(
                 status="completed",
                 output="Verificado: archivos presentes y con contenido.",
-                actions={"issue_status": "done"},
+                actions={
+                    "issue_status": "done",
+                    "add_comments": [
+                        "Verificado.\n---AGENT-REPORT---\n"
+                        "role: file_scout\nresult: done\nissue_status: done\n"
+                        "next_owner: lead\nblocker: none\nevidence: archivos presentes"
+                    ],
+                },
             )
 
     executor = RunExecutor(db_path, AdapterRegistry([_ScoutRuntime()]))
@@ -4657,6 +4908,78 @@ def test_scout_closing_done_auto_reports_to_supervisor(tmp_path: Path) -> None:
             "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
         ).fetchone()[0]
     assert lead_wake == 1, "el cierre de un hijo debe despertar al padre SIEMPRE, sin depender del LLM"
+
+
+def test_scout_close_without_agent_report_retries_once_then_blocks(tmp_path: Path) -> None:
+    """Un summary no es evidencia: se corrige una vez y después se escala."""
+    db_path = tmp_path / "aiteam.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO goals (id, title) VALUES ('g1', 'G')")
+        conn.execute(
+            "INSERT INTO agents (id, role, name, adapter_type, supervisor_agent_id) VALUES "
+            "('role:lead', 'lead', 'L', 'subscription_cli', NULL),"
+            "('role:scout', 'file_scout', 'S', 'subscription_cli', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, title, status, role, assignee_agent_id) VALUES "
+            "('root', 'g1', 'Root', 'in_progress', 'lead', 'role:lead')"
+        )
+        conn.execute(
+            "INSERT INTO issues (id, goal_id, parent_id, title, status, role, assignee_agent_id) VALUES "
+            "('scout-issue', 'g1', 'root', 'Verificar', 'in_progress', 'file_scout', 'role:scout')"
+        )
+        conn.commit()
+
+    class _ReportlessScoutRuntime:
+        descriptor = AdapterDescriptor(adapter_type="subscription_cli", channel="subscription")
+
+        def build_env(self, *, run_id: str, wake_context: dict[str, object]) -> dict[str, str]:
+            return {"AITEAM_RUN_ID": run_id}
+
+        def execute(self, run: dict[str, Any], env: dict[str, str]) -> ExecutionResult:
+            return ExecutionResult(
+                status="completed",
+                output="Verificado, cierro.",
+                actions={"issue_status": "done"},
+            )
+
+    executor = RunExecutor(db_path, AdapterRegistry([_ReportlessScoutRuntime()]))
+    enqueue_wakeup(
+        db_path, agent_id="role:scout", source="assignment", reason="new_issue",
+        payload={"issue_id": "scout-issue", "wake_reason": "new_issue"},
+    )
+
+    first = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:scout")
+    assert first is not None
+    executor.execute(first)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT status FROM issues WHERE id='scout-issue'").fetchone()[0] == "todo"
+        retry = conn.execute(
+            "SELECT payload_json FROM wakeup_requests "
+            "WHERE agent_id='role:scout' AND reason='tier3_report_retry' AND status='queued'"
+        ).fetchone()
+        lead_wakes = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
+        ).fetchone()[0]
+    assert retry is not None
+    assert json.loads(retry[0])["wake_reason"] == "tier3_report_retry"
+    assert lead_wakes == 0
+
+    second = HeartbeatScheduler(db_path).dispatch_next(agent_id="role:scout")
+    assert second is not None
+    executor.execute(second)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT status FROM issues WHERE id='scout-issue'").fetchone()[0] == "blocked"
+        missing_count = conn.execute(
+            "SELECT COUNT(*) FROM activity_log "
+            "WHERE action='tier3.agent_report_missing' AND target_id='scout-issue'"
+        ).fetchone()[0]
+        lead_wakes = conn.execute(
+            "SELECT COUNT(*) FROM wakeup_requests WHERE agent_id='role:lead' AND status='queued'"
+        ).fetchone()[0]
+    assert missing_count == 2
+    assert lead_wakes == 1
 
 
 # ── P3: métricas de calidad deterministas en el runner builtin ────────────────

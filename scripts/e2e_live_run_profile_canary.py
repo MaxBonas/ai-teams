@@ -133,7 +133,7 @@ def run_full_team(root: Path) -> dict[str, Any]:
     workspace.mkdir(parents=True, exist_ok=True)
     os.environ["AITEAM_USER_CONFIG_DIR"] = str(root / "user-config")
     for profile_id, model in (
-        ("codex_subscription", "gpt-5.5"),
+        ("codex_subscription", "gpt-5.6-sol"),
         ("antigravity_subscription", "gemini-3.1-pro-high"),
         ("antigravity_subscription", "claude-sonnet-4-6"),
         ("antigravity_subscription", "gemini-3.5-flash-high"),

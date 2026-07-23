@@ -10,8 +10,9 @@ from aiteam.db.activity_log import log_activity
 from aiteam.db.agents import create_agent
 from aiteam.db.interactions import ConflictError, create_interaction, resolve_interaction
 from aiteam.db.wakeups import enqueue_wakeup
+from aiteam.compatibility_service import issue_compatibility_context
 from aiteam.policies import EXTENSION_PROPOSAL_REASON
-from aiteam.project_adapters import choose_adapter_for_role, project_profiles, reconcile_project_agent_policy
+from aiteam.project_adapters import choose_adapter_for_new_slot, project_profiles, reconcile_project_agent_policy
 from aiteam.tools.catalog import default_capabilities_for_role
 
 _TERMINAL = {"done", "cancelled"}
@@ -247,6 +248,7 @@ def reconcile_unassigned_role_issues(db_path: Path) -> list[str]:
             role=str(row["role"] or ""),
             supervisor_agent_id=lead_agent_id,
             source=f"liveness:{issue_id}",
+            issue_id=issue_id,
         )
         if not agent_id:
             continue
@@ -736,6 +738,7 @@ def _ensure_role_agent(
     role: str,
     supervisor_agent_id: str | None,
     source: str,
+    issue_id: str = "",
 ) -> str | None:
     role_key = _normalize_role(role)
     if not role_key:
@@ -751,7 +754,18 @@ def _ensure_role_agent(
                 pass
             return agent_id
     try:
-        selection = choose_adapter_for_role(role_key, "standard", project_profiles(Path(db_path).parent))
+        compatibility_context = (
+            issue_compatibility_context(db_path, issue_id) if issue_id else {}
+        )
+        selection = choose_adapter_for_new_slot(
+            db_path,
+            role=role_key,
+            seniority="standard",
+            profiles=project_profiles(Path(db_path).parent),
+            selection_scope=f"liveness:new-agent:{agent_id}",
+            issue_id=issue_id,
+            **compatibility_context,
+        )
         row = create_agent(
             db_path,
             agent_id=agent_id,

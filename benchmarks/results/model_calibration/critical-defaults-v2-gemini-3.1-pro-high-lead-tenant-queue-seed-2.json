@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 9.5,
+  "usage": {},
+  "response": {
+    "objective": "Ejecutar la migración tenant_queue_migration garantizando SQLite como única fuente durable con aislamiento por tenant_id por issue, corrigiendo la condición de carrera en el checkout (que separa SELECT y UPDATE y permite que dos workers ganen la misma issue), sin detener runs activas, manteniendo un flag para volver al camino anterior y superando el gate de calidad.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "title": "Corrección atómica de checkout en SQLite por tenant_id",
+        "description": "Eliminar la separación entre SELECT y UPDATE en el checkout de la cola para impedir que dos workers ganen la misma issue.",
+        "owner": "Lead Executor",
+        "acceptor": "Architect",
+        "dependencies": []
+      },
+      {
+        "id": "WI-2",
+        "title": "Implementación y validación del flag de rollback",
+        "description": "Configurar y verificar el flag de alternancia para permitir volver al camino anterior sin pérdida de estado.",
+        "owner": "Lead Executor",
+        "acceptor": "Team Lead",
+        "dependencies": [
+          "WI-1"
+        ]
+      },
+      {
+        "id": "WI-3",
+        "title": "Ejecución de tenant_queue_migration sin interrupción",
+        "description": "Desplegar la migración manteniendo SQLite como fuente durable única con tenant_id y asegurando la continuidad de las runs activas.",
+        "owner": "Lead Executor",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-1",
+          "WI-2"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "id": "R-1",
+        "description": "Dos workers ganan la misma issue debido a la separación actual de SELECT y UPDATE.",
+        "mitigation": "Atomizar el checkout en SQLite bajo transacción por tenant_id."
+      },
+      {
+        "id": "R-2",
+        "description": "Detención o degradación de runs activas durante tenant_queue_migration.",
+        "mitigation": "Ejecutar migración en caliente asegurando compatibilidad con SQLite."
+      },
+      {
+        "id": "R-3",
+        "description": "Pérdida de wakeups durante los reinicios de validación.",
+        "mitigation": "Monitoreo estricto de eventos de wakeup en SQLite durante el ciclo de verificación."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas.",
+      "rollback_path": "Uso del flag configurado para revertir dinámicamente al camino anterior.",
+      "metrics": {
+        "restarts_required": 100,
+        "lost_wakeups_allowed": 0,
+        "window_hours": 24
+      }
+    },
+    "escalation": {
+      "triggers": [
+        "Pérdida de 1 o más wakeups durante el gate de 100 reinicios en 24 horas.",
+        "Interrupción o detención de cualquier run activa durante la migración.",
+        "Detección de doble asignación de issue a dos workers tras la corrección del checkout.",
+        "Falla en la conmutación al camino anterior a través del flag de rollback."
+      ],
+      "action": "Activar inmediatamente el flag de rollback al camino anterior y escalar al Lead y Quorum Auditor con logs de SQLite."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

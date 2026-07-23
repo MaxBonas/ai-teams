@@ -21,6 +21,50 @@ Registro de problemas detectados en runs reales del proyecto. Cada entrada docum
 
 ## Problemas abiertos
 
+### RUN-018 · MITIGADO — Instalación externa sin contrato de mínimos ni tipo de entregable
+
+**Detectado:** 2026-07-23; incidente ocurrido el 2026-07-22
+**Run ID(s):** no disponibles; reporte del owner sobre una instalación externa
+**Proyecto:** estudio empresarial de una empresa de limpieza
+**Síntomas:** faltaban CLIs y el proyecto arrancó con errores; OpenCode pidió una
+API key inesperada; el agente integrador instaló Ollama y LM Studio como si
+fueran obligatorios; un objetivo teórico creó tests, falló runs y se bloqueó.
+**Causas confirmadas:** no existía una fuente machine-readable que separase
+runtimes requeridos, opciones primarias y adapters opcionales; el onboarding no
+explicaba con suficiente proximidad que Zen exige credencial personal aunque el
+modelo tenga precio cero; los perfiles locales no publicaban clase de setup; el
+producto no persiste tipo de entregable y el Lead sigue presentado como equipo
+de software con `full_team` por defecto.
+**Mitigación aplicada:** `installation_support_v1`, auditor read-only al final
+del bootstrap, guía de una sola opción Lead-capable, OpenCode opcional con auth
+humana explícita y perfiles Ollama/LM Studio marcados opcionales. La skill del
+Lead prohíbe roles/tests de programación para investigación sin artefacto
+ejecutable.
+**Pendiente:** I.3 debe añadir doctor/auth/health; P0.J debe persistir tipo,
+gobernar gates y reproducir el estudio como fixture e2e.
+**Verificación:** I.1.4 cerró después en el run independiente `30023876549`;
+Windows x86_64 queda `verified` para control plane sin instalar CLIs. Los
+adapters siguen sin declararse autenticados por esa evidencia.
+
+### RUN-019 — El harness de start quedaba esperando handles heredados
+
+**Síntoma:** la primera aceptación local I.1.4 dejó backend y frontend sanos,
+pero el proceso que invocaba `start_ide.bat` no recuperó control mientras
+capturaba stdout/stderr de un árbol desacoplado.
+
+**Causas consideradas:** handles de pipes heredados por procesos nietos; health
+realmente tardío; o teardown incorrecto. Los puertos y logs demostraron que los
+servicios estaban listos, y detenerlos liberó inmediatamente el padre, por lo
+que la primera causa quedó confirmada.
+
+**Corrección:** el harness dirige únicamente el output de `start` a `DEVNULL`;
+bootstrap, audit, health, fixture y stop siguen capturados y fallan con paso
+exacto. `start_ide.bat` usa procesos ocultos y admite `AITEAM_NO_BROWSER=1`.
+
+**Verificación:** segunda ejecución local completa 10/10 pasos en 15,7 s, crea
+una issue sobre 26 tablas, libera ambos puertos, no introduce ningún CLI global
+y mantiene `independent_machine=false`/`promotion_allowed=false`.
+
 ### RUN-015 · ABIERTO — OpenCode SDK rechaza JSON Schema con texto válido
 
 **Detectado:** 2026-07-22

@@ -1,0 +1,393 @@
+{
+  "schema_version": 1,
+  "benchmark": "model_default_live_promotion_audit",
+  "observed_at": "2026-07-23T17:14:03.674930+02:00",
+  "database": "runtime/aiteam.db",
+  "live_shadow": {
+    "roles": [
+      {
+        "role": "lead",
+        "snapshot_id": "fa4082f3-44d6-43ad-a283-9d49ee931a75",
+        "input_hash": "be1f24e8586c19cec58b5d8b5aa1bd21a05f4aa709f68dd521e71b93fbea4215",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "team_lead",
+        "snapshot_id": "dc05ecd4-f5f9-443c-8941-46b5324b7095",
+        "input_hash": "cb94103b4ba989be760b5c0c6103e4f4e68c7726d59699b7dc8965ee3a72591a",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "lead_executor",
+        "snapshot_id": "57b80efd-4ed8-4ae1-af3b-a469eabfd5e7",
+        "input_hash": "4d4d5fb682fcf8b8256e724a2681a6c45fc3cd555604a7c7a434c1cdd3acb39b",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "architect",
+        "snapshot_id": "bd64ac95-d6d7-4c90-b753-c2b940dbb397",
+        "input_hash": "6a7644848705de59e259c8130257fde187e308776a6d2df7d1b5617c058110b2",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "quorum_auditor",
+        "snapshot_id": "97e56f6c-34d7-4782-9bc8-30c23690e9a8",
+        "input_hash": "ffa73c96cc95184dfc81457174802003da9e58cce850875f1b6bb4fa6c8185e5",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "engineer",
+        "snapshot_id": "404a8d1a-fd3e-4798-b037-fa075b039cb9",
+        "input_hash": "5b606bc84d9812e029e159ee27397eca6a618e6c2ad81927f0cfacad6dcafe7c",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "reviewer",
+        "snapshot_id": "0f0fb30f-e080-408b-9e4b-74fd2ba2ff1f",
+        "input_hash": "cf065a86d049c8db4b0cce86e4f2ae180d981b2dd43bc3e295c474197de31ced",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "qa",
+        "snapshot_id": "9160f63c-6529-4d82-a1e3-d1ef2bb769ad",
+        "input_hash": "07573291c32921ab4840b213244055505cbac4227572c3ca01e5084a7f07f299",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "test_designer",
+        "snapshot_id": "977f6111-4750-4481-a427-a1efa4611f87",
+        "input_hash": "4d51f19b2a59b0ee602d0449ad69ad7c1a2da72002f8c573c12d57320c2f645e",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "mcp_operator",
+        "snapshot_id": "654df74a-872d-4bef-9067-9f95a17b26eb",
+        "input_hash": "1f21a0be25987d86ec371c1c08db2c6a5fb4d0574b02970c0ebaef8eb153abc5",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "worker",
+        "snapshot_id": "3aa801df-ab13-4bad-947d-72764e90a9c6",
+        "input_hash": "19eeac6251e93554af9751ef69179ca3516f6bc20ccb547254f8793517509383",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "file_scout",
+        "snapshot_id": "5e25df67-5259-4849-b1ec-643821e1a4a8",
+        "input_hash": "1a78e0eabfe0b993068ae2b678d09c3292dc146ce303a32ce3596b719ed9eab0",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "web_scout",
+        "snapshot_id": "8e050101-781b-47b8-99cb-84f377c7f96a",
+        "input_hash": "6fa49a48164b2de8c16db374f711f7811dbb3b16e7fe6e6e240f2b5a20178eeb",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      },
+      {
+        "role": "context_curator",
+        "snapshot_id": "5909ffac-8f44-4c3c-b4ee-a2e34b3ca264",
+        "input_hash": "1c8cfe0bef241b56dedb04a805919ab748e0dd7b2e90ee3e4ca5935956645cc3",
+        "hash_valid": true,
+        "candidate_count": 46,
+        "auto_eligible_count": 0,
+        "winner_candidate_id": null,
+        "winner_reason": "no_auto_eligible_candidate",
+        "assignment_changed": false,
+        "auto_applied": false
+      }
+    ],
+    "blockers": [
+      {
+        "reason": "gate:calibrated:exact_role_evidence_not_calibrated",
+        "occurrences": 619
+      },
+      {
+        "reason": "gate:fresh:evidence_stale_or_unproven",
+        "occurrences": 619
+      },
+      {
+        "reason": "gate:case_diversity:not_proven",
+        "occurrences": 619
+      },
+      {
+        "reason": "gate:privacy:not_proven",
+        "occurrences": 528
+      },
+      {
+        "reason": "gate:structured_output:not_proven",
+        "occurrences": 528
+      },
+      {
+        "reason": "gate:workspace:not_proven",
+        "occurrences": 526
+      },
+      {
+        "reason": "gate:automatic_policy:failed",
+        "occurrences": 525
+      },
+      {
+        "reason": "gate:tools:not_proven",
+        "occurrences": 507
+      },
+      {
+        "reason": "score_components_unknown:quality,capability,reliability,economy,speed",
+        "occurrences": 507
+      },
+      {
+        "reason": "confidence_below_75:0",
+        "occurrences": 507
+      },
+      {
+        "reason": "gate:model_verified:failed",
+        "occurrences": 504
+      },
+      {
+        "reason": "gate:capacity_available:capacity_unknown",
+        "occurrences": 462
+      },
+      {
+        "reason": "gate:adapter_green:failed",
+        "occurrences": 392
+      },
+      {
+        "reason": "gate:selectable:failed",
+        "occurrences": 378
+      },
+      {
+        "reason": "gate:compatible:model_unavailable",
+        "occurrences": 322
+      },
+      {
+        "reason": "gate:configured:failed",
+        "occurrences": 280
+      },
+      {
+        "reason": "gate:capacity_available:failed",
+        "occurrences": 140
+      },
+      {
+        "reason": "score_components_unknown:quality,capability,reliability,speed",
+        "occurrences": 112
+      },
+      {
+        "reason": "confidence_below_75:10",
+        "occurrences": 111
+      },
+      {
+        "reason": "gate:compatible:model_tier_insufficient",
+        "occurrences": 85
+      },
+      {
+        "reason": "gate:compatible:profile_blocked",
+        "occurrences": 56
+      },
+      {
+        "reason": "score_components_unknown:capability,reliability,economy,speed",
+        "occurrences": 25
+      },
+      {
+        "reason": "confidence_below_75:40",
+        "occurrences": 25
+      },
+      {
+        "reason": "gate:compatible:model_role_incompatible",
+        "occurrences": 22
+      },
+      {
+        "reason": "gate:compatible:profile_role_unsupported",
+        "occurrences": 20
+      },
+      {
+        "reason": "gate:compatible:external_mcp_unsupported",
+        "occurrences": 14
+      },
+      {
+        "reason": "gate:tools:external_mcp_unsupported",
+        "occurrences": 14
+      },
+      {
+        "reason": "gate:compatible:model_capability_missing",
+        "occurrences": 7
+      },
+      {
+        "reason": "gate:tools:model_capability_missing",
+        "occurrences": 7
+      },
+      {
+        "reason": "gate:case_diversity:failed",
+        "occurrences": 4
+      },
+      {
+        "reason": "gate:compatible:workspace_write_required",
+        "occurrences": 2
+      },
+      {
+        "reason": "gate:workspace:workspace_write_required",
+        "occurrences": 2
+      },
+      {
+        "reason": "confidence_below_75:19",
+        "occurrences": 1
+      }
+    ],
+    "live_observations": {
+      "adapter_green:False": 392,
+      "adapter_green:True": 252,
+      "capacity:capacity_unknown": 252,
+      "capacity:no_data": 392,
+      "declared_economy_known:True": 644,
+      "normalized_economy_known:False": 532,
+      "normalized_economy_known:True": 112
+    },
+    "gates": {
+      "shadow_persisted_per_role": true,
+      "snapshot_hashes_valid": true,
+      "shadow_never_changed_assignment": true,
+      "shadow_never_auto_applied": true,
+      "all_roles_have_auto_winner": false
+    },
+    "auto_ready": false
+  },
+  "fail_closed_enforcement": {
+    "database": "runtime/model-default-enforcement.sqlite",
+    "cases": [
+      {
+        "case": "adapter_red",
+        "winner_candidate_id": null,
+        "assignment_changed": false,
+        "auto_applied": false,
+        "hash_valid": true
+      },
+      {
+        "case": "incompatibility",
+        "winner_candidate_id": null,
+        "assignment_changed": false,
+        "auto_applied": false,
+        "hash_valid": true
+      },
+      {
+        "case": "price_unknown",
+        "winner_candidate_id": null,
+        "assignment_changed": false,
+        "auto_applied": false,
+        "hash_valid": true
+      },
+      {
+        "case": "quota_pressure",
+        "winner_candidate_id": null,
+        "assignment_changed": false,
+        "auto_applied": false,
+        "hash_valid": true
+      },
+      {
+        "case": "stale",
+        "winner_candidate_id": null,
+        "assignment_changed": false,
+        "auto_applied": false,
+        "hash_valid": true
+      },
+      {
+        "case": "tie",
+        "winner_candidate_id": null,
+        "assignment_changed": false,
+        "auto_applied": false,
+        "hash_valid": true
+      },
+      {
+        "case": "owner_override",
+        "winner_candidate_id": "fixture-profile::fixture-model",
+        "assignment_changed": false,
+        "auto_applied": false,
+        "hash_valid": true,
+        "preserved_current": true
+      }
+    ],
+    "all_fail_closed": true
+  },
+  "decision": {
+    "recommended_rollout": "recommend",
+    "auto_allowed": false,
+    "default_change_allowed": false,
+    "reason": "retain_recommend_until_every_role_has_live_auto_winner",
+    "rollback": "AITEAM_MODEL_DEFAULT_ROLLOUT=shadow"
+  },
+  "ok": true
+}

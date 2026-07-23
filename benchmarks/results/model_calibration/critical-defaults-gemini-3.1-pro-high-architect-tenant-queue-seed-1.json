@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 7.312,
+  "usage": {},
+  "response": {
+    "decision": "Implementar un mecanismo de checkout atómico en SQLite mediante una única transacción o cláusula UPDATE con RETURNING filtrada por tenant_id, sustituyendo la separación SELECT y UPDATE para evitar que múltiples workers adquieran la misma issue.",
+    "constraints": [
+      "HECHO: SQLite es la única fuente de datos durable.",
+      "HECHO: Cada issue está asociada a un tenant_id.",
+      "HECHO: La migración no puede pausar ni interrumpir runs activas.",
+      "HECHO: Se requiere mantener compatibilidad con el flag de rollback existente.",
+      "HECHO: Criterio de pase (gate): 100 reinicios con 0 wakeups perdidos durante un periodo continuo de 24 horas."
+    ],
+    "interfaces": {
+      "checkout_issue": {
+        "input": {
+          "tenant_id": "string",
+          "worker_id": "string"
+        },
+        "output": {
+          "issue_id": "string|null",
+          "status": "acquired|empty"
+        }
+      },
+      "migration_toggle": {
+        "input": {
+          "enabled": "boolean"
+        },
+        "output": {
+          "active_path": "atomic_sqlite|legacy_select_update"
+        }
+      }
+    },
+    "risks": [
+      "SUPUESTO: Alta contención en escrituras de SQLite si múltiples workers compiten agresivamente por el mismo tenant_id.",
+      "SUPUESTO: Transición de ejecuciones activas entre el path legacy y el nuevo sin generación de deadlocks en la base de datos."
+    ],
+    "verification": "Superar la prueba de estrés de 24 horas completando 100 reinicios de workers en caliente sin registrar ningún wakeup perdido ni registros duplicados de checkout en SQLite.",
+    "rollback": "Desactivar el flag de características para redirigir inmediatamente las solicitudes de checkout al flujo legacy (SELECT y UPDATE separados) sin afectar el estado persistido en SQLite ni detener las runs en ejecución."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 22.578,
+  "usage": {
+    "input_tokens": 16569,
+    "cached_input_tokens": 0,
+    "output_tokens": 593
+  },
+  "response": {
+    "objective": "Migrar el checkout de issues multi-tenant a una operación atómica en SQLite, manteniendo runs activas y conservando el flag de retorno al camino anterior.",
+    "execution_steps": [
+      "Añadir tenant_id a las consultas, índices y restricciones necesarias, con una migración compatible con datos y runs existentes.",
+      "Sustituir el SELECT seguido de UPDATE por un checkout transaccional atómico que seleccione y reclame una única issue elegible dentro del tenant.",
+      "Incluir un identificador de lease o versión para impedir que dos workers confirmen el mismo checkout.",
+      "Mantener ambos caminos detrás del flag existente y habilitar el nuevo primero en un entorno controlado.",
+      "Crear pruebas de concurrencia con dos o más workers compitiendo por la misma issue y verificar que solo uno obtiene el lease.",
+      "Crear pruebas de aislamiento entre tenants y de continuidad para runs activas durante la migración.",
+      "Ejecutar 100 reinicios y observar durante 24 horas; aprobar el gate únicamente si hay cero wakeups perdidos."
+    ],
+    "evidence": [
+      "Resultado esperado de la prueba concurrente: una issue produce exactamente un checkout ganador.",
+      "Resultado esperado de aislamiento: ningún worker reclama issues de otro tenant.",
+      "Resultado esperado de compatibilidad: las runs activas continúan sin interrupción durante el cambio.",
+      "Evidencia requerida para promoción: registros de 100 reinicios, ventana completa de 24 horas y contador de wakeups perdidos igual a cero.",
+      "No se afirma ninguna ejecución realizada; toda la evidencia indicada debe producirse durante la implementación y validación."
+    ],
+    "risks": [
+      "Bloqueos o contención de SQLite bajo concurrencia.",
+      "Migración incompleta de tenant_id en issues existentes.",
+      "Wakeups perdidos al alternar entre caminos durante runs activas.",
+      "Leases duplicados o atascados por límites transaccionales incorrectos.",
+      "Diferencias de comportamiento entre el camino nuevo y el anterior."
+    ],
+    "rollback": [
+      "Desactivar el camino nuevo mediante el flag y devolver los checkouts al camino anterior.",
+      "Conservar el esquema compatible para no interrumpir runs activas ni exigir una reversión destructiva inmediata.",
+      "Detener la promoción si aparece cualquier checkout duplicado o wakeup perdido.",
+      "Analizar las issues afectadas y reconciliar leases antes de reintentar la activación."
+    ],
+    "escalation": [
+      "Escalar si no puede garantizarse la asignación de tenant_id para todas las issues existentes.",
+      "Escalar si el cambio de esquema exige bloquear o detener runs activas.",
+      "Escalar ante cualquier wakeup perdido, checkout duplicado o imposibilidad de completar las 24 horas de observación.",
+      "No aprobar la migración hasta satisfacer íntegramente el gate de 100 reinicios con cero wakeups perdidos durante 24 horas."
+    ]
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:27:46.616713Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:27:46.616749Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:27:46.623543Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:27:47.531973Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:27:47.532003Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

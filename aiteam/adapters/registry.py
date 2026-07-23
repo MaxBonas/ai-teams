@@ -184,10 +184,10 @@ def build_default_registry() -> AdapterRegistry:
                 adapter_type="gemini_api",
                 channel="api",
                 provider="google",
-                model="gemini-3.5-flash",
+                model="gemini-3.6-flash",
                 cost_tier=2,
             ),
-            model="gemini-3.5-flash",
+            model="gemini-3.6-flash",
         )
     )
     registry.register(

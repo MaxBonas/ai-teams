@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 8.562,
+  "usage": {},
+  "response": {
+    "decision": "Transicionar la operación de checkout desde la secuencia separada de SELECT y UPDATE hacia una transacción atómica en SQLite parametrizada por tenant_id, asegurando la asignación única por issue a un solo worker sin detener las runs activas.",
+    "constraints": [
+      "HECHO: SQLite es la única fuente durable del sistema.",
+      "HECHO: Cada issue posee un tenant_id asociado.",
+      "HECHO: El checkout actual separa SELECT y UPDATE, permitiendo que dos workers ganen la misma issue.",
+      "HECHO: La migración no puede detener runs activas.",
+      "HECHO: Existe un flag de control para volver al camino anterior.",
+      "HECHO: El gate de validación es ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas.",
+      "SUPUESTO: El volumen de escrituras simultáneas por checkout en SQLite no generará bloqueos prolongados que degraden el rendimiento de las runs activas."
+    ],
+    "interfaces": {
+      "checkout_issue": "checkout_issue(tenant_id: String, worker_id: String) -> Option<Issue>",
+      "migration_flag": "is_new_checkout_enabled() -> Boolean",
+      "wakeup_handler": "process_wakeup(tenant_id: String, issue_id: String) -> Status"
+    },
+    "risks": [
+      "Bloqueo de base de datos (database lock) en SQLite bajo alta concurrencia de workers compitiendo por checkout en el mismo tenant_id.",
+      "Pérdida de wakeups en la transición entre el reinicio de workers y la reanudación del estado persistido en SQLite.",
+      "Incompatibilidad momentánea si coexisten workers procesando bajo el flag activo e inactivo."
+    ],
+    "verification": {
+      "evidence": "Registro auditado de 100 reinicios consecutivos en un periodo de 24 horas con métrica verificada de 0 wakeups perdidos y 0 entregas duplicadas de issues."
+    },
+    "rollback": {
+      "procedure": "Desactivación del flag de migración para desviar el tráfico de checkout a la ruta anterior (SELECT y UPDATE separados) sin afectar el estado durable ni detener las runs en curso."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

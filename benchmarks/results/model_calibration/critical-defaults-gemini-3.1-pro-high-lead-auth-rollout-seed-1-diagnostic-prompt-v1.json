@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "auth_rollout_incident",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 6.703,
+  "usage": {},
+  "response": {
+    "objective": "Resolver el incidente auth_rollout_incident mitigando la tasa de error del 2,4 % en auth v2 (desplegado al 5 %, superando el límite del 1,0 % durante 10 minutos) mediante rollback a auth v1 o acciones de recuperación coordinadas.",
+    "work_items": [
+      {
+        "id": "WI-01",
+        "task": "Ejecutar rollback del rollout de auth v2 al 5 % regresando a auth v1",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Estado actual del despliegue en auth v2",
+          "Disponibilidad comprobada de auth v1"
+        ]
+      },
+      {
+        "id": "WI-02",
+        "task": "Gestionar la rotación de secrets pendiente",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Resolución o mitigación del incidente de tasa de error"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "description": "La tasa de error del 2,4 % impacta la autenticación de usuarios al superar el límite tolerable del 1,0 % durante 10 minutos.",
+        "mitigation": "Ejecutar el rollback inmediato a auth v1 disponible."
+      },
+      {
+        "description": "La rotación de secrets sigue siendo una dependencia pendiente no resuelta.",
+        "mitigation": "Completar y validar la rotación de secrets antes de cualquier intento futuro de re-despliegue."
+      },
+      {
+        "description": "Riesgo de reprogramación no autorizada para el jueves.",
+        "mitigation": "Excluir explícitamente la opción de desplegar el jueves por haber sido descartada."
+      }
+    ],
+    "verification": {
+      "gate": "Aprobación de recuperación del servicio",
+      "acceptor": "Reviewer",
+      "criteria": "El Reviewer acepta la resolución únicamente cuando la inspección de logs y métricas confirme de forma explícita la recuperación del sistema y el retorno de la tasa de error a niveles aceptables."
+    },
+    "escalation": {
+      "condition": "Si el rollback a auth v1 no reduce la tasa de error por debajo del 1,0 % o si surgen bloqueos con la rotación de secrets pendientes.",
+      "action": "Escalar de inmediato a la dirección técnica y equipos de infraestructura para intervención prioritaria."
+    }
+  },
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "forbidden_hits": [
+      "desplegar el jueves"
+    ],
+    "contract_passed": false
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "disabled_by_contract",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": false
+}

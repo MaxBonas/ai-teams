@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-low",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "role": "file_scout",
+  "seed": 2,
+  "wall_seconds": 102.234,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "source_path": true,
+      "tenant_boundary": true,
+      "atomicity": true,
+      "winner_check": true,
+      "missing_test": true,
+      "next_owner": true
+    },
+    "anchors_retained": 6,
+    "anchors_total": 6,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "file_scout",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "src/tenant_checkout.py, tests/test_checkout.py"
+  },
+  "artifact": "Completed file scout execution\n\n### Files read\n- `src/tenant_checkout.py` (306 bytes)\n- `tests/test_checkout.py` (83 bytes)\n\n### Summary\n- **¿cómo delimita tenant el checkout?**:\n  El `checkout` no realiza ninguna delimitación por inquilino (tenant). La consulta se realiza de forma global sobre las tareas con estado `'todo'` sin aplicar ningún filtro por tenant.\n  ```python\n  row = conn.execute(\"SELECT id FROM issues WHERE status='todo' ORDER BY priority LIMIT 1\").fetchone()\n  ```\n\n- **¿SELECT y reserva forman una operación atómica?**:\n  No. Se ejecutan como dos sentencias SQL distintas e independientes, sin estar envueltas en una transacción ni utilizar mecanismos de bloqueo (como `SELECT ... FOR UPDATE`), por lo que no es una operación atómica y es susceptible a condiciones de carrera.\n\n- **¿el UPDATE confirma que esta run fue la ganadora?**:\n  No. El `UPDATE` se ejecuta de forma incondicional sobre el identificador obtenido por el `SELECT`, sobrescribiendo los campos `status` y `lease_owner` sin verificar si otra ejecución ya los había modificado concurrentemente.\n  ```python\n  conn.execute(\"UPDATE issues SET status='in_progress', lease_owner=? WHERE id=?\", (worker_id, row[0]))\n  ```\n\n- **¿qué caso cubre el test y qué caso concurrente/multi-tenant no cubre?**:\n  El test `test_empty_queue_returns_none` cubre únicamente el caso en que la cola de tareas está vacía. No cubre ningún caso de concurrencia (múltiples workers intentando adquirir la misma tarea al mismo tiempo) ni de aislamiento multi-tenant.\n  ```python\n  def test_empty_queue_returns_none(conn):\n      assert checkout(conn, 'w1') is None\n  ```\n\n### What was NOT found\nNinguno (todos los archivos requeridos fueron leídos exitosamente).\n\n---AGENT-REPORT---\nrole: file_scout\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: src/tenant_checkout.py, tests/test_checkout.py",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:c7916a10-972a-4f40-b9b7-e33ff30b0fc7",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gemini-3.5-flash-low",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\flash-low-file-scout-seed-2\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true
+}

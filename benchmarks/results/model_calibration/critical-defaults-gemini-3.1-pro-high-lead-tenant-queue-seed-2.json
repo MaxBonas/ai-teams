@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 7.484,
+  "usage": {},
+  "response": {
+    "objective": "Ejecutar tenant_queue_migration manteniendo SQLite como única fuente durable, corrigiendo la condición de carrera en el checkout (SELECT y UPDATE separados por tenant_id) sin detener runs activas, asegurando capacidad de rollback mediante feature flag y validando el criterio de aceptación.",
+    "work_items": [
+      {
+        "id": "WI-01",
+        "title": "Implementación del Feature Flag de Rollback",
+        "owner": "Backend Lead",
+        "acceptor": "Engineering Lead",
+        "dependencies": []
+      },
+      {
+        "id": "WI-02",
+        "title": "Atomización del Checkout en SQLite por tenant_id",
+        "owner": "Database Engineer",
+        "acceptor": "Backend Lead",
+        "dependencies": [
+          "WI-01"
+        ]
+      },
+      {
+        "id": "WI-03",
+        "title": "Migración sin Interrupción de Runs Activas",
+        "owner": "Infrastructure/DevOps Lead",
+        "acceptor": "Engineering Lead",
+        "dependencies": [
+          "WI-02"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "description": "Dos workers ganan la misma issue antes de aplicar la atomicidad en checkout",
+        "mitigation": "Unificar SELECT y UPDATE en una transacción atómica en SQLite"
+      },
+      {
+        "description": "Detención de runs activas durante la transición de migración",
+        "mitigation": "Desplegar cambios en caliente manteniendo compatibilidad mediante el flag"
+      },
+      {
+        "description": "Pérdida de wakeups durante los reinicios de verificación",
+        "mitigation": "Monitoreo continuo de colas y capacidad de rollback inmediato con el flag"
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas"
+    },
+    "escalation": {
+      "conditions": [
+        "Pérdida de uno o más wakeups durante la ejecución de los 100 reinicios o la ventana de 24 horas",
+        "Detección de doble adjudicación de una misma issue por workers concurrentes",
+        "Interrupción no planificada de cualquier run activa durante la migración",
+        "Incapacidad de SQLite para responder como fuente durable bajo carga"
+      ]
+    }
+  },
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

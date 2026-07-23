@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_tier_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "mcp_operator",
+  "reasoning_effort": "medium",
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "advisory_recovery_governance",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "samples_artifact_passed": 3,
+  "samples_single_attempt": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-terra-mcp-operator-seed-1.json",
+    "benchmarks/results/model_calibration/codex-terra-mcp-operator-seed-2.json",
+    "benchmarks/results/model_calibration/codex-terra-mcp-operator-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-mcp-operator-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "36b4665d1c541811ab243af9f62599d6448f6a756dc9cf9102e1db47054666ad"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-mcp-operator-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "420696b3d90edb0342acb3efcba1c73fb2b8b7910f83d0be599e6f36cc11fc1e"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-terra-mcp-operator-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "5ec8560aa70e2f16932b0f22542387b5fb558f216d9e2877346e709ad052a741"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "artifacts_hashed": true
+  },
+  "checks_passed": 36,
+  "checks_total": 36,
+  "wall_seconds_median": 42.359,
+  "wall_seconds_range": [
+    27.859,
+    49.593
+  ],
+  "usage": {
+    "input_tokens": 342171,
+    "output_tokens": 4424,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "workspaces grandes",
+      "peticiones ambiguas",
+      "inputs binarios"
+    ]
+  }
+}

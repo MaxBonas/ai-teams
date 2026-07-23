@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_luna_tier3_role_canary",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_causal_report_v2",
+  "role": "file_scout",
+  "seed": 3,
+  "wall_seconds": 71.063,
+  "attempts": 2,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": false
+  },
+  "evaluation": {
+    "anchors": {
+      "source_path": true,
+      "tenant_boundary": true,
+      "atomicity": true,
+      "winner_check": true,
+      "missing_test": true,
+      "next_owner": true
+    },
+    "anchors_retained": 6,
+    "anchors_total": 6,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "file_scout",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "src/tenant_checkout.py, tests/test_checkout.py, issue description and wake payload"
+  },
+  "artifact": "Inspeccionados los dos archivos indicados; el checkout no delimita por tenant, separa SELECT y UPDATE, y no verifica que la run haya ganado. El único test cubre una cola vacía.\n\n⚙ Sistema: el rol de solo lectura intentó cerrar sin un AGENT-REPORT válido. El cierre no cuenta y se permite un único reintento de formato.\n\nLeídos ambos archivos. El checkout no filtra por tenant, separa SELECT y UPDATE sin confirmar ganador; el test solo cubre cola vacía.\n\n**Files read**\n- `src/tenant_checkout.py` (306 bytes)\n- `tests/test_checkout.py` (83 bytes)\n\n**Summary**\n- El checkout ejecuta `SELECT id FROM issues WHERE status='todo' ORDER BY priority LIMIT 1`; no aparece ningún filtro ni parámetro de tenant.\n- La reserva se realiza después, mediante un `UPDATE` separado: `UPDATE issues SET status='in_progress', lease_owner=? WHERE id=?`. Por tanto, SELECT y reserva no forman una única operación atómica en este código.\n- El `UPDATE` solo filtra por `id` y no comprueba estado previo, tenant ni filas afectadas; no hay confirmación explícita de que esta run haya sido la ganadora.\n- El único test, `test_empty_queue_returns_none`, verifica que una cola sin elementos devuelve `None`.\n- No se cubre el caso concurrente de dos workers seleccionando/reservando el mismo issue ni un escenario multi-tenant.\n\n**What was NOT found**\n- No se encontraron otros archivos indicados ni evidencia adicional en los dos archivos leídos.\n\n---AGENT-REPORT---\nrole: file_scout\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: src/tenant_checkout.py, tests/test_checkout.py, issue description and wake payload",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:9be599cb-cadf-4ddd-ad90-3405d0901e7e",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "usage_json": "{\"cached_input_tokens\": 18176, \"input_tokens\": 37996, \"output_tokens\": 1126, \"reasoning_output_tokens\": 62}"
+    },
+    "input_tokens": 56622,
+    "output_tokens": 1666,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-luna-file-scout-low-v2-seed-3\\.aiteam\\aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": false
+}

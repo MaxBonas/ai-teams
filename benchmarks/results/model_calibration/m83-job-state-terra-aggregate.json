@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "test_designer",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "job_state_machine_mutation",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/m83-job-state-terra-seed-1.json",
+    "benchmarks/results/model_calibration/m83-job-state-terra-seed-2.json",
+    "benchmarks/results/model_calibration/m83-job-state-terra-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-job-state-terra-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "dd91bcf40a0070c98e2e324cb45ea9b55679119cbfbbfdbb69bbf47e8df0ac1c"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-job-state-terra-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "5e31dae26efffd0a5f3aa012bd7d86fb3049f45e72f1b2fd9a39f96091f9376a"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/m83-job-state-terra-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "b8f074a087fddb48297a2e882317a825f697036be4db206ac8ada9eaea3c0492"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true
+  },
+  "checks_passed": 24,
+  "checks_total": 24,
+  "wall_seconds_median": 74.672,
+  "wall_seconds_range": [
+    66.156,
+    83.39
+  ],
+  "usage": {
+    "cached_input_tokens": 433664,
+    "input_tokens": 499611,
+    "output_tokens": 8254,
+    "reasoning_output_tokens": 1549,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "integración multi-módulo",
+      "tests de browser",
+      "property-based testing"
+    ]
+  }
+}

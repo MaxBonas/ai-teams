@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "benchmark": "coding_behavioral_calibration",
+  "case": "cli_conversor",
+  "seed": 3,
+  "started_at": "2026-07-23T13:05:27+0200",
+  "evaluation_contract": {
+    "version": 1,
+    "evaluators": [
+      {
+        "id": "hidden_acceptance",
+        "class": "deterministic_behavioral",
+        "blind": true
+      },
+      {
+        "id": "ruff",
+        "class": "static_analysis",
+        "blind": true
+      }
+    ],
+    "independent_semantic_or_structural": true,
+    "goodhart_risk": "residual_hidden_suite_overfit",
+    "constructs_not_measured": [
+      "behavior outside the hidden suite",
+      "long-term maintainability",
+      "real-user acceptance"
+    ]
+  },
+  "config": {
+    "max_attempts": 2,
+    "stateless": true
+  },
+  "arms": {
+    "gemma4:26b": {
+      "model": "gemma4:26b",
+      "profile_id": "local_gemma4_ollama",
+      "provider": "ollama",
+      "channel": "local",
+      "issue_status": "in_progress",
+      "attempts": 1,
+      "runs": [
+        {
+          "id": "run:84308043-e128-4271-a1af-9ad8b84b1ec2",
+          "status": "failed",
+          "error_code": "subscription_cli_parse_error",
+          "liveness_state": "failed",
+          "provider": "ollama",
+          "model": "gemma4:26b",
+          "channel": "local"
+        }
+      ],
+      "wall_seconds": 87.328,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_cents": 0,
+      "usage_available": false,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 1,
+        "hidden_passed": 0,
+        "hidden_failed": 9,
+        "hidden_errors": 0,
+        "hidden_total": 9,
+        "deliverable_files": []
+      },
+      "workspace": "runtime/canaries/local-gemma26b-engineer-seed-3/gemma4_26b"
+    }
+  },
+  "finished_at": "2026-07-23T13:07:05+0200"
+}

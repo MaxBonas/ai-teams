@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 23.062,
+  "usage": {
+    "input_tokens": 16561,
+    "cached_input_tokens": 0,
+    "output_tokens": 821
+  },
+  "response": {
+    "decision": {
+      "hechos": [
+        "SQLite será la única fuente durable.",
+        "Cada issue contiene tenant_id.",
+        "El checkout actual permite que dos workers obtengan la misma issue."
+      ],
+      "supuestos": [
+        "SQLite admite transacciones inmediatas y actualización condicional con verificación de filas afectadas."
+      ],
+      "arquitectura": "Sustituir SELECT+UPDATE separados por un checkout transaccional atómico, filtrado por tenant_id. La adjudicación solo existe si la actualización condicional afecta exactamente una fila. Las runs activas conservan su estado; el cambio afecta únicamente a nuevos checkouts."
+    },
+    "constraints": {
+      "hechos": [
+        "La migración no puede detener runs activas.",
+        "Debe conservarse el camino anterior mediante un flag.",
+        "No se permiten fuentes durables adicionales."
+      ],
+      "limites": [
+        "SQLite contiene issues, propiedad de checkout y señales durables.",
+        "Los wakeups en memoria son optimizaciones; nunca constituyen evidencia durable ni condición exclusiva de progreso.",
+        "La migración no modifica la propiedad de runs ya activas."
+      ]
+    },
+    "interfaces": {
+      "checkout": {
+        "entrada": [
+          "tenant_id",
+          "worker_id",
+          "timestamp"
+        ],
+        "salida": [
+          "issue adjudicada o resultado vacío"
+        ],
+        "garantia": "Como máximo un worker obtiene cada issue mediante transición condicional dentro de una transacción."
+      },
+      "wake": {
+        "entrada": [
+          "tenant_id",
+          "identificador durable del trabajo"
+        ],
+        "salida": [
+          "notificación oportunista"
+        ],
+        "garantia": "Tras reinicio, el trabajo pendiente se redescubre consultando SQLite aunque la notificación se pierda."
+      },
+      "flag": {
+        "estados": [
+          "camino_anterior",
+          "checkout_atomico"
+        ],
+        "alcance": "Controla nuevos checkouts; no altera runs activas ni datos durables."
+      }
+    },
+    "risks": [
+      {
+        "riesgo": "Contención o bloqueo de SQLite.",
+        "mitigacion": "Transacciones breves, timeout acotado y reintentos observables."
+      },
+      {
+        "riesgo": "Inanición entre tenants.",
+        "mitigacion": "Orden de selección determinista y métricas desglosadas por tenant_id."
+      },
+      {
+        "riesgo": "Cambio de flag durante una adjudicación.",
+        "mitigacion": "Resolver el camino una vez al inicio del checkout y completar esa operación bajo una sola semántica."
+      },
+      {
+        "riesgo": "Wakeup perdido tras persistir trabajo.",
+        "mitigacion": "Reconciliación periódica desde SQLite; la notificación no sustituye la consulta durable."
+      }
+    ],
+    "verification": {
+      "evidencia_verificable": [
+        "Registro durable o trazas correlacionadas que demuestren una única adjudicación por issue.",
+        "Métricas por tenant_id de intentos, adjudicaciones, conflictos, latencia, bloqueos y reintentos.",
+        "Prueba de cambio de flag mientras existen runs activas, verificando que continúan sin duplicación ni pérdida.",
+        "Prueba de recuperación que reinicie workers después de persistir trabajo y antes o durante el wakeup."
+      ],
+      "gate": {
+        "reinicios": 100,
+        "ventana_horas": 24,
+        "wakeups_perdidos_permitidos": 0,
+        "criterio": "El cambio solo supera el gate si los 100 reinicios completan una ventana continua de 24 horas sin wakeups perdidos."
+      }
+    },
+    "rollback": {
+      "accion": "Cambiar el flag al camino anterior únicamente para nuevos checkouts.",
+      "preservacion": [
+        "No revertir SQLite ni eliminar tenant_id.",
+        "No interrumpir ni reasignar runs activas.",
+        "Conservar métricas, trazas y registros de adjudicación para análisis."
+      ],
+      "disparadores": [
+        "Duplicación de adjudicaciones.",
+        "Wakeup perdido.",
+        "Errores sostenidos de bloqueo o latencia fuera del umbral operativo definido."
+      ],
+      "verificacion": "Confirmar que nuevos checkouts usan el camino anterior, que las runs activas terminan bajo su semántica original y que no aparecen nuevas adjudicaciones duplicadas."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:09:20.894304Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:09:20.894343Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:09:20.901809Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:09:21.259693Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:09:21.259717Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

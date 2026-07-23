@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "team_lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 8.828,
+  "usage": {},
+  "response": {
+    "objective": "Coordinar la migración tenant_queue_migration estableciendo SQLite como la única fuente durable con tenant_id por issue, resolviendo la condición de carrera en el checkout (separación de SELECT y UPDATE) para impedir que dos workers ganen la misma issue, realizando la migración sin detener runs activas, asegurando la reversibilidad mediante un flag de rollback y superando el gate de 100 reinicios con cero wakeups perdidos en 24 horas.",
+    "assignments": [
+      {
+        "task": "Unificar el checkout (SELECT y UPDATE) para evitar la doble adjudicación por worker respetando tenant_id",
+        "owner": "Backend Engineer",
+        "aceptador": "Tech Lead"
+      },
+      {
+        "task": "Implementar SQLite como única fuente durable y habilitar el flag de rollback",
+        "owner": "Database Engineer",
+        "aceptador": "Team Lead"
+      },
+      {
+        "task": "Ejecutar el proceso de migración en caliente sin detener runs activas",
+        "owner": "DevOps Engineer",
+        "aceptador": "Team Lead"
+      },
+      {
+        "task": "Ejecutar y monitorear la prueba del gate de 100 reinicios con cero wakeups perdidos durante 24 horas",
+        "owner": "QA Lead",
+        "aceptador": "Team Lead"
+      }
+    ],
+    "dependencies": [
+      "La unificación del checkout depende de la estructura SQLite con tenant_id.",
+      "La migración en caliente depende del flag de rollback verificado.",
+      "La prueba del gate de 24 horas depende de la migración en caliente sin interrupción de runs activas."
+    ],
+    "acceptance": [
+      "SQLite es la única fuente durable y cada issue incluye tenant_id.",
+      "El checkout es atómico y ningún par de workers gana la misma issue.",
+      "La migración se realiza sin detener runs activas.",
+      "El flag permite alternar al camino anterior de forma segura.",
+      "Se completan 100 reinicios con cero wakeups perdidos durante 24 horas continuas."
+    ],
+    "status_update": "Plan de migración y asignaciones estructuradas. Preparando entornos para la migración sin detención de runs activas previa validación del gate.",
+    "escalation": "En caso de fallo en la atomicidad del checkout, pérdida de wakeups en la prueba del gate o interrupción de runs activas, se procederá a activar el flag de rollback de inmediato y se escalará a la dirección técnica."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

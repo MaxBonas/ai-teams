@@ -31,6 +31,18 @@ ALLOWED_RESULTS = frozenset(
     {"done", "completed", "approved", "changes_requested", "blocked", "partial", "failed", "skipped"}
 )
 
+
+def agent_report_is_valid(*, parsed: dict[str, str], agent_role: str) -> bool:
+    """Validate the semantic minimum shared by persisted reports and gates."""
+    result_value = str(parsed.get("result") or "").strip().lower()
+    claimed_role = str(parsed.get("role") or "").strip().lower()
+    role_key = str(agent_role or "").strip().lower()
+    role_matches = not claimed_role or claimed_role == role_key or (
+        claimed_role.replace("software_", "").replace("code_", "")
+        == role_key.replace("software_", "").replace("code_", "")
+    )
+    return result_value in ALLOWED_RESULTS and role_matches
+
 _ENSURE_SQL = """
 CREATE TABLE IF NOT EXISTS agent_reports (
     id TEXT PRIMARY KEY,
@@ -69,15 +81,9 @@ def record_agent_report(
                      role (an agent cannot speak as another role).
     ``is_assignee``— the emitting agent is the issue's assignee.
     """
-    result_value = str(parsed.get("result") or "").strip().lower()
-    claimed_role = str(parsed.get("role") or "").strip().lower()
     role_key = str(agent_role or "").strip().lower()
-    role_matches = not claimed_role or claimed_role == role_key or (
-        # tolerate the common engineer/software_engineer + reviewer/code_reviewer aliases
-        claimed_role.replace("software_", "").replace("code_", "")
-        == role_key.replace("software_", "").replace("code_", "")
-    )
-    valid = result_value in ALLOWED_RESULTS and role_matches
+    result_value = str(parsed.get("result") or "").strip().lower()
+    valid = agent_report_is_valid(parsed=parsed, agent_role=role_key)
 
     with contextlib.closing(_connect(db_path)) as conn:
         conn.executescript(_ENSURE_SQL)

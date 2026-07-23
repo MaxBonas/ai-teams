@@ -53,7 +53,7 @@ def test_compare_catalog_reports_missing_unexpected_and_duplicates() -> None:
     assert row["duplicate_discovered"] == ["model-c"]
 
 
-def test_report_separates_codex_blocker_from_completed_drift_audit() -> None:
+def test_report_passes_with_current_catalogs_and_calibrations() -> None:
     report = build_report(
         catalog_rows=[
             {
@@ -72,23 +72,19 @@ def test_report_separates_codex_blocker_from_completed_drift_audit() -> None:
             "failures": [],
         },
         codex_catalog={
-            "status": "cli_update_required",
-            "reason": "catalog_requires_newer_cli",
-            "installed_version": "0.128.0",
+            "status": "current",
+            "installed_version": "0.145.0",
+            "catalog_client_version": "0.145.0",
+            "coverage_ok": True,
         },
         observed_at=datetime(2026, 7, 22, tzinfo=timezone.utc),
     )
 
     assert report["ok"] is True
     assert report["promotion_allowed"] is False
-    assert report["attention_required"] == [
-        {
-            "profile_id": "codex_subscription",
-            "reason": "catalog_requires_newer_cli",
-        }
-    ]
-    assert report["policy"]["next_review_due"] == "2026-08-19"
-    assert report["policy"]["calibration_next_review_due"] == "2026-08-19"
+    assert report["attention_required"] == []
+    assert report["policy"]["next_review_due"] == "2026-08-20"
+    assert report["policy"]["calibration_next_review_due"] == "2026-08-20"
     assert report["gates"]["promoted_model_calibration_registry"] is True
     assert report["gates"]["promoted_model_calibrations_fresh"] is True
     assert report["model_calibration_freshness"]["registered_promotions_fresh"] is True
@@ -106,12 +102,19 @@ def test_report_opens_attention_when_promoted_calibration_is_stale() -> None:
             }
         ],
         flow_report={"ok": True},
-        codex_catalog={"status": "current", "installed_version": "0.128.0"},
+        codex_catalog={
+            "status": "current",
+            "installed_version": "0.145.0",
+            "catalog_client_version": "0.145.0",
+            "coverage_ok": True,
+        },
         observed_at=datetime(2026, 7, 22, tzinfo=timezone.utc),
     )
 
     assert report["ok"] is False
     assert report["gates"]["promoted_model_calibrations_fresh"] is False
+    assert report["policy"]["next_review_due"] == "2026-07-22"
+    assert report["policy"]["calibration_next_review_due"] == "2026-07-22"
     assert {
         (item.get("model"), item.get("role"), item["reason"])
         for item in report["attention_required"]
@@ -121,7 +124,7 @@ def test_report_opens_attention_when_promoted_calibration_is_stale() -> None:
     }
 
 
-def test_versioned_drift_receipt_contains_fresh_exact_calibrations() -> None:
+def test_versioned_drift_receipt_records_current_catalog_and_tiers() -> None:
     path = (
         Path(__file__).resolve().parents[1]
         / "benchmarks"
@@ -131,10 +134,55 @@ def test_versioned_drift_receipt_contains_fresh_exact_calibrations() -> None:
     )
     report = json.loads(path.read_text(encoding="utf-8"))
 
-    assert all(report["gates"].values())
+    assert report["ok"] is True
+    assert report["codex_catalog"]["status"] == "current"
+    assert report["codex_catalog"]["installed_version"] == "0.145.0"
+    assert report["gates"] == {
+        "authenticated_inventories_complete": True,
+        "declared_catalog_coverage": True,
+        "hermetic_model_flow_matrix": True,
+        "model_tier_matrix_complete": True,
+        "promoted_model_calibration_registry": True,
+        "promoted_model_calibrations_fresh": True,
+    }
     freshness = report["model_calibration_freshness"]
     assert freshness["registry_valid"] is True
     assert freshness["registered_promotions_fresh"] is True
     assert freshness["unregistered_promotions_allowed"] is False
     assert freshness["existing_defaults_changed"] is False
     assert len(freshness["entries"]) == 3
+    codex = next(
+        entry
+        for entry in freshness["entries"]
+        if entry["profile_id"] == "codex_subscription"
+    )
+    assert codex["model"] == "gpt-5.6-luna"
+    assert codex["status"] == "fresh"
+    assert codex["stale_reasons"] == []
+    assert report["policy"]["next_review_due"] == "2026-08-20"
+
+
+def test_report_fails_closed_when_codex_catalog_is_missing_promoted_model() -> None:
+    report = build_report(
+        catalog_rows=[{
+            "profile_id": "antigravity_subscription",
+            "status": "current",
+            "cli_version": "1.1.5",
+            "coverage_ok": True,
+        }],
+        flow_report={"ok": True},
+        codex_catalog={
+            "status": "current",
+            "installed_version": "0.145.0",
+            "catalog_client_version": "0.145.0",
+            "coverage_ok": False,
+            "missing_declared": ["gpt-5.6-luna"],
+        },
+        observed_at=datetime(2026, 7, 22, tzinfo=timezone.utc),
+    )
+
+    assert report["ok"] is False
+    assert report["gates"]["declared_catalog_coverage"] is False
+    assert report["attention_required"] == [
+        {"profile_id": "codex_subscription", "reason": "catalog_drift"}
+    ]

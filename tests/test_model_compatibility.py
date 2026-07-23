@@ -91,7 +91,7 @@ def test_free_model_allowlist_is_permission_not_best_for_hint() -> None:
     )["code"] == "model_role_incompatible"
     assert _decision(
         profile, deepseek, "qa", run_profile="full_team", data_class="public"
-    )["allowed"] is True
+    )["code"] == "model_role_incompatible"
     assert _decision(
         profile, deepseek, "test_designer", run_profile="full_team", data_class="public"
     )["code"] == "model_role_incompatible"
@@ -104,7 +104,7 @@ def test_api_profile_does_not_gain_external_mcp_from_provider_tools() -> None:
         "channel": "api",
         "data_policy": "provider_free_tier",
     }
-    model = _model("gemini_api_free", "gemini-3.5-flash")
+    model = _model("gemini_api_free", "gemini-3.6-flash")
     decision = _decision(
         profile, model, "reviewer", data_class="public",
         required_capabilities=["external_mcp"],
@@ -143,6 +143,6 @@ def test_restricted_channel_requires_data_classification() -> None:
         "data_policy": "provider_free_tier",
     }
     decision = _decision(
-        profile, _model("gemini_api_free", "gemini-3.5-flash"), "reviewer"
+        profile, _model("gemini_api_free", "gemini-3.6-flash"), "reviewer"
     )
     assert decision["code"] == "data_classification_required"

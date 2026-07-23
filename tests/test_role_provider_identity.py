@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from aiteam.policies import canonical_role, forbidden_ops_for_role, role_status, role_tier
+from aiteam.policies import (
+    NON_EDITING_ROLES,
+    WORK_SLOT_ROLES,
+    canonical_role,
+    forbidden_ops_for_role,
+    role_status,
+    role_tier,
+)
 from aiteam.provider_identity import (
     capacity_pool_key,
     model_vendor,
@@ -23,6 +30,8 @@ def test_worker_uses_tier3_authority_contract() -> None:
     denied = forbidden_ops_for_role("worker")
     assert "create_issue" in denied
     assert "write_file" in denied
+    assert "worker" in NON_EDITING_ROLES
+    assert "worker" not in WORK_SLOT_ROLES
 
 
 def test_perspective_is_model_vendor_not_transport_profile() -> None:

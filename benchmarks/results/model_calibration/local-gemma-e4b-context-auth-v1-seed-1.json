@@ -1,0 +1,121 @@
+{
+  "benchmark": "context_summary_semantic_retention",
+  "rubric_id": "auth_migration_causal_v5",
+  "source_chars": 8501,
+  "summary_chars": 0,
+  "causal_units": [],
+  "causal_index_chars": 2,
+  "artifact_chars": 3,
+  "artifact_ratio": 0.0004,
+  "compression_ratio": 0.0,
+  "max_compression_ratio": 0.3,
+  "within_budget": true,
+  "required_retained": 0,
+  "required_total": 9,
+  "required_retention_rate": 0.0,
+  "optional_retained": 0,
+  "optional_total": 0,
+  "semantic_gate_passed": false,
+  "accepted": false,
+  "criteria": [
+    {
+      "id": "jwt_rs256",
+      "kind": "decision",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "dual_validation_24h",
+      "kind": "decision",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "legacy_kid_gate",
+      "kind": "constraint",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "next_owner",
+      "kind": "owner",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "review_acceptance",
+      "kind": "acceptance",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "regional_cache_risk",
+      "kind": "risk",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "escalation_threshold",
+      "kind": "escalation",
+      "required": true,
+      "retained": false,
+      "matched": []
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "required": true,
+      "retained": false,
+      "matched": []
+    }
+  ],
+  "contract_version": "two_causal_slices_three_seeds_each_v1",
+  "case_id": "auth_migration",
+  "seed": 1,
+  "source_sha256": "d36c09ac4ffe001885acbdbf7405e0a1c5643dbbf8fe9e21a67916570ec14ec4",
+  "rubric_sha256": "31a6cf2c3fc6e1249664cfc8af1260b0ff805a6753c1127743f2fe5441aa4e05",
+  "profile_id": "local_gemma4_ollama",
+  "execution_config": {
+    "role": "context_curator",
+    "profile_id": "local_gemma4_ollama",
+    "model": "gemma4:e4b",
+    "reasoning_effort_override": "none",
+    "source": "benchmark_runtime"
+  },
+  "adapter": {
+    "type": "subscription_cli",
+    "model": "gemma4:e4b",
+    "channel": "local"
+  },
+  "runtime": {
+    "issue_status": "in_progress",
+    "run": {
+      "id": "run:2ea29089-d768-4570-a2b0-e2c118af4928",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "agent_id": "role:context_curator"
+    },
+    "attempts": 1,
+    "wall_seconds": 33.3,
+    "input_tokens": 2051,
+    "output_tokens": 886,
+    "cost_cents": 0,
+    "telemetry_status": "observed",
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\local-gemma-e4b-context-auth-screen-seed-1\\.aiteam\\aiteam.db"
+  },
+  "summary": ""
+}

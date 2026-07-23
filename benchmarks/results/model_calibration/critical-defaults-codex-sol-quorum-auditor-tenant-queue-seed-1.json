@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 21.438,
+  "usage": {
+    "input_tokens": 16572,
+    "cached_input_tokens": 0,
+    "output_tokens": 464
+  },
+  "response": {
+    "verdict": "NO-GO",
+    "challenges": [
+      "SELECT y UPDATE separados permiten checkout duplicado entre workers.",
+      "El aislamiento por tenant_id no garantiza exclusión mutua ni equidad entre tenants.",
+      "El flag de rollback puede reintroducir el camino defectuoso y mezclar protocolos incompatibles.",
+      "Contraejemplo: un worker reclama una issue y cae antes de confirmar; otro puede duplicarla o dejarla bloqueada.",
+      "Contraejemplo: una run activa atraviesa la migración mientras cambia el esquema o la semántica de ownership."
+    ],
+    "missing_evidence": [
+      "Diseño y prueba de checkout atómico en SQLite.",
+      "Compatibilidad demostrada con runs activas durante migración y rollback.",
+      "Definición medible de wakeup perdido y mecanismo de observación.",
+      "Resultados completos de 100 reinicios y 24 horas continuas con carga concurrente.",
+      "Pruebas de recuperación ante crash, timeout, transacciones bloqueadas y disco lleno.",
+      "Invariantes verificadas de tenant_id, ownership, leases e idempotencia."
+    ],
+    "failure_modes": [
+      "Procesamiento duplicado de una issue.",
+      "Issue huérfana o permanentemente bloqueada tras un crash.",
+      "Wakeup perdido por carrera entre commit, notificación y reinicio.",
+      "Contención o SQLITE_BUSY bajo concurrencia.",
+      "Starvation entre tenants.",
+      "Rollback parcial con workers usando caminos distintos.",
+      "Corrupción lógica por migración concurrente con runs activas.",
+      "Falso positivo del gate por instrumentación incompleta."
+    ],
+    "recommendation": {
+      "decision": "NO-GO",
+      "conditions": [
+        "Implementar checkout mediante una única transacción atómica con resultado inequívoco.",
+        "Definir invariantes, leases y recuperación idempotente tras crashes.",
+        "Probar migración y rollback con runs activas y versiones mixtas.",
+        "Superar el gate exigido con telemetría auditable: 100 reinicios, cero wakeups perdidos y 24 horas continuas.",
+        "Añadir pruebas adversariales de concurrencia, bloqueo, crash y fallos de almacenamiento."
+      ]
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T08:40:57.538802Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:40:57.538869Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:40:57.550431Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:40:58.531773Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:40:58.531821Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

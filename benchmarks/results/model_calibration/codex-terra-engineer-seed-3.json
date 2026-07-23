@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "benchmark": "coding_behavioral_calibration",
+  "case": "cli_conversor",
+  "seed": 3,
+  "started_at": "2026-07-22T16:52:55+0200",
+  "evaluation_contract": {
+    "version": 1,
+    "evaluators": [
+      {
+        "id": "hidden_acceptance",
+        "class": "deterministic_behavioral",
+        "blind": true
+      },
+      {
+        "id": "ruff",
+        "class": "static_analysis",
+        "blind": true
+      }
+    ],
+    "independent_semantic_or_structural": true,
+    "goodhart_risk": "residual_hidden_suite_overfit",
+    "constructs_not_measured": [
+      "behavior outside the hidden suite",
+      "long-term maintainability",
+      "real-user acceptance"
+    ]
+  },
+  "config": {
+    "max_attempts": 2,
+    "stateless": true
+  },
+  "arms": {
+    "gpt-5.6-terra": {
+      "model": "gpt-5.6-terra",
+      "profile_id": "codex_subscription",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "issue_status": "done",
+      "attempts": 1,
+      "runs": [
+        {
+          "id": "run:80cb07c1-a210-496d-9ed5-8ad47aaf05c1",
+          "status": "completed",
+          "error_code": null,
+          "liveness_state": "advanced",
+          "provider": "openai-codex",
+          "model": "gpt-5.6-terra",
+          "channel": "subscription"
+        }
+      ],
+      "wall_seconds": 50.563,
+      "input_tokens": 22725,
+      "output_tokens": 2454,
+      "cost_cents": 0,
+      "usage_available": true,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 9,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 9,
+        "deliverable_files": [
+          "README.md",
+          "conversor.py",
+          "tests/test_conversor.py"
+        ]
+      },
+      "workspace": "runtime/bench/codex-terra-engineer-seed-3/gpt-5.6-terra"
+    }
+  },
+  "finished_at": "2026-07-22T16:53:54+0200"
+}

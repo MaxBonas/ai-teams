@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 7.984,
+  "usage": {},
+  "response": {
+    "decision": {
+      "role": "architect",
+      "seed": 3,
+      "architecture_decision": "Unificar la operación de checkout (actualmente dividida en SELECT y UPDATE) en una única transacción atómica en SQLite por tenant_id para evitar la adquisición duplicada de issues por múltiples workers sin detener las runs activas.",
+      "facts": [
+        "SQLite es la única fuente de almacenamiento durable.",
+        "Cada issue está asociada a un tenant_id.",
+        "El checkout actual separa SELECT y UPDATE, lo que permite que dos workers adquieran la misma issue.",
+        "La migración debe realizarse sin detener runs activas.",
+        "Existe un flag para volver al camino anterior."
+      ],
+      "assumptions": [
+        "SQLite admite transacciones atómicas unificadas (o clausulas UPDATE RETURNING) para realizar la lectura y actualización de estado en un solo paso dentro del esquema actual.",
+        "La contención entre workers por tenant_id puede ser manejada mediante transacciones inmediatas o un tiempo de espera (busy timeout) adecuado en SQLite."
+      ]
+    },
+    "constraints": [
+      "SQLite se mantiene como la única fuente de datos durable.",
+      "Prohibido detener las runs activas durante el proceso de migración.",
+      "Garantizar el aislamiento y separación estricta por tenant_id.",
+      "El cambio debe poder ser revertido mediante el flag existente sin afectar el estado persistido."
+    ],
+    "interfaces": {
+      "checkout_atomic_op": {
+        "input": {
+          "tenant_id": "string",
+          "worker_id": "string",
+          "limit": "integer"
+        },
+        "output": {
+          "acquired_issues": "array of issue records"
+        },
+        "guarantees": "Atomicidad completa en la reserva de la issue dentro de SQLite impidiendo asignación doble."
+      },
+      "migration_feature_flag": {
+        "flag_key": "tenant_queue_atomic_checkout_enabled",
+        "type": "boolean",
+        "behavior": "Cuando es false, utiliza el camino legacy; cuando es true, ejecuta el checkout atómico unificado."
+      }
+    },
+    "risks": [
+      {
+        "risk": "Contención de bloqueos (SQLITE_BUSY) por escrituras concurrentes de múltiples workers intentando hacer checkout en el mismo tenant_id.",
+        "mitigation": "Optimizar el tiempo de transacción y aplicar retries con retroceso exponencial a nivel de conexión SQLite."
+      },
+      {
+        "risk": "Incompatibilidad de estado durante la convivencia de workers usando el camino nuevo y el camino anterior durante el despliegue.",
+        "mitigation": "Asegurar que la consulta de checkout atómica actualice atómicamente el estado de la fila en SQLite, haciendo que el camino legacy no vuelva a seleccionar una fila ya reservada."
+      }
+    ],
+    "verification": {
+      "gate_criteria": "Ejecutar exitosamente 100 reinicios con cero wakeups perdidos durante un periodo continuo de 24 horas.",
+      "verifiable_evidence": [
+        "Métricas de telemetría confirmando 100 eventos de reinicio consecutivos con 0 wakeups perdidos en 24 horas.",
+        "Logs de auditoría de SQLite demostrando que ninguna issue_id fue asignada a más de un worker_id."
+      ]
+    },
+    "rollback": {
+      "trigger_condition": "Detección de asignación duplicada de issues, bloqueo severo de base de datos (SQLITE_BUSY persistente) o pérdida de wakeups durante la ventana del gate.",
+      "procedure": "Desactivar el flag de migración para redirigir el flujo de checkout al camino anterior de manera inmediata y sin downtime."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

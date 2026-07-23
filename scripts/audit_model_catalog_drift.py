@@ -22,8 +22,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from aiteam.model_flow_matrix import audit_builtin_model_flows  # noqa: E402
 from aiteam.model_calibration import audit_promoted_model_calibrations  # noqa: E402
+from aiteam.model_tiers import audit_model_tier_matrix  # noqa: E402
 from aiteam.user_config import (  # noqa: E402
-    executable_model_options,
+    DEFAULT_ADAPTER_PROFILES,
+    MODEL_OPTIONS_BY_PROFILE,
+    codex_catalog_snapshot,
     model_options,
 )
 
@@ -91,14 +94,23 @@ def build_report(
     codex_catalog: dict[str, Any],
     observed_at: datetime,
 ) -> dict[str, Any]:
-    inventory_complete = bool(catalog_rows) and all(
+    codex_current = (
+        codex_catalog.get("status") == "current"
+        and bool(codex_catalog.get("installed_version"))
+        and bool(codex_catalog.get("catalog_client_version"))
+    )
+    inventory_complete = bool(catalog_rows) and codex_current and all(
         row.get("status") == "current" and bool(row.get("cli_version"))
         for row in catalog_rows
     )
-    coverage_ok = inventory_complete and all(
+    coverage_ok = inventory_complete and codex_catalog.get("coverage_ok") is True and all(
         row.get("coverage_ok") is True for row in catalog_rows
     )
     flow_ok = flow_report.get("ok") is True
+    tier_report = audit_model_tier_matrix(
+        DEFAULT_ADAPTER_PROFILES, MODEL_OPTIONS_BY_PROFILE
+    )
+    tier_ok = tier_report.get("ok") is True
     observed_versions = {
         str(row.get("profile_id") or ""): str(row.get("cli_version") or "") or None
         for row in catalog_rows
@@ -116,8 +128,13 @@ def build_report(
         for entry in calibration_report["entries"]
     ]
     cadence_due = (observed_at + timedelta(days=30)).date()
-    calibration_due = min(calibration_due_dates, default=cadence_due)
-    next_review_due = min(cadence_due, max(observed_at.date(), calibration_due))
+    scheduled_calibration_due = min(calibration_due_dates, default=cadence_due)
+    calibration_due = (
+        observed_at.date()
+        if calibration_report["all_fresh"] is not True
+        else max(observed_at.date(), scheduled_calibration_due)
+    )
+    next_review_due = min(cadence_due, calibration_due)
     attention: list[dict[str, Any]] = []
     for row in catalog_rows:
         if row.get("status") != "current" or row.get("coverage_ok") is not True:
@@ -129,11 +146,14 @@ def build_report(
                     else "catalog_drift",
                 }
             )
-    if codex_catalog.get("status") != "current":
+    if not codex_current or codex_catalog.get("coverage_ok") is not True:
         attention.append(
             {
                 "profile_id": "codex_subscription",
-                "reason": codex_catalog.get("reason") or codex_catalog.get("status"),
+                "reason": (
+                    codex_catalog.get("reason")
+                    or ("catalog_drift" if codex_current else codex_catalog.get("status"))
+                ),
             }
         )
     for entry in calibration_report["entries"]:
@@ -147,6 +167,14 @@ def build_report(
                     "stale_reasons": entry["stale_reasons"],
                 }
             )
+    if not tier_ok:
+        attention.append(
+            {
+                "profile_id": "builtin_model_catalog",
+                "reason": "model_tier_matrix_incomplete",
+                "failures": tier_report.get("failures") or [],
+            }
+        )
     return {
         "schema_version": 1,
         "benchmark": "model_catalog_drift_audit",
@@ -178,11 +206,16 @@ def build_report(
                 "failures",
             )
         },
+        "model_tier_matrix": {
+            key: tier_report.get(key)
+            for key in ("ok", "policy_version", "models_audited", "failures", "rows")
+        },
         "model_calibration_freshness": calibration_report,
         "gates": {
             "authenticated_inventories_complete": inventory_complete,
             "declared_catalog_coverage": coverage_ok,
             "hermetic_model_flow_matrix": flow_ok,
+            "model_tier_matrix_complete": tier_ok,
             "promoted_model_calibration_registry": calibration_report["registry_valid"],
             "promoted_model_calibrations_fresh": calibration_report["all_fresh"],
         },
@@ -192,6 +225,7 @@ def build_report(
             inventory_complete
             and coverage_ok
             and flow_ok
+            and tier_ok
             and calibration_report["registry_valid"]
             and calibration_report["all_fresh"]
         ),
@@ -291,7 +325,26 @@ def run_audit(*, observed_at: datetime | None = None) -> dict[str, Any]:
         _collect_catalog(profile_id, spec)
         for profile_id, spec in CATALOG_COMMANDS.items()
     ]
-    _, codex_catalog = executable_model_options("codex_subscription")
+    # Old completed-run health must not mask a model removed from the current
+    # Codex cache, so this gate consumes the raw read-only catalog snapshot.
+    codex_catalog = codex_catalog_snapshot()
+    declared = [
+        str(item.get("value") or "")
+        for item in model_options().get("codex_subscription", [])
+        if isinstance(item, dict) and str(item.get("value") or "")
+    ]
+    discovered = [str(item) for item in codex_catalog.pop("models", []) if str(item)]
+    missing = sorted(set(declared) - set(discovered))
+    duplicates = sorted({item for item in discovered if discovered.count(item) > 1})
+    codex_catalog.update(
+        {
+            "declared": sorted(set(declared)),
+            "discovered": sorted(set(discovered)),
+            "missing_declared": missing,
+            "duplicate_discovered": duplicates,
+            "coverage_ok": not missing and not duplicates,
+        }
+    )
     return build_report(
         catalog_rows=catalog_rows,
         flow_report=audit_builtin_model_flows(),

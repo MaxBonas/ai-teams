@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "case_id": "auth_rollout_incident",
+  "seed": 2,
+  "status": "completed",
+  "wall_seconds": 20.125,
+  "usage": {
+    "input_tokens": 16584,
+    "cached_input_tokens": 0,
+    "output_tokens": 848
+  },
+  "response": {
+    "objective": "Detener el impacto del rollout de auth v2, recuperar la tasa de error por debajo del 1,0 % y decidir rollback o reanudación controlada con accountability explícita.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "action": "Pausar inmediatamente el rollout de auth v2 en el 5 %.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [],
+        "gate": "No aumentar el porcentaje mientras la tasa de error sea superior al 1,0 %.",
+        "status": "required"
+      },
+      {
+        "id": "WI-2",
+        "action": "Ejecutar rollback a auth v1 si la pausa no confirma recuperación conforme al gate de verificación.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Disponibilidad confirmada de auth v1"
+        ],
+        "gate": "Reviewer acepta únicamente cuando logs y métricas confirmen la recuperación.",
+        "status": "conditional"
+      },
+      {
+        "id": "WI-3",
+        "action": "Completar y validar la rotación de secrets antes de cualquier nuevo intento de rollout.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Rotación de secrets pendiente"
+        ],
+        "gate": "La rotación debe estar completada y validada antes de reanudar auth v2.",
+        "status": "blocked"
+      },
+      {
+        "id": "WI-4",
+        "action": "Preparar una decisión documentada de reanudación gradual o mantenimiento de auth v1.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "WI-1",
+          "WI-2 si aplica",
+          "WI-3",
+          "Evidencia de logs y métricas"
+        ],
+        "gate": "No recomendar ni programar despliegue para el jueves.",
+        "status": "pending"
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Persistencia o aumento de errores mientras auth v2 permanece activo.",
+        "owner": "Release Engineer",
+        "mitigation": "Mantener el rollout pausado y usar auth v1 para rollback.",
+        "trigger": "Tasa de error superior al 1,0 %."
+      },
+      {
+        "risk": "Reanudación con secrets sin rotar.",
+        "owner": "Release Engineer",
+        "mitigation": "Bloquear la reanudación hasta completar y validar la rotación.",
+        "trigger": "Dependencia de rotación todavía pendiente."
+      },
+      {
+        "risk": "Declarar recuperación sin evidencia suficiente.",
+        "owner": "Reviewer",
+        "mitigation": "Rechazar la aceptación hasta que logs y métricas confirmen recuperación.",
+        "trigger": "Evidencia incompleta, contradictoria o ausente."
+      }
+    ],
+    "verification": {
+      "acceptor": "Reviewer",
+      "required_evidence": [
+        "Logs que confirmen recuperación",
+        "Métricas que confirmen una tasa de error igual o inferior al 1,0 % durante una ventana continua de 10 minutos",
+        "Validación de la rotación de secrets antes de reanudar auth v2"
+      ],
+      "gates": [
+        "No avanzar el rollout mientras la tasa de error supere el 1,0 %.",
+        "No avanzar el rollout mientras la tasa de error supere el 1,0 %.",
+        "Reviewer no acepta hasta confirmar recuperación mediante logs y métricas."
+      ],
+      "success_condition": "Recuperación confirmada por logs y métricas, con tasa de error igual o inferior al 1,0 % durante 10 minutos continuos."
+    },
+    "escalation": [
+      {
+        "condition": "La tasa de error no baja al 1,0 % o menos tras pausar el rollout.",
+        "owner": "Release Engineer",
+        "action": "Ejecutar rollback a auth v1 y solicitar revisión inmediata.",
+        "accountable_acceptor": "Reviewer"
+      },
+      {
+        "condition": "El rollback no recupera el servicio según logs y métricas.",
+        "owner": "Release Engineer",
+        "action": "Escalar como incidente activo y mantener bloqueado auth v2.",
+        "accountable_acceptor": "Reviewer"
+      },
+      {
+        "condition": "La rotación de secrets permanece pendiente o falla su validación.",
+        "owner": "Release Engineer",
+        "action": "Escalar el bloqueo de dependencia; no reanudar el rollout.",
+        "accountable_acceptor": "Reviewer"
+      },
+      {
+        "condition": "No existe evidencia concluyente de recuperación.",
+        "owner": "Reviewer",
+        "action": "Rechazar la aceptación y exigir logs y métricas adicionales.",
+        "accountable_acceptor": "Reviewer"
+      }
+    ]
+  },
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors_retained": 11,
+    "anchors_total": 12,
+    "forbidden_hits": [],
+    "contract_passed": false
+  },
+  "diagnostic": "2026-07-23T07:56:40.241840Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:56:40.241880Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:56:40.249019Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T07:56:40.515532Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:56:40.515556Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "disabled_by_contract",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": false
+}

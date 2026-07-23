@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-medium",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "incident_dependency_handoff",
+  "role": "worker",
+  "seed": 3,
+  "wall_seconds": 74.547,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "incident": true,
+      "owner": true,
+      "observed_lag": true,
+      "threshold": true,
+      "window": true,
+      "freeze": true,
+      "dependency": true,
+      "acceptance": true
+    },
+    "anchors_retained": 8,
+    "anchors_total": 8,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "README.md"
+  },
+  "artifact": "Checklist causal para el incidente INC-42 completado con éxito.\n\n### Checklist Causal - INC-42 (Activo)\n\n**Roles y Responsabilidades:**\n- **Propietario (Owner):** Database SRE\n- **Aprobador (Acceptor):** Incident Commander\n\n**Estado de la Métrica e Incidentes:**\n- **Métrica actual:** El replication lag es de 47 s.\n- **Límite y ventana:** Supera el límite de 10 s durante una ventana de 3 minutos.\n\n**Acciones y Dependencias:**\n- [ ] **Acción obligatoria:** Congelar escrituras (debido a que se superó el límite de lag de 10 s durante 3 minutos).\n- [ ] **Condición de Failover:** Realizar failover a `replica-eu-2` únicamente después de verificar que el checksum coincida.\n\n**Criterios de Aceptación (Incident Commander):**\n- [ ] El replication lag es menor a 10 s (`lag < 10 s`).\n- [ ] El checksum coincide.\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: README.md",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:3711985f-9a54-4f22-82ba-14a8c815ff90",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gemini-3.5-flash-medium",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "runtime/bench/m83-incident-flash-medium-worker-s3/.aiteam/aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true
+}

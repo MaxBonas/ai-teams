@@ -14,7 +14,11 @@ import urllib.request
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api.utils import _require_api_auth_request
+from api.utils import (
+    _require_api_auth_request,
+    get_current_workspace,
+    resolve_runtime_dir,
+)
 from aiteam.adapters.registry import build_default_registry
 from aiteam.user_config import (
     ROLE_CAPABILITY_PROFILES,
@@ -36,6 +40,14 @@ from aiteam.user_config import (
 from aiteam.policies import canonical_role, role_status
 from aiteam.provider_identity import profile_identity
 from aiteam.model_compatibility import compatibility_decision
+from aiteam.model_catalog_api import (
+    catalog_selection_reason,
+    rank_catalog_candidates_for_role,
+)
+from aiteam.model_catalog_service import (
+    get_current_model_catalog,
+    invalidate_model_catalog_cache,
+)
 
 router = APIRouter()
 
@@ -111,15 +123,74 @@ async def get_model_options_for_role(
         # Equipo debe mostrar el catálogo completo: disponibilidad y
         # compatibilidad deshabilitan opciones, no las borran. El ranking por
         # rol no debe perder los campos de inventario/health del catálogo.
-        catalog_options = profile.get("model_options") if isinstance(profile.get("model_options"), list) else []
-        catalog_by_value = {str(item.get("value") or ""): item for item in catalog_options}
+        catalog_options = (
+            profile.get("model_options")
+            if isinstance(profile.get("model_options"), list)
+            else []
+        )
+        catalog_by_value = {
+            str(item.get("value") or ""): item for item in catalog_options
+        }
         ranked_options = model_options_for_role(profile_id, role, executable_only=False)
         options = [
             {**catalog_by_value.get(str(option.get("value") or ""), {}), **option}
             for option in ranked_options
         ]
+        # Compatibilidad transitoria: se conservan todos los campos legacy,
+        # pero identidad, score base, orden y razón vienen del read model M.3.
+        db_path = resolve_runtime_dir(get_current_workspace()) / "aiteam.db"
+        read_model = get_current_model_catalog(
+            db_paths=(db_path,) if db_path.is_file() else ()
+        )
+        catalog_ranked = rank_catalog_candidates_for_role(read_model, role)
+        catalog_by_model = {
+            str(item.get("identity", {}).get("model_id") or ""): item
+            for item in catalog_ranked
+            if str(item.get("identity", {}).get("profile_id") or "") == profile_id
+        }
+        legacy_order = {
+            str(option.get("value") or ""): index
+            for index, option in enumerate(options)
+        }
+        canonical_order = {
+            str(item.get("identity", {}).get("model_id") or ""): index
+            for index, item in enumerate(catalog_ranked)
+            if str(item.get("identity", {}).get("profile_id") or "") == profile_id
+        }
+        options = [
+            {
+                **option,
+                "catalog_candidate_id": catalog_by_model.get(
+                    str(option.get("value") or ""), {}
+                ).get("candidate_id"),
+                "model_role_score": (
+                    catalog_by_model.get(str(option.get("value") or ""), {})
+                    .get("role_evaluation", {})
+                    .get("score")
+                ),
+                "selection_reason": (
+                    catalog_selection_reason(
+                        catalog_by_model[str(option.get("value") or "")][
+                            "role_evaluation"
+                        ]
+                    )
+                    if str(option.get("value") or "") in catalog_by_model
+                    else "role_score_missing"
+                ),
+            }
+            for option in options
+        ]
+        options.sort(
+            key=lambda option: (
+                0 if str(option.get("value") or "") in canonical_order else 1,
+                canonical_order.get(str(option.get("value") or ""), 10**9),
+                legacy_order.get(str(option.get("value") or ""), 10**9),
+            )
+        )
         role_profile = ROLE_CAPABILITY_PROFILES.get(canonical_role(role), {})
-        required = [item.strip() for item in required_capabilities.split(",") if item.strip()]
+        required = [
+            item.strip() for item in required_capabilities.split(",") if item.strip()
+        ]
         options = [
             {
                 **option,
@@ -132,14 +203,18 @@ async def get_model_options_for_role(
                     data_class=data_class,
                     required_capabilities=required,
                     role_profile=role_profile,
-                    candidate_models=options,
+                    # El POST usa el orden persistido del perfil. Mantenerlo
+                    # aquí garantiza paridad aunque la respuesta se reordene.
+                    candidate_models=catalog_options,
                 ),
             }
             for option in options
         ]
     else:
         profiles = {str(item.get("id") or ""): item for item in load_adapter_profiles()}
-        options = profiles.get(profile_id, {}).get("model_options", model_options().get(profile_id, []))
+        options = profiles.get(profile_id, {}).get(
+            "model_options", model_options().get(profile_id, [])
+        )
         role_profile = {}
     return {
         "success": True,
@@ -151,7 +226,9 @@ async def get_model_options_for_role(
             "criticality": criticality,
             "data_class": data_class or None,
             "required_capabilities": [
-                item.strip() for item in required_capabilities.split(",") if item.strip()
+                item.strip()
+                for item in required_capabilities.split(",")
+                if item.strip()
             ],
         },
         "options": options,
@@ -166,7 +243,11 @@ async def post_model_compatibility(body: CompatibilityRequest, request: Request)
     profile = profiles.get(body.profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Adapter profile not found")
-    options = profile.get("model_options") if isinstance(profile.get("model_options"), list) else []
+    options = (
+        profile.get("model_options")
+        if isinstance(profile.get("model_options"), list)
+        else []
+    )
     selected = next(
         (item for item in options if str(item.get("value") or "") == body.model),
         None,
@@ -212,6 +293,7 @@ async def post_user_adapter_secret(body: StoreSecretRequest, request: Request):
         ref = store_secret(provider=body.provider, name=body.name, secret=body.secret)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    invalidate_model_catalog_cache()
     return {"success": True, "ref": ref, "has_secret": True}
 
 
@@ -246,7 +328,9 @@ async def post_user_adapter_profile(body: UpsertProfileRequest, request: Request
                     raise ValueError("each model option needs a unique non-empty value")
                 tier = str(option.get("tier") or "").strip().lower()
                 if tier not in {"budget", "standard", "premium"}:
-                    raise ValueError(f"model {value!r} needs tier budget, standard or premium")
+                    raise ValueError(
+                        f"model {value!r} needs tier budget, standard or premium"
+                    )
                 normalized_option = {**option, "value": value, "tier": tier}
                 for field in ("allowed_roles", "denied_roles", "best_for"):
                     if field not in option:
@@ -255,7 +339,9 @@ async def post_user_adapter_profile(body: UpsertProfileRequest, request: Request
                     for raw_role in option.get(field) or []:
                         normalized = canonical_role(raw_role)
                         if role_status(normalized) == "unknown":
-                            raise ValueError(f"unknown role in model {value!r}: {raw_role}")
+                            raise ValueError(
+                                f"unknown role in model {value!r}: {raw_role}"
+                            )
                         if normalized not in roles:
                             roles.append(normalized)
                     normalized_option[field] = roles
@@ -265,7 +351,11 @@ async def post_user_adapter_profile(body: UpsertProfileRequest, request: Request
         profile = upsert_adapter_profile(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"success": True, "profile": {**profile, "identity": profile_identity(profile)}}
+    invalidate_model_catalog_cache()
+    return {
+        "success": True,
+        "profile": {**profile, "identity": profile_identity(profile)},
+    }
 
 
 @router.post("/api/user-adapters/login")
@@ -274,7 +364,9 @@ async def post_user_adapter_login(body: LoginRequest, request: Request):
     try:
         result = launch_subscription_login(body.cli_id)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"CLI not found: {exc.filename or exc}")
+        raise HTTPException(
+            status_code=404, detail=f"CLI not found: {exc.filename or exc}"
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"success": True, **result}
@@ -306,9 +398,13 @@ async def post_user_adapter_test(body: TestAdapterRequest, request: Request):
             body.profile_id,
             tested_model,
             available=success,
-            reason=str(result.get("reason") or ("live_test_completed" if success else "live_test_failed")),
+            reason=str(
+                result.get("reason")
+                or ("live_test_completed" if success else "live_test_failed")
+            ),
             status="verified" if success else _model_probe_failure_status(result),
         )
+    invalidate_model_catalog_cache()
     return {
         "success": result["status"] in {"ok", "installed"},
         "profile_id": body.profile_id,
@@ -318,7 +414,9 @@ async def post_user_adapter_test(body: TestAdapterRequest, request: Request):
     }
 
 
-def _test_profile(profile: dict[str, Any], *, model: str | None = None) -> dict[str, Any]:
+def _test_profile(
+    profile: dict[str, Any], *, model: str | None = None
+) -> dict[str, Any]:
     adapter_type = str(profile.get("adapter_type") or "")
     profile_id = str(profile.get("id") or "")
     config = resolve_adapter_config(adapter_type, {"profile_id": profile_id})
@@ -327,15 +425,29 @@ def _test_profile(profile: dict[str, Any], *, model: str | None = None) -> dict[
     now = datetime.now(timezone.utc).isoformat()
 
     if adapter_type == "subscription_cli":
-        command = config.get("command") if isinstance(config.get("command"), list) else []
+        command = (
+            config.get("command") if isinstance(config.get("command"), list) else []
+        )
         executable = str(command[0]) if command else "codex"
         resolved = _resolve_cli_executable_for_probe(executable)
         if resolved is None:
-            return {"status": "failed", "checked_at": now, "reason": "cli_not_found", "detail": executable}
+            return {
+                "status": "failed",
+                "checked_at": now,
+                "reason": "cli_not_found",
+                "detail": executable,
+            }
         try:
-            proc = subprocess.run([resolved, "--version"], capture_output=True, text=True, timeout=15)
+            proc = subprocess.run(
+                [resolved, "--version"], capture_output=True, text=True, timeout=15
+            )
         except Exception as exc:
-            return {"status": "failed", "checked_at": now, "reason": "cli_probe_failed", "detail": str(exc)}
+            return {
+                "status": "failed",
+                "checked_at": now,
+                "reason": "cli_probe_failed",
+                "detail": str(exc),
+            }
         if proc.returncode == 0:
             auth = _subscription_auth_probe(profile, config)
             if auth.get("status") == "ok":
@@ -343,14 +455,16 @@ def _test_profile(profile: dict[str, Any], *, model: str | None = None) -> dict[
                     "status": "ok",
                     "checked_at": now,
                     "reason": auth.get("reason") or "subscription_auth_present",
-                    "detail": auth.get("detail") or (proc.stdout or proc.stderr or "").strip()[:300],
+                    "detail": auth.get("detail")
+                    or (proc.stdout or proc.stderr or "").strip()[:300],
                 }
             return {
                 "status": "installed",
                 "checked_at": now,
                 "reason": auth.get("reason") or "cli_installed_auth_not_verified",
                 "detail": (proc.stdout or proc.stderr or "").strip()[:300],
-                "hint": auth.get("hint") or "Login local o API key configurada, y luego vuelve a probar.",
+                "hint": auth.get("hint")
+                or "Login local o API key configurada, y luego vuelve a probar.",
             }
         return {
             "status": "failed",
@@ -361,12 +475,22 @@ def _test_profile(profile: dict[str, Any], *, model: str | None = None) -> dict[
 
     ref = str(config.get("api_key_ref") or "")
     if str(profile.get("channel") or "") == "api" and not read_secret(ref):
-        return {"status": "failed", "checked_at": now, "reason": "missing_secret", "detail": ref or "default secret"}
+        return {
+            "status": "failed",
+            "checked_at": now,
+            "reason": "missing_secret",
+            "detail": ref or "default secret",
+        }
 
     registry = build_default_registry()
     runtime = registry.get(adapter_type)
     if runtime is None:
-        return {"status": "failed", "checked_at": now, "reason": "adapter_not_registered", "detail": adapter_type}
+        return {
+            "status": "failed",
+            "checked_at": now,
+            "reason": "adapter_not_registered",
+            "detail": adapter_type,
+        }
     with_config = getattr(runtime, "with_config", None)
     if callable(with_config):
         runtime = with_config(config)
@@ -415,17 +539,29 @@ def _discover_api_catalog(profile: dict[str, Any]) -> dict[str, Any]:
     secret = read_secret(ref)
     source = str(profile.get("provider") or adapter_type or "provider API")
     if not secret:
-        return {"status": "missing_secret", "source": source, "reason": "missing_secret", "models": []}
+        return {
+            "status": "missing_secret",
+            "source": source,
+            "reason": "missing_secret",
+            "models": [],
+        }
 
     provider = str(profile.get("provider") or "").strip().lower()
     if adapter_type == "gemini_api" or provider in {"google", "gemini"}:
-        url = "https://generativelanguage.googleapis.com/v1beta/models?" + urllib.parse.urlencode({"key": secret})
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models?"
+            + urllib.parse.urlencode({"key": secret})
+        )
         headers: dict[str, str] = {}
         list_key, id_key = "models", "name"
     else:
         base_url = str(config.get("base_url") or "").rstrip("/")
         if not base_url:
-            base_url = "https://api.anthropic.com/v1" if "anthropic" in provider else "https://api.openai.com/v1"
+            base_url = (
+                "https://api.anthropic.com/v1"
+                if "anthropic" in provider
+                else "https://api.openai.com/v1"
+            )
         url = f"{base_url}/models"
         if "anthropic" in provider:
             headers = {"x-api-key": secret, "anthropic-version": "2023-06-01"}
@@ -463,12 +599,19 @@ def _discover_api_catalog(profile: dict[str, Any]) -> dict[str, Any]:
             if list_key == "models":
                 next_token = str(payload.get("nextPageToken") or "")
             elif payload.get("has_more") and page_items:
-                next_token = str(payload.get("last_id") or page_items[-1].get("id") or "")
+                next_token = str(
+                    payload.get("last_id") or page_items[-1].get("id") or ""
+                )
             else:
                 next_token = ""
             if not next_token:
                 break
-        return {"status": "current", "source": source, "models": sorted(set(models)), "reason": "authenticated_discovery"}
+        return {
+            "status": "current",
+            "source": source,
+            "models": sorted(set(models)),
+            "reason": "authenticated_discovery",
+        }
     except urllib.error.HTTPError as exc:
         return {
             "status": "rate_limited" if exc.code == 429 else "failed",
@@ -477,7 +620,12 @@ def _discover_api_catalog(profile: dict[str, Any]) -> dict[str, Any]:
             "reason": f"http_{exc.code}",
         }
     except Exception as exc:
-        return {"status": "failed", "source": source, "models": [], "reason": exc.__class__.__name__}
+        return {
+            "status": "failed",
+            "source": source,
+            "models": [],
+            "reason": exc.__class__.__name__,
+        }
 
 
 def _model_probe_failure_status(result: dict[str, Any]) -> str:
@@ -499,12 +647,18 @@ def _redact_catalog_result(result: dict[str, Any] | None) -> dict[str, Any] | No
     }
 
 
-def _subscription_auth_probe(profile: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+def _subscription_auth_probe(
+    profile: dict[str, Any], config: dict[str, Any]
+) -> dict[str, Any]:
     provider = str(profile.get("provider") or "").lower()
     cli_kind = str(config.get("cli_kind") or "").lower()
     ref = str(config.get("api_key_ref") or "").strip()
     if ref and read_secret(ref):
-        return {"status": "ok", "reason": "api_key_present", "detail": f"{ref} guardada en vault local"}
+        return {
+            "status": "ok",
+            "reason": "api_key_present",
+            "detail": f"{ref} guardada en vault local",
+        }
 
     # Perfiles LOCALES (codex --oss contra Ollama/LM Studio): no necesitan
     # auth de ChatGPT — la verificación honesta es que el runtime local
@@ -518,7 +672,11 @@ def _subscription_auth_probe(profile: dict[str, Any], config: dict[str, Any]) ->
         if auth:
             email = str(auth.get("email") or "").strip()
             detail = f"Codex auth local detectado{f' para {email}' if email else ''}."
-            return {"status": "ok", "reason": "codex_native_auth_present", "detail": detail}
+            return {
+                "status": "ok",
+                "reason": "codex_native_auth_present",
+                "detail": detail,
+            }
         return {
             "status": "installed",
             "reason": "codex_auth_not_verified",
@@ -526,22 +684,56 @@ def _subscription_auth_probe(profile: dict[str, Any], config: dict[str, Any]) ->
         }
 
     if "antigravity" in provider or cli_kind == "antigravity":
-        command = config.get("command") if isinstance(config.get("command"), list) else ["agy"]
+        command = (
+            config.get("command")
+            if isinstance(config.get("command"), list)
+            else ["agy"]
+        )
         executable = _resolve_cli_executable_for_probe(str(command[0] or "agy"))
         if executable:
             try:
                 probe = subprocess.run(
-                    [executable, "--new-project", "--print", "Reply exactly OK", "--mode", "plan", "--sandbox", "--print-timeout", "30s"],
-                    capture_output=True, text=True, timeout=45, encoding="utf-8", errors="replace",
+                    [
+                        executable,
+                        "--new-project",
+                        "--print",
+                        "Reply exactly OK",
+                        "--mode",
+                        "plan",
+                        "--sandbox",
+                        "--print-timeout",
+                        "30s",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=45,
+                    encoding="utf-8",
+                    errors="replace",
                 )
                 if probe.returncode == 0 and "OK" in (probe.stdout or ""):
-                    return {"status": "ok", "reason": "antigravity_keyring_auth_present", "detail": "Antigravity auth verificado en vivo"}
-                return {"status": "installed", "reason": "antigravity_auth_not_verified", "hint": (probe.stderr or probe.stdout or "").strip()[:300]}
+                    return {
+                        "status": "ok",
+                        "reason": "antigravity_keyring_auth_present",
+                        "detail": "Antigravity auth verificado en vivo",
+                    }
+                return {
+                    "status": "installed",
+                    "reason": "antigravity_auth_not_verified",
+                    "hint": (probe.stderr or probe.stdout or "").strip()[:300],
+                }
             except Exception as exc:
-                return {"status": "installed", "reason": "antigravity_auth_probe_failed", "hint": str(exc)[:300]}
+                return {
+                    "status": "installed",
+                    "reason": "antigravity_auth_probe_failed",
+                    "hint": str(exc)[:300],
+                }
 
     if "opencode" in provider or cli_kind == "opencode":
-        command = config.get("command") if isinstance(config.get("command"), list) else ["opencode"]
+        command = (
+            config.get("command")
+            if isinstance(config.get("command"), list)
+            else ["opencode"]
+        )
         executable = _resolve_cli_executable_for_probe(str(command[0] or "opencode"))
         if executable:
             try:
@@ -563,10 +755,19 @@ def _subscription_auth_probe(profile: dict[str, Any], config: dict[str, Any]) ->
                 return {
                     "status": "installed",
                     "reason": "opencode_auth_not_verified",
-                    "hint": "Ejecuta `opencode auth login --provider opencode` y acepta las condiciones de privacidad de Zen.",
+                    "hint": (
+                        "OpenCode Zen exige una API key personal incluso para modelos de "
+                        "precio temporalmente cero. Ejecuta "
+                        "`opencode auth login --provider opencode`, conecta tu cuenta y "
+                        "acepta sus condiciones; AI Teams no puede automatizar esa decisión."
+                    ),
                 }
             except Exception as exc:
-                return {"status": "installed", "reason": "opencode_auth_probe_failed", "hint": str(exc)[:300]}
+                return {
+                    "status": "installed",
+                    "reason": "opencode_auth_probe_failed",
+                    "hint": str(exc)[:300],
+                }
 
     return {"status": "installed", "reason": "cli_installed_auth_not_verified"}
 
@@ -576,7 +777,9 @@ def _resolve_cli_executable_for_probe(name: str) -> str | None:
     if resolved:
         return resolved
     if os.name == "nt" and name.lower() == "agy":
-        candidate = Path(os.environ.get("LOCALAPPDATA") or "") / "agy" / "bin" / "agy.exe"
+        candidate = (
+            Path(os.environ.get("LOCALAPPDATA") or "") / "agy" / "bin" / "agy.exe"
+        )
         if candidate.is_file():
             return str(candidate)
     return None
@@ -602,7 +805,9 @@ def _local_runtime_probe(config: dict[str, Any]) -> dict[str, Any]:
             "reason": f"{local_provider}_not_running",
             "hint": f"Arranca {local_provider} y vuelve a probar ({exc.__class__.__name__}).",
         }
-    if model and not any(n == model or n.startswith(model.split(":")[0]) for n in names):
+    if model and not any(
+        n == model or n.startswith(model.split(":")[0]) for n in names
+    ):
         return {
             "status": "installed",
             "reason": "local_model_missing",

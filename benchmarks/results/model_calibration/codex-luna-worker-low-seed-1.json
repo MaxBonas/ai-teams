@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_luna_tier3_role_canary",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
+  "role": "worker",
+  "seed": 1,
+  "wall_seconds": 28.406,
+  "attempts": 2,
+  "checks": {
+    "issue_done": false,
+    "run_completed": true,
+    "valid_assignee_report": false,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": false
+  },
+  "evaluation": {
+    "anchors": {
+      "active_wave": true,
+      "owner": true,
+      "observed_rate": true,
+      "threshold": true,
+      "window": true,
+      "rollback": true,
+      "acceptance": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": null,
+  "artifact": "Checklist causal preparado y tarea cerrada.\n\n⚙ Sistema: el rol de solo lectura intentó cerrar sin un AGENT-REPORT válido. El cierre no cuenta y se permite un único reintento de formato.\n\nChecklist causal preparado y tarea cerrada.\n\n⚙ Sistema: segundo cierre sin AGENT-REPORT válido; la tarea queda bloqueada y vuelve al supervisor para reasignación o ajuste de modelo.\n\nChecklist causal:\n1. Si la tasa de error permanece en 2,1 % durante 5 minutos y supera el límite de 1,0 %, entonces pausar W3.\n2. Tras pausar W3, volver a W2.\n3. Release Engineer es el owner de la acción y coordinación.\n4. Reviewer acepta únicamente cuando los logs y la métrica confirmen la recuperación.\n5. Evidencia requerida: logs de recuperación y métrica por debajo del límite.\n\n---AGENT-REPORT---\nrole: worker\nresult: Checklist causal de decisión reportado.\nissue_status: done\nnext_owner: Release Engineer\nblocker: Ninguno; pendiente de confirmación de recuperación por Reviewer.\nevidence: Tasa de error observada de 2,1 %, límite operativo de 1,0 % durante 5 minutos; validación requerida mediante logs y métrica.",
+  "runtime": {
+    "issue_status": "blocked",
+    "run": {
+      "id": "run:47aa923a-7860-40ec-ae27-f5251f680643",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "channel": "subscription",
+      "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 17847, \"output_tokens\": 700, \"reasoning_output_tokens\": 34}"
+    },
+    "input_tokens": 35400,
+    "output_tokens": 1032,
+    "cost_cents": 0,
+    "db": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\bench\\codex-luna-worker-low-seed-1\\.aiteam\\aiteam.db"
+  },
+  "ok": false
+}

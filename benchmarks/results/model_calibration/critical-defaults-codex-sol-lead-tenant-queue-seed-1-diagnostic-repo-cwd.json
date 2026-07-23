@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 32.734,
+  "usage": {
+    "input_tokens": 19786,
+    "cached_input_tokens": 0,
+    "output_tokens": 1793
+  },
+  "response": {
+    "objective": {
+      "description": "Migrar la cola multi-tenant para que SQLite sea la única fuente durable, garantizando checkout atómico por tenant_id, continuidad de runs activas y rollback mediante el flag existente.",
+      "success_criteria": [
+        "Cada issue y operación de cola preserva tenant_id.",
+        "Dos workers no pueden adquirir la misma issue.",
+        "Las runs activas continúan durante la migración.",
+        "El camino anterior puede restaurarse mediante el flag.",
+        "El gate final completa 100 reinicios y 24 horas con cero wakeups perdidos."
+      ],
+      "owner": "Lead",
+      "acceptor": "Lead"
+    },
+    "work_items": [
+      {
+        "id": "W1",
+        "description": "Inventariar escrituras, lecturas, checkout, wakeups, runs activas y comportamiento del flag.",
+        "owner": "Engineer",
+        "acceptor": "Lead",
+        "dependencies": [],
+        "evidence": [
+          "Mapa de rutas durables",
+          "Invariantes de tenant_id",
+          "Plan de compatibilidad para runs activas"
+        ],
+        "gate": "No existen rutas durables fuera de SQLite sin registrar."
+      },
+      {
+        "id": "W2",
+        "description": "Diseñar la migración incremental y el checkout atómico usando una única transacción SQLite con selección y actualización condicionada.",
+        "owner": "Senior Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "W1"
+        ],
+        "evidence": [
+          "Diseño transaccional",
+          "Estados y transiciones",
+          "Estrategia de rollback"
+        ],
+        "gate": "El diseño demuestra exclusión mutua, aislamiento por tenant y compatibilidad con runs activas."
+      },
+      {
+        "id": "W3",
+        "description": "Implementar tenant_id en todas las consultas relevantes y reemplazar el SELECT más UPDATE separado por checkout atómico.",
+        "owner": "Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "W2"
+        ],
+        "evidence": [
+          "Pruebas de concurrencia",
+          "Pruebas de aislamiento entre tenants",
+          "Registro del resultado de cada checkout"
+        ],
+        "gate": "Bajo contención, exactamente un worker adquiere cada issue."
+      },
+      {
+        "id": "W4",
+        "description": "Implementar la transición sin detener runs activas y validar que el flag restaura el camino anterior sin perder estado durable.",
+        "owner": "Engineer",
+        "acceptor": "QA",
+        "dependencies": [
+          "W2",
+          "W3"
+        ],
+        "evidence": [
+          "Prueba con runs iniciadas antes del cambio",
+          "Prueba de activación y desactivación del flag",
+          "Comparación de estado antes y después del rollback"
+        ],
+        "gate": "Las runs activas terminan correctamente y el rollback no pierde ni duplica wakeups."
+      },
+      {
+        "id": "W5",
+        "description": "Ejecutar pruebas de fallo, reinicio, concurrencia y recuperación sobre la ruta nueva.",
+        "owner": "QA",
+        "acceptor": "Lead",
+        "dependencies": [
+          "W3",
+          "W4"
+        ],
+        "evidence": [
+          "Resultados reproducibles",
+          "Conteo de wakeups emitidos, procesados, pendientes y duplicados",
+          "Trazabilidad por tenant_id, issue_id y run_id"
+        ],
+        "gate": "No hay adquisiciones dobles, cruces de tenant ni pérdida de wakeups."
+      },
+      {
+        "id": "W6",
+        "description": "Superar el gate final de 100 reinicios y mantener observación durante 24 horas.",
+        "owner": "QA",
+        "acceptor": "Lead",
+        "dependencies": [
+          "W5"
+        ],
+        "evidence": [
+          "Registro de los 100 reinicios",
+          "Ventana continua de 24 horas",
+          "Cero wakeups perdidos"
+        ],
+        "gate": "100 reinicios completados y cero wakeups perdidos durante 24 horas."
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Dos workers adquieren la misma issue por una operación no atómica.",
+        "owner": "Senior Engineer",
+        "mitigation": "Checkout en una única transacción con actualización condicionada y verificación de filas afectadas.",
+        "gate": "Prueba concurrente repetida sin doble ganador."
+      },
+      {
+        "risk": "Consultas sin tenant_id mezclan datos entre tenants.",
+        "owner": "Engineer",
+        "mitigation": "Aplicar tenant_id a claves, filtros, índices y pruebas de aislamiento.",
+        "gate": "Ninguna operación puede leer o modificar una issue de otro tenant."
+      },
+      {
+        "risk": "La migración interrumpe o deja huérfanas runs activas.",
+        "owner": "Lead",
+        "mitigation": "Despliegue incremental, compatibilidad temporal y conservación de identificadores y estados.",
+        "gate": "Runs anteriores al cambio continúan hasta un estado terminal válido."
+      },
+      {
+        "risk": "El rollback mediante flag produce pérdida o duplicación.",
+        "owner": "Reviewer",
+        "mitigation": "Mantener SQLite como fuente durable común y probar cambios repetidos del flag.",
+        "gate": "El rollback conserva cardinalidad y trazabilidad de wakeups."
+      },
+      {
+        "risk": "El gate mide procesos vivos pero no wakeups realmente procesados.",
+        "owner": "QA",
+        "mitigation": "Conciliar wakeups emitidos, pendientes, reclamados, completados y duplicados.",
+        "gate": "La conciliación demuestra cero pérdidas."
+      }
+    ],
+    "verification": {
+      "owner": "QA",
+      "acceptor": "Lead",
+      "checks": [
+        "Checkout concurrente con múltiples workers sobre la misma issue.",
+        "Concurrencia entre tenants con identificadores potencialmente coincidentes.",
+        "Reinicio antes, durante y después del checkout.",
+        "Continuidad de runs activas durante el cambio de ruta.",
+        "Activación y desactivación repetida del flag.",
+        "Conciliación durable de todos los wakeups.",
+        "Cien reinicios y observación continua durante 24 horas."
+      ],
+      "release_gate": "No se acepta la migración hasta completar 100 reinicios con cero wakeups perdidos durante 24 horas, sin doble checkout, cruce de tenants ni interrupción de runs activas."
+    },
+    "escalation": [
+      {
+        "condition": "Se detecta cualquier wakeup perdido, duplicación no idempotente o doble checkout.",
+        "action": "Detener la promoción, activar el camino anterior mediante el flag, preservar evidencias y abrir un issue bloqueante.",
+        "owner": "Lead",
+        "decision_maker": "Lead"
+      },
+      {
+        "condition": "Una run activa no puede continuar de forma segura durante la migración.",
+        "action": "Mantener la ruta anterior para esa cohorte y exigir un diseño de compatibilidad revisado.",
+        "owner": "Senior Engineer",
+        "decision_maker": "Lead"
+      },
+      {
+        "condition": "No puede demostrarse aislamiento completo por tenant_id.",
+        "action": "Bloquear el release y ampliar la auditoría de consultas, índices y claves.",
+        "owner": "Reviewer",
+        "decision_maker": "Lead"
+      },
+      {
+        "condition": "El rollback altera el estado durable o requiere detener runs.",
+        "action": "Declarar el flag no apto como mecanismo de recuperación y rediseñar la transición antes de continuar.",
+        "owner": "Lead",
+        "decision_maker": "Lead"
+      },
+      {
+        "condition": "El gate de 24 horas se interrumpe o cualquiera de los 100 reinicios falla.",
+        "action": "Reiniciar el gate completo después de corregir y revisar la causa.",
+        "owner": "QA",
+        "decision_maker": "Lead"
+      }
+    ]
+  },
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "forbidden_hits": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T07:51:47.179667Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:51:47.180612Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:51:47.253022Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T07:51:47.278382Z ERROR codex_core::session::session: failed to load skill C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\.agents\\skills\\fix-mcp\\SKILL.md: missing YAML frontmatter delimited by ---\n2026-07-23T07:51:47.920221Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T07:51:47.920249Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "ok": true
+}

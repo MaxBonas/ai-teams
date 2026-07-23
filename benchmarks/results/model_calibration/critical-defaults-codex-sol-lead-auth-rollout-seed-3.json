@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "case_id": "auth_rollout_incident",
+  "seed": 3,
+  "status": "completed",
+  "wall_seconds": 15.843,
+  "usage": {
+    "input_tokens": 16584,
+    "cached_input_tokens": 0,
+    "output_tokens": 662
+  },
+  "response": {
+    "objective": {
+      "goal": "Detener el rollout de auth v2 al 5 % y recuperar una tasa de error igual o inferior al 1,0 %.",
+      "lead_accountability": "Coordinar decisiones, verificar owners y exigir evidencia antes de aceptar la recuperación."
+    },
+    "work_items": [
+      {
+        "id": "WI-1",
+        "action": "Pausar el rollout de auth v2 al 5 %.",
+        "owner": "Release Engineer",
+        "accepter": "Reviewer",
+        "dependencies": [],
+        "gate": "Rollout confirmado sin avance adicional."
+      },
+      {
+        "id": "WI-2",
+        "action": "Ejecutar rollback a auth v1 si la tasa de error no se recupera dentro del límite.",
+        "owner": "Release Engineer",
+        "accepter": "Reviewer",
+        "dependencies": [
+          "Disponibilidad de auth v1"
+        ],
+        "gate": "Logs y métricas confirman una tasa de error igual o inferior al 1,0 %."
+      },
+      {
+        "id": "WI-3",
+        "action": "Completar la rotación de secrets antes de reanudar auth v2.",
+        "owner": "Release Engineer",
+        "accepter": "Reviewer",
+        "dependencies": [
+          "Rotación de secrets pendiente"
+        ],
+        "gate": "Dependencia completada y recuperación confirmada mediante logs y métricas."
+      }
+    ],
+    "risks": [
+      {
+        "risk": "La tasa de error observada permanece en 2,4 %, por encima del límite de 1,0 %.",
+        "owner": "Release Engineer",
+        "mitigation": "Mantener pausado el rollout y usar auth v1 para rollback."
+      },
+      {
+        "risk": "La rotación de secrets pendiente bloquea la reanudación segura.",
+        "owner": "Release Engineer",
+        "mitigation": "No reanudar auth v2 hasta completar la dependencia."
+      },
+      {
+        "risk": "Aceptar una recuperación sin evidencia suficiente.",
+        "owner": "Reviewer",
+        "mitigation": "Rechazar la aceptación hasta que logs y métricas confirmen la recuperación."
+      }
+    ],
+    "verification": {
+      "acceptance_owner": "Reviewer",
+      "required_evidence": [
+        "Logs que confirmen recuperación",
+        "Métricas con tasa de error igual o inferior al 1,0 %"
+      ],
+      "release_gate": "No reanudar el rollout mientras falte la rotación de secrets o no se cumpla el límite de error."
+    },
+    "escalation": {
+      "conditions": [
+        {
+          "condition": "La tasa de error continúa por encima del 1,0 %.",
+          "accountable": "Release Engineer",
+          "required_action": "Mantener la pausa y proceder con rollback a auth v1."
+        },
+        {
+          "condition": "La rotación de secrets sigue pendiente.",
+          "accountable": "Release Engineer",
+          "required_action": "Bloquear la reanudación del rollout."
+        },
+        {
+          "condition": "Logs o métricas no confirman recuperación.",
+          "accountable": "Reviewer",
+          "required_action": "No aceptar la recuperación y devolver el incidente al Release Engineer."
+        }
+      ],
+      "lead_role": "Asegurar que cada condición tenga respuesta, owner y gate explícitos."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": false,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 11,
+    "anchors_total": 12,
+    "missing_anchors": [
+      "case.observation_window"
+    ],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": false
+  },
+  "diagnostic": "2026-07-23T08:02:26.737417Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:02:26.737463Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:02:26.746257Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T08:02:27.087017Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T08:02:27.087039Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": false,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

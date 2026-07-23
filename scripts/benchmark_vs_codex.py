@@ -7,7 +7,7 @@ tiempo de pared. El juez es un exit code, no una opinión.
 
 Uso (gasta tokens reales — NUNCA corre en la suite de tests):
     venv/Scripts/python.exe scripts/benchmark_vs_codex.py --case benchmarks/cli_conversor
-    venv/Scripts/python.exe scripts/benchmark_vs_codex.py --case ... --arm solo --model gpt-5.5
+    venv/Scripts/python.exe scripts/benchmark_vs_codex.py --case ... --arm solo --model gpt-5.6-sol
 """
 from __future__ import annotations
 
@@ -233,7 +233,7 @@ def main() -> int:
     parser.add_argument("--case", type=Path, default=REPO_ROOT / "benchmarks" / "cli_conversor")
     parser.add_argument("--arm", choices=["both", "team", "solo"], default="both")
     parser.add_argument("--workdir", type=Path, default=None)
-    parser.add_argument("--model", default="gpt-5.5", help="modelo del brazo solo")
+    parser.add_argument("--model", default="gpt-5.6-sol", help="modelo del brazo solo")
     parser.add_argument("--profiles", default="codex_subscription,openai_api")
     parser.add_argument(
         "--run-profile",

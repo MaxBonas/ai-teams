@@ -2,6 +2,10 @@ from scripts.benchmark_antigravity_coding_models import (
     BASELINE_MODEL,
     CHALLENGER_MODEL,
     aggregate_reports,
+    aggregate_diverse_family_reports,
+    aggregate_single_model_reports,
+    bootstrap_profile_ids,
+    model_workspace_name,
 )
 from scripts.benchmark_integrity import code_evaluation_contract
 
@@ -93,3 +97,94 @@ def test_legacy_behavioral_report_cannot_promote_without_explicit_limits() -> No
     assert aggregate["integrity"]["promotion_allowed"] is False
     assert aggregate["conclusion"]["disposition"] == "insufficient_promotion_contract"
     assert aggregate["conclusion"]["default_change_allowed"] is False
+
+
+def test_single_model_aggregate_calibrates_exact_pair_without_fake_baseline() -> None:
+    reports = [
+        {
+            "seed": seed,
+            "case": "cli_conversor",
+            "evaluation_contract": code_evaluation_contract(),
+            "_source_receipt": f"local-engineer-seed-{seed}.json",
+            "arms": {
+                "gpt-5.6-terra": {
+                    **_arm(passed=9, seconds=50 + seed),
+                    "input_tokens": 100 * seed,
+                    "output_tokens": 10 * seed,
+                    "usage_available": True,
+                }
+            },
+        }
+        for seed in (1, 2, 3)
+    ]
+
+    aggregate = aggregate_single_model_reports(
+        reports, model="gpt-5.6-terra", profile_id="codex_subscription"
+    )
+
+    assert aggregate["matrix_complete"] is True
+    assert aggregate["samples_passed"] == 3
+    assert aggregate["usage"]["input_tokens"] == 600
+    assert aggregate["integrity"]["sources_bound"] is True
+    assert len(aggregate["sample_manifest"][0]["evidence_sha256"]) == 64
+    assert aggregate["conclusion"]["exact_pair_calibrated"] is True
+    assert aggregate["conclusion"]["default_change_allowed"] is False
+
+
+def test_local_coding_bootstrap_keeps_target_profile_and_no_external_quota() -> None:
+    assert bootstrap_profile_ids("local_gemma4_ollama") == [
+        "local_gemma4_ollama",
+        "codex_subscription",
+    ]
+    assert model_workspace_name("gemma4:26b") == "gemma4_26b"
+
+
+def test_diversity_aggregate_requires_two_exact_distinct_families() -> None:
+    aggregates = [
+        {
+            "profile_id": "codex_subscription",
+            "model": "gpt-5.6-terra",
+            "case": case,
+            "matrix_complete": True,
+            "samples_passed": 3,
+            "conclusion": {"exact_pair_calibrated": True},
+            "_source_receipt": f"{case}.json",
+        }
+        for case in ("cli_conversor", "config_redactor")
+    ]
+
+    aggregate = aggregate_diverse_family_reports(
+        aggregates,
+        model="gpt-5.6-terra",
+        profile_id="codex_subscription",
+    )
+
+    assert aggregate["case_families"] == ["cli_conversor", "config_redactor"]
+    assert aggregate["samples_total"] == 6
+    assert aggregate["integrity"]["same_exact_pair"] is True
+    assert aggregate["conclusion"]["case_diversity_passed"] is True
+
+
+def test_diversity_aggregate_rejects_duplicate_family_or_identity() -> None:
+    aggregates = [
+        {
+            "profile_id": "codex_subscription",
+            "model": model,
+            "case": "same_case",
+            "matrix_complete": True,
+            "samples_passed": 3,
+            "conclusion": {"exact_pair_calibrated": True},
+            "_source_receipt": f"{model}.json",
+        }
+        for model in ("gpt-5.6-terra", "gpt-5.6-luna")
+    ]
+
+    aggregate = aggregate_diverse_family_reports(
+        aggregates,
+        model="gpt-5.6-terra",
+        profile_id="codex_subscription",
+    )
+
+    assert aggregate["conclusion"]["exact_pair_calibrated"] is False
+    assert aggregate["integrity"]["same_exact_pair"] is False
+    assert aggregate["integrity"]["two_distinct_families"] is False

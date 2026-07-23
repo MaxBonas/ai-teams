@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.145.0",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 28.766,
+  "usage": {
+    "input_tokens": 16663,
+    "cached_input_tokens": 0,
+    "output_tokens": 1229
+  },
+  "response": {
+    "objective": "Migrar la cola multi-tenant manteniendo SQLite como única fuente durable, garantizando aislamiento por tenant_id y un checkout atómico que impida que dos workers obtengan la misma issue, sin detener runs activas y conservando el flag de retorno al camino anterior.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "task": "Definir invariantes de durabilidad, aislamiento por tenant_id, exclusividad del checkout y continuidad de runs activas.",
+        "owner": "lead",
+        "acceptor": "architect",
+        "dependencies": [],
+        "gate": "Invariantes y criterios de aceptación documentados sin fuentes durables adicionales."
+      },
+      {
+        "id": "WI-2",
+        "task": "Diseñar e implementar el checkout atómico en SQLite, eliminando la separación vulnerable entre SELECT y UPDATE.",
+        "owner": "database_owner",
+        "acceptor": "lead",
+        "dependencies": [
+          "WI-1"
+        ],
+        "gate": "Dos workers concurrentes no pueden ganar la misma issue y toda operación respeta tenant_id."
+      },
+      {
+        "id": "WI-3",
+        "task": "Validar que cada lectura, selección, actualización y recuperación de issues esté delimitada por tenant_id.",
+        "owner": "queue_owner",
+        "acceptor": "security_acceptor",
+        "dependencies": [
+          "WI-1",
+          "WI-2"
+        ],
+        "gate": "No existe acceso cruzado entre tenants en los caminos nuevo y anterior."
+      },
+      {
+        "id": "WI-4",
+        "task": "Introducir el nuevo checkout sin detener ni invalidar runs activas.",
+        "owner": "runtime_owner",
+        "acceptor": "operations_acceptor",
+        "dependencies": [
+          "WI-2",
+          "WI-3"
+        ],
+        "gate": "Las runs activas continúan durante la migración sin interrupción atribuible al cambio."
+      },
+      {
+        "id": "WI-5",
+        "task": "Verificar y conservar el flag que permite volver al camino anterior.",
+        "owner": "release_owner",
+        "acceptor": "lead",
+        "dependencies": [
+          "WI-2",
+          "WI-4"
+        ],
+        "gate": "El retorno mediante flag está probado y no cambia a SQLite como única fuente durable."
+      },
+      {
+        "id": "WI-6",
+        "task": "Ejecutar la validación de reinicios y wakeups durante la ventana exigida.",
+        "owner": "verification_owner",
+        "acceptor": "lead",
+        "dependencies": [
+          "WI-2",
+          "WI-3",
+          "WI-4",
+          "WI-5"
+        ],
+        "gate": "100 reinicios con cero wakeups perdidos durante 24 horas."
+      },
+      {
+        "id": "WI-7",
+        "task": "Autorizar la migración únicamente tras superar todos los gates y mantener preparado el rollback por flag.",
+        "owner": "lead",
+        "acceptor": "operations_acceptor",
+        "dependencies": [
+          "WI-6"
+        ],
+        "gate": "Todos los aceptadores aprueban sus entregables y el gate de 100 reinicios con cero wakeups perdidos durante 24 horas está cumplido."
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Dos workers obtienen la misma issue por mantener SELECT y UPDATE separados.",
+        "owner": "database_owner",
+        "mitigation": "Hacer atómico el checkout en SQLite.",
+        "acceptor": "lead"
+      },
+      {
+        "risk": "Acceso o asignación cruzada entre tenants.",
+        "owner": "queue_owner",
+        "mitigation": "Aplicar tenant_id en todos los caminos de lectura y mutación.",
+        "acceptor": "security_acceptor"
+      },
+      {
+        "risk": "Pérdida de wakeups durante reinicios.",
+        "owner": "verification_owner",
+        "mitigation": "Bloquear la migración hasta completar 100 reinicios con cero wakeups perdidos durante 24 horas.",
+        "acceptor": "lead"
+      },
+      {
+        "risk": "Interrupción de runs activas durante la migración.",
+        "owner": "runtime_owner",
+        "mitigation": "Desplegar el cambio sin detener runs activas y verificar su continuidad.",
+        "acceptor": "operations_acceptor"
+      },
+      {
+        "risk": "El rollback introduce otra fuente durable o queda inutilizable.",
+        "owner": "release_owner",
+        "mitigation": "Mantener SQLite como única fuente durable y probar el retorno mediante el flag existente.",
+        "acceptor": "lead"
+      }
+    ],
+    "verification": {
+      "owner": "verification_owner",
+      "acceptor": "lead",
+      "checks": [
+        {
+          "check": "Exclusividad del checkout",
+          "success_condition": "Ninguna issue es ganada por dos workers."
+        },
+        {
+          "check": "Aislamiento multi-tenant",
+          "success_condition": "Toda issue conserva tenant_id y ningún camino cruza límites de tenant."
+        },
+        {
+          "check": "Continuidad operativa",
+          "success_condition": "La migración no detiene runs activas."
+        },
+        {
+          "check": "Rollback",
+          "success_condition": "El flag devuelve al camino anterior manteniendo SQLite como única fuente durable."
+        },
+        {
+          "check": "Gate final",
+          "success_condition": "Ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas."
+        }
+      ],
+      "release_condition": "No autorizar la migración hasta que todos los checks sean aceptados."
+    },
+    "escalation": [
+      {
+        "trigger": "Una issue puede ser ganada por dos workers.",
+        "action": "Bloquear la migración y escalar al database_owner y al lead."
+      },
+      {
+        "trigger": "Se detecta acceso cruzado entre tenant_id.",
+        "action": "Bloquear la migración y escalar al queue_owner, security_acceptor y lead."
+      },
+      {
+        "trigger": "Se pierde cualquier wakeup durante la ventana de 24 horas o no se completan 100 reinicios.",
+        "action": "Declarar fallido el gate, mantener o activar el camino anterior mediante el flag y escalar al verification_owner y lead."
+      },
+      {
+        "trigger": "La migración exige detener una run activa o interrumpe una run activa.",
+        "action": "Detener el avance, usar el flag para volver al camino anterior y escalar al runtime_owner, operations_acceptor y lead."
+      },
+      {
+        "trigger": "SQLite deja de ser la única fuente durable.",
+        "action": "Bloquear o revertir el cambio y escalar al architect y lead."
+      },
+      {
+        "trigger": "El flag de retorno no funciona.",
+        "action": "No autorizar la migración y escalar al release_owner y lead."
+      }
+    ]
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-23T09:01:13.521137Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T09:01:13.521185Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-23T09:01:13.530646Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-23T09:01:13.917400Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-23T09:01:13.917428Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

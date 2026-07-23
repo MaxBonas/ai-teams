@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_prompt_comparison",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-sol",
+  "role": "quorum_auditor",
+  "case_id": "auth_rollout_incident",
+  "required_seeds": [
+    1,
+    2,
+    3
+  ],
+  "comparable": true,
+  "v1_samples_passed": 1,
+  "v2_samples_passed": 3,
+  "pass_delta": 2,
+  "improvement_observed": true,
+  "regression_observed": false,
+  "source_receipts": {
+    "v1": [
+      "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-1.json",
+      "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-2.json",
+      "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-auth-rollout-seed-3.json"
+    ],
+    "v2": [
+      "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-quorum-auditor-auth-rollout-seed-1.json",
+      "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-quorum-auditor-auth-rollout-seed-2.json",
+      "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-quorum-auditor-auth-rollout-seed-3.json"
+    ]
+  },
+  "conclusion": {
+    "calibration_allowed": false,
+    "next_gate": "rerun_full_two_case_v2_matrix_before_registry_change"
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "ci_provenance": {
+    "job": "windows-clean-room",
+    "repository": "MaxBonas/ai-teams",
+    "run_attempt": "1",
+    "run_id": "30023876549",
+    "runner_arch": "X64",
+    "runner_os": "Windows",
+    "source_sha": "f2a20ede8629a843e1385c06c3f9eded96f8f470",
+    "trigger_sha": "e3931412bd791fd5614269a3764c271123c384ae"
+  },
+  "environment_class": "independent_ephemeral_ci",
+  "fixture": {
+    "created": true,
+    "goals": 0,
+    "issues": 1,
+    "tables": 26
+  },
+  "global_cli_inventory_after": {
+    "antigravity": false,
+    "codex": false,
+    "lmstudio": false,
+    "ollama": false,
+    "opencode": false
+  },
+  "global_cli_inventory_before": {
+    "antigravity": false,
+    "codex": false,
+    "lmstudio": false,
+    "ollama": false,
+    "opencode": false
+  },
+  "host": {
+    "architecture": "amd64",
+    "os": "windows",
+    "python_bootstrap": "3.12.10"
+  },
+  "independent_machine": true,
+  "installation_audit": {
+    "contract_updated_at": "2026-07-23",
+    "control_plane_ready": true,
+    "live_runs_status": "primary_adapter_required",
+    "runtimes": [
+      {
+        "id": "python",
+        "minimum_version": "3.10",
+        "ready": true,
+        "version": "3.14.6"
+      },
+      {
+        "id": "node",
+        "minimum_version": "22",
+        "ready": true,
+        "version": "v24.18.0"
+      },
+      {
+        "id": "npm",
+        "minimum_version": "10",
+        "ready": true,
+        "version": "11.16.0"
+      },
+      {
+        "id": "git",
+        "minimum_version": "2.23",
+        "ready": true,
+        "version": "git version 2.55.0.windows.2"
+      },
+      {
+        "id": "powershell",
+        "minimum_version": "5.1",
+        "ready": true,
+        "version": "7.6.3"
+      }
+    ],
+    "schema_version": "installation_support_audit_v1",
+    "support_id": "windows_native_x86_64",
+    "support_status": "preview"
+  },
+  "ok": true,
+  "promotion_allowed": true,
+  "schema_version": "windows_clean_room_acceptance_v1",
+  "source": {
+    "checkout": "actions_checkout",
+    "revision": "f2a20ede8629a843e1385c06c3f9eded96f8f470"
+  },
+  "steps": [
+    {
+      "duration_seconds": 0.031,
+      "exit_code": 0,
+      "name": "source_revision",
+      "ok": true
+    },
+    {
+      "duration_seconds": 43.906,
+      "exit_code": 0,
+      "name": "bootstrap_first",
+      "ok": true
+    },
+    {
+      "duration_seconds": 2.109,
+      "exit_code": 0,
+      "name": "bootstrap_second",
+      "ok": true
+    },
+    {
+      "duration_seconds": 1.032,
+      "exit_code": 0,
+      "name": "installation_audit",
+      "ok": true
+    },
+    {
+      "duration_seconds": 5.312,
+      "exit_code": 0,
+      "name": "start",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.313,
+      "exit_code": 0,
+      "name": "backend_health",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.343,
+      "exit_code": 0,
+      "name": "frontend_health",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.485,
+      "exit_code": 0,
+      "name": "fixture_project_create",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.687,
+      "exit_code": 0,
+      "name": "stop",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "ports_released",
+      "ok": true
+    }
+  ]
+}

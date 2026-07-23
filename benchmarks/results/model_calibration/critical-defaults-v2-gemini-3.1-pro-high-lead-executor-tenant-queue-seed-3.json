@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 12.5,
+  "usage": {},
+  "response": {
+    "objective": "Como lead_executor (semilla de repetición 3), ejecutar la migración tenant_queue_migration consolidando SQLite como la única fuente durable, unificando atomicamente el SELECT y UPDATE por tenant_id en la operación de checkout para evitar que dos workers ganen la misma issue, garantizando cero interrupciones en runs activas y superando el gate de 100 reinicios con cero wakeups perdidos durante 24 horas.",
+    "execution_steps": [
+      "Diseñar y verificar una consulta o transacción atómica de checkout en SQLite filtrada por tenant_id que combine la lectura y actualización de estado en un solo paso invulnerable a carreras entre workers.",
+      "Desplegar el nuevo flujo de checkout manteniendo el flag de alternancia en la posición del camino anterior para no detener ni afectar las runs activas.",
+      "Habilitar el flag para conmutar el checkout al nuevo mecanismo de SQLite por tenant_id de manera transparente para el sistema en ejecución.",
+      "Ejecutar la secuencia de validación del gate aplicando exactamente 100 reinicios al entorno bajo carga.",
+      "Monitorear durante una ventana continua de 24 horas la tasa de wakeups y confirmar que no exista ningún wakeup perdido (0 wakeups perdidos)."
+    ],
+    "evidence": "Telemetría y logs comprobando la ejecución atómica del checkout por tenant_id en SQLite sin registros de issues duplicadas entre workers, adjuntando la métrica verificada del gate: 100 reinicios completados con 0 wakeups perdidos en una ventana de 24 horas.",
+    "risks": [
+      "Contención de bloqueos en SQLite si múltiples workers intentan realizar el checkout atómico de issues pertenecientes al mismo tenant_id de forma simultánea.",
+      "Inconsistencias temporales durante la conmutación si algún worker mantiene sesiones activas con el flujo no atómico previo."
+    ],
+    "rollback": "Alternar inmediatamente el flag para regresar al camino anterior de checkout sin detener ni cancelar las runs activas en ejecución.",
+    "escalation": "Disparar escalamiento inmediato si se registra al menos 1 wakeup perdido durante el proceso de los 100 reinicios dentro de la ventana de 24 horas, o si la activación del flag degrada la continuidad de las runs activas."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

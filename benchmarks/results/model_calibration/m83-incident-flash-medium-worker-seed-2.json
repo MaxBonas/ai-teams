@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-medium",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "incident_dependency_handoff",
+  "role": "worker",
+  "seed": 2,
+  "wall_seconds": 65.453,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "incident": true,
+      "owner": true,
+      "observed_lag": true,
+      "threshold": true,
+      "window": true,
+      "freeze": true,
+      "dependency": true,
+      "acceptance": true
+    },
+    "anchors_retained": 8,
+    "anchors_total": 8,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "README.md, AITEAM_WAKE_PAYLOAD_JSON"
+  },
+  "artifact": "Checklist causal para el incidente INC-42 creado exitosamente.\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: README.md, AITEAM_WAKE_PAYLOAD_JSON\n\n# Checklist Causal - INC-42\n\n## 1. Identificación y Responsabilidades\n- **Incidente Activo:** INC-42\n- **Propietario del Incidente (Owner):** Database SRE\n- **Aceptador del Incidente (Acceptor):** Incident Commander\n\n## 2. Métricas y Límites Causales\n- **Replication Lag Actual:** 47 s\n- **Límite de Replication Lag:** 10 s\n- **Ventana de Superación:** Límite superado durante 3 minutos.\n- **Acción Requerida:** Congelar escrituras.\n\n## 3. Condiciones y Dependencias de Failover\n- **Servidor de Destino:** `replica-eu-2`\n- **Condición de Failover:** Solo puede ocurrir después de que el checksum coincida.\n\n## 4. Criterios de Aceptación (Cierre por Incident Commander)\n- [ ] Replication lag menor a 10 s (< 10 s).\n- [ ] Checksum coincidente en las réplicas.\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: README.md, AITEAM_WAKE_PAYLOAD_JSON",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:2c2eeacc-efde-4501-9276-b1e50e582309",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gemini-3.5-flash-medium",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "runtime/bench/m83-incident-flash-medium-worker-s2/.aiteam/aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true
+}

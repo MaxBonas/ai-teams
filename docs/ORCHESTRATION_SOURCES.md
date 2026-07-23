@@ -55,11 +55,11 @@ Registro canónico de fuentes usadas por [ORCHESTRATION.md](ORCHESTRATION.md). V
   - https://developers.openai.com/api/docs/guides/latest-model
   - https://developers.openai.com/api/reference/resources/models
 - Calidad: A.
-- Revisión: `2026-07-20`.
+- Revisión: `2026-07-22`.
 - Cubre: IDs `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, capacidades,
   ventanas, herramientas y precios; Sol=frontier, Terra=equilibrio y Luna=alto
   volumen sensible a coste.
-- Evidencia de canal local: Codex CLI `0.128.0` expone los tres slugs en
+- Evidencia de canal local: Codex CLI `0.145.0` expone y ejecuta los tres slugs en
   `~/.codex/models_cache.json`, con ventana efectiva declarada de 258.400 tokens.
 
 ## Anthropic
@@ -114,8 +114,8 @@ Registro canónico de fuentes usadas por [ORCHESTRATION.md](ORCHESTRATION.md). V
   - https://ai.google.dev/gemini-api/docs/pricing
 - Calidad: A.
 - Revisión: `2026-07-22`.
-- Cubre: `gemini-3.1-pro-preview`, `gemini-3.5-flash` estable y
-  `gemini-3.1-flash-lite` estable, además de precios y tramos por longitud.
+- Cubre: `gemini-3.1-pro-preview`, `gemini-3.6-flash` estable y
+  `gemini-3.5-flash-lite` estable, además de precios y tramos por longitud.
 - Evidencia de canal local: `agy 1.1.5 models` confirmó 11 IDs slug: los ocho
   anteriores de Gemini 3.1/3.5, Claude Opus/Sonnet 4.6 y GPT-OSS 120B, más tres
   Gemini 3.6 sujetos a probe exacto. No confirmó usage comparable por run.

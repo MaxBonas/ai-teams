@@ -3,6 +3,77 @@
 Este documento reúne decisiones, migraciones y planes ya cerrados. No es un
 backlog: el trabajo vigente vive exclusivamente en `../task.md`.
 
+## 2026-07-22 — Cierre de control plane, auditorías y calibraciones
+
+Actualización posterior: Codex CLI 0.145.0 permitió cerrar el A/B causal.
+GPT-5.5 quedó como control histórico 6/6 y Luna `medium` fue promovido 6/6 para
+`context_curator`. El catálogo activo quedó en 46 modelos, 321 celdas positivas
+y 415 negativas; la auditoría de catálogo, flujo, tiers y calibración pasa 6/6
+gates. La suite completa posterior pasa 1237 tests.
+
+Actualización de cobertura: el inventario conductual separa 32 canarios de 4
+fixtures de tools. `worker` quedó coherentemente read-only y fuera de los work
+slots de implementación. El cierre Tier 3 exige ahora un `AGENT-REPORT` válido,
+con un reintento y escalado al segundo fallo. Los screenings Luna low/medium no
+autorizaron `file_scout` (3/6 anclas) ni `worker` (7/7 anclas, contrato `result`
+inválido en low e informe ausente en medium); se preservan como diagnóstico
+negativo, no como promoción.
+Luna `web_scout` completa el fixture MCP gobernado con 3/3 usos correctos y 8/8
+anclas, pero solo 2/3 cierres en una run; queda como evidencia parcial.
+Terra `medium` completa Reviewer 3/3 sobre el ciclo durable, Engineer 3/3 con
+27/27 tests ocultos y Ruff limpio, y QA 3/3 con 30/30 checks adversariales. Los
+pares exactos quedan calibrados sin herencia hacia los demás roles Tier 2. El
+primer QA omitió el reporte durable; aclarar que el bloque debe ir dentro de
+`add_comment` corrigió el contrato y la evidencia pre-fix se conserva. Test
+Designer completa además 3/3 suites independientes, 24/24 checks y 15/15
+ejecuciones contra mutantes ocultos sin modificar producción. MCP Operator
+completa 3/3 y 36/36 checks con allow/deny, health fallido por version mismatch
+y recovery activo; el fallo pre-fix de vocabulario queda preservado.
+El catálogo dejó de recomendar QA sobre OpenCode read-only y los tres roles
+activos sin prompt propio (QA condicional, Test Designer y MCP Operator)
+recibieron skills y capacidades coherentes con sus contratos vivos.
+
+- P0.1 cerró los hallazgos de autoridad, MCP, concurrencia, orientación,
+  paralelismo y coste. El Lead asignado es la única identidad que puede aceptar
+  una síntesis de quorum; los grants MCP no se amplían mediante hints y los
+  temporales de pytest quedaron aislados por sesión en Windows.
+- P0.2 renovó catálogos, economía por canal y selección ejecutable. Equipo y el
+  backend comparten el mismo gate perfil+modelo+rol; discovery no equivale a
+  ejecutabilidad y API, suscripción y local conservan coste/provenance separados.
+- OpenCode Zen quedó integrado como canal gratuito read-only. Sus canarios
+  durables no justificaron promoción; el transporte server/SDK fue evaluado con
+  resultado negativo para producción y el CLI efímero sigue vigente.
+- La vía BYOK incorporó perfiles separados para Gemini Free y Groq Free, vault
+  local, health, usage y cuota. GitHub Models y OpenRouter no se añadieron sin
+  credenciales ni catálogo ejecutable demostrado.
+- Antigravity completó 27 runs de screening y canarios conductuales. Sonnet 4.6
+  fue promovido únicamente para Engineer; Flash High conserva review/QA y
+  Gemini 3.6 permanece manual/probe-gated. Los tres perfiles `solo_lead`,
+  `lead_quorum` y `full_team` cerraron canarios vivos.
+- P0.3 centralizó compatibilidad en `aiteam.model_compatibility` y
+  `aiteam.compatibility_service`, con enforcement en bootstrap, Equipo, hiring,
+  reconcile, dispatch, fallback y recovery. La matriz hermética cerró con 47
+  modelos, 337 celdas positivas y 415 negativas.
+- El context curator obtuvo contrato causal durable, presupuesto, recovery e
+  índice estructurado. GPT-5.5 superó los casos auth y queue; Luna quedó
+  bloqueada porque Codex CLI 0.128.0 no ejecutaba el catálogo que requería
+  0.145.0.
+- El auditor de drift añadió registro de calibraciones por
+  perfil+modelo+rol. Las tres promociones históricas quedaron frescas, con
+  versión y recibos, y la siguiente revisión se fijó para 2026-08-19.
+- La instrumentación de paralelismo persiste decisiones exactas y dispone de un
+  A/B hermético, pero no existe todavía trigger vivo representativo. El default
+  continúa secuencial y el modo paralelo sigue opt-in.
+- El gate de informe de coste revisó 71 SQLite y no encontró un proyecto con
+  volumen comparable suficiente. El informe API/UI no se construyó.
+- La orientación frontend quedó instrumentada localmente con consentimiento,
+  revocación y borrado, E2E reproducible y protocolo humano prerregistrado. No se
+  infirieron adopción ni claridad sin ocho sesiones observadas.
+- El benchmark de `dispatch_candidate_decisions` midió hasta 1000 wakeups sin
+  presión operativa; se conservó el log aditivo y se rechazó un TTL global.
+- El bloque se publicó en `origin/master` mediante `65eb862`, `c9dd733` y
+  `f1227e4` después de 1229 tests en verde y revisión de secretos/diff.
+
 ## 2026-07-21 — Pytest concurrente seguro en Windows
 
 - El probe de PID deja de usar `os.kill(pid, 0)` y pasa a

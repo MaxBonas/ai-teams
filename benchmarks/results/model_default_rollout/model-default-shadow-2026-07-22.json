@@ -1,0 +1,70 @@
+{
+  "schema_version": "model_default_shadow_receipt_v1",
+  "rollout_version": "model_default_rollout_v1",
+  "observed_at": "2026-07-22",
+  "source": "current_workspace_runtime",
+  "selection_scope_prefix": "m7-shadow-2026-07-22",
+  "agent_count": 6,
+  "candidate_count_per_role": 48,
+  "winner_count": 0,
+  "no_winner_count": 6,
+  "assignment_changed_count": 0,
+  "agents_unchanged": true,
+  "decisions": [
+    {
+      "agent_id": "role:context_curator",
+      "role": "context_curator",
+      "current_profile_id": "codex_subscription",
+      "current_model": "gpt-5.4-mini",
+      "decision": "no_winner",
+      "divergence": "preserve_current_no_winner",
+      "snapshot_id": "a0f2cbbf-4462-41f5-8d2d-8002bc74b969"
+    },
+    {
+      "agent_id": "role:engineer",
+      "role": "engineer",
+      "current_profile_id": "codex_subscription",
+      "current_model": "gpt-5.4",
+      "decision": "no_winner",
+      "divergence": "preserve_current_no_winner",
+      "snapshot_id": "3b31d3fb-0bb2-4df7-8fa7-7a347c6b19ed"
+    },
+    {
+      "agent_id": "role:file_scout",
+      "role": "file_scout",
+      "current_profile_id": "codex_subscription",
+      "current_model": "gpt-5.4-mini",
+      "decision": "no_winner",
+      "divergence": "preserve_current_no_winner",
+      "snapshot_id": "e2be5b3b-c7fb-42f2-9fb8-8f9df8e66624"
+    },
+    {
+      "agent_id": "role:lead",
+      "role": "lead",
+      "current_profile_id": "codex_subscription",
+      "current_model": "gpt-5.5",
+      "decision": "no_winner",
+      "divergence": "preserve_current_no_winner",
+      "snapshot_id": "38f27ce0-7d15-4078-b60f-e1bd797ef8db"
+    },
+    {
+      "agent_id": "role:reviewer",
+      "role": "reviewer",
+      "current_profile_id": "codex_subscription",
+      "current_model": "gpt-5.5",
+      "decision": "no_winner",
+      "divergence": "preserve_current_no_winner",
+      "snapshot_id": "5a1aa331-11c1-44f1-84d9-2bf61e730b82"
+    },
+    {
+      "agent_id": "role:web_scout",
+      "role": "web_scout",
+      "current_profile_id": "codex_subscription",
+      "current_model": "gpt-5.4-mini",
+      "decision": "no_winner",
+      "divergence": "preserve_current_no_winner",
+      "snapshot_id": "e5b12335-473a-40ff-9ad0-5455d09e6806"
+    }
+  ],
+  "conclusion": "El shadow ranking no encuentra candidatos auto-elegibles; conserva las seis asignaciones actuales y no autoriza activar defaults."
+}

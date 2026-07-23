@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-medium",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "incident_dependency_handoff",
+  "role": "worker",
+  "seed": 1,
+  "wall_seconds": 17.234,
+  "attempts": 1,
+  "checks": {
+    "issue_done": true,
+    "run_completed": true,
+    "valid_assignee_report": true,
+    "artifact_contract": true,
+    "workspace_unchanged": true,
+    "single_attempt": true
+  },
+  "evaluation": {
+    "anchors": {
+      "incident": true,
+      "owner": true,
+      "observed_lag": true,
+      "threshold": true,
+      "window": true,
+      "freeze": true,
+      "dependency": true,
+      "acceptance": true
+    },
+    "anchors_retained": 8,
+    "anchors_total": 8,
+    "forbidden_matches": [],
+    "contract_passed": true
+  },
+  "agent_report": {
+    "role": "worker",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "blocker": "none",
+    "evidence": "AITEAM_WAKE_PAYLOAD_JSON"
+  },
+  "artifact": "Completed the incident review and generated the causal checklist. Marked status as done.\n\n# Causal Checklist for INC-42\n\n## Status & Ownership\n- **Incident**: INC-42 (Active)\n- **Owner**: Database SRE\n- **Acceptor**: Incident Commander\n\n## Metrics & Actions\n- **Metric**: Replication lag\n- **Current Value**: 47 s\n- **Limit/Threshold**: 10 s\n- **Time Window**: 3 minutes\n- **Action**: Freeze writes (congelar escrituras) since replication lag (47 s) exceeds the 10 s limit for 3 minutes.\n\n## Handoff & Dependencies\n- **Failover target**: replica-eu-2\n- **Pre-condition**: Failover to replica-eu-2 can only occur after the checksum matches (checksum coincida).\n\n## Acceptance Criteria\n- [ ] Replication lag < 10 s\n- [ ] Checksum matches (checksum coincida)\n\n---AGENT-REPORT---\nrole: worker\nresult: done\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: AITEAM_WAKE_PAYLOAD_JSON",
+  "runtime": {
+    "issue_status": "done",
+    "run": {
+      "id": "run:e42f70aa-ba6b-4e2d-acc2-f501d0bf286e",
+      "status": "completed",
+      "error_code": null,
+      "error": null,
+      "model": "gemini-3.5-flash-medium",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "runtime/bench/m83-incident-flash-medium-worker-s1/.aiteam/aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      }
+    ],
+    "mcp_trace": [],
+    "mcp_health_recovery": null
+  },
+  "ok": true
+}

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_behavioral_diversity_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "role": "mcp_operator",
+  "reasoning_effort": "medium",
+  "contract_version": "tier3_two_family_causal_report_v3",
+  "case_families": [
+    "advisory_recovery_governance",
+    "dependency_policy_governance"
+  ],
+  "case_family_count": 2,
+  "seeds_per_family": 3,
+  "samples_total": 6,
+  "family_checks": [
+    {
+      "case_family": "advisory_recovery_governance",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "samples_artifact_passed": 3,
+      "samples_single_attempt": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/codex-terra-mcp-operator-aggregate.json"
+    },
+    {
+      "case_family": "dependency_policy_governance",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "samples_artifact_passed": 3,
+      "samples_single_attempt": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/m83-policy-terra-mcp-aggregate.json"
+    }
+  ],
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-terra-mcp-operator-aggregate.json",
+    "benchmarks/results/model_calibration/m83-policy-terra-mcp-aggregate.json"
+  ],
+  "source_sha256": [
+    "478e617009b16b3f3fea16196be1f99143e43227f276d16eb667dd60a8694001",
+    "36456e2411779c79ab2598c938bfa152d1003112634dc6874031edc82b2d0a64"
+  ],
+  "integrity": {
+    "same_exact_pair": true,
+    "two_distinct_families": true,
+    "sources_bound": true,
+    "sources_hashed": true
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "case_diversity_passed": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_two_family_exact_pair",
+    "goodhart_risk": "moderate"
+  }
+}

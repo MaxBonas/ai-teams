@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_tier_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-luna",
+  "role": "file_scout",
+  "reasoning_effort": "low",
+  "contract_version": "tier3_causal_report_v2",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 1,
+  "samples_artifact_passed": 3,
+  "samples_single_attempt": 1,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/codex-luna-file-scout-low-v2-seed-1.json",
+    "benchmarks/results/model_calibration/codex-luna-file-scout-low-v2-seed-2.json",
+    "benchmarks/results/model_calibration/codex-luna-file-scout-low-v2-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-luna-file-scout-low-v2-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "09d5af13d4d7941d51f130c7b8aebfd653488a19e9569e20e163415b9ee76fff"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-luna-file-scout-low-v2-seed-2.json",
+      "seed": 2,
+      "ok": false,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": false
+      },
+      "artifact_sha256": "7b183241a4caaac0c876e5a8348a93c6b8e570c67b3cbb2b45ca186b2c3fdc84"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/codex-luna-file-scout-low-v2-seed-3.json",
+      "seed": 3,
+      "ok": false,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": false
+      },
+      "artifact_sha256": "fe5194d1d1149ace93c33e48c774b4cebaee0afaed1e225545654e065022ea15"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "artifacts_hashed": true
+  },
+  "checks_passed": 16,
+  "checks_total": 18,
+  "wall_seconds_median": 48.906,
+  "wall_seconds_range": [
+    21.672,
+    71.063
+  ],
+  "usage": {
+    "input_tokens": 132093,
+    "output_tokens": 4363,
+    "marginal_cost_cents": 0,
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": false,
+    "default_change_allowed": false,
+    "decision": "retain_requires_canary",
+    "unmeasured_constructs": [
+      "workspaces grandes",
+      "peticiones ambiguas",
+      "inputs binarios"
+    ]
+  }
+}

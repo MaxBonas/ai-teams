@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "benchmark": "coding_behavioral_calibration",
+  "case": "cli_conversor",
+  "seed": 1,
+  "started_at": "2026-07-23T12:59:00+0200",
+  "evaluation_contract": {
+    "version": 1,
+    "evaluators": [
+      {
+        "id": "hidden_acceptance",
+        "class": "deterministic_behavioral",
+        "blind": true
+      },
+      {
+        "id": "ruff",
+        "class": "static_analysis",
+        "blind": true
+      }
+    ],
+    "independent_semantic_or_structural": true,
+    "goodhart_risk": "residual_hidden_suite_overfit",
+    "constructs_not_measured": [
+      "behavior outside the hidden suite",
+      "long-term maintainability",
+      "real-user acceptance"
+    ]
+  },
+  "config": {
+    "max_attempts": 2,
+    "stateless": true
+  },
+  "arms": {
+    "gemma4:26b": {
+      "model": "gemma4:26b",
+      "profile_id": "local_gemma4_ollama",
+      "provider": "ollama",
+      "channel": "local",
+      "issue_status": "done",
+      "attempts": 1,
+      "runs": [
+        {
+          "id": "run:1485a69f-6b33-4f98-a820-f42405d47e53",
+          "status": "completed",
+          "error_code": null,
+          "liveness_state": "advanced",
+          "provider": "ollama",
+          "model": "gemma4:26b",
+          "channel": "local"
+        }
+      ],
+      "wall_seconds": 151.578,
+      "input_tokens": 2051,
+      "output_tokens": 1086,
+      "cost_cents": 0,
+      "usage_available": true,
+      "score": {
+        "ruff_issues": 0,
+        "hidden_exit": 0,
+        "hidden_passed": 9,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 9,
+        "deliverable_files": [
+          "conversor.py"
+        ]
+      },
+      "workspace": "runtime/canaries/local-gemma26b-engineer-screen-v2-seed-1/gemma4_26b"
+    }
+  },
+  "finished_at": "2026-07-23T13:01:43+0200"
+}

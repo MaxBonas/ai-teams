@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 8.61,
+  "usage": {},
+  "response": {
+    "objective": "Migrar la cola de tareas a SQLite como fuente única durable con soporte multitenant (tenant_id) sin detener runs activas y corrigiendo la condición de carrera en el checkout.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "title": "Implementación de checkout atómico",
+        "description": "Refactorizar el checkout separando SELECT y UPDATE hacia una operación atómica única en SQLite por tenant_id para evitar asignaciones duplicadas.",
+        "owner": "Backend Engineer",
+        "acceptor": "Lead",
+        "dependencies": []
+      },
+      {
+        "id": "WI-2",
+        "title": "Implementación de feature flag de fallback",
+        "description": "Desarrollar un flag de conmutación para revertir al flujo de checkout anterior en caso de fallos sin detener el sistema.",
+        "owner": "Backend Engineer",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-1"
+        ]
+      },
+      {
+        "id": "WI-3",
+        "title": "Despliegue y migración sin interrupción",
+        "description": "Ejecutar la migración a la nueva cola garantizando la continuidad total de las runs activas en ejecución.",
+        "owner": "Infrastructure Engineer",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-1",
+          "WI-2"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Asignación duplicada de issues",
+        "description": "La separación actual entre SELECT y UPDATE permite que dos workers ganen la misma issue.",
+        "mitigation": "Unificar la selección y reserva de issues dentro de una transacción atómica SQLite."
+      },
+      {
+        "risk": "Desechado o detención de runs activas",
+        "description": "La migración podría afectar las runs en ejecución si no se aísla adecuadamente el estado.",
+        "mitigation": "Utilizar el flag de fallback y realizar una migración progresiva garantizando compatibilidad."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante un periodo continuado de 24 horas.",
+      "acceptor": "Lead"
+    },
+    "escalation": {
+      "conditions": [
+        "Pérdida de 1 o más wakeups durante los 100 reinicios o dentro del periodo de 24 horas.",
+        "Detección de doble asignación de issue a distintos workers.",
+        "Fallo en el mantenimiento del estado de runs activas durante el cambio de versión."
+      ],
+      "action": "Activar el flag de revert al camino anterior de inmediato y escalar al Lead con los logs del checkout e impacto reportado."
+    }
+  },
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "forbidden_hits": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "ok": true
+}

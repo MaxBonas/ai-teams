@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "local_gemma4_ollama",
+  "model": "gemma4:26b",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "role": "test_designer",
+  "seed": 1,
+  "seconds": 43.016,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": false,
+    "all_hidden_mutants_killed": false,
+    "durable_report_done": false,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 1,
+      "stdout": "                [100%]\n================================== FAILURES ===================================\n___________________ test_quote_invalid_unit_price_negative ____________________\n\n    def test_quote_invalid_unit_price_negative():\n        # unit_price must be >= 0\n        with pytest.raises(ValueError, match=\"unit_price must be >= 0\"):\n>           quote(unit_price=-1.0, quantity=5, discount_pct=0)\n\ntests\\test_acceptance_pricing.py:16: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nunit_price = -1.0, quantity = 5, discount_pct = 0\n\n    def quote(unit_price, quantity, discount_pct=0):\n        \"\"\"Return a two-decimal quote or reject invalid commercial inputs.\"\"\"\n        if unit_price < 0:\n>           raise ValueError(\"unit_price must be non-negative\")\nE           ValueError: unit_price must be non-negative\n\npricing.py:4: ValueError\n\nDuring handling of the above exception, another exception occurred:\n\n    def test_quote_invalid_unit_price_negative():\n        # unit_price must be >= 0\n>       with pytest.raises(ValueError, match=\"unit_price must be >= 0\"):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       AssertionError: Regex pattern did not match.\nE         Expected regex: 'unit_price must be >= 0'\nE         Actual message: 'unit_price must be non-negative'\n\ntests\\test_acceptance_pricing.py:15: AssertionError\n______________________ test_quote_invalid_quantity_zero _______________________\n\n    def test_quote_invalid_quantity_zero():\n        # quantity cannot be 0\n        with pytest.raises(ValueError, match=\"quantity must be > 0\"):\n>           quote(unit_price=10.0, quantity=0, discount_pct=0)\n\ntests\\test_acceptance_pricing.py:25: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nunit_price = 10.0, quantity = 0, discount_pct = 0\n\n    def quote(unit_price, quantity, discount_pct=0):\n        \"\"\"Return a two-decimal quote or reject invalid commercial inputs.\"\"\"\n        if unit_price < 0:\n            raise ValueError(\"unit_price must be non-negative\")\n        if quantity <= 0:\n>           raise ValueError(\"quantity must be positive\")\nE           ValueError: quantity must be positive\n\npricing.py:6: ValueError\n\nDuring handling of the above exception, another exception occurred:\n\n    def test_quote_invalid_quantity_zero():\n        # quantity cannot be 0\n>       with pytest.raises(ValueError, match=\"quantity must be > 0\"):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       AssertionError: Regex pattern did not match.\nE         Expected regex: 'quantity must be > 0'\nE         Actual message: 'quantity must be positive'\n\ntests\\test_acceptance_pricing.py:24: AssertionError\n=========================== short test summary info ===========================\nFAILED tests\\test_acceptance_pricing.py::test_quote_invalid_unit_price_negative\nFAILED tests\\test_acceptance_pricing.py::test_quote_invalid_quantity_zero - A...\n2 failed, 8 passed in 0.10s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_zero_quantity": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_negative_price": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_discount_over_100": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_discount": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_quantity": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_pricing.py"
+  ],
+  "run": {
+    "id": "run:f95609ce-b882-44f2-9b86-646c427ca525",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gemma4:26b",
+    "provider": "ollama",
+    "channel": "local",
+    "usage_json": "{\"cached_input_tokens\": 0, \"input_tokens\": 2051, \"output_tokens\": 1570, \"reasoning_output_tokens\": 0}"
+  },
+  "report": null,
+  "usage": {
+    "cached_input_tokens": 0,
+    "input_tokens": 2051,
+    "output_tokens": 1570,
+    "reasoning_output_tokens": 0
+  },
+  "workspace": "C:\\Users\\she__\\Documents\\Antigravity Projects\\Ai_Teams\\runtime\\canaries\\local-gemma26b-test-designer-screen-seed-1",
+  "ok": false
+}

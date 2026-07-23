@@ -1,6 +1,6 @@
 # Orquestación multi-modelo en AI Teams
 
-Actualizado: `2026-07-22`
+Actualizado: `2026-07-23`
 
 Fuente canónica para diseñar, revisar y evaluar routing, delegación, adapters, cascadas, quorum, verificación, contexto, liveness y economía multi-LLM. Las skills de Claude y Codex deben apuntar aquí, no copiar este contenido.
 
@@ -88,13 +88,21 @@ RouteLLM demuestra en benchmarks propios que puede conservar el 95% del rendimie
 
 No usar porcentajes de vendors como thresholds locales. `AITEAM_PROVIDER_ESCALATION_THRESHOLD=0.25` es una decisión operativa del proyecto que debe calibrarse con telemetría propia.
 
-### Política de modelos por tier y adapter (revisión 2026-07-20)
+### Política de modelos por tier y adapter (revisión 2026-07-22)
 
 El tier describe la responsabilidad del rol, no el proveedor. El modelo se
 resuelve dentro del adapter que el owner eligió y nunca cambia la autoridad del
 Lead. Los aliases de producto tampoco son intercambiables entre canales: un ID
 de API, un slug de Codex y una etiqueta aceptada por Antigravity son contratos
 distintos.
+
+El tier no se deduce de un único precio. La política
+`capability_economy_speed_v1` conserva tres ejes auditables: banda de capacidad
+y roles compatibles; economía según precio API, presión de cuota de suscripción
+o recursos locales; y velocidad oficial o medida por canal. Un valor
+`unknown` de velocidad queda explícito y exige medición, nunca una estimación.
+Las herramientas y la autoridad siguen siendo hard gates separados: un Tier 1
+no obtiene escritura/MCP y un Tier 3 no los pierde solo por su precio.
 
 Roles canónicos:
 
@@ -106,6 +114,13 @@ Roles canónicos:
 - Tier 3: `worker`, `file_scout`, `web_scout` y `context_curator`;
   `researcher` solo se acepta al leer proyectos legacy;
 - `test_runner` es determinista: ejecuta procesos y no recibe modelo.
+
+`worker` es aquí un ejecutor barato de análisis/reporting, no un Engineer barato:
+es read-only, recibe `repo_read`, no ocupa work slots de implementación y debe
+devolver el trabajo material a un owner Tier 2. `worker`, scouts y test runner no
+pueden cerrar `done` sin un `AGENT-REPORT` válido de la run y del assignee. El
+runtime permite una corrección de formato; un segundo incumplimiento bloquea y
+despierta al supervisor, sin aceptar summaries como evidencia.
 
 La diversidad de proveedor no se decide comparando el ID de perfil. AI Teams
 deriva cinco dimensiones: organización que presta el canal, fabricante del
@@ -127,7 +142,7 @@ metadata no concede todavía compatibilidad, que corresponde al hard gate P0.3.
 |---|---|---|---|---|
 | OpenAI API | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` | La familia publica exactamente las bandas flagship, balance y alto volumen. |
 | Anthropic API | `claude-opus-4-8` | `claude-sonnet-5` | `claude-haiku-4-5` | Opus es el default complejo; Sonnet ofrece el equilibrio; Haiku cubre subagentes. |
-| Gemini API | `gemini-3.1-pro-preview` | `gemini-3.5-flash` | `gemini-3.1-flash-lite` | Pro sigue siendo preview; Flash y Flash-Lite son estables. El health debe detectar retirada/cambio. |
+| Gemini API | `gemini-3.1-pro-preview` | `gemini-3.6-flash` | `gemini-3.5-flash-lite` | Pro sigue preview; 3.6 Flash y 3.5 Flash-Lite son estables y sustituyen los defaults anteriores. |
 
 `claude-fable-5` queda visible como escalado manual excepcional, no como default
 automático de Tier 1. Es el Claude más capaz para trabajo muy largo, pero cuesta
@@ -172,19 +187,107 @@ siendo el gate.
 El drift tiene owner `AI Teams maintainer` y cadencia mensual más evento de
 versión/catálogo. `scripts/audit_model_catalog_drift.py` compara inventarios
 autenticados con IDs declarados y ejecuta la matriz hermética. El recibo del
-2026-07-22 pasa los tres gates; declara cinco modelos Zen, conserva Laguna
-manual/probe-gated tras fallar 0/3 review durable, Big Pickle como `rejected` y
-la incompatibilidad de versión Codex como atención. Nada de ello promueve
-defaults.
+2026-07-22 pasa 6/6 gates. Codex 0.145.0 y su cache 0.145.0 contienen los tres
+IDs declarados Sol/Terra/Luna sin duplicados; esa cobertura consume el snapshot
+actual y no health histórico. El registro comprueba además el contenido de los
+recibos promovidos: identidad, versión, rol, esfuerzo, matriz, resultado y
+fuentes exactas. Un modelo declarado ausente o un agregado manipulado falla
+cerrado. Nada de ello promueve defaults por discovery.
+
+La cobertura conductual se audita por separado mediante
+`scripts/audit_model_evaluation_coverage.py`. Deduplica aliases a roles
+semánticos, exige calibración fresca exacta para declarar `calibrated`, conserva
+screenings o resultados incompletos como `partial`, separa los contratos que
+necesitan `external_mcp` como `requires_tool_fixture` y no crea deuda automática
+para candidatos manual/probe-gated. En el baseline del 2026-07-22 hay 46 modelos
+y 131 destinos `best_for`: 8 calibrados, 5 parciales, 32 canarios ejecutables,
+4 fixtures de tools, 3 candidatos manuales y 79 bloqueados por health/canal. La
+antigüedad por sí sola nunca retira un modelo; sí puede volver stale su evidencia.
+
+M.7.1 usa `scripts/benchmark_critical_default_roles.py` para la cohorte premium:
+cada par exacto de Sol o Gemini 3.1 Pro High con `architect`, `lead`,
+`lead_executor`, `quorum_auditor` o `team_lead` necesita dos familias causales
+por tres semillas. El juez determinista queda fuera del prompt, exige schema
+exacto, nombra cada ancla ausente y puede reevaluar recibos sin inferencia.
+La primera matriz v1 de `lead` no promovió candidatos: Sol obtuvo 4/6 y Pro High
+5/6 por omisiones causales. Esos recibos se conservan como historial y no se
+mezclan con los agregados v2.
+
+La segunda matriz exacta, `architect`, completa 6/6 tanto en Sol como en Gemini
+3.1 Pro High. Cada agregado vincula las seis fuentes y el SHA-256 de cada
+respuesta; el auditor de cobertura vuelve a comprobar identidad, caso, semilla,
+versión, resultado y hash. Una mutación degrada la evidencia a `partial`.
+Los dos pares quedan calibrados para calidad por rol, pero sus agregados
+mantienen `default_change_allowed=false`: M.7.4 debe observar health, cuota,
+economía y snapshot antes de habilitar un default. La cobertura del 2026-07-23
+queda en 10 calibrados, 5 parciales, 30 canarios, 4 fixtures, 3 manuales y 79
+bloqueados.
+
+La matriz `lead_executor` evita exigir que el modelo repita su etiqueta de rol:
+valida schema, pasos no vacíos, evidencia material, hechos causales y ausencia
+de afirmaciones de ejecución/delegación ficticias. Tras reevaluar las mismas
+respuestas sin otra inferencia, Sol completa 6/6 y queda calibrado; Gemini 3.1
+Pro High queda 5/6 porque una muestra omite la ventana de 10 minutos. El segundo
+se conserva como diagnóstico y no se reintenta hasta obtener un pase. La
+cobertura pasa a 11 calibrados, 5 parciales y 29 canarios pendientes.
+
+El contrato productivo Tier 1 añade una pasada silenciosa y común de retención
+causal: scope/cohorte, tenant/autorización, métricas con valor+unidad+ventana+
+acción, owner+aceptador, dependencias, rollback y escalado. El screening pareado
+v1→v2 mejora las cinco familias débiles de 1/3 o 2/3 a 3/3. Después se ejecutan
+los casos complementarios, no un re-roll selectivo: 30/30 muestras v2 pasan y
+los cinco pares antes incompletos alcanzan matrices 6/6.
+
+Así, los diez pares exactos de Sol y Gemini 3.1 Pro High con `architect`,
+`lead`, `lead_executor`, `quorum_auditor` y `team_lead` quedan calibrados. El
+harness impide agregar versiones mezcladas y la cobertura comprueba versión de
+prompt, identidad, fuentes y hashes. El snapshot 2026-07-23 queda en 18
+calibrados, 4 parciales, 23 canarios, 4 fixtures, 3 manuales y 79 bloqueados.
+Esto valida calidad por rol; no autoriza todavía cambiar defaults, que siguen
+sujetos al snapshot vivo y los gates de M.7.4.
+
+El screening v1 de Codex Luna descubrió tres defectos de contrato antes que una
+limitación concluyente del modelo: `worker` no tenía skill cargable, el prompt
+consolidado no exigía el `AGENT-REPORT` exacto y `file_scout` recibía una tarea
+de diagnóstico/recomendación incompatible con su frontera neutral. El contrato
+v2 añade cobertura causal y cierre exacto para Tier 3, crea la skill de worker y
+reformula file scout como preguntas de evidencia, sin ampliar autoridad.
+
+Con Luna `low`, `worker` completa 3/3 en una run. `web_scout` completa 3/3 en
+una run, conserva 8/8 hechos, llama `release_advisory_lookup` mediante MCP local
+aprobado y health-checked y no puede llamar la tool de escritura denegada. Ambos
+pares quedan calibrados. `file_scout` retiene el contrato semántico 3/3, pero
+solo 1/3 cierra en una run; las otras dos necesitan la única corrección de
+formato. Queda `partial`, sin otro ajuste dirigido a las mismas semillas. Los
+agregados v2 vinculan tres fuentes y hashes de artefacto, y la cobertura detecta
+tampering. El snapshot pasa a 20 calibrados, 4 parciales y 21 canarios.
+
+Terra `medium` completa cinco contratos Tier 2 exactos sobre Codex 0.145.0.
+Reviewer pasa 3/3 ciclos durables de rechazo→fix→aprobación, con mediana 64,0 s
+(62,844–93,094), 113.509 tokens de entrada y 8.230 de salida. Engineer pasa
+27/27 tests ocultos, Ruff limpio y una run por semilla, con mediana 62,921 s
+(50,563–70,797) y 116.800/8.812 tokens. QA pasa 3/3 ciclos adversariales y
+30/30 checks: materializa tests que fallan contra el defecto, preserva
+producción, persiste `changes_requested` y aprueba/retira los tests tras el fix;
+mediana 116,048 s (115,953–133,938), 773.932 tokens input y 12.946 output.
+Test Designer pasa 3/3 suites,
+24/24 checks y 15/15 ejecuciones contra cinco mutantes ocultos; mediana 73,172 s
+(71,235–92,328), 404.062 input y 7.956 output. MCP Operator pasa 3/3 y 36/36
+checks con allow/deny reales, llamada read, cero write, fallo de versión y
+recovery activo; mediana 42,359 s (27,859–49,593), 342.171 input y 4.424 output.
+Los cinco pares quedan calibrados sin extrapolación. El coste marginal de suscripción es 0 y
+esos tokens expresan presión de cuota, no precio API.
 
 La frescura de catálogo/health y la frescura de calidad son contratos distintos.
 `aiteam.model_calibration` registra por par exacto perfil+modelo+rol la fecha,
-versión y recibos que autorizaron las promociones históricas de GPT-5.5 para
-`context_curator` y Sonnet 4.6 para Engineer. El auditor mensual falla cerrado
+versión y recibos que autorizaron Luna para `context_curator` y Sonnet 4.6 para
+Engineer. El auditor mensual falla cerrado
 para promociones no registradas y marca `stale` al superar 30 días, encontrar
-fecha futura, cambiar/no observar versión o perder evidencia. El recibo actual
-encuentra las tres entradas frescas y adelanta `next_review_due` al primer
-vencimiento (`2026-08-19`). `stale` abre recalibración, pero conserva
+fecha futura, cambiar/no observar versión o perder evidencia. El recibo anterior
+encuentra las tres entradas frescas. Tras actualizar Codex a 0.145.0, el A/B
+auth+queue recalibró Luna/`context_curator`; el recibo actual pasa los seis gates
+incluida la matriz de tiers. `stale` abre
+recalibración, pero conserva
 `existing_default_action=unchanged`: la edad por sí sola no demuestra que un
 default sea inejecutable ni autoriza degradarlo silenciosamente a `manual-only`.
 Eso requiere una regresión de catálogo, health o calidad comparable.
@@ -196,6 +299,42 @@ wakeups tomados al terminar. Medium tarda 43,078 s medianos frente a 99,999 s;
 la mejora de latencia no equivale a ahorro de tokens ni a capacidad de cuota,
 por lo que Flash High conserva el default. El recibo agregado es
 `antigravity-durable-review-v4-aggregate.json`.
+
+Los contratos Tier 2 de Flash High ya no se extrapolan desde Reviewer. Los
+harnesses conductuales de Terra se generalizan por perfil+modelo sin cambiar
+casos ni jueces. Gemini 3.5 Flash High completa QA 3/3: cada semilla crea tests
+adversariales que fallan contra producción rota, preserva el archivo productivo,
+reporta `changes_requested`, verifica el fix, retira los tests y aprueba; suma
+30/30 gates y mediana 130,733 s. Test Designer completa 3/3, pasa producción y
+mata los cinco mutantes ocultos por semilla: 15/15 mutantes, 24/24 gates y
+mediana 55,266 s.
+
+Dos defectos del instrumento se corrigen sin repetir inferencia: el juez QA
+acepta `active=False` en constructores, además de diccionarios, y la superficie
+de archivos authored excluye `__pycache__`/`.pyc` generados por ejecutar pytest.
+Los agregados enlazan fuentes y hashes y un test de tampering degrada evidencia.
+Antigravity no expone tokens headless, por lo que usage permanece `unknown`.
+Ambos pares quedan calibrados para calidad por rol, con
+`default_change_allowed=false`; la cobertura pasa a 22 calibrados, 4 parciales
+y 19 canarios.
+
+El cierre económico Tier 3 usa el mismo contrato causal/report v2 para
+Medium/`worker`, Low/`worker` y Low/`file_scout`, ya sin hardcodes de Codex ni
+un `reasoning_effort` ficticio. Medium/`worker` completa 3/3 en un intento
+(mediana 70,640 s) y Low/`file_scout` 3/3 (80,080 s). Low/`worker` completa
+solo 2/3 (54,660 s): una semilla agota el timeout de 240 s, converge en el
+segundo dispatch y repite una opción explícitamente prohibida. Por tanto queda
+`partial`; el resultado negativo se conserva y no se sustituye por un re-roll.
+
+Low/`context_curator` se mide con un contrato distinto y adecuado al rol:
+`auth_migration` y `queue_rollout`, tres semillas por caso, rúbrica oculta y
+persistencia SQLite real. Pasa 6/6 en un intento, con mediana 96,300 s y rango
+42,300–169,700. El agregado exige exactamente las seis células, fuentes
+distintas y hashes coincidentes de thread, rúbrica y artefacto. En los cuatro
+pares Antigravity los tokens siguen `unknown`; los ceros de SQLite no se
+presentan como consumo observado. El snapshot queda en 25 calibrados, 4
+parciales, 16 canarios, 4 fixtures, 3 manuales y 79 bloqueados, siempre con
+`default_change_allowed=false`.
 
 El primer canario vivo de creación por perfil usa `solo_lead` con Antigravity
 Pro High sobre una tarea reversible. Completa en una run y 54,656 s, conserva un
@@ -291,9 +430,13 @@ La economía depende del canal:
 - Suscripción: el coste marginal de cada run sigue siendo 0; tokens, duración y
   runs sirven para estimar presión de cuota, no para inventar euros. Cada perfil
   necesita forecast propio porque los límites y pesos no son equivalentes.
-- Local: el coste monetario marginal se registra como 0, pero salud, RAM/VRAM,
-  latencia y throughput forman parte de capacidad; una opción nueva no se usa
-  hasta que el owner la instale y pruebe.
+- Local: el coste monetario/API, el consumo de tokens externos y la presión de
+  cuota externa son siempre 0. Es una ventaja económica real y explícita del
+  ranking (`zero_external_cost_local_compute`, `quota_unlimited=true`), no una
+  métrica desconocida. Salud, RAM/VRAM, energía, latencia y throughput se miden
+  aparte como capacidad del host: pueden impedir ejecutar o rebajar velocidad,
+  pero nunca se convierten en consumo de cuota/tokens de proveedor. Una opción
+  nueva no se usa hasta que el owner la instale y pruebe.
 
 La provenance de cuota vive en `run_adapter_profiles`, separada de la
 configuración mutable del agente. `subscription_quota_snapshot` siempre puede
@@ -318,15 +461,472 @@ permanece `capacity_unknown`. La proyección devuelve `api_rate_limit` o
 `subscription_pressure` y la interfaz no presenta una como si fuera la otra.
 Fuente: [FREE-4](ORCHESTRATION_SOURCES.md#free-4-api-keys-gratuitas-y-límites).
 
-No se sustituyen calibraciones locales solo por novedad comercial. En particular,
-`context_curator` sobre Codex conserva `gpt-5.5`: superó los canarios causales
-donde el mini anterior falló. `gpt-5.6-luna` debe vencer ese baseline en auth y
-queue antes de heredar ese rol. El canario auth del 2026-07-20 no produjo una
-muestra comparable: Codex CLI `0.128.0` rechazó Luna porque el cache de modelos
-fue generado para cliente `0.145.0`. Equipo marca Sol/Terra/Luna como no
-ejecutables en esa instalación y mantiene GPT-5.5 habilitado por runs previas;
-la calibración se reanuda después de actualizar el CLI, sin contar este fallo
-de transporte como fallo de calidad.
+No se sustituyen calibraciones locales solo por novedad comercial. La matriz
+auth+queue de Codex 0.145.0 usa dos casos y tres repeticiones por caso: GPT-5.5
+sin override de esfuerzo queda como control histórico 6/6; Luna original obtiene
+3/6 y prompt v2 4/6, también sin override. Luna `medium` v3 obtiene 6/6, 36,55 s
+medianos frente a 37,65 s y reduce las medianas de entrada/salida de
+22.753/1.784 a 21.495/1.700 tokens. Las ramas no fijadas no permiten atribuir
+causalmente el resultado a `low`. Solo la configuración Luna `medium` exacta
+hereda `context_curator`; otros roles mantienen su selección propia.
+
+### Catálogo universal y ranking por rol (objetivo P0.M)
+
+AI Teams debe convertir su inventario multi-proveedor en una superficie de
+producto consultable y en la fuente única de recomendaciones para crear y editar
+equipos. El catálogo incluye todos los modelos declarados, descubiertos,
+configurados o observados históricamente, aunque estén bloqueados, retirados,
+manual-only o sin calibrar. Estar visible nunca equivale a poder ejecutarse.
+
+La unidad operativa del ranking no es el nombre comercial aislado, sino el par
+exacto `(adapter_profile_id, channel/pool, model_id, canonical_role)`. El mismo
+modelo vía API y suscripción comparte fabricante/perspectiva, pero difiere en
+credenciales, health, tools, privacidad, coste/cuota y recovery. La UI puede
+agrupar esas entradas bajo un modelo lógico; el selector no puede fusionarlas.
+
+La proyección de catálogo debe componer, sin duplicar fuentes de verdad:
+
+- identidad de proveedor/fabricante/perspectiva/canal/pool;
+- catálogo declarado y discovery autenticado;
+- configuración, health y probe del modelo exacto;
+- compatibilidad de rol, run profile, criticidad, data class y capabilities;
+- tier, contexto, structured output, workspace y MCP gobernado;
+- calibraciones, diagnósticos negativos, samples, jueces, Goodhart y frescura;
+- latencia/throughput, liveness, retries, convergencia y errores;
+- precio API, presión de cuota de suscripción o recursos locales, con provenance.
+
+Los estados permanecen ortogonales y explicables: `catalogued`, `configured`,
+`adapter_green`, `model_verified`, `selectable`, `compatible`, `calibrated`,
+`stale`, `manual_only`, `blocked` y `retired`. El endpoint y la pestaña Modelos
+deben exponer razón, fuente, versión y fecha; no reducirlos a `available=true`.
+
+El contrato puro M.1 vive en `aiteam.model_catalog_projection` con versión
+`model_catalog_identity_v1`. Su `candidate_id` deriva de la identidad operacional
+completa —perfil, organización proveedora, fabricante/perspectiva, canal, pool y
+slug exacto—, por lo que API y suscripción nunca colisionan aunque transporten el
+mismo modelo. Enumera fuentes `declared_catalog`, `configured_profile`,
+`authenticated_discovery` y `historical_run`; cada estado publica `value`,
+`reason`, `source`, `version` y `observed_at`. Discovery deja
+`model_verified=false`; `compatible`, `calibrated` y `stale` permanecen
+desconocidos hasta recibir rol, contexto y evidencia exactos. La conexión con
+SQLite/read model corresponde a M.3 y no se finge dentro de esta función leaf.
+La fusión es determinista y aplica autoridad explícita por campo:
+`authenticated_discovery` > `configured_profile` > `declared_catalog` >
+`historical_run`; dentro de la misma fuente vence la observación más reciente.
+Una run histórica nunca degrada política o disponibilidad vigentes y cada
+estado conserva la provenance del campo que produjo su valor. Duplicar un
+`profile_id` con definición distinta o reutilizar un par histórico
+perfil+modelo con otra identidad operacional falla cerrado. La API importa la
+misma enumeración de estados del contrato y no mantiene una segunda lista.
+
+`model_role_score_v2` es una hipótesis de política versionada que se validará en
+shadow antes de modificar defaults. Produce un breakdown 0–100:
+
+- calidad conductual e idoneidad para el contrato exacto del rol: 40 %;
+- capacidad y headroom demostrados para contexto/tools/output: 15 %;
+- fiabilidad, liveness y convergencia: 15 %;
+- economía contextual del canal: 20 %;
+- velocidad end-to-end o throughput comparable: 10 %.
+
+El score compuesto es la suma ponderada de esos cinco componentes normalizados.
+`confidence` no se esconde mediante una multiplicación opaca: se muestra aparte
+y actúa como gate de auto-elegibilidad. En la versión inicial, una plaza nueva
+solo puede elegir automáticamente evidencia exacta `calibrated` y no stale; los
+pares `partial`, sin test o con evidencia materialmente incompleta siguen
+ordenables para comparación/manual, pero no pueden ganar el default. Durante la
+migración, si ningún candidato alcanza ese gate se conserva el default explícito
+actual o se pide decisión al owner.
+
+La puntuación publica por separado `confidence`, clase de evidencia, número de
+semillas/casos, cobertura de tools, frescura, constructos no medidos y riesgo de
+Goodhart. Un dato desconocido no se convierte en cero ni en una ventaja: queda
+`unknown`, reduce confianza y puede impedir auto-selección si afecta un eje
+material. Los pesos son internos y prerregistrados, no cifras de un vendor; su
+activación requiere contrastarlos con calidad/coste propios y versionar todo
+cambio posterior.
+
+La economía nunca compara euros, cuota y hardware como unidades crudas. API usa
+coste esperado por tarea aceptada; suscripción usa presión de la cuota del perfil
+y señales de agotamiento; local usa recursos y throughput observados. La
+normalización se hace sobre candidatos elegibles del mismo contexto y conserva
+su fuente. El catálogo muestra el score base del rol; `selection_score` puede
+aplicar el contexto del proyecto/issue —criticidad, privacidad, tools,
+presupuesto y presión de capacidad— sin reescribir la evaluación base.
+`selection_score` conserva el mismo breakdown y pesos, sustituyendo únicamente
+los componentes contextuales por sus valores para ese proyecto/issue; no añade
+bonificaciones secretas ni mezcla `confidence` dentro de la cifra.
+
+Antes de puntuar se aplican hard gates. Un candidato automático necesita adapter
+conectado y verde, modelo exacto verificado/selectable, compatibilidad completa,
+política automática y evidencia fresca suficiente. Privacidad, tools,
+structured output, workspace, `manual_only`, retirada, stale material o cuota
+agotada pueden excluir aunque la nota sea alta. El orden de desempate es estable:
+evidencia/calidad del rol, menor carga económica comparable, menor latencia y
+finalmente identidad canónica.
+
+La implementación pura vive en `aiteam.model_role_scoring`. Si los cinco ejes
+están observados, `score` es la suma ponderada; si falta alguno, `score=null` y
+se publica el rango mínimo/máximo posible junto con el peso conocido. Así un
+unknown no se imputa como cero ni puede ganar como si fuera gratuito. La
+economía exige basis específico por canal: coste API por tarea aceptada, presión
+de cuota de suscripción, recursos+throughput local o presión del gateway; los
+desempates económicos solo se aplican dentro del mismo grupo comparable.
+
+`confidence` se calcula aparte con estado/clase de evidencia, semillas, casos,
+cobertura de tools, frescura/version/fecha, recibos, constructos no medidos y
+riesgo de Goodhart. La completitud métrica actúa como cap explícito, no
+multiplica el score. Para auto se exigen al menos 3 semillas, 2 casos, clase de
+juez superior a self-report, recibo durable y provenance temporal/versionada;
+Goodhart material/alto o tools requeridas sin cubrir fallan cerrados. Los
+constructos no medidos aplican un cap visible y acumulable, no una penalización
+secreta dentro del score. El mínimo shadow para auto-
+elegibilidad es 75/100, además de evidencia `calibrated`, fresca y todos los
+hard gates: configuración, health, verificación exacta, selectable,
+compatibilidad, política automática, privacidad, tools, workspace, structured
+output y capacidad disponible. Un score 100 no puede eludir un deny. La salida
+declara `rollout=shadow_only`; M.3–M.7 deben integrar, comparar y autorizar el
+rollout antes de afectar una contratación.
+
+`rank_model_role_scores` solo acepta `model_role_score_v2`, un único rol
+canónico y candidate IDs no duplicados. La selección contextual reutiliza las
+constantes canónicas de versión, pesos y umbral; no mantiene números paralelos.
+Una métrica numérica sin fuente se convierte en `unknown` y una identidad
+operacional incompleta no puede puntuarse.
+
+M.3 materializa esa composición en `aiteam.model_catalog_read_model` con versión
+`model_catalog_read_model_v1`. El entrypoint local une perfiles redacted,
+opciones/tiers, discovery y health, compatibilidad, cobertura de evaluación,
+runs, `run_adapter_profiles` y `cost_events`. Las SQLite se leen read-only con
+introspección: una DB legacy o parcial produce diagnóstico, no una excepción que
+borre el resto. Coste, tokens y latencia históricos quedan como métricas crudas;
+solo una normalización explícita y con provenance puede alimentar los cinco
+componentes del scorer. Los normalized metrics tampoco pueden sobreescribir los
+hard gates derivados del catálogo y la compatibilidad real.
+
+Cada candidato y fila por rol conserva hashes de contenido/entrada, los inputs
+exactos del scorer, receipts, runs y fuentes. El colector normaliza y deduplica
+rutas SQLite equivalentes antes de sumar observaciones. El auditor recalcula el
+hash de entrada y el score completo, por lo que volver a sellar un payload
+exterior manipulado no oculta divergencias internas. Además detecta perfiles,
+modelos o roles declarados ausentes, scores automáticos incompletos, métricas
+conocidas sin fuente, evidencia stale y divergencia de consumidores. El baseline
+local revalidado el 2026-07-23 enumera 46 candidatos y la matriz completa de 17
+roles canónicos (782 celdas), con cero candidatos auto-elegibles y cero fallos.
+M.8.1 añade
+`model_normalized_metrics_v1`: los 25 pares calibrados reciben únicamente la
+tasa de éxito observable de su contrato exacto como componente `quality=100`,
+con semillas, casos, clase de juez, Goodhart, recibos, fecha, versión y grupo de
+comparación. Los parciales, negativos y no probados no reciben calidad. Esto no
+atribuye capability, fiabilidad, economía o velocidad no medidas, por lo que
+ningún candidato se vuelve auto-elegible. El read model audita que el registro
+superior coincida exactamente con la provenance de cada fila y detecta
+eliminaciones o inyecciones.
+
+M.8.2 convierte la taxonomía de `ROLE_STATUS` en el contrato ordenado
+`CANONICAL_ROLES`; los aliases solo normalizan identidades antiguas y nunca
+crean columnas duplicadas. Cada modelo proyecta todos los roles, aunque no
+aparezcan en `best_for`, cobertura o runtime. Una incompatibilidad prevalece
+sobre evidencia histórica para la decisión actual: conserva su código, razón,
+receipts y estado previo, pero el score final permanece `None`. Una celda
+compatible no calibrada que pudiera entrar en selección automática declara
+`run_exact_canary` o `run_exact_tool_fixture`; nunca hereda calidad de otro rol.
+El auditor rechaza taxonomías o matrices incompletas, scores incompatibles y
+deuda automática sin acción exacta. El recibo vigente contiene 666 celdas
+incompatibles y 116 compatibles: 25 calibradas y 91 aún sin score.
+M.8.2 queda cerrado con una corrección adicional: `manual_only=false` es política
+del modelo, no permiso para todos los roles compatibles. Una ruta automática
+requiere además nominación exacta en `best_for`. Así, 71 celdas compatibles no
+nominadas siguen disponibles para configuración manual, pero no generan deuda
+ni promoción automática. Hay 45 celdas nominadas; ninguna ruta operativa carece
+de evidencia. Las dos operativas no calibradas —Luna/File Scout y Flash
+Low/Worker— ya conservan agregados íntegros de tres semillas y resultado
+parcial, por lo que fijan `no_rerun_until_material_change` y no reciben quality.
+El auditor rechaza una política automática rol divergente o una ruta operativa
+sin recibo exacto.
+
+M.8.3 introduce `model_evidence_taxonomy_v1`. Un benchmark general de capacidad,
+un canario exacto de rol y un fixture exacto de tools son evidencias distintas
+y no pueden sustituirse entre sí. Los `research_score` declarados se muestran
+como generales, no normalizados y no alimentan el scorer. Cada métrica exacta
+publica `evidence_kind`, familias de casos y riesgo de Goodhart.
+
+`model_role_score_v2` añade el hard gate `case_diversity`: para automática exige
+al menos dos familias independientes, no simplemente más seeds o más checks
+sobre el mismo fixture. Una calibración mono-familia conserva su quality exacta
+visible, pero su riesgo Goodhart pasa a material y no puede promocionarse. El
+baseline actual separa 23 canarios de rol y 2 fixtures de tools: 21 pares son
+multi-familia y 4 conservan una sola familia válida tras un screening fallido.
+cohortes de Coding, QA, Test Designer, Tier 3 y MCP Operator.
+
+La cohorte Coding usa `config_redactor` como segunda familia frente a
+`cli_conversor`. Terra/Engineer completó tres seeds, 9/9 tests ocultos y Ruff
+limpio; el agregado `coding_hidden_suite_two_family_v4` enlaza y hashea ambos
+agregados exactos, seis muestras y dos familias. Sonnet/Engineer pasó los tres
+tests ocultos de seed 1, pero dejó un import `pytest` sin usar (`F401`): fail-fast
+detuvo las otras seeds. Su calibración anterior sigue visible, pero continúa
+mono-familia y sin permiso automático; la salida del modelo no se parcheó.
+
+La cohorte QA añade `webhook_replay_boundary` a la familia de autorización:
+valida firma inválida, expiración y replay con estado. Terra/QA completó tres
+seeds, 30/30 gates y un agregado enlazado de 6/6 muestras, por lo que abre
+`case_diversity`. Flash High/QA completó correctamente el ataque del primer seed,
+pero Antigravity agotó 240 s en la reverificación. Se conserva como diagnóstico
+operacional `subscription_cli_timeout`, se detienen las demás seeds por
+fail-fast y no se altera su calibración anterior ni se abre diversidad.
+
+La cohorte Test Designer añade una máquina de estados de jobs a las fronteras
+aritméticas de pricing. Terra/Test Designer completó tres seeds, 24/24 gates y
+15/15 mutantes; el agregado de 6/6 muestras abre `case_diversity`. Flash High
+completó el primer seed con 5/5 mutantes. En el segundo volvió a matar 5/5, pero
+agotó 240 s antes del reporte y cierre durable; fail-fast detuvo el tercero.
+Queda como diagnóstico operacional y no abre diversidad.
+
+La cohorte Tier 3 usa familias distintas por función: triaje causal de incidente
+para Worker, idempotencia de pagos para File Scout y un segundo advisory
+gobernado para Web Scout. Luna/Worker, Flash Medium/Worker y Luna/Web Scout
+completaron tres seeds exactas y agregados enlazados de 6/6 muestras. Flash
+Low/File Scout falló el primer submit con `submit_work JSON object not found`;
+fail-fast detuvo las otras seeds y mantiene el gate cerrado. Las reformulaciones
+equivalentes detectadas en Worker/Web Scout se añadieron al juez y se
+reevaluaron sobre receipts existentes, sin nueva inferencia.
+
+MCP Operator añade `dependency_policy_lookup`/`publish_policy` como segundo
+dominio gobernado, independiente del advisory. Terra completó tres seeds y
+36/36 gates: fallo y recuperación de health, allow/deny, llamada permitida,
+ausencia de write, reporte durable y single-attempt. El agregado enlaza 6/6
+muestras. Con ello M.8.3.3–M.8.3.4 quedan cerrados: 21/25 pares abren diversidad;
+los cuatro restantes conservan quality anterior, diagnóstico exacto y bloqueo
+automático hasta cambio material.
+
+La cobertura vigente queda registrada en
+`benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`:
+46 modelos, 131 destinos semánticos, 25 calibrados, 5 parciales, 15 canarios,
+4 fixtures de tools, 3 candidatos manuales y 79 bloqueados. Estos estados son
+de cobertura conductual; no sustituyen los 782 estados de compatibilidad de la
+matriz modelo×rol ni conceden selección automática.
+
+Cuando health no conserva versión, el entrypoint puede reutilizar el último
+`model_catalog_drift_audit` de hasta 30 días como evidencia durable. Solo acepta
+un recibo `ok`, con todos sus gates verdaderos, catálogo `current` y cobertura
+exacta; health vivo prevalece. La fuente y fecha quedan en
+`evaluation_version_evidence`. Un recibo futuro, stale, inválido o con cualquier
+gate falso no rehabilita calibraciones.
+
+`model_role_score_snapshots` y `aiteam.db.model_score_snapshots` guardan de forma
+idempotente el set completo de candidatos, versiones, ganador, razón y hash. Un
+ganador `auto_applied` debe pertenecer al set y ser auto-elegible; una mutación
+posterior invalida `hash_valid`. Una versión o rol explícitos dentro de un
+candidato deben coincidir con el snapshot; su ausencia sigue siendo válida para
+consumidores envolventes que ya versionan el set. La tabla está lista, pero no recibe selecciones
+productivas sin un snapshot vivo elegible. La identidad canónica mantiene un
+orden de presentación determinista, pero si score, evidencia, calidad, economía
+y velocidad siguen exactamente empatados, `default.reason=unresolved_exact_tie`
+falla cerrado y exige owner.
+
+M.4 expone el mismo read model mediante `GET /api/model-catalog` y
+`GET /api/model-catalog/candidates?role=...`. La primera ruta conserva candidatos
+bloqueados/inactivos y filtra por rol, proveedor, canal, tier, estado y
+configuración; la segunda usa directamente `rank_model_role_scores` y publica
+score, breakdown, confianza, compatibilidad, métricas, evidencia, provenance y
+`selection_reason`. Ninguna ruta recalcula gates ni activa el ganador: el
+contexto base sigue siendo criticidad medium, datos públicos y capacidades
+canónicas del rol; `selection_score` contextual pertenece a M.6.
+La respuesta de candidatos identifica esta vista como `base_role_score` y
+enlaza `POST /api/model-catalog/selection` como superficie contextual; no afirma
+ya que M.6 esté pendiente. La caché conserva una copia privada y devuelve copias
+aisladas, de modo que ningún consumidor puede mutar el read model compartido.
+El timestamp de caché se toma después de construir la proyección y las claves
+siguen incorporando configuración y SQLite.
+
+`/api/user-adapters/models` conserva por compatibilidad externa `role_score` y los campos
+anteriores, pero añade `catalog_candidate_id`, `model_role_score` y razón
+canónica y ordena primero los pares presentes en la proyección global. Su
+compatibilidad contextual existente se calcula contra el orden persistido del
+perfil, igual que el POST de preflight, para mantener paridad exacta. Una caché
+local de 30 segundos se separa por configuración/SQLite y se invalida en
+mutaciones de perfil, secret y health; no ejecuta discovery ni canarios.
+Ningún consumidor productivo del cockpit usa ya este GET: onboarding, Equipo y
+hiring consultan `POST /api/model-catalog/selection`; el probe manual conserva
+su contrato independiente en `POST /api/user-adapters/test`. Así, inventario y
+diagnóstico local no vuelven a convertirse accidentalmente en ranking.
+
+La selección automática usa una sola función backend compartida por onboarding,
+bootstrap Lead, hiring, Equipo, quorum y propuestas de fallback. Persiste el
+conjunto de candidatos, score version, breakdown, confianza, hard gates y razón
+del ganador. La opción explícita del owner siempre prevalece y no se reescribe en
+reconcile. Sin candidato elegible se conserva un default explícito o se escala al
+owner; nunca se cambia silenciosamente de adapter.
+
+El `role_score` actual de `aiteam.user_config.model_options_for_role` es
+transitorio: ordena por tier, capabilities declaradas y `best_for`, pero no
+representa todavía calidad durable, fiabilidad, economía/velocidad observadas ni
+confianza. Debe delegar gradualmente en la nueva proyección. Durante rollout, el
+nuevo ranking funciona primero en shadow, después como recomendación visual y
+solo finalmente como default para plazas nuevas sin modelo fijado. Agentes ya
+existentes no se migran automáticamente.
+
+La pestaña independiente `Modelos` muestra proveedores/canales y una matriz
+modelo×rol con score, confianza, tier, calidad, economía, velocidad, estado y
+evidencia. Los detalles enlazan recibos y métricas; filtros y comparación no
+reimplementan scoring en React. En crear/editar equipo, cada rol recibe la lista
+global de pares modelo+adapter ordenada por la misma API; los no elegibles siguen
+visibles, deshabilitados y con causa.
+
+M.5 materializa esa pestaña en `ide-frontend/src/components/ModelCatalog`. El
+read model publica metadata redacted del perfil —política/nota de datos,
+workspace, MCP, structured output y clase económica— para que React no consulte
+una segunda fuente ni convierta ausencia de privacidad en permiso. La vista
+presenta tarjetas perfil+canal, filtros, matriz desplazable y ficha de detalle
+con estados, hard gates, breakdown, confianza, métricas y receipts. Al elegir un
+rol obtiene el orden de `/api/model-catalog/candidates`; un candidato bloqueado
+con score superior permanece detrás del elegible y se explica como deny. El
+rollout visual continúa `shadow_only`: la pestaña no contrata ni muta defaults.
+La reauditoría del 2026-07-23 mantiene `unknown` separado de cero también en la
+presentación: score o confianza ausentes usan `—`. El filtro enumera los once
+estados canónicos, las tarjetas publican conteos configurado/verde con estado
+accesible y el detalle incluye los inputs exactos del score. Su diálogo mueve el
+foco al abrir, lo confina, cierra con Escape y devuelve el foco al control de
+origen. El footer enlaza conceptualmente el selector contextual ya activo, sin
+texto de rollout obsoleto ni cálculo local en React.
+
+M.6 empieza con `POST /api/model-catalog/selection` y la función pura
+`build_contextual_model_selection`. Esta proyección enumera todos los pares del
+catálogo para un rol —también los que aún no tienen fila de score—, recalcula la
+compatibilidad exacta con run profile, criticidad, data class y capacidades y
+aplica esos hard gates antes de llamar al ranking canónico. Conserva por separado
+`base_score` y `selection_score`: mientras no existan métricas contextuales
+normalizadas y comparables, el valor numérico no cambia y solo cambian gates.
+Si no hay auto-elegibles, `default.action` exige conservar una selección
+explícita o preguntar al owner; nunca recomienda simplemente la primera fila.
+
+`ModelRoleSelector` consume ese POST en onboarding, edición, hiring propuesto,
+alta directa de Equipo, quorum y fallback. Agrupa por proveedor/canal, mantiene
+el orden backend y permite al owner elegir candidatos compatibles/selectables
+aunque no sean auto-elegibles; los demás permanecen visibles con su deny reason.
+Quorum añade diversidad y fallback restringe el perfil, sin reimplementar el
+ranking. M.6.2 queda cerrado: cada frontera que crea o modifica una asignación
+reconstruye el contexto desde `issue_id` y une las capabilities efectivas del
+agente con las requeridas por la issue y sus ancestros. Proposal inicial,
+quorum y liveness pasan el mismo contexto al selector gobernado; no basta con
+que la UI hubiera filtrado previamente un candidato.
+
+Los accesos `model_options?.[0]` que permanecen en React son probes manuales de
+conexión y no escriben asignaciones. `GET /api/user-adapters/models` permanece
+como compatibilidad externa sin consumidores productivos; el inventario local
+no gobierna el ranking ni sustituye a `POST /api/model-catalog/selection`.
+Los caminos legacy que aún validan clientes antiguos o reparan metadata perdida
+son fronteras explícitas, no defaults silenciosos.
+
+Los cambios de una asignación existente cruzando perfil o adapter nunca son un
+fallback automático. Review high/critical con la misma perspectiva que el
+engineer y recovery tras agotar liveness crean una `request_confirmation`
+durable con el par exacto recomendado por `contextual_model_selection`; la issue
+queda `blocked` y el agente conserva byte a byte su asignación. Al aceptar, el
+executor recalcula catálogo, conexión, `owner_selectable`, compatibilidad y el
+gate original (`different_perspective` o `different_adapter`) antes de escribir
+`selection_intent.mode=owner_explicit`. Rechazar mantiene el bloqueo. Si Team se
+editó mientras la tarjeta estaba pendiente, la edición más nueva prevalece y
+solo reabre trabajo si también supera esa revalidación. Estas transiciones son
+control plane determinista: no consumen otra inferencia ni quedan bloqueadas por
+gates de coste/compliance destinados a ejecutar modelos.
+
+Una elección manual del componente se persiste dentro de `adapter_config` como
+`selection_intent` versión `model_selection_intent_v1`, modo `owner_explicit`,
+con la identidad canónica del candidato. Es metadata no secreta y viaja con el
+par exacto perfil+modelo. Reconcile solo puede reparar placeholders o identidad
+de transporte perdida; no debe reinterpretar esta marca como autorización para
+optimizar o reemplazar el modelo. El modo durable `default` queda reservado para
+M.7, cuando exista un candidato auto-elegible y snapshot reproducible.
+
+`aiteam.model_selection_intent` normaliza las fronteras autorizadas por el owner.
+Create, update y aceptación de hiring vinculan el `candidate_id` al perfil y
+modelo exactos; una identidad falsificada o un `mode=default` enviado por un
+cliente falla antes de escribir. Un PATCH del mismo par hereda la intención
+existente, pero vuelve a contrastar su candidato canónico para que una fila
+legacy o manipulada no eluda el vínculo por conservar perfil/modelo. Onboarding
+también pasa por este normalizador backend: un `candidate_id` falso aborta y
+limpia el proyecto parcial. GET/reload proyecta la marca sin reinterpretarla.
+Solo M.7 crea `mode=default` desde un snapshot automático reproducible.
+
+M.7 inicia sin mutación mediante `aiteam.model_default_rollout` y
+`POST /api/model-catalog/selection/shadow`. Cada evaluación persiste el conjunto
+contextual completo, eleva `auto_eligible` desde el `selection_score` ya
+gobernado, marca la asignación actual y registra `matches`, divergencia o
+`no_winner`. El snapshot es idempotente y sellado. Generar
+`selection_intent/mode=default` exige recalcular ese hash, `auto_applied=true` y
+un ganador elegible con identidad operacional completa; un snapshot shadow no
+puede usarse para contratar. El smoke inicial conserva seis asignaciones porque
+ninguno de los 48 candidatos por rol supera todos los gates.
+
+El rollout de proceso usa `AITEAM_MODEL_DEFAULT_ROLLOUT=shadow|recommend|auto`.
+Un valor ausente o inválido cae a `shadow`, de modo que volver a `shadow` es el
+rollback y no reescribe agentes. `recommend` persiste la misma decisión pero
+mantiene el selector vigente. `auto` solo puede materializar una plaza nueva sin
+pin a partir de un snapshot `auto_applied`, hash válido y ganador elegible; si no
+hay ganador conserva `role_builtin` con estado durable `default_unresolved`, que
+reconcile no puede convertir después mediante la heurística legacy. Las cohortes
+conectadas cubren agentes dinámicos de issues/liveness, bootstrap Lead, Tier 3 y
+quorum. Un Lead sin ganador aborta la creación y elimina el árbol parcial; Tier 3
+conserva builtin explicado; quorum resuelve secuencialmente y excluye perspectivas
+ya usadas cuando hay alternativas. Las altas de lote se confirman una a una para
+liberar el write lock antes de persistir el snapshot siguiente; el ensure
+idempotente completa una caída parcial. Canarios herméticos prueban dos canales,
+no-winner, pins y reconcile, pero no sustituyen la matriz viva de health, cuota y
+calidad. El recuento de suite se actualiza al cerrar esta cohorte.
+La verificación resultante deja 238 tests dirigidos y 1329 globales en verde.
+
+M.7.4 persiste el snapshot vivo del 2026-07-23 para 14 roles y los 46 candidatos
+del catálogo: los 14 hashes son válidos y ninguna evaluación shadow modifica
+asignaciones o marca `auto_applied`. Las 644 observaciones candidato×rol tienen
+economía declarada, pero solo 17 disponen de economía normalizada; 392 muestran
+adapter rojo y ninguna tiene capacidad suficientemente demostrada (`no_data` o
+`capacity_unknown`). Por eso el rollout operativo avanza únicamente a
+`recommend`, que no asigna, y `auto` permanece denegado. La plantilla documenta
+`recommend`; una variable ausente o inválida sigue cayendo a `shadow`, que es
+también el rollback inmediato. La matriz de autoridad confirma que adapter rojo,
+incompatibilidad, precio desconocido, presión de cuota, stale, empate exacto y
+override no crean una asignación. Además, el rollout vuelve a comprobar que el
+ganador de la proyección siga siendo auto-elegible antes de persistir autoridad.
+
+La presión económica contextual de M.6 se deriva en el servidor. Para cada
+perfil, `subscription_quota_snapshot` conserva estados y provenance: solo
+`exhausted_observed` o `limit_reached` cierran `capacity_available` y deshabilitan
+la elección; `capacity_unknown` permanece desconocido (`passed=null`) e impide
+el default automático sin fingir cero ni bloquear por sí solo una elección
+manual del owner. Si una política explícita
+del owner aporta unidad, límite, ventana y utilización, el selector puede
+sustituir únicamente el componente `economy` de una suscripción por su headroom
+normalizado, con basis `subscription_quota_pressure`; no compara unidades entre
+perfiles. Para API, el cap diario se deriva de `cost_events` y
+`daily_cost_cap_cents`: al alcanzarse bloquea candidatos API, pero no canales de
+suscripción cuyo coste marginal registrado es cero. Si la SQLite no puede leerse,
+el gasto y el restante quedan desconocidos: el lector usa modo read-only, no crea
+una DB vacía ni convierte el fallo en gasto cero. Un forecast owner incompleto,
+no finito o sin unidad/límite/ventana válidos tampoco reescribe economía. El
+frontend no envía ni autorreporta estas presiones.
+
+El selector envía `issue_id`, no una afirmación de tools. El backend hereda
+`required_capabilities` de la issue y sus ancestros mediante el mismo
+`issue_compatibility_context` que usa dispatch, y las une con las capacidades
+del agente editado y los defaults del rol. Así una necesidad `external_mcp`,
+repo write o structured output puede cerrar el mismo hard gate en hiring y en
+ejecución sin confiar en estado React. Las listas se unen en toda la ascendencia,
+no se sustituye una por otra; para campos escalares prevalece el valor más
+cercano a la issue, incluida una criticidad `medium` explícita.
+
+La explicación del default refleja el orden real. Un score distinto publica su
+delta; un empate identifica si lo resolvieron evidencia, calidad, economía o
+latencia dentro del mismo grupo comparable y, como último recurso estable, la
+identidad canónica. React muestra esa causa junto al breakdown sin recalcular el
+ranking.
+
+Onboarding usa ya el mismo `ModelRoleSelector`. La creación del proyecto envía
+perfil, modelo y candidate id exactos; `choose_adapter_for_role` acepta ese
+modelo preferido solo si pertenece al perfil, es seleccionable y supera la
+compatibilidad Lead. Bootstrap no vuelve a escoger otro modelo por tier: guarda
+el par y `model_selection_intent_v1/owner_explicit`. La ausencia de
+`lead_model` mantiene temporalmente el contrato anterior para clientes que aún
+no han migrado.
 
 ### Selector de perfil de ejecución
 
@@ -403,6 +1003,12 @@ adapter: `model_unavailable` abre el gate de lifecycle descrito arriba. El modo
 autónomo no puede resolverlo porque cambiar modelo/familia/tier es una decisión
 de producto, no un default operacional.
 
+Agotar liveness en el adapter completo aplica la misma frontera: puede generar
+una recomendación cross-adapter, pero no reasignar ni reabrir la issue hasta que
+el owner acepte y el candidato siga siendo ejecutable. La interaction es
+idempotente por issue/agente/causa y su resolución deja activity y wakeup
+durables; inventario o catálogo por sí solos nunca autorizan la mutación.
+
 FrugalGPT aporta evidencia primaria de que combinar selección, generación y cascadas puede reducir coste manteniendo calidad en sus datasets. No prescribe thresholds universales. Fuente: [PAPER-2](ORCHESTRATION_SOURCES.md#paper-2-frugalgpt).
 
 Vigilar `cascade pile-up`: degradación o rate limit del barato puede trasladar toda la carga al caro. En AI Teams lo mitigan `provider_governor`, recovery acotado y cap diario.
@@ -412,7 +1018,7 @@ Vigilar `cascade pile-up`: degradación o rate limit del barato puede trasladar 
 Las columnas `runs.session_id_before/after` existen, pero el runtime productivo
 continúa stateless: Claude usa `--no-session-persistence`, Codex `--ephemeral` y
 Antigravity `--new-project`. El probe local del 2026-07-21 confirma reanudación
-por ID explícito en Codex 0.128.0 y Antigravity 1.1.5; Claude no está instalado
+por ID explícito en Codex 0.145.0 y Antigravity 1.1.5; Claude no está instalado
 en esta máquina.
 
 `aiteam/session_continuity.py` define el gate experimental. Una sesión solo puede
@@ -456,6 +1062,15 @@ En AI Teams, `test_runner` debe seguir siendo builtin/subprocess. El LLM puede i
 - Planner: define objetivo, riesgos y aceptación.
 - Maker: produce el cambio o artefacto.
 - Verifier: contrasta spec, diff y evidencia.
+
+La clasificación empieza por el entregable, no por asumir programación. Un
+estudio empresarial, investigación, memo o análisis sin artefacto ejecutable no
+crea Engineer, Test Designer, QA ni Test Runner, y no inventa archivos o suites
+para satisfacer gates de software. Usa scouts/curator y, cuando reduzca un
+riesgo concreto, revisión independiente de fuentes o método. Su evidencia es
+cobertura, citas fechadas, supuestos, cálculos y una conclusión accionable. En
+trabajo `mixed`, solo el sub-issue realmente ejecutable activa build/tests.
+P0.J llevará esta mitigación de prompt a metadata, UI y enforcement determinista.
 
 Preferir evidencia en este orden:
 
@@ -587,7 +1202,8 @@ el módulo verifica rango, issue y ratio antes de persistir, y el executor aplic
 la transición devuelta y deniega el cierre sin
 artefacto. El canario real `scripts/benchmark_context_curator.py` muestra una
 frontera dependiente de modelo/proveedor: en `auth_migration`, Codex mini conserva
-7-8/9 anclas en tres semillas (0/3), `gpt-5.5` obtiene 2/2 y Anthropic Haiku 3/3;
+7-8/9 anclas en tres semillas (0/3); el control GPT-5.5 y Luna `medium` obtienen
+6/6 en la matriz actual, mientras Anthropic Haiku conserva 3/3 en su canario;
 en `queue_rollout`, Codex mini obtiene 3/3 y senior/Antigravity 1/1 cada uno.
 Cada bloque añade un índice causal v1 con unidades tipadas y provenance mínima
 por comentario. Producción valida la forma de relaciones que no deben perderse:
@@ -599,7 +1215,7 @@ el índice tiene un cap separado de 4 KiB. Los primeros recibos reales v1 pasan
 auth y queue 9/9 en una run, con ratios Markdown 12,77 % y 12,96 %, pero ratios
 totales 47,56 % y 54,37 % al contar JSON y UUID: la trazabilidad tiene coste de
 contexto y debe seguir midiéndose. Por ello, nuevas contrataciones de curador sobre
-`codex_subscription` usan `gpt-5.5`; otros perfiles conservan su selección propia
+`codex_subscription` usan `gpt-5.6-luna` con esfuerzo `medium`; otros perfiles conservan su selección propia
 y el usuario puede cambiarla. No se promueve globalmente todo proveedor barato.
 
 El recovery productivo está acotado a una sola corrección automática. Ante el
@@ -831,6 +1447,11 @@ con `StructuredOutputError` y `structured=null`; que algunos produzcan JSON
 textual válido de forma no estable no satisface el contrato del proveedor. La
 evaluación termina con decisión negativa: no se construye autorecovery
 productivo sobre esta versión.
+La revalidación 2026-07-23 confirma OpenCode 1.18.4, el mismo catálogo de cinco
+modelos declarados y Big Pickle todavía rechazado. El cierre enlaza y hashea los
+recibos previos sin gastar una nueva inferencia: DeepSeek/Reviewer conserva
+`partial` 1/3 y el pool solo se reabre si cambia versión, catálogo, transporte
+o contrato structured output.
 El canario solo demuestra recoverability manual y health de un MCP local, no de
 MCPs externos. `serve` tampoco aporta el sandbox necesario para Engineer.
 Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
@@ -867,13 +1488,21 @@ Una incompatibilidad se bloquea antes de consumir modelo y devuelve un código,
 una explicación para el owner y alternativas ejecutables; nunca se corrige con
 un cambio silencioso de adapter o `lead_builtin`.
 
+La composición viva única es `contextual_model_selection`: superpone read model,
+contexto de issue, tools, health/selectable, presión de cuota y presupuesto antes
+de ordenar. `POST /api/model-catalog/selection`, onboarding, Equipo, hiring,
+quorum y lifecycle consumen esa misma proyección. Cada flujo añade únicamente
+su restricción de dominio: quorum exige diversidad de perspectiva; fallback
+permanece en el mismo perfil, prioriza continuidad de familia/tier y presenta
+al owner el selector restringido antes de mutar la asignación.
+
 La matriz provisional de los canales gratuitos, pendiente de canarios vivos,
 es deliberadamente más estrecha que su capacidad comercial:
 
 | Perfil/modelo | Roles máximos provisionales | Bloqueos obligatorios |
 |---|---|---|
 | Zen / Nemotron 3 Ultra | Lead, arquitectura, quorum y review read-only | Engineer/Worker y Lead `solo_lead`; datos confidenciales |
-| Zen / DeepSeek V4 Flash o MiMo V2.5 | Reviewer y QA read-only | Lead/quorum, test_designer, escritura y datos confidenciales |
+| Zen / DeepSeek V4 Flash o MiMo V2.5 | Reviewer read-only | Lead/quorum, QA, test_designer, escritura y datos confidenciales |
 | Zen / North Mini Code | Scouts y context curator | Lead/quorum, review crítico y escritura |
 | Gemini Free / 3.5 Flash | Reviewer, QA y test design | Lead/quorum hasta calibración; MCP externo |
 | Gemini Free / Flash-Lite | Scouts y context curator | Lead/quorum y review crítico |
@@ -886,6 +1515,22 @@ deben clasificarse genéricamente como incapaces de escribir. Lo que no poseen e
 un loop MCP gobernado. Capacidad de workspace, transporte MCP, privacidad y
 calidad de modelo son ejes independientes y deben producir razones de deny
 distintas.
+
+Los screenings exactos del pool no bloqueante 2026-07-23 tampoco autorizan
+defaults. GPT-OSS 120B de Antigravity no produjo un `submit_work` válido en
+`file_scout`, `worker` ni en el único retry justificable de `web_scout`; el
+primer intento de web fue infraestructura saturada y no se contó como calidad.
+Se aplicó fail-fast tras el primer fallo contractual reproducible, en vez de
+gastar tres semillas incapaces de superar el gate de transporte.
+
+En Ollama 0.32.1, Qwen 2.5 Coder 14B no cierra los contratos exactos de
+`file_scout` ni `context_curator`; Gemma 4 E4B tampoco supera
+`file_scout`/`context_curator`/`worker`. Gemma 4 26B pasa Engineer solo 1/3 y
+queda `partial`; Reviewer no supera el rechazo durable y Test Designer mata
+mutantes pero falla la baseline, por lo que ese resultado no se presenta como
+éxito de mutación. Estos fallos se conservan como diagnósticos por par exacto.
+La ventaja económica local permanece intacta —cero coste y cuota externos—,
+pero no sustituye calidad, fiabilidad ni compatibilidad.
 
 Una prueba del perfil o del modelo default no verifica todo el catálogo. Una
 opción habilitada en Equipo necesita ID descubierto o vigente, compatibilidad
@@ -904,9 +1549,10 @@ inventariado no equivale a estar autorizado. Los perfiles custom pueden
 declarar `model_options` con tier, capacidades y allow/deny por rol.
 
 El contrato considera que las APIs pueden materializar file ops estructuradas.
-OpenCode se mantiene read-only por política expresa. QA puede operar como
-revisión adversarial de lectura, mientras Engineer, Test Designer y Lead en
-`solo_lead` requieren escritura. `mcp_operator` y cualquier necesidad
+OpenCode se mantiene read-only por política expresa. El QA condicional escribe
+únicamente tests adversariales que demuestran defectos, por lo que requiere
+`repo_write` igual que Engineer, Test Designer y Lead en `solo_lead` y no se
+recomienda en OpenCode. `mcp_operator` y cualquier necesidad
 `external_mcp` exigen transporte marcado `governed`; las tools nativas del
 proveedor no satisfacen esa condición. Los canales `non_confidential_only` o
 `provider_free_tier` fallan cerrados sin clasificación y deniegan datos
@@ -1062,7 +1708,7 @@ admisible con riesgo residual de sobreajuste a la suite oculta.
 | Hiring | `aiteam/run_profiles.py`, `aiteam/hiring_economics.py` |
 | Adapters | `aiteam/project_adapters.py`, `aiteam/adapters/` (incluye Zen y BYOK OpenAI-compatible) |
 | Provider health | `aiteam/provider_governor.py` |
-| Calibración de modelos | `aiteam/model_calibration.py`, `scripts/audit_model_catalog_drift.py` |
+| Catálogo, scoring y calibración de modelos | `aiteam/model_catalog_projection.py`, `aiteam/model_role_scoring.py`, `aiteam/model_catalog_read_model.py`, `aiteam/model_catalog_api.py`, `aiteam/model_catalog_service.py`, `aiteam/db/model_score_snapshots.py`, `aiteam/model_calibration.py`, `api/routers/model_catalog.py`, `ide-frontend/src/components/ModelCatalog/`, scripts de auditoría de catálogo |
 | MCP gobernado | `aiteam/mcp_runtime.py`, `aiteam/extensions.py`, `aiteam/mcp_catalog.py`, traducción Codex/OpenCode en adapters |
 | Detección MCP | `aiteam/mcp_needs.py`, reconciliación en `aiteam/heartbeat/loop.py` |
 | Context curator | `aiteam/context_curator.py`, proyección en `aiteam/db/wake_payload.py` |

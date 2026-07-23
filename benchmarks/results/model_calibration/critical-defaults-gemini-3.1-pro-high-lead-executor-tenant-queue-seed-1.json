@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "status": "completed",
+  "wall_seconds": 7.828,
+  "usage": {},
+  "response": {
+    "objective": "Eliminar la condición de carrera en el checkout de la cola por tenant consolidando SQLite como única fuente durable sin interrumpir las ejecuciones activas.",
+    "execution_steps": [
+      "Refactorizar la lógica de checkout para unificar la consulta SELECT y el cambio de estado UPDATE en una única transacción atómica en SQLite por tenant_id.",
+      "Implementar y validar el flag de control de características (feature flag) para alternar dinámicamente entre la lógica de checkout previa y la nueva de manera transparente.",
+      "Desplegar el cambio asegurando la compatibilidad con las ejecuciones activas sin forzar paradas del servicio.",
+      "Ejecutar el protocolo de prueba del gate aplicando 100 reinicios sobre el sistema durante un intervalo continuo de 24 horas.",
+      "Supervisar la métrica de wakeups y la concurrencia de workers para confirmar la ausencia de asignaciones dobles."
+    ],
+    "evidence": [
+      "Superación exitosa del gate: comprobación de 100 reinicios ejecutados con cero wakeups perdidos durante el periodo supervisado de 24 horas.",
+      "Registros de base de datos que confirmen que dos workers no ganaron el mismo issue de un tenant_id simultáneamente."
+    ],
+    "risks": [
+      "Mayor contención de locks en SQLite al ejecutar escrituras en transacciones concurrentes por tenant.",
+      "Posible incremento en los tiempos de espera si la tasa de checkout por worker se eleva bajo alta carga."
+    ],
+    "rollback": "Cambiar el estado del flag de control para retornar de forma inmediata al camino de checkout anterior sin reiniciar el proceso ni perder durabilidad en SQLite.",
+    "escalation": "Escalar al equipo de arquitectura de datos e infraestructura si se detectan bloqueos de base de datos no resueltos o si se registra algún wakeup perdido durante las 24 horas del gate."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

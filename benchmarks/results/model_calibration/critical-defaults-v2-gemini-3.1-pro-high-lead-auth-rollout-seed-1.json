@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.5",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "auth_rollout_incident",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 7.609,
+  "usage": {},
+  "response": {
+    "objective": "Resolver el incidente auth_rollout_incident mediante la mitigación del rollout de auth v2 (actualmente al 5 %) tras registrar una tasa de error del 2,4 %, superando el límite del 1,0 % durante un periodo de 10 minutos, garantizando la recuperación del servicio.",
+    "work_items": [
+      {
+        "id": "WI-01",
+        "task": "Ejecutar el rollback del rollout de auth v2 (cohorte al 5 %) hacia Auth v1",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Rotación de secrets"
+        ],
+        "rollback_path": "Auth v1"
+      },
+      {
+        "id": "WI-02",
+        "task": "Completar la dependencia pendiente de rotación de secrets",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [],
+        "rollback_path": "Auth v1"
+      }
+    ],
+    "risks": [
+      {
+        "description": "Tasa de error del 2,4 % observada en la cohorte del 5 % de auth v2, excediendo el límite tolerable de 1,0 % durante 10 minutos."
+      },
+      {
+        "description": "Dependencia pendiente en la rotación de secrets que puede impedir la estabilización o el despliegue."
+      }
+    ],
+    "verification": {
+      "gate": "Aprobación de recuperación de auth",
+      "acceptor": "Reviewer",
+      "condition": "El Reviewer acepta el estado únicamente cuando los logs y métricas confirmen explícitamente la recuperación y el restablecimiento de la tasa de error dentro del límite tolerable."
+    },
+    "escalation": {
+      "conditions": [
+        "Persistencia de la tasa de error por encima del 1,0 % transcurrido el periodo de 10 minutos sin confirmación en logs y métricas.",
+        "Impedimento o fallo durante el rollback hacia Auth v1.",
+        "Bloqueo no resuelto en la dependencia pendiente de rotación de secrets."
+      ]
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": true,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}
