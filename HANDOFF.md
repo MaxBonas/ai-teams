@@ -44,22 +44,35 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad ejecutable: **P0.I.1.4.3**, ejecutar la aceptación Windows en
-el runner efímero y conservar/auditar su recibo. M.8 queda abierto como
+Siguiente unidad ejecutable: **P0.I.2.1**, formalizar capas, precedencia y
+ownership de configuración portable por máquina. M.8 queda abierto como
 mantenimiento por evento/mes; sus 25 pares
 calibrados ya tienen quality exacta, 21 abren diversidad y los cuatro restantes
 no deben repetirse hasta un cambio material.
 
 ## Trabajo reciente
 
+- I.1 queda cerrado. El run independiente
+  `https://github.com/MaxBonas/ai-teams/actions/runs/30023876549` prueba la
+  revisión exacta `f2a20ed`: cinco runtimes listos, 10/10 pasos, bootstrap
+  43,906 s→2,109 s, health backend/frontend, fixture de una issue/26 tablas,
+  stop limpio y cero CLIs añadidos. El recibo redacted versionado es
+  `benchmarks/results/installation_acceptance/windows-clean-room-f2a20ed.json`
+  (SHA-256 versionado
+  `b45b9c285bec86ba356ce36a747b24d2ba9d503d51d5ec34291cc5ebf5c6111d`;
+  artefacto original
+  `b8b714f97b103ba602419849c0bccdeb18362de49e2bbae8e2533f7e37d20806`).
+  `windows_native_x86_64` y `git_checkout` pasan a `verified` solo para control
+  plane; adapters vivos, releases, ARM64 y POSIX conservan gates separados.
 - I.1.4.1–I.1.4.2 añaden un harness Windows fail-closed y un workflow sobre
   `windows-latest`. Comprueban revisión, bootstrap doble, auditoría, start/stop,
   health, proyecto SQLite fixture, puertos liberados y que no aparezcan CLIs
   globales implícitos. Un recibo local se etiqueta `local_existing_host` y no
   permite promoción. La ejecución local integral pasa 10/10 pasos, una issue y
   26 tablas; corrigió un bloqueo por handles heredados en el primer intento.
-  I.1.4 continúa abierto hasta obtener el artefacto independiente con SHA y
-  provenance de GitHub Actions coincidentes. Config añade una guía expandible de OpenCode Zen con enlace a
+  La auditoría del artefacto independiente exigió además checkout del head SHA
+  exacto y versiones redacted de runtimes antes de permitir promoción. Config
+  añade una guía expandible de OpenCode Zen con enlace a
   la key personal, login en terminal, `opencode auth list` y probe posterior,
   sin recoger la credencial. Verificación: 41 tests focalizados, Ruff y
   typecheck limpios, 1461 tests backend y teardown sin listeners residuales.
@@ -68,7 +81,7 @@ no deben repetirse hasta un cambio material.
   read-only que recomienda sin instalar: hace falta un solo canal Lead-capable
   verde; Codex/Antigravity son opciones primarias, OpenCode es economía opcional
   con API key personal y Ollama/LM Studio son locales opcionales. La máquina
-  actual reporta Windows x86_64 `preview`, control plane listo, Codex 0.145.0,
+  La auditoría local inicial reportó Windows x86_64 `preview`, control plane listo, Codex 0.145.0,
   Antigravity 1.1.5 y OpenCode 1.18.4 presentes, sin fingir auth/health. El caso
   externo del 2026-07-22 queda en RUN-018; la parte no programativa abre P0.J y
   recibe mitigación inmediata en la skill del Lead. Verificación: bootstrap

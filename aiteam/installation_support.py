@@ -44,6 +44,12 @@ def load_installation_support_contract(path: Path | None = None) -> dict[str, An
     for row in payload["platforms"]:
         if row.get("status") not in SUPPORT_STATUSES:
             raise ValueError(f"invalid platform status: {row.get('id')}")
+    for collection in ("distributions", "platforms"):
+        for row in payload[collection]:
+            if row.get("status") == "verified" and not (
+                row.get("evidence") and row.get("evidence_run")
+            ):
+                raise ValueError(f"verified support requires evidence: {row.get('id')}")
     for row in payload["adapters"]:
         if row.get("automatic_install") is not False:
             raise ValueError(f"adapter must not install automatically: {row.get('id')}")

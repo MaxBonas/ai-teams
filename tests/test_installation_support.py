@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from pathlib import Path
+
 from aiteam.installation_support import (
     audit_installation_support,
     load_installation_support_contract,
     version_meets_minimum,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_support_contract_separates_required_primary_and_optional_local() -> None:
@@ -29,10 +35,33 @@ def test_support_contract_separates_required_primary_and_optional_local() -> Non
     assert all(item["automatic_install"] is False for item in adapters.values())
     assert "checksums SHA-256" in distributions["versioned_release_artifact"]["required_contents"]
     assert distributions["git_checkout"]["integrity"] == "tag o commit SHA explícito"
+    assert distributions["git_checkout"]["status"] == "verified"
+    windows = next(
+        item for item in contract["platforms"]
+        if item["id"] == "windows_native_x86_64"
+    )
+    assert windows["status"] == "verified"
+    assert windows["evidence"].endswith("windows-clean-room-f2a20ed.json")
+    assert "adapters vivos" in windows["verified_scope"]
     assert acceptance["platform_id"] == "windows_native_x86_64"
     assert acceptance["required_steps"].count("bootstrap_first") == 1
     assert "independent_machine=true" in acceptance["promotion_requires"]
     assert "No ejecuta inferencias" in " ".join(acceptance["limits"])
+
+    receipt_path = ROOT / windows["evidence"]
+    receipt_bytes = receipt_path.read_bytes()
+    assert hashlib.sha256(receipt_bytes).hexdigest() == windows["evidence_sha256"]
+    assert len(windows["artifact_sha256"]) == 64
+    receipt = json.loads(receipt_bytes)
+    assert receipt["schema_version"] == "windows_clean_room_acceptance_v1"
+    assert receipt["ok"] is True
+    assert receipt["independent_machine"] is True
+    assert receipt["promotion_allowed"] is True
+    assert receipt["ci_provenance"]["run_id"] == "30023876549"
+    assert receipt["source"]["revision"] == receipt["ci_provenance"]["source_sha"]
+    assert len(receipt["steps"]) == 10
+    assert all(step["ok"] for step in receipt["steps"])
+    assert all(item["ready"] for item in receipt["installation_audit"]["runtimes"])
 
 
 def test_machine_audit_does_not_treat_optional_tools_as_blockers() -> None:

@@ -39,12 +39,16 @@
   "distributions": [
     {
       "id": "git_checkout",
-      "status": "preview",
+      "status": "verified",
       "source": "https://github.com/MaxBonas/ai-teams.git",
       "integrity": "tag o commit SHA explícito",
       "update": "git pull",
       "rollback": "checkout de un tag o commit conocido",
-      "notes": "Vía canónica actual; aún no existe una release aceptada en máquina limpia."
+      "evidence": "benchmarks/results/installation_acceptance/windows-clean-room-f2a20ed.json",
+      "evidence_sha256": "b45b9c285bec86ba356ce36a747b24d2ba9d503d51d5ec34291cc5ebf5c6111d",
+      "artifact_sha256": "b8b714f97b103ba602419849c0bccdeb18362de49e2bbae8e2533f7e37d20806",
+      "evidence_run": "https://github.com/MaxBonas/ai-teams/actions/runs/30023876549",
+      "notes": "Vía canónica verificada en Windows x86_64; el artefacto de release versionado sigue pendiente."
     },
     {
       "id": "versioned_release_artifact",
@@ -71,19 +75,26 @@
       "id": "windows_native_x86_64",
       "os": "windows",
       "architecture": "x86_64",
-      "status": "preview",
+      "status": "verified",
       "bootstrap": "scripts\\prepare_dev_env.bat",
+      "verified_scope": "clone, bootstrap idempotente, audit, start/stop y proyecto SQLite fixture; los adapters vivos conservan gates propios",
       "tested_versions": {
-        "windows": "10.0.26200",
-        "python": "3.12.10",
-        "node": "24.14.0",
-        "npm": "11.9.0",
+        "windows": "GitHub-hosted windows-latest",
+        "python_bootstrap": "3.12.10",
+        "python_venv": "3.14.6",
+        "node": "24.18.0",
+        "npm": "11.16.0",
+        "git": "2.55.0.windows.2",
         "powershell": "7.6.3"
       },
-      "evidence_date": "2026-07-22",
+      "evidence_date": "2026-07-23",
+      "evidence": "benchmarks/results/installation_acceptance/windows-clean-room-f2a20ed.json",
+      "evidence_sha256": "b45b9c285bec86ba356ce36a747b24d2ba9d503d51d5ec34291cc5ebf5c6111d",
+      "artifact_sha256": "b8b714f97b103ba602419849c0bccdeb18362de49e2bbae8e2533f7e37d20806",
+      "evidence_run": "https://github.com/MaxBonas/ai-teams/actions/runs/30023876549",
       "limitations": [
-        "Falta aceptación reproducible en una máquina limpia independiente.",
-        "No existe todavía artefacto de release versionado."
+        "No existe todavía artefacto de release versionado.",
+        "La aceptación no instala, autentica ni ejecuta adapters de proveedor."
       ]
     },
     {

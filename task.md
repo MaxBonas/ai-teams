@@ -64,18 +64,18 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 6. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próxima unidad ejecutable sin esperar un trigger externo: **I.1.4.3**, ejecutar
-y conservar el recibo del workflow Windows independiente. M.8 permanece abierto solo por mantenimiento
-continuo; sus cuatro diagnósticos mono-familia no se repiten hasta cambio
-material.
+Próxima unidad ejecutable sin esperar un trigger externo: **I.2.1**, formalizar
+capas, precedencia y ownership de configuración por máquina. M.8 permanece
+abierto solo por mantenimiento continuo; sus cuatro diagnósticos mono-familia
+no se repiten hasta cambio material.
 
 ## P0.I — Distribución portable e integración poliglota
 
-- [ ] **I.1 Definir la matriz de soporte y el contrato de instalación**.
+- [x] **I.1 Definir la matriz de soporte y el contrato de instalación**.
   - [x] **I.1.1 Matriz canónica**: `config/installation_support.v1.json`
     separa `verified`, `preview`, `planned` y `unsupported` por OS/arquitectura,
-    runtimes y distribución. Windows x86_64 nativo permanece `preview`; ARM64,
-    Linux y macOS siguen `planned` hasta recibos independientes.
+    runtimes y distribución. Windows x86_64 nativo queda `verified` en I.1.4;
+    ARM64, Linux y macOS siguen `planned` hasta recibos independientes.
   - [x] **I.1.2 Requisitos y bundles sin instalación implícita**: el manifiesto,
     bootstrap, README y guía distinguen runtimes requeridos, una de varias
     opciones Lead-capable, OpenCode económico opcional y runtimes locales
@@ -85,13 +85,13 @@ material.
     para modelos temporalmente a precio cero; AI Teams guía el login pero no
     crea cuentas ni acepta condiciones. Verificación: bootstrap real completo,
     37 tests dirigidos, Ruff limpio y 1456 tests backend.
-  - [x] **I.1.3 Contrato de distribución y rollback**: Git es la única vía
-    `preview` actual y exige tag/commit SHA para integridad. La release planificada
+  - [x] **I.1.3 Contrato de distribución y rollback**: Git es la vía
+    `verified` actual y exige tag/commit SHA para integridad. La release planificada
     debe contener versión inmutable, SHA-256, SBOM/licencias, notas de migración,
     actualización/rollback y test de ausencia de secretos/estado local. Producir
     ese artefacto pertenece a I.8. Un contenedor puede ser adicional, nunca
     sustituto de CLIs y credenciales del host.
-  - [ ] **I.1.4 Aceptación independiente**: ejecutar clone/bootstrap dos veces,
+  - [x] **I.1.4 Aceptación independiente**: ejecutar clone/bootstrap dos veces,
     audit, start/stop y proyecto fixture en una máquina Windows x86_64 limpia;
     conservar recibo redacted. Solo entonces decidir si alguna celda puede pasar
     de `preview` a `verified`.
@@ -108,16 +108,26 @@ material.
       `.github/workflows/windows-clean-room.yml` ejecuta el harness sobre
       `windows-latest`, con checkout exacto y artefacto durable. Una ejecución
       local se etiqueta `local_existing_host` y no puede promover soporte.
-    - [ ] **I.1.4.3 Evidencia independiente**: ejecutar el workflow sobre la
+    - [x] **I.1.4.3 Evidencia independiente**: el
+      [run 30023876549](https://github.com/MaxBonas/ai-teams/actions/runs/30023876549)
+      ejecutó el workflow sobre la
       revisión entregable, descargar y auditar
       `windows-clean-room-receipt.json`, enlazar revisión+run y comprobar
       `ok=true`, `independent_machine=true` y `promotion_allowed=true`. El
       recibo exige además SHA coincidente y provenance completa de GitHub
-      Actions; el enlace externo al run sigue siendo parte obligatoria de la
-      evidencia.
-    - [ ] **I.1.4.4 Decisión de promoción**: solo con I.1.4.3 verde, decidir y
-      justificar si `windows_native_x86_64` y `git_checkout` pasan de `preview`
-      a `verified`; un fallo conserva `preview` y abre una tarea por causa.
+      Actions. El recibo durable es
+      `benchmarks/results/installation_acceptance/windows-clean-room-f2a20ed.json`
+      (SHA-256 versionado
+      `b45b9c285bec86ba356ce36a747b24d2ba9d503d51d5ec34291cc5ebf5c6111d`;
+      artefacto original
+      `b8b714f97b103ba602419849c0bccdeb18362de49e2bbae8e2533f7e37d20806`).
+      Pasa 14/14 checks de auditoría, cinco runtimes y 10/10 pasos.
+    - [x] **I.1.4.4 Decisión de promoción**:
+      `windows_native_x86_64` y `git_checkout` pasan a `verified` para clone,
+      bootstrap idempotente, audit, start/stop y fixture. La ausencia de CLIs en
+      el runner demuestra además que el bootstrap no instala proveedores.
+      Auth/health/modelos vivos, releases, ARM64 y POSIX quedan explícitamente
+      fuera de esta promoción.
     - Verificación de implementación: 41 tests focalizados, Ruff limpio,
       typecheck frontend limpio, 1461 tests backend y puertos 8010/9490 libres
       tras el teardown.
@@ -130,7 +140,7 @@ material.
     sin pasos implícitos ni afirmaciones de soporte sin evidencia fechada.
 
 - [ ] **I.2 Hacer portable la configuración y el estado por máquina**.
-  - [ ] Formalizar capas: defaults versionados, `config/*.example.json`, ajustes
+  - [ ] **I.2.1** Formalizar capas: defaults versionados, `config/*.example.json`, ajustes
     de usuario por OS, variables de entorno, secrets locales y overrides por
     proyecto bajo `.aiteam/`; documentar precedencia y ownership.
   - [ ] Añadir export/import redacted de configuración operativa. Nunca incluir
@@ -202,7 +212,8 @@ material.
   - [x] Reauditar I.7 el 2026-07-22 contra código y ejecución real: bootstrap
     Windows verde en dos pasadas consecutivas, migración en dry-run,
     `system-check`, 1335 tests backend y typecheck frontend. Corregidas dos
-    sobreafirmaciones: Windows completo permanece `preview` hasta I.1/I.8 y
+    sobreafirmaciones vigentes entonces: Windows permanecía `preview` hasta I.1 y
+    el artefacto de release seguía pendiente en I.8; además
     `system-check` enumera el registro, pero no prueba auth/conectividad/health.
     `tests/test_installation_docs.py` protege entrypoints, enlaces y límites.
 

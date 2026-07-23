@@ -9,7 +9,7 @@ hasta cerrarlo o pedir un desbloqueo.
 
 | Entorno | Estado | Entrada |
 |---|---|---|
-| Windows nativo | Bootstrap operativo; aceptación completa pendiente | `scripts\prepare_dev_env.bat` |
+| Windows x86_64 nativo | Verificado para control plane | `scripts\prepare_dev_env.bat` |
 | Linux | Objetivo, aún no verificado | Bootstrap POSIX pendiente |
 | macOS | Objetivo, aún no verificado | Bootstrap POSIX pendiente |
 
@@ -39,7 +39,10 @@ Abre `http://localhost:9490`. Para detener los procesos:
 La aceptación reproducible de Windows usa
 [windows-clean-room.yml](.github/workflows/windows-clean-room.yml): repite el
 bootstrap, prueba start/stop y crea un proyecto fixture en un runner efímero.
-Hasta conservar un recibo verde de ese workflow, Windows continúa en `preview`.
+Windows x86_64 está `verified` para ese alcance mediante el
+[recibo independiente](benchmarks/results/installation_acceptance/windows-clean-room-f2a20ed.json)
+y su [run de GitHub Actions](https://github.com/MaxBonas/ai-teams/actions/runs/30023876549).
+Esto no declara autenticados los adapters ni sustituye sus probes.
 
 El bootstrap crea o actualiza dependencias locales del checkout y materializa
 configuración runtime desde `config/*.example.json`. Es seguro repetirlo. No

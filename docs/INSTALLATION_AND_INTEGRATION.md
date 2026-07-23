@@ -4,7 +4,7 @@ Actualizado: `2026-07-23`
 
 Esta es la guía canónica para instalar AI Teams en una máquina nueva, trasladar
 una instalación y entregar la integración a una persona o agente de IA. Describe
-el estado real: Windows tiene bootstrap probado; Linux, macOS, releases
+el estado real: Windows x86_64 tiene control plane verificado; Linux, macOS, releases
 empaquetadas, `doctor --json` y la matriz poliglota siguen en P0.I de `task.md`.
 
 ## Contrato de portabilidad
@@ -20,10 +20,13 @@ proyecto fixture, dejando versión y resultado fechados. Los estados son:
 | `planned` | Existe tarea y contrato, pero no evidencia suficiente. |
 | `unsupported` | Hay incompatibilidad conocida o no existe integración segura. |
 
-Estado actual: el bootstrap de desarrollo de Windows nativo está probado y es
-repetible, pero la plataforma completa sigue en `preview` hasta que I.1 deje el
-recibo de máquina limpia y la regresión automática exigidos por este contrato.
-Linux y macOS son `planned`; no deben presentarse como instalaciones cerradas.
+Estado actual: Windows x86_64 está `verified` para clone, bootstrap idempotente,
+audit, start/stop y proyecto SQLite fixture. La evidencia es el
+[recibo redacted](../benchmarks/results/installation_acceptance/windows-clean-room-f2a20ed.json)
+y el [run independiente](https://github.com/MaxBonas/ai-teams/actions/runs/30023876549).
+Los adapters vivos conservan sus propios gates de instalación, autenticación,
+health y modelo exacto. Linux y macOS son `planned`; no deben presentarse como
+instalaciones cerradas.
 
 La fuente única legible por máquina es
 `config/installation_support.v1.json`. Contiene plataformas, arquitecturas,
@@ -153,7 +156,7 @@ El workflow conserva `windows-clean-room-receipt.json` como artefacto redacted.
 No autentica proveedores ni ejecuta inferencias: esos gates pertenecen al
 `doctor` y a los canarios por adapter. Una ejecución manual del harness sirve
 para depurarlo, pero se etiqueta `local_existing_host` y nunca autoriza pasar
-Windows de `preview` a `verified`:
+Windows de `preview` a `verified` por sí sola:
 
 ```powershell
 python scripts\accept_windows_clean_room.py `
@@ -161,8 +164,12 @@ python scripts\accept_windows_clean_room.py `
   --fixture-root "$env:TEMP\aiteam-i1-fixtures"
 ```
 
-La promoción requiere una ejecución verde del workflow y conservar su recibo:
-definir CI no equivale a haber probado todavía una máquina independiente.
+La revisión `f2a20ed` completó el workflow en el
+[run 30023876549](https://github.com/MaxBonas/ai-teams/actions/runs/30023876549).
+El recibo versionado conserva SHA exacto, provenance del runner, cinco runtimes
+listos, 10/10 pasos, una issue/26 tablas, inventario CLI antes/después y ausencia
+de rutas o secretos. Por ello Windows x86_64 y `git_checkout` pasan a
+`verified` únicamente para el alcance descrito.
 
 ## Linux y macOS
 

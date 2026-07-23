@@ -32,9 +32,9 @@ def test_installation_guide_is_linked_and_does_not_overclaim_platforms() -> None
 
     assert "docs/INSTALLATION_AND_INTEGRATION.md" in readme
     assert "INSTALLATION_AND_INTEGRATION.md" in index
-    assert "Bootstrap operativo; aceptación completa pendiente" in readme
+    assert "Verificado para control plane" in readme
     assert "no prueba conectividad, autenticación ni health" in readme
-    assert "sigue en `preview`" in guide
+    assert "Windows x86_64 está `verified`" in guide
     assert "Linux y macOS son `planned`" in guide
     assert "no prueba conectividad, autenticación ni health" in guide
     assert "installation_support.v1.json" in readme
@@ -42,6 +42,7 @@ def test_installation_guide_is_linked_and_does_not_overclaim_platforms() -> None
     assert "Ollama y LM Studio son opcionales" in readme
     assert "API key personal" in guide
     assert "windows-clean-room.yml" in guide
+    assert "windows-clean-room-f2a20ed.json" in guide
 
 
 def test_documented_migration_validation_remains_a_dry_run() -> None:

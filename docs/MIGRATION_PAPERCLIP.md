@@ -183,12 +183,13 @@ distintos lenguajes mediante capacidades demostradas.
 - `docs/INSTALLATION_AND_INTEGRATION.md` es el onboarding canónico para personas
   y agentes de IA y separa estrictamente lo operativo hoy de los objetivos.
 
-Estado: contrato documental creado el `2026-07-22` e I.1.1–I.1.3 implementadas.
-I.1.4 dispone de harness fail-closed y workflow independiente sobre
-`windows-latest`, pero no queda cerrado hasta conservar y auditar un recibo
-verde de esa ejecución. Windows x86_64 sigue `preview`; Linux/macOS y la matriz
-poliglota no se consideran cerrados. El onboarding de OpenCode Zen guía la API
-key personal en el CLI sin copiarla a AI Teams.
+Estado: I.1 cerrado el `2026-07-23`. El run independiente `30023876549` y el
+recibo `windows-clean-room-f2a20ed.json` verifican Windows x86_64 para clone,
+bootstrap, audit, start/stop y fixture sin instalar CLIs globales. Git checkout
+y ese alcance del control plane pasan a `verified`; adapters vivos, releases,
+ARM64, Linux/macOS y la matriz poliglota conservan gates separados. El
+onboarding de OpenCode Zen guía la API key personal en el CLI sin copiarla a AI
+Teams. El siguiente bloque es I.2, portabilidad de configuración/estado.
 
 ### Fase 1 — Schema v2 paralelo
 

@@ -40,12 +40,11 @@ del bootstrap, guía de una sola opción Lead-capable, OpenCode opcional con aut
 humana explícita y perfiles Ollama/LM Studio marcados opcionales. La skill del
 Lead prohíbe roles/tests de programación para investigación sin artefacto
 ejecutable.
-**Pendiente:** I.1.4 debe cerrar aceptación en máquina limpia; I.3 debe añadir
-doctor/auth/health; P0.J debe persistir tipo, gobernar gates y reproducir el
-estudio como fixture e2e.
-**Verificación:** auditor real produce Windows x86_64 `preview`, runtimes listos,
-Codex 0.145.0, Antigravity 1.1.5 y OpenCode 1.18.4 instalados sin declarar auth;
-bootstrap completo, 37 tests dirigidos, Ruff limpio y 1456 tests backend.
+**Pendiente:** I.3 debe añadir doctor/auth/health; P0.J debe persistir tipo,
+gobernar gates y reproducir el estudio como fixture e2e.
+**Verificación:** I.1.4 cerró después en el run independiente `30023876549`;
+Windows x86_64 queda `verified` para control plane sin instalar CLIs. Los
+adapters siguen sin declararse autenticados por esa evidencia.
 
 ### RUN-019 — El harness de start quedaba esperando handles heredados
 
