@@ -44,14 +44,14 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad: **P0.I.8.4c obtener y auditar receipts del mismo ZIP en
-runners Windows/Linux/macOS; después I.8.4d en máquinas reales**. I.8.3 está
-cerrado localmente y I.8.4a/b ya implementa el harness y el gate, pero el
-descriptor v0.1.0 conserva `publish.enabled=false`: no crear el tag hasta que la
-evidencia independiente esté preparada.
+Siguiente unidad: **calibrar pares modelo+rol cuyo canal esté realmente
+disponible**. El owner ha despriorizado por ahora I.8.4c/d Linux/macOS,
+Containers, Mobile nativo y PHP/Ruby/Swift. El descriptor v0.1.0 conserva
+`publish.enabled=false`: no crear el tag sin evidencia independiente.
 I.8.1 e I.9 ya están cerrados.
 PHP/Ruby queda pausado por prioridad del owner. I.6.2 está cerrado con la run
 `30085247826`: 18 receipts/27 celdas ligadas a `775e72e` y agregado durable;
+Web moderno amplía la matriz a 30/30 en `30085680374` sobre `8888dfe`.
 `support_claim=false` impide promoción automática. M.8 queda abierto como
 mantenimiento por evento/mes; sus 25 pares
 calibrados ya tienen quality exacta, 21 abren diversidad y los cuatro restantes

@@ -64,14 +64,10 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 6. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próxima unidad: **I.8.4c consolidar un SHA y auditar los receipts del mismo ZIP
-en runners Windows/Linux/macOS; después I.8.4d en una máquina real por
-plataforma**. I.8.4a/b deja preparados harness y gate CI, pero `v0.1.0`
-conserva `publish.enabled=false` hasta que la evidencia independiente permita
-crear el tag.
-PHP/Ruby queda pausado por prioridad explícita del owner.
-I.6.2 espera artifacts reales de la workflow Windows/Linux/macOS antes de
-promover cualquier celda.
+Próxima unidad: **calibración de catálogo modelo+rol con canales realmente
+disponibles**. El owner ha despriorizado por ahora I.8.4c/d Linux/macOS,
+Containers, Mobile nativo y PHP/Ruby/Swift. Web moderno queda cerrado con
+30/30 celdas CI; Docker continúa opcional y nunca requisito.
 M.8 permanece
 abierto solo por mantenimiento continuo; sus cuatro diagnósticos mono-familia
 no se repiten hasta cambio material.
@@ -405,11 +401,13 @@ no se repiten hasta cambio material.
       descriptor-bound `configure → build → test`. Fixture CMake/CTest y job
       × tres OS pasa; Windows local bloquea configure por CMake ausente y las
       fases posteriores por `prerequisite_not_satisfied`, sin ejecutarlas.
-    - [x] **Web moderno local**: fixture Vite + React + TypeScript + CSS detecta
+    - [x] **Web moderno**: fixture Vite + React + TypeScript + CSS detecta
       `web_frontend` y reutiliza, sin duplicarlos, los comandos descriptor-bound
       npm de build/test/lint/typecheck. La calidad real del stack permanece
       cubierta por I.9; este fixture valida detección, routing, cwd, quoting y
-      artefacto en una copia portable. Pendiente únicamente su receipt CI.
+      artefacto en una copia portable. Run `30085680374`: 18 receipts y 30/30
+      celdas verdes en Windows/Linux/macOS sobre `8888dfe`; agregado SHA-256
+      `8a91f9a3be06444c15a9b9285341a5a1fa8ca89e4f47946266f59bfc2644adce`.
     - [ ] **Containers opcionales**: añadir fixture Docker/Compose cuando haya
       runtime controlado. Nunca instalar Docker automáticamente ni convertirlo
       en requisito de AI Teams.

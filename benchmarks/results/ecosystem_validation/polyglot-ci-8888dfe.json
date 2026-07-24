@@ -1,0 +1,264 @@
+{
+  "cells": [
+    {
+      "case_id": "c_cpp_cmake",
+      "os": "linux"
+    },
+    {
+      "case_id": "dotnet_xunit",
+      "os": "linux"
+    },
+    {
+      "case_id": "go_builtin",
+      "os": "linux"
+    },
+    {
+      "case_id": "java_maven_junit",
+      "os": "linux"
+    },
+    {
+      "case_id": "javascript_npm",
+      "os": "linux"
+    },
+    {
+      "case_id": "monorepo_javascript",
+      "os": "linux"
+    },
+    {
+      "case_id": "monorepo_python",
+      "os": "linux"
+    },
+    {
+      "case_id": "python_pytest",
+      "os": "linux"
+    },
+    {
+      "case_id": "rust_cargo",
+      "os": "linux"
+    },
+    {
+      "case_id": "web_vite_react_typescript",
+      "os": "linux"
+    },
+    {
+      "case_id": "c_cpp_cmake",
+      "os": "macos"
+    },
+    {
+      "case_id": "dotnet_xunit",
+      "os": "macos"
+    },
+    {
+      "case_id": "go_builtin",
+      "os": "macos"
+    },
+    {
+      "case_id": "java_maven_junit",
+      "os": "macos"
+    },
+    {
+      "case_id": "javascript_npm",
+      "os": "macos"
+    },
+    {
+      "case_id": "monorepo_javascript",
+      "os": "macos"
+    },
+    {
+      "case_id": "monorepo_python",
+      "os": "macos"
+    },
+    {
+      "case_id": "python_pytest",
+      "os": "macos"
+    },
+    {
+      "case_id": "rust_cargo",
+      "os": "macos"
+    },
+    {
+      "case_id": "web_vite_react_typescript",
+      "os": "macos"
+    },
+    {
+      "case_id": "c_cpp_cmake",
+      "os": "windows"
+    },
+    {
+      "case_id": "dotnet_xunit",
+      "os": "windows"
+    },
+    {
+      "case_id": "go_builtin",
+      "os": "windows"
+    },
+    {
+      "case_id": "java_maven_junit",
+      "os": "windows"
+    },
+    {
+      "case_id": "javascript_npm",
+      "os": "windows"
+    },
+    {
+      "case_id": "monorepo_javascript",
+      "os": "windows"
+    },
+    {
+      "case_id": "monorepo_python",
+      "os": "windows"
+    },
+    {
+      "case_id": "python_pytest",
+      "os": "windows"
+    },
+    {
+      "case_id": "rust_cargo",
+      "os": "windows"
+    },
+    {
+      "case_id": "web_vite_react_typescript",
+      "os": "windows"
+    }
+  ],
+  "errors": [],
+  "expected_cells": 30,
+  "expected_receipts": 18,
+  "expected_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032",
+  "generated_at": "2026-07-24T10:19:46.668080+00:00",
+  "missing_cells": [],
+  "observed_cells": 30,
+  "observed_receipts": 18,
+  "ok": true,
+  "schema_version": "ecosystem_ci_evidence_v1",
+  "sources": [
+    {
+      "architecture": "arm64",
+      "id": "receipt-01",
+      "os": "macos",
+      "sha256": "0c36a60f9942965a89187095bff043fcfc13a449b6a311169b57bc995201b50e",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-02",
+      "os": "linux",
+      "sha256": "7fb92f140128acaebaa5a6312d7c9c3bf3bc6ed2c490384d8004e503749719e6",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-03",
+      "os": "windows",
+      "sha256": "a259d727ad989489cd8eb819cbf99d366465eeea91f29e1c4cc89cd41f8e2593",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "arm64",
+      "id": "receipt-04",
+      "os": "macos",
+      "sha256": "e6c4d37294a5e837ea65f8571836b8fe01760ecf6ecdc18ac2b65b54bd13a75d",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-05",
+      "os": "linux",
+      "sha256": "c327b403eb53e04ac259b00722f42c3a78fe89c796522bc6d4c28ae861d95041",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-06",
+      "os": "windows",
+      "sha256": "7f8cbda5c37b5960b324048eb5aec217ee09c37d5b42942c553cda683b320131",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "arm64",
+      "id": "receipt-07",
+      "os": "macos",
+      "sha256": "7dd50e90bd01f73a89c7dbcb55b079571d5fbd809c8d76be4e31d859bb680c7f",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-08",
+      "os": "linux",
+      "sha256": "5adc4933ede5ba1fc5e8030a29dfd4c5f96700d3935b3f95566d397548b3bdc5",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-09",
+      "os": "windows",
+      "sha256": "e1b79e7301bc2a16204f10f95ec6e3682a510a03a8b0bf67bb1d086a93487624",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "arm64",
+      "id": "receipt-10",
+      "os": "macos",
+      "sha256": "2130584943df06cf71d949645cae06bfafbaabad4d19ae749d0d5d8a8432294c",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-11",
+      "os": "linux",
+      "sha256": "d83c11db7d4d5020ad2c3b302bb7635eec5a1b241ea3f77b88b3c23650b0e896",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-12",
+      "os": "windows",
+      "sha256": "93345ab08472924dea7a300c84d9132642204103d90df2e655c9656107dcd4be",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "arm64",
+      "id": "receipt-13",
+      "os": "macos",
+      "sha256": "d78404a3dacf0e01d233654068d6528ce010845eac64d4531c9b0200826682e3",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "arm64",
+      "id": "receipt-14",
+      "os": "macos",
+      "sha256": "4b62c409ff0d29476977516c44432fa13a5f6599eb33f551a986b490390c1bf3",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-15",
+      "os": "linux",
+      "sha256": "ebe48e3b900a76f8bf87d53a5851598298e19a9af925255a14e91e0c12b9ba9e",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-16",
+      "os": "windows",
+      "sha256": "8ae7ca4ab80c3fc886388bffd54a9d3b93c4ef80bc2f6493d2c1fa7e7b191bda",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-17",
+      "os": "linux",
+      "sha256": "1300c057b18b62e01e80a05654f2e4a8e84750a66512e51f2f9231c31183419b",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    },
+    {
+      "architecture": "x86_64",
+      "id": "receipt-18",
+      "os": "windows",
+      "sha256": "2712fb7d77c3ddf75ae2ea683998827b67320c551094e6bb86f982a892bd2253",
+      "source_revision": "8888dfef5caca1ee599ff1c76a50654d442bd032"
+    }
+  ],
+  "support_claim": false,
+  "unexpected_cells": []
+}
