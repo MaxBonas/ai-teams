@@ -44,8 +44,14 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad: **calibrar pares modelo+rol cuyo canal esté realmente
-disponible**. El owner ha despriorizado por ahora I.8.4c/d Linux/macOS,
+Siguiente unidad: **cerrar el fixture Flash Low/Web Scout y mantener el drift
+de catálogo por evento**. El inventario del 2026-07-24 descubre Ling 3.0 Flash
+Free en OpenCode: ya está visible como `catalog_only`, sin roles ni selección
+automática. Codex 0.145.0 sigue siendo la última versión publicada en npm, pero
+su cache exige 0.146.0, así que el auditor lo bloquea correctamente. Antigravity
+1.1.6 conserva catálogo, vuelve stale Sonnet/Engineer 1.1.5 y su screening de
+revalidación pasa 3/3 hidden pero falla Ruff con 7 incidencias; no repetir hasta
+otro cambio material. El owner ha despriorizado por ahora I.8.4c/d Linux/macOS,
 Containers, Mobile nativo y PHP/Ruby/Swift. El descriptor v0.1.0 conserva
 `publish.enabled=false`: no crear el tag sin evidencia independiente.
 I.8.1 e I.9 ya están cerrados.

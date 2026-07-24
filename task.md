@@ -36,8 +36,8 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
 - El backend/pre-run de compatibilidad perfil+modelo+rol está cerrado y gobierna
   bootstrap, Equipo, hiring, dispatch, fallback y recovery.
 - Los tres run profiles tienen canario vivo cerrado.
-- La matriz canónica cubre 46 modelos × 17 roles: 782 celdas, 116 compatibles
-  y 666 incompatibles con razón explícita.
+- La matriz canónica cubre 47 modelos × 17 roles: 799 celdas, 116 compatibles
+  y 683 incompatibles con razón explícita.
 - Sonnet 4.6 conserva `best_for=engineer`, pero ninguna ruta es auto-elegible;
   Luna conserva `context_curator` con esfuerzo `medium` y Flash High conserva
   evidencia exacta de review/QA.
@@ -644,7 +644,7 @@ no se repiten hasta cambio material.
   - [x] Baseline `2026-07-22`: defaults, opciones, prompts y scripts activos
     usan las familias vigentes; GPT-5.5 queda solo como control histórico y las
     tarifas antiguas solo como compatibilidad FinOps de runs ya persistidas.
-  - [x] Las 46 opciones activas exponen banda de capacidad, economía específica
+  - [x] Las 47 opciones activas exponen banda de capacidad, economía específica
     del canal y clase/fuente de velocidad bajo
     `capability_economy_speed_v1`; un dato desconocido queda explícito y no se
     sustituye por una estimación.
@@ -658,6 +658,12 @@ no se repiten hasta cambio material.
     ejecutables pendientes, 4 fixtures de tools pendientes, 3 candidatos
     manuales y 79 bloqueados por canal/health. Recibo:
     `benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`.
+    Evento vivo `2026-07-24`: 47 modelos/132 destinos; el preflight proyecta
+    8 calibrados, 17 parciales, 15 canarios, 4 fixtures, 3 manuales y 85
+    bloqueados al aplicar estrictamente el CLI Codex pendiente y las versiones
+    no observadas/stale. No borra evidencia histórica ni cambia defaults.
+    Recibos: `model-catalog-drift-2026-07-24.json` y
+    `model-evaluation-coverage-2026-07-24.json`.
   - [x] **Lote A — Codex subscription (14 destinos evaluados)**: Luna para scouts/worker;
     Terra para Engineer/MCP/QA/review/test design; Sol para Lead/arquitectura/
     quorum. Reutilizar harnesses por familia de contrato y registrar por rol
@@ -706,14 +712,18 @@ no se repiten hasta cambio material.
       `team_lead`, `architect` y `quorum_auditor`, cada uno con evidencia exacta
       y sin extrapolar aliases semánticamente distintos. Los cinco pares quedan
       `calibrated`; sus agregados críticos enlazan dos familias y seis muestras.
-  - [ ] **Lote B — Antigravity (12 calibrados, 2 parciales y 3 pendientes
-    accionables)**: conservar Flash
+  - [ ] **Lote B — Antigravity (drift 1.1.6 controlado; un fixture accionable)**:
+    conservar Flash
     High Reviewer como calibrado durable; completar contratos exactos que el
     screening genérico de Lead/scout no demuestra. No repetir review 3/3 ni
-    coding Sonnet sin cambio de CLI/modelo/contrato. Pendientes reales:
-    GPT-OSS/Worker (`requires_canary`) y los fixtures Web Scout de Flash Low y
-    GPT-OSS; los candidatos manuales y Gemini 3.6 bloqueados no cuentan como
-    calibraciones ejecutables.
+    coding Sonnet sin cambio de CLI/modelo/contrato. GPT-OSS quedó cerrado
+    negativamente por fallo reproducible de `submit_work` en File Scout,
+    Worker y Web Scout. El cambio material a CLI 1.1.6 reabrió Sonnet/Engineer:
+    `config_redactor` pasa 3/3 hidden, pero deja 7 incidencias Ruff en 296,297 s;
+    fail-fast impide gastar las otras cinco celdas y la calibración 1.1.5 queda
+    stale para nuevas promociones. Pendiente real ejecutable: fixture exacto
+    Web Scout de Flash Low. Los candidatos manuales y Gemini 3.6 bloqueados no
+    cuentan como calibraciones ejecutables.
   - [x] **Lote C — locales instalados (8 destinos evaluados, cierre negativo)**:
     Gemma 4 E4B/26B y Qwen 2.5 Coder 14B fueron probados sin descargar modelos
     ausentes. Gemma 26B/Engineer queda `partial` 1/3; los otros siete contratos
@@ -722,8 +732,11 @@ no se repiten hasta cambio material.
     permanecen como ejes de host separados.
   - [x] **Lote D — OpenCode (cierre negativo por transporte sin cambio)**:
     catálogo 1.18.4 y hashes revalidados sin nueva inferencia; DeepSeek Reviewer
-    queda `partial` 1/3. Mantener read-only y no reabrir server/SDK hasta un
-    cambio de catálogo, modelo, CLI, transporte o contrato.
+    queda `partial` 1/3. El catálogo del 2026-07-24 añade Ling 3.0 Flash Free
+    como sexta opción `catalog_only`: visible, manual/probe-gated y denegada
+    para todos los roles hasta clasificación y canario exacto. Mantener
+    read-only y no reabrir server/SDK hasta un cambio de catálogo, modelo, CLI,
+    transporte o contrato.
   - [ ] **Lote E — APIs/Claude bloqueados (79 destinos en total junto con otros
     no ejecutables)**: esperar key, CLI, instalación o health exacto; discovery
     comercial no autoriza consumo ni selección.
@@ -1383,10 +1396,14 @@ no se repiten hasta cambio material.
     `requires_canary`, 4 `requires_tool_fixture`, 3 manuales y 79 bloqueados.
     Ningún candidato es auto-elegible; una calibración positiva conserva quality
     exacta, no concede un default.
-  - Antigravity conserva 12 pares calibrados y 2 parciales. Sus tres pendientes
-    accionables son GPT-OSS/Worker y los fixtures Web Scout de Flash Low y
-    GPT-OSS; Sonnet/Engineer y dos roles Flash High no repiten la segunda familia
-    fallida hasta un cambio material.
+  - Antigravity conserva históricamente 12 pares calibrados y 2 parciales; la
+    actualización 1.1.6 vuelve stale Sonnet/Engineer para promoción nueva. Sus
+    tres pendientes históricos ya no son tres acciones: GPT-OSS quedó cerrado negativamente y
+    solo Flash Low/Web Scout conserva un fixture exacto pendiente. El cambio
+    Antigravity 1.1.6 activó la revalidación Sonnet/Engineer; falló por 7
+    incidencias Ruff pese a 3/3 hidden y queda fail-fast, sin completar la
+    matriz hasta otro cambio material. Dos roles Flash High tampoco repiten la
+    segunda familia fallida sin cambio material.
   - Gemini 3.6 High/Low fueron catalogados pero no ejecutables; Medium completó
     review sin superar al baseline. No repetir runs idénticas sin cambio de
     modelo, CLI, catálogo o contrato.

@@ -15,8 +15,8 @@ def test_coverage_inventory_is_conservative_and_tracks_exact_promotions() -> Non
         },
     )
 
-    assert report["models"] == 46
-    assert report["role_pairs"] == 131
+    assert report["models"] == 47
+    assert report["role_pairs"] == 132
     assert report["complete"] is False
     assert report["pair_counts"]["calibrated"] == 25
     assert report["pair_counts"]["partial"] == 5

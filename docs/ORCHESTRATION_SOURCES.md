@@ -219,10 +219,13 @@ de descarga ni una política de actualización automática.
   - https://opencode.ai/docs/permissions
   - https://opencode.ai/docs/config
 - Calidad: A, documentación oficial.
-- Revisión: `2026-07-21`.
+- Revisión: `2026-07-24`.
 - Cubre: IDs exactos, endpoint compatible con OpenAI, gratuidad temporal,
   login/API key, inventario CLI, configuración inline y condiciones de uso de
-  datos. Limitación: no publica una cuota estable que AI Teams pueda prometer.
+  datos. El inventario autenticado y la documentación oficial del 2026-07-24
+  confirman además `ling-3.0-flash-free`; la fuente no publica todavía evidencia
+  suficiente para asignarle tier funcional o roles. Limitación: no publica una
+  cuota estable que AI Teams pueda prometer.
 
 ### FREE-2 Capacidades de los modelos
 

@@ -158,7 +158,7 @@ y [GOOG-1](ORCHESTRATION_SOURCES.md#goog-1-gemini-3-y-precios).
 |---|---|---|---|---|
 | Codex subscription | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` | Slugs del catálogo; Equipo solo los habilita si el CLI instalado puede ejecutarlos. Coste marginal 0, cuota no ilimitada. |
 | Claude Code subscription | Opus 4.8 | Sonnet 5 | Haiku 4.5 | Perfil bloqueado en esta máquina; Fable solo manual y sujeto a plan/créditos. |
-| Antigravity subscription 1.1.5 | `gemini-3.1-pro-high` | `claude-sonnet-4-6` coding; `gemini-3.5-flash-high` review/QA | `gemini-3.5-flash-low` | IDs ejecutables confirmados por `agy models`; Equipo muestra etiquetas legibles, pero persiste y ejecuta estos slugs. Sin recibo headless comparable de tokens. |
+| Antigravity subscription 1.1.6 | `gemini-3.1-pro-high` | `claude-sonnet-4-6` coding; `gemini-3.5-flash-high` review/QA | `gemini-3.5-flash-low` | IDs ejecutables confirmados por `agy models`; Equipo muestra etiquetas legibles, pero persiste y ejecuta estos slugs. Sin recibo headless comparable de tokens. La actualización conserva el catálogo, pero vuelve stale la calibración 1.1.5 de Sonnet. |
 | Ollama/LM Studio | ninguno por defecto | Qwen3 Coder 30B o Gemma 4 26B tras eval | modelo pequeño configurado | Nunca descargar ni cambiar automáticamente: usar solo modelo instalado y health aprobado. |
 | builtin/manual | no aplica | no aplica | no aplica | Código determinista u operador humano, no routing LLM. |
 
@@ -612,6 +612,13 @@ modelos o roles declarados ausentes, scores automáticos incompletos, métricas
 conocidas sin fuente, evidencia stale y divergencia de consumidores. El baseline
 local revalidado el 2026-07-23 enumera 46 candidatos y la matriz completa de 17
 roles canónicos (782 celdas), con cero candidatos auto-elegibles y cero fallos.
+El evento de catálogo del 2026-07-24 eleva la proyección a 47 candidatos y 799
+celdas. Ling añade 17 incompatibilidades explícitas
+`model_role_unclassified`; no altera las 116 celdas compatibles ni crea un
+default. La auditoría descubrió y corrigió además que volver stale una evidencia
+no debe borrar su diversidad histórica: `calibrated`/`fresh` cierran promoción,
+pero `case_diversity` sigue describiendo los receipts. El read model vuelve a
+pasar con 0 auto-elegibles y 0 fallos.
 M.8.1 añade
 `model_normalized_metrics_v1`: los 25 pares calibrados reciben únicamente la
 tasa de éxito observable de su contrato exacto como componente `quality=100`,
@@ -1469,7 +1476,10 @@ MCPs externos. `serve` tampoco aporta el sandbox necesario para Engineer.
 Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad)
 y [FREE-3](ORCHESTRATION_SOURCES.md#free-3-cli-mcp-sesiones-y-telemetría).
 
-La vía gratuita es híbrida. `opencode_zen_free` declara cinco modelos; Laguna
+La vía gratuita es híbrida. `opencode_zen_free` declara seis modelos. Ling 3.0
+Flash Free se descubrió el 2026-07-24 y queda `catalog_only`, manual, probe-gated
+y sin roles aprobados hasta clasificar capacidad y superar un contrato exacto; su
+tier `standard` es una banda provisional de presentación y no concede autoridad. Laguna
 permanece manual/probe-gated tras fallar 0/3 y Big Pickle sigue `rejected`.
 `gemini_api_free` reutiliza una key Google del owner y
 `groq_api_free` usa un runtime OpenAI-compatible con key Groq propia. Son
@@ -1534,6 +1544,14 @@ defaults. GPT-OSS 120B de Antigravity no produjo un `submit_work` válido en
 primer intento de web fue infraestructura saturada y no se contó como calidad.
 Se aplicó fail-fast tras el primer fallo contractual reproducible, en vez de
 gastar tres semillas incapaces de superar el gate de transporte.
+
+El cambio Antigravity 1.1.5→1.1.6 reabre por evento únicamente la frescura de
+Sonnet 4.6/Engineer. El screening comparable `config_redactor` del 2026-07-24
+completa 3/3 tests ocultos en una run, pero deja 7 incidencias Ruff y tarda
+296,297 s. Se aplica fail-fast y no se consumen las otras cinco celdas de la
+matriz de dos familias. El default existente no se cambia por edad o por este
+screening aislado, pero la pareja no puede obtener una promoción nueva hasta
+recalibrarse con una versión/contrato materialmente distinto.
 
 En Ollama 0.32.1, Qwen 2.5 Coder 14B no cierra los contratos exactos de
 `file_scout` ni `context_curator`; Gemma 4 E4B tampoco supera

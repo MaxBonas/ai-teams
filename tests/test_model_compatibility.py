@@ -97,6 +97,26 @@ def test_free_model_allowlist_is_permission_not_best_for_hint() -> None:
     )["code"] == "model_role_incompatible"
 
 
+def test_newly_discovered_catalog_only_model_cannot_gain_a_role_from_its_tier() -> None:
+    profile = {
+        "id": "opencode_zen_free",
+        "adapter_type": "subscription_cli",
+        "data_policy": "non_confidential_only",
+        "config": {"cli_kind": "opencode", "read_only": True},
+    }
+    ling = _model("opencode_zen_free", "opencode/ling-3.0-flash-free")
+
+    for role in ("reviewer", "file_scout", "lead"):
+        decision = _decision(
+            profile,
+            ling,
+            role,
+            run_profile="full_team",
+            data_class="public",
+        )
+        assert decision["code"] == "model_role_unclassified"
+
+
 def test_api_profile_does_not_gain_external_mcp_from_provider_tools() -> None:
     profile = {
         "id": "gemini_api_free",

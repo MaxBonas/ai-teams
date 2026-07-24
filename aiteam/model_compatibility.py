@@ -32,6 +32,9 @@ _REASONS = {
     "profile_blocked": "El perfil está bloqueado o retirado.",
     "model_not_catalogued": "El modelo no pertenece al catálogo declarado del perfil.",
     "model_unavailable": "El modelo no está ejecutable en este perfil.",
+    "model_role_unclassified": (
+        "El modelo está catalogado, pero aún no tiene roles aprobados."
+    ),
     "profile_role_unsupported": "El perfil no declara soporte para este rol.",
     "model_role_incompatible": "El modelo no está aprobado para este rol.",
     "model_tier_insufficient": "La banda del modelo es inferior a la autoridad del rol.",
@@ -109,6 +112,8 @@ def compatibility_decision(
     ):
         code = "model_unavailable"
         details["availability_reason"] = selected.get("availability_reason")
+    elif selected.get("assignment_policy") == "catalog_only":
+        code = "model_role_unclassified"
     elif profile_roles and role_key not in profile_roles:
         code = "profile_role_unsupported"
     elif allowed_roles and role_key not in allowed_roles:

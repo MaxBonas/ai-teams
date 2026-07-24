@@ -431,12 +431,16 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
         "profile_id": "antigravity_subscription",
         "model": "claude-sonnet-4-6",
         "role": "engineer",
-        "evaluated_at": "2026-07-23",
-        "provider_version": "1.1.5",
-        "reason": "second_coding_family_hidden_3_of_3_but_ruff_f401_fail_fast",
+        "evaluated_at": "2026-07-24",
+        "provider_version": "1.1.6",
+        "reason": (
+            "provider_1_1_6_revalidation_hidden_3_of_3_but_ruff_7_fail_fast"
+        ),
         "receipts": (
             "benchmarks/results/model_calibration/"
             "m83-config-redactor-sonnet-seed-1.json",
+            "benchmarks/results/model_calibration/"
+            "antigravity-1.1.6-config-redactor-sonnet-seed-1.json",
         ),
     },
     *(

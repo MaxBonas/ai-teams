@@ -14,19 +14,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
+import shutil
 import sqlite3
 import statistics
+import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from api.routers.workspace import _initialize_project_runtime  # noqa: E402
 from aiteam.adapters.registry import build_default_registry  # noqa: E402
 from aiteam.db.agents import create_agent  # noqa: E402
 from aiteam.db.issues import create_issue  # noqa: E402
@@ -39,9 +40,12 @@ from aiteam.project_adapters import (  # noqa: E402
     write_project_adapter_policy,
 )
 from aiteam.tools.catalog import default_capabilities_for_role  # noqa: E402
-from scripts.benchmark_integrity import audit_ab_series, code_evaluation_contract  # noqa: E402
+from api.routers.workspace import _initialize_project_runtime  # noqa: E402
+from scripts.benchmark_integrity import (  # noqa: E402
+    audit_ab_series,
+    code_evaluation_contract,
+)
 from scripts.benchmark_vs_codex import score_workspace  # noqa: E402
-
 
 PROFILE_ID = "antigravity_subscription"
 BASELINE_MODEL = "gemini-3.5-flash-high"
@@ -69,6 +73,35 @@ def _portable_path(path: Path) -> str:
         return str(resolved.relative_to(REPO_ROOT)).replace("\\", "/")
     except ValueError:
         return str(resolved)
+
+
+def cli_version_for_profile(profile_id: str) -> str:
+    command = (
+        "agy"
+        if profile_id == "antigravity_subscription"
+        else "codex"
+        if profile_id == "codex_subscription"
+        else "ollama"
+        if profile_id.startswith("local_")
+        else ""
+    )
+    executable = shutil.which(command) if command else None
+    if not executable:
+        return ""
+    completed = subprocess.run(
+        [executable, "--version"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    match = re.search(
+        r"\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b",
+        f"{completed.stdout}\n{completed.stderr}",
+    )
+    return match.group(1) if completed.returncode == 0 and match else ""
 
 
 def run_arm(
@@ -266,11 +299,18 @@ def aggregate_single_model_reports(
     valid_arms = [arm for arm in arms if isinstance(arm, dict)]
     same_case = len({str(report.get("case") or "") for report in reports}) == 1
     same_contract = len({json.dumps(report.get("evaluation_contract") or {}, sort_keys=True) for report in reports}) == 1
+    provider_versions = {
+        str(report.get("provider_version") or "") for report in reports
+    }
+    same_provider_version = (
+        len(provider_versions) == 1 and "" not in provider_versions
+    )
     exact_pair_calibrated = bool(
         seeds == [1, 2, 3]
         and len(valid_arms) == 3
         and same_case
         and same_contract
+        and same_provider_version
         and all(
             arm.get("issue_status") == "done"
             and int(arm.get("score", {}).get("hidden_total") or 0) > 0
@@ -318,6 +358,8 @@ def aggregate_single_model_reports(
         "matrix_complete": seeds == [1, 2, 3] and len(valid_arms) == 3,
         "same_case": same_case,
         "same_evaluation_contract": same_contract,
+        "provider_version": next(iter(provider_versions), None),
+        "same_provider_version": same_provider_version,
         "source_receipts": source_receipts,
         "sample_manifest": sample_manifest,
         "integrity": {
@@ -366,6 +408,12 @@ def aggregate_diverse_family_reports(
         (str(report.get("profile_id") or ""), str(report.get("model") or ""))
         for report in aggregates
     }
+    provider_versions = {
+        str(report.get("provider_version") or "") for report in aggregates
+    }
+    same_provider_version = (
+        len(provider_versions) == 1 and "" not in provider_versions
+    )
     sources = [str(report.get("_source_receipt") or "") for report in aggregates]
     source_hashes = [
         hashlib.sha256(
@@ -394,6 +442,7 @@ def aggregate_diverse_family_reports(
         len(aggregates) == 2
         and len(case_families) == 2
         and identities == {(profile_id, model)}
+        and same_provider_version
         and len(sources) == 2
         and all(sources)
         and len(set(sources)) == 2
@@ -410,6 +459,7 @@ def aggregate_diverse_family_reports(
         "profile_id": profile_id,
         "model": model,
         "contract_version": CODING_DIVERSITY_CONTRACT,
+        "provider_version": next(iter(provider_versions), None),
         "case_families": case_families,
         "case_family_count": len(case_families),
         "seeds_per_family": 3,
@@ -421,6 +471,7 @@ def aggregate_diverse_family_reports(
         "source_sha256": source_hashes,
         "integrity": {
             "same_exact_pair": identities == {(profile_id, model)},
+            "same_provider_version": same_provider_version,
             "two_distinct_families": len(case_families) == 2,
             "sources_bound": len(sources) == 2 and all(sources),
             "sources_hashed": len(source_hashes) == 2,
@@ -525,6 +576,9 @@ def main() -> int:
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "evaluation_contract": code_evaluation_contract(),
         "case_family": case.name,
+        "provider_version": cli_version_for_profile(
+            args.single_profile or PROFILE_ID
+        ),
         "config": {"max_attempts": max(1, args.max_attempts), "stateless": True},
         "arms": {},
     }

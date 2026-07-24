@@ -70,9 +70,21 @@ def audit_builtin_model_flows() -> dict[str, Any]:
             blocked = str(profile.get("status") or "").lower() in {
                 "blocked", "blocked_by_provider", "retired", "disabled",
             }
+            catalog_only = model.get("assignment_policy") == "catalog_only"
             if blocked:
                 if any(code != "profile_blocked" for code in denied_roles.values()):
                     failures.append(_failure(pair, "blocked_profile", "deny no uniforme"))
+            elif catalog_only:
+                if allowed_roles or any(
+                    code != "model_role_unclassified" for code in denied_roles.values()
+                ):
+                    failures.append(
+                        _failure(
+                            pair,
+                            "catalog_only",
+                            "un modelo sin clasificar debe denegar todos los roles",
+                        )
+                    )
             elif not allowed_roles:
                 failures.append(_failure(pair, "positive_path", "ningún rol activo compatible"))
 
@@ -88,7 +100,10 @@ def audit_builtin_model_flows() -> dict[str, Any]:
                 failures.append(_failure(pair, "deterministic_deny", deterministic["code"]))
 
             data_policy = str(profile.get("data_policy") or "")
-            if data_policy in {"non_confidential_only", "provider_free_tier"}:
+            if (
+                data_policy in {"non_confidential_only", "provider_free_tier"}
+                and not catalog_only
+            ):
                 probe_role = allowed_roles[0] if allowed_roles else "reviewer"
                 missing_class = _decision(profile, model, probe_role, data_class="")
                 confidential = _decision(
@@ -134,6 +149,7 @@ def audit_builtin_model_flows() -> dict[str, Any]:
                 "allowed_roles": allowed_roles,
                 "denied_roles": denied_roles,
                 "blocked_profile": blocked,
+                "catalog_only": catalog_only,
             })
 
     return {

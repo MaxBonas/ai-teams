@@ -283,6 +283,24 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "confidential_data_allowed": False,
         },
         {
+            "value": "opencode/ling-3.0-flash-free",
+            "label": "Ling 3.0 Flash Free",
+            "tier": "standard",
+            "caps": ["unclassified"],
+            "capability_basis": "provisional_pending_classification",
+            "best_for": [],
+            "allowed_roles": [],
+            "assignment_policy": "catalog_only",
+            "automatic": False,
+            "requires_probe": True,
+            "price_note": (
+                "Gratis temporal · catalogado el 2026-07-24 · "
+                "clasificación y canario pendientes"
+            ),
+            "temporary": True,
+            "confidential_data_allowed": False,
+        },
+        {
             "value": "opencode/north-mini-code-free",
             "label": "North Mini Code Free",
             "tier": "budget",

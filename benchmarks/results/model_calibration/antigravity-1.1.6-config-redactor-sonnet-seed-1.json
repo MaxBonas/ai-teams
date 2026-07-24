@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "benchmark": "coding_behavioral_calibration",
+  "case": "config_redactor",
+  "seed": 1,
+  "started_at": "2026-07-24T12:39:00+0200",
+  "evaluation_contract": {
+    "version": 1,
+    "evaluators": [
+      {
+        "id": "hidden_acceptance",
+        "class": "deterministic_behavioral",
+        "blind": true
+      },
+      {
+        "id": "ruff",
+        "class": "static_analysis",
+        "blind": true
+      }
+    ],
+    "independent_semantic_or_structural": true,
+    "goodhart_risk": "residual_hidden_suite_overfit",
+    "constructs_not_measured": [
+      "behavior outside the hidden suite",
+      "long-term maintainability",
+      "real-user acceptance"
+    ]
+  },
+  "case_family": "config_redactor",
+  "provider_version": "1.1.6",
+  "config": {
+    "max_attempts": 2,
+    "stateless": true
+  },
+  "arms": {
+    "claude-sonnet-4-6": {
+      "model": "claude-sonnet-4-6",
+      "profile_id": "antigravity_subscription",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "issue_status": "done",
+      "attempts": 1,
+      "runs": [
+        {
+          "id": "run:9de0ab6c-4ca1-4b57-bc10-8b7925217d7c",
+          "status": "completed",
+          "error_code": null,
+          "liveness_state": "advanced",
+          "provider": "google-antigravity",
+          "model": "claude-sonnet-4-6",
+          "channel": "subscription"
+        }
+      ],
+      "wall_seconds": 296.297,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_cents": 0,
+      "usage_available": false,
+      "score": {
+        "ruff_issues": 7,
+        "hidden_exit": 0,
+        "hidden_passed": 3,
+        "hidden_failed": 0,
+        "hidden_errors": 0,
+        "hidden_total": 3,
+        "deliverable_files": [
+          "README.md",
+          "config_redactor.py",
+          "test_config_redactor.py"
+        ]
+      },
+      "workspace": "runtime/bench/agy-116-config-redactor-sonnet-s1/claude-sonnet-4-6"
+    }
+  },
+  "finished_at": "2026-07-24T12:44:07+0200"
+}

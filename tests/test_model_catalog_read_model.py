@@ -269,6 +269,32 @@ def test_read_model_composes_normalized_score_and_provenance(tmp_path: Path) -> 
     assert audit_model_catalog_read_model(read_model)["ok"] is True
 
 
+def test_stale_evidence_keeps_historical_case_diversity_but_cannot_promote(
+    tmp_path: Path,
+) -> None:
+    profile = _profile()
+    evaluation = _evaluation_report()
+    role_evidence = evaluation["rows"][0]["roles"][0]
+    role_evidence["status"] = "partial"
+    role_evidence["stale_reasons"] = ["provider_version_changed"]
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=evaluation,
+        runtime_report=collect_model_runtime_observations([_runtime_db(tmp_path)]),
+        normalized_metrics=_normalized_metrics(),
+        observed_at=OBSERVED_AT,
+    )
+
+    role = _role(read_model, "engineer")
+    hard_gates = role["score_inputs"]["hard_gates"]
+    assert hard_gates["calibrated"] is False
+    assert hard_gates["fresh"] is False
+    assert hard_gates["case_diversity"] is True
+    assert role["score"]["auto_eligible"] is False
+    assert audit_model_catalog_read_model(read_model)["ok"] is True
+
+
 def test_raw_runtime_metrics_are_not_misrepresented_as_normalized_score(
     tmp_path: Path,
 ) -> None:

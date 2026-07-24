@@ -62,7 +62,10 @@ def annotate_model_tier(
         {
             "tier_policy_version": TIER_POLICY_VERSION,
             "capability_band": tier,
-            "capability_basis": "declared_caps_roles_and_local_calibration",
+            "capability_basis": (
+                option.get("capability_basis")
+                or "declared_caps_roles_and_local_calibration"
+            ),
             "economy": economy,
             "speed_class": speed_class,
             "speed_source": speed_source,

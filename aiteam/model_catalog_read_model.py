@@ -1294,6 +1294,11 @@ def _hard_gate_inputs(
             return False
         return None
 
+    case_families = {
+        str(item)
+        for item in evidence.get("case_families") or ()
+        if str(item)
+    }
     gates = {
         "configured": state("configured"),
         "adapter_green": state("adapter_green"),
@@ -1304,17 +1309,10 @@ def _hard_gate_inputs(
         "calibrated": str(evaluation.get("status") or "") == "calibrated",
         "fresh": str(evaluation.get("status") or "") == "calibrated"
         and not evaluation.get("stale_reasons"),
+        # La frescura gobierna promoción, no borra la diversidad histórica
+        # de una métrica exacta que sigue visible para diagnóstico.
         "case_diversity": (
-            len(
-                {
-                    str(item)
-                    for item in evidence.get("case_families") or ()
-                    if str(item)
-                }
-            )
-            >= 2
-            if str(evaluation.get("status") or "") == "calibrated"
-            else None
+            len(case_families) >= 2 if case_families else None
         ),
         "privacy": domain_gate(
             {"data_classification_required", "confidential_data_forbidden"}

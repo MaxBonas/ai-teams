@@ -9,6 +9,12 @@ def test_every_builtin_model_has_capability_economy_and_speed_tier_evidence() ->
     assert report["models_audited"] == sum(
         len(options) for options in MODEL_OPTIONS_BY_PROFILE.values()
     )
+    ling = next(
+        row
+        for row in model_options()["opencode_zen_free"]
+        if row["value"] == "opencode/ling-3.0-flash-free"
+    )
+    assert ling["capability_basis"] == "provisional_pending_classification"
 
 
 def test_public_model_options_expose_three_axis_tier_metadata() -> None:

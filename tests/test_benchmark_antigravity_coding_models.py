@@ -1,8 +1,8 @@
 from scripts.benchmark_antigravity_coding_models import (
     BASELINE_MODEL,
     CHALLENGER_MODEL,
-    aggregate_reports,
     aggregate_diverse_family_reports,
+    aggregate_reports,
     aggregate_single_model_reports,
     bootstrap_profile_ids,
     model_workspace_name,
@@ -104,6 +104,7 @@ def test_single_model_aggregate_calibrates_exact_pair_without_fake_baseline() ->
         {
             "seed": seed,
             "case": "cli_conversor",
+            "provider_version": "0.145.0",
             "evaluation_contract": code_evaluation_contract(),
             "_source_receipt": f"local-engineer-seed-{seed}.json",
             "arms": {
@@ -145,6 +146,7 @@ def test_diversity_aggregate_requires_two_exact_distinct_families() -> None:
             "profile_id": "codex_subscription",
             "model": "gpt-5.6-terra",
             "case": case,
+            "provider_version": "0.145.0",
             "matrix_complete": True,
             "samples_passed": 3,
             "conclusion": {"exact_pair_calibrated": True},
@@ -171,6 +173,7 @@ def test_diversity_aggregate_rejects_duplicate_family_or_identity() -> None:
             "profile_id": "codex_subscription",
             "model": model,
             "case": "same_case",
+            "provider_version": "0.145.0",
             "matrix_complete": True,
             "samples_passed": 3,
             "conclusion": {"exact_pair_calibrated": True},
@@ -188,3 +191,26 @@ def test_diversity_aggregate_rejects_duplicate_family_or_identity() -> None:
     assert aggregate["conclusion"]["exact_pair_calibrated"] is False
     assert aggregate["integrity"]["same_exact_pair"] is False
     assert aggregate["integrity"]["two_distinct_families"] is False
+
+
+def test_single_model_aggregate_rejects_mixed_provider_versions() -> None:
+    reports = [
+        {
+            "seed": seed,
+            "case": "cli_conversor",
+            "provider_version": "1.1.6" if seed < 3 else "1.1.5",
+            "evaluation_contract": code_evaluation_contract(),
+            "_source_receipt": f"sonnet-seed-{seed}.json",
+            "arms": {"claude-sonnet-4-6": _arm(passed=9, seconds=20)},
+        }
+        for seed in (1, 2, 3)
+    ]
+
+    aggregate = aggregate_single_model_reports(
+        reports,
+        model="claude-sonnet-4-6",
+        profile_id="antigravity_subscription",
+    )
+
+    assert aggregate["same_provider_version"] is False
+    assert aggregate["conclusion"]["exact_pair_calibrated"] is False
