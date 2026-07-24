@@ -372,9 +372,11 @@ no se repiten hasta cambio material.
     nueve casos Python/npm/Java/.NET/Go/Rust/C++. El gate agregado descarga los
     18 receipts, exige las 27 celdas exactas, worktree limpio, todos los casos
     `passed`, `support_claim=false` y el mismo SHA; conserva hashes de cada
-    fuente en `ecosystem_ci_evidence_v1`. Falta ejecutar la workflow y auditar
-    el artifact real antes de promover celdas. Reservar canarios vivos de
-    adapters para entornos controlados y registrar provenance separada.
+    fuente en `ecosystem_ci_evidence_v1`. RUN-022 corrige los triggers para la
+    rama real `master` y conserva `main` como compatible. Falta ejecutar la
+    workflow y auditar el artifact real antes de promover celdas. Reservar
+    canarios vivos de adapters para entornos controlados y registrar provenance
+    separada.
   - [x] **I.6.3 Fallar de forma explicable**: cuando falta soporte devuelve
     `capability_gap_v1` con descriptor, owner y acción; nunca instala, improvisa
     comandos destructivos ni declara éxito parcial. Los comandos `planned`

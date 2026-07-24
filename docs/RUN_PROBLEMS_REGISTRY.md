@@ -114,6 +114,22 @@ La matriz Laguna vs DeepSeek completa seis muestras y conserva
 > de liveness siguen siendo válidas: un rol de implementación que no produce
 > cambios no puede cerrar solo con texto. OpenCode Zen sí continúa read-only.
 
+### RUN-022 · RESUELTO — CI silenciosa por divergencia `main`/`master`
+
+**Detectado:** 2026-07-24
+**Run ID(s):** commit `dd105ce`
+**Proyecto:** AI Teams
+**Síntomas:** tras publicar 175 archivos y tres workflows activas, GitHub no
+creó ninguna run para el SHA nuevo.
+**Causas consideradas:** Actions deshabilitadas, filtros de rutas sin
+coincidencia o rama equivocada. GitHub confirmó workflows activas y el commit
+modificó rutas incluidas; el repositorio publica `master`, pero los triggers
+escuchaban solo `main`.
+**Fix aplicado:** frontend, polyglot y clean-room escuchan `master` y `main`.
+`test_ci_branch_contract.py` carga el YAML y exige la rama por defecto real.
+**Verificación:** 18/18 pruebas focalizadas, Ruff y parseo de todas las
+workflows verdes; la siguiente publicación debe producir runs sobre `master`.
+
 ### RUN-021 · RESUELTO — El ZIP limpio no podía instalar su backend de build
 
 **Detectado:** 2026-07-24

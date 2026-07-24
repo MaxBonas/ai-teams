@@ -15,6 +15,7 @@ on:
       - "tests/test_ecosystem_validation.py"
   push:
     branches:
+      - master
       - main
 
 permissions:

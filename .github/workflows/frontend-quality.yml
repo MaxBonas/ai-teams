@@ -9,6 +9,7 @@ on:
       - "package.json"
   push:
     branches:
+      - master
       - main
     paths:
       - ".github/workflows/frontend-quality.yml"
