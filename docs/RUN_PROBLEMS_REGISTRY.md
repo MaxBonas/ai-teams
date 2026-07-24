@@ -130,6 +130,22 @@ escuchaban solo `main`.
 **Verificación:** 18/18 pruebas focalizadas, Ruff y parseo de todas las
 workflows verdes; la siguiente publicación debe producir runs sobre `master`.
 
+### RUN-023 · RESUELTO — Fixtures CI rechazaban su propio workspace canónico
+
+**Detectado:** 2026-07-24
+**Run ID(s):** `30085076996`, corregido en `30085247826`
+**Proyecto:** matriz de ecosistemas de AI Teams
+**Síntomas:** todas las acciones Windows y macOS fallaban antes del toolchain
+con `cwd_escaped_workspace`; el recibo base ejecutaba nueve casos y duplicaba
+celdas aunque la workflow requería solo cuatro.
+**Causa raíz:** se resolvía el `cwd`, pero se comparaba contra una raíz sin
+resolver. Windows expandía el alias 8.3 y macOS `/var` a `/private/var`.
+Además, `--require` validaba expectativas pero no acotaba selección.
+**Fix aplicado:** resolver primero la raíz y derivar de ella el `cwd`; cuando no
+hay `--case`, reutilizar `--require` como selección explícita.
+**Verificación:** 19/19 pruebas focalizadas y run real verde: 18 receipts,
+27 celdas, tres sistemas, un único SHA y gate agregado aceptado.
+
 ### RUN-021 · RESUELTO — El ZIP limpio no podía instalar su backend de build
 
 **Detectado:** 2026-07-24

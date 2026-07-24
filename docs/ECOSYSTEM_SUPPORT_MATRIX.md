@@ -11,25 +11,29 @@ soportada.
 
 | Caso | Windows x86_64 local | Windows CI | Linux CI | macOS CI | Alcance |
 |---|---:|---:|---:|---:|---|
-| `python_pytest` | pass | pendiente | pendiente | pendiente | pytest mínimo |
-| `javascript_npm` | pass | pendiente | pendiente | pendiente | build, test, lint y typecheck npm |
-| `monorepo_python` | pass | pendiente | pendiente | pendiente | detección y pytest en monorepo |
-| `monorepo_javascript` | pass | pendiente | pendiente | pendiente | detección, build y test npm en monorepo |
-| `java_maven_junit` | pass | pendiente | pendiente | pendiente | package Maven, JUnit y surefire report |
-| `dotnet_xunit` | bloqueado: falta SDK | pendiente | pendiente | pendiente | build y xUnit; tener solo runtime no basta |
-| `go_builtin` | bloqueado: falta Go | pendiente | pendiente | pendiente | build y test estándar, sin dependencias |
-| `rust_cargo` | bloqueado: falta Cargo | pendiente | pendiente | pendiente | build `--locked`, test y artefacto rlib |
-| `c_cpp_cmake` | bloqueado: falta CMake | pendiente | pendiente | pendiente | configure, build y CTest en orden obligatorio |
+| `python_pytest` | pass | pass | pass | pass | pytest mínimo |
+| `javascript_npm` | pass | pass | pass | pass | build, test, lint y typecheck npm |
+| `monorepo_python` | pass | pass | pass | pass | detección y pytest en monorepo |
+| `monorepo_javascript` | pass | pass | pass | pass | detección, build y test npm en monorepo |
+| `java_maven_junit` | pass | pass | pass | pass | package Maven, JUnit y surefire report |
+| `dotnet_xunit` | bloqueado: falta SDK | pass | pass | pass | build y xUnit; tener solo runtime no basta |
+| `go_builtin` | bloqueado: falta Go | pass | pass | pass | build y test estándar, sin dependencias |
+| `rust_cargo` | bloqueado: falta Cargo | pass | pass | pass | build `--locked`, test y artefacto rlib |
+| `c_cpp_cmake` | bloqueado: falta CMake | pass | pass | pass | configure, build y CTest en orden obligatorio |
 
 Los recibos locales se generaron en un worktree sucio y por ello solo son
 evidencia de desarrollo, no promoción.
-`.github/workflows/polyglot-fixtures.yml` debe producir recibos ligados al SHA
-exacto en los tres sistemas antes de promover estas celdas. Su job
+La run
+[`30085247826`](https://github.com/MaxBonas/ai-teams/actions/runs/30085247826)
+produjo los receipts ligados al SHA
+`775e72e09fde87a1b5251f44076b4f6c4690a91e`. Su job
 `evidence-gate` no confía en el estado de los jobs: descarga los 18 receipts y
 exige las 27 combinaciones OS/caso, SHA único, worktree limpio, todos los casos
 `passed` y `support_claim=false`. El agregado
-`ecosystem_ci_evidence_v1` conserva el hash de cada fuente; sigue sin promover
-soporte automáticamente.
+`ecosystem_ci_evidence_v1` está conservado como
+`benchmarks/results/ecosystem_validation/polyglot-ci-775e72e.json`, SHA-256
+`9ce3c81b41817a9a7b3fde78a99ea5753722385f8cb309cfe5b204f802d2fc64`;
+sigue sin promover soporte automáticamente.
 
 ## Estado del resto del catálogo
 

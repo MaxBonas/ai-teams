@@ -367,16 +367,22 @@ no se repiten hasta cambio material.
     actual pasa 30/30 tests focalizados, 190/190 de integración con
     doctor/wake/runner y 1578/1578 globales.
     Al estar el worktree sucio no autoriza promoción.
-  - [ ] **I.6.2 Ejecutar la matriz CI por OS/toolchain sin credenciales**.
+  - [x] **I.6.2 Ejecutar la matriz CI por OS/toolchain sin credenciales**.
     `.github/workflows/polyglot-fixtures.yml` ya define Windows/Linux/macOS para
     nueve casos Python/npm/Java/.NET/Go/Rust/C++. El gate agregado descarga los
     18 receipts, exige las 27 celdas exactas, worktree limpio, todos los casos
     `passed`, `support_claim=false` y el mismo SHA; conserva hashes de cada
     fuente en `ecosystem_ci_evidence_v1`. RUN-022 corrige los triggers para la
-    rama real `master` y conserva `main` como compatible. Falta ejecutar la
-    workflow y auditar el artifact real antes de promover celdas. Reservar
-    canarios vivos de adapters para entornos controlados y registrar provenance
-    separada.
+    rama real `master` y conserva `main` como compatible. La primera run expuso
+    RUN-023: Windows 8.3 y `/var` de macOS hacían divergir raíz sin resolver y
+    `cwd` canónico; además `--require` no limitaba los casos. Tras corregir
+    ambas fronteras, la run `30085247826` pasa 18/18 receipts y 27/27 celdas
+    sobre `775e72e`; el agregado durable
+    `polyglot-ci-775e72e.json` tiene SHA-256
+    `9ce3c81b41817a9a7b3fde78a99ea5753722385f8cb309cfe5b204f802d2fc64`.
+    `support_claim=false` permanece deliberadamente: la evidencia cierra el
+    gate, no promociona por sí sola el catálogo. Reservar canarios vivos de
+    adapters para entornos controlados y registrar provenance separada.
   - [x] **I.6.3 Fallar de forma explicable**: cuando falta soporte devuelve
     `capability_gap_v1` con descriptor, owner y acción; nunca instala, improvisa
     comandos destructivos ni declara éxito parcial. Los comandos `planned`

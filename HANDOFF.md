@@ -50,10 +50,9 @@ cerrado localmente y I.8.4a/b ya implementa el harness y el gate, pero el
 descriptor v0.1.0 conserva `publish.enabled=false`: no crear el tag hasta que la
 evidencia independiente esté preparada.
 I.8.1 e I.9 ya están cerrados.
-PHP/Ruby queda pausado por prioridad del owner. I.6.2
-espera artifacts reales de CI; `evidence-gate` ya exige 18 receipts/27 celdas
-ligadas al mismo SHA, pero no promover por el YAML ni por el canario local
-sucio. M.8 queda abierto como
+PHP/Ruby queda pausado por prioridad del owner. I.6.2 está cerrado con la run
+`30085247826`: 18 receipts/27 celdas ligadas a `775e72e` y agregado durable;
+`support_claim=false` impide promoción automática. M.8 queda abierto como
 mantenimiento por evento/mes; sus 25 pares
 calibrados ya tienen quality exacta, 21 abren diversidad y los cuatro restantes
 no deben repetirse hasta un cambio material.
