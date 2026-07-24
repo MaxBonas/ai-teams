@@ -1,0 +1,17 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "web_vite_react_typescript",
+  "expected_detected": ["javascript_typescript", "web_frontend"],
+  "cases": [
+    {
+      "id": "web_vite_react_typescript",
+      "ecosystem_id": "javascript_typescript",
+      "actions": [
+        {"id": "build", "artifacts": ["dist/index.html"]},
+        {"id": "test", "artifacts": []},
+        {"id": "lint", "artifacts": []},
+        {"id": "typecheck", "artifacts": []}
+      ]
+    }
+  ]
+}

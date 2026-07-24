@@ -63,6 +63,7 @@ jobs:
             --require javascript_npm `
             --require monorepo_python `
             --require monorepo_javascript `
+            --require web_vite_react_typescript `
             --receipt "$env:AITEAM_FIXTURE_RECEIPT"
 
       - name: Upload validation receipt

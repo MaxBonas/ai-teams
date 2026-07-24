@@ -63,6 +63,7 @@ def test_fixture_catalog_is_versioned_and_unique() -> None:
         "polyglot_monorepo",
         "python_minimal",
         "rust_minimal",
+        "web_vite_react_typescript",
     }
     assert len(case_ids) == len(set(case_ids))
 
@@ -106,6 +107,21 @@ def test_polyglot_monorepo_detects_and_executes_each_descriptor() -> None:
         "python",
         "javascript_typescript",
     }
+
+
+def test_modern_web_fixture_detects_web_and_reuses_npm_actions() -> None:
+    receipt = validate_ecosystem_fixtures(
+        selected_case_ids=("web_vite_react_typescript",),
+    )
+
+    case = receipt["cases"][0]
+    assert case["status"] == "passed"
+    assert [action["command_id"] for action in case["actions"]] == [
+        "npm_build",
+        "npm_test",
+        "npm_lint",
+        "npm_typecheck",
+    ]
 
 
 def test_missing_runtime_becomes_owned_capability_gap() -> None:
@@ -289,6 +305,7 @@ def test_ci_matrix_covers_three_os_and_uploads_sha_bound_receipts() -> None:
         "javascript_npm",
         "monorepo_python",
         "monorepo_javascript",
+        "web_vite_react_typescript",
     ):
         assert f"--require {case_id}" in workflow
     assert "--require java_maven_junit" in workflow

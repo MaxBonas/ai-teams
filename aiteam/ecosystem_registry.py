@@ -3,12 +3,12 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from aiteam.platform_runtime import platform_id, resolve_executable
 from aiteam.policies import WORKSPACE_NOISE_DIRS
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_VERSION = "ecosystem_registry_v1"
@@ -28,7 +28,7 @@ ECOSYSTEM_IDS = (
     "php",
     "ruby",
     "swift",
-    "web_mobile",
+    "web_frontend",
     "containers_devcontainers",
 )
 _ALLOWED_COMMAND_STATUS = {"legacy_enabled", "planned"}
@@ -93,14 +93,18 @@ def validate_ecosystem_registry(payload: Mapping[str, Any]) -> None:
 
     ecosystems = payload.get("ecosystems")
     if not isinstance(ecosystems, list):
-        raise ValueError("ecosystem registry entries must be a list")
+        raise TypeError("ecosystem registry entries must be a list")
     ids = tuple(str(item.get("id") or "") for item in ecosystems)
     if ids != ECOSYSTEM_IDS:
         raise ValueError("ecosystem registry order or coverage drift")
     for ecosystem in ecosystems:
         _validate_ecosystem(ecosystem, allowed_env=allowed_env, max_timeout=max_timeout)
     gaps = payload.get("known_gaps")
-    if not isinstance(gaps, list) or not gaps or any(not str(item).strip() for item in gaps):
+    if (
+        not isinstance(gaps, list)
+        or not gaps
+        or any(not str(item).strip() for item in gaps)
+    ):
         raise ValueError("ecosystem registry known gaps required")
 
 
@@ -124,7 +128,10 @@ def _validate_ecosystem(
     if set(ecosystem) != expected:
         raise ValueError(f"ecosystem fields drift:{ecosystem.get('id')}")
     detector = ecosystem.get("detectors")
-    if not isinstance(detector, Mapping) or set(detector) != {"manifests", "extensions"}:
+    if not isinstance(detector, Mapping) or set(detector) != {
+        "manifests",
+        "extensions",
+    }:
         raise ValueError(f"ecosystem detectors invalid:{ecosystem.get('id')}")
     runtime_ids: set[str] = set()
     for runtime in ecosystem.get("runtimes") or ():
@@ -136,7 +143,7 @@ def _validate_ecosystem(
         runtime_ids.add(runtime_id)
     dependencies = ecosystem.get("action_dependencies")
     if not isinstance(dependencies, list):
-        raise ValueError(f"ecosystem action dependencies invalid:{ecosystem.get('id')}")
+        raise TypeError(f"ecosystem action dependencies invalid:{ecosystem.get('id')}")
     dependency_actions: set[str] = set()
     dependency_graph: dict[str, set[str]] = {}
     for dependency in dependencies:
@@ -182,7 +189,9 @@ def _validate_ecosystem(
     for action_id in ACTION_IDS:
         entries = commands.get(action_id)
         if not isinstance(entries, list):
-            raise ValueError(f"ecosystem command list invalid:{ecosystem.get('id')}:{action_id}")
+            raise TypeError(
+                f"ecosystem command list invalid:{ecosystem.get('id')}:{action_id}"
+            )
         for command in entries:
             if set(command) != expected_command_fields:
                 raise ValueError(
@@ -392,9 +401,7 @@ def plan_ecosystem_command(
             command_id=command["id"],
         )
     test_targets = sorted(
-        rel
-        for rel in rel_paths
-        if _matches_any(rel, command["selectors"]["globs"])
+        rel for rel in rel_paths if _matches_any(rel, command["selectors"]["globs"])
     )
     argv: list[str] = []
     for item in command["argv"]:
@@ -673,9 +680,11 @@ def _selectors_match(
             if not _matches_any(rel, (manifest,)):
                 continue
             try:
-                content = (root / rel).read_text(
-                    encoding="utf-8", errors="ignore"
-                ).casefold()[:256_000]
+                content = (
+                    (root / rel)
+                    .read_text(encoding="utf-8", errors="ignore")
+                    .casefold()[:256_000]
+                )
             except OSError:
                 continue
             if any(str(marker).casefold() in content for marker in markers):
@@ -737,6 +746,8 @@ def _command_cwd(
         candidate.relative_to(workspace)
     except ValueError:
         return None
-    if any(part in WORKSPACE_NOISE_DIRS for part in candidate.relative_to(workspace).parts):
+    if any(
+        part in WORKSPACE_NOISE_DIRS for part in candidate.relative_to(workspace).parts
+    ):
         return None
     return candidate

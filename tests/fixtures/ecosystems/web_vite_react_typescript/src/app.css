@@ -1,0 +1,9 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+}
+
+main {
+  max-width: 60rem;
+  margin-inline: auto;
+}

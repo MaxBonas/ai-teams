@@ -48,6 +48,7 @@ def _complete_matrix(root: Path, revision: str) -> None:
         "javascript_npm",
         "monorepo_python",
         "monorepo_javascript",
+        "web_vite_react_typescript",
     }
     singles = EXPECTED_CASES - grouped
     for system in ("windows", "linux", "macos"):
@@ -76,7 +77,7 @@ def test_ecosystem_ci_audit_accepts_exact_complete_matrix(tmp_path: Path) -> Non
 
     assert result["ok"] is True
     assert result["observed_receipts"] == 18
-    assert result["observed_cells"] == 27
+    assert result["observed_cells"] == 30
     assert result["missing_cells"] == []
     assert all(len(item["sha256"]) == 64 for item in result["sources"])
     assert result["support_claim"] is False

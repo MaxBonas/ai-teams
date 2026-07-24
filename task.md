@@ -389,25 +389,33 @@ no se repiten hasta cambio material.
     solo se desbloquean dentro del validador autorizado y el receipt mantiene
     `support_claim=false`.
   - [ ] **I.6.4 Ampliar fixtures y CI** a Java/Kotlin, Go, Rust, C/C++, .NET,
-    PHP, Ruby, Swift, Web/Mobile y Containers, incluyendo build/test,
+    PHP, Ruby, Swift, Web, Mobile y Containers, incluyendo build/test,
     timeouts, quoting, artefactos y gaps específicos por OS.
     - [x] Java/Maven: fixture JUnit con package, test y surefire report; Windows
-      local pasa. Workflow Java 17 × tres OS definida y pendiente de artifacts.
+      local y CI Java 17 × tres OS pasan.
     - [x] .NET: fixture xUnit con build/test; Windows local identifica que el
       host tiene runtime pero no SDK mediante `runtime_probe_failed:dotnet`.
-      Workflow SDK 8 × tres OS definida y pendiente de artifacts.
+      CI SDK 8 × tres OS pasa.
       El receipt redacted no conserva rutas absolutas.
     - [x] Go: fixture sin dependencias con build/test; Windows local devuelve
-      `runtime_unavailable:go`. Workflow `setup-go@v6` con Go 1.25.9 × tres OS,
-      pendiente de artifacts.
+      `runtime_unavailable:go`. CI `setup-go@v6` con Go 1.25.9 × tres OS pasa.
     - [x] Rust: fixture Cargo `--locked`, test y rlib; Windows local devuelve
-      `runtime_unavailable:cargo`. Workflow usa el Rust preinstalado por cada
-      runner y registra su versión, pendiente de artifacts.
+      `runtime_unavailable:cargo`. CI usa el Rust preinstalado y pasa × tres OS.
     - [x] C/C++: el contrato añade la acción `configure` y dependencias
       descriptor-bound `configure → build → test`. Fixture CMake/CTest y job
-      × tres OS definidos; Windows local bloquea configure por CMake ausente y
-      las fases posteriores por `prerequisite_not_satisfied`, sin ejecutarlas.
-    - [ ] PHP, Ruby, Swift, Web/Mobile y Containers.
+      × tres OS pasa; Windows local bloquea configure por CMake ausente y las
+      fases posteriores por `prerequisite_not_satisfied`, sin ejecutarlas.
+    - [x] **Web moderno local**: fixture Vite + React + TypeScript + CSS detecta
+      `web_frontend` y reutiliza, sin duplicarlos, los comandos descriptor-bound
+      npm de build/test/lint/typecheck. La calidad real del stack permanece
+      cubierta por I.9; este fixture valida detección, routing, cwd, quoting y
+      artefacto en una copia portable. Pendiente únicamente su receipt CI.
+    - [ ] **Containers opcionales**: añadir fixture Docker/Compose cuando haya
+      runtime controlado. Nunca instalar Docker automáticamente ni convertirlo
+      en requisito de AI Teams.
+    - [ ] **Mobile nativo pospuesto**: separar Android/Flutter/Xcode antes de
+      crear fixtures; no conservar la categoría compuesta `web_mobile`.
+    - [ ] PHP, Ruby y Swift, pausados por prioridad.
   - Cierre: matriz pública de cobertura, recibos fechados y regresión automática
     para cada celda anunciada como soportada. Estado visible en
     `docs/ECOSYSTEM_SUPPORT_MATRIX.md`.

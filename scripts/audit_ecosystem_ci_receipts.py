@@ -14,6 +14,7 @@ EXPECTED_CASES = {
     "javascript_npm",
     "monorepo_python",
     "monorepo_javascript",
+    "web_vite_react_typescript",
     "java_maven_junit",
     "dotnet_xunit",
     "go_builtin",

@@ -1,0 +1,11 @@
+{
+  "name": "aiteam-web-vite-react-typescript-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/app.test.mjs",
+    "lint": "node scripts/lint.mjs",
+    "typecheck": "node scripts/typecheck.mjs"
+  }
+}

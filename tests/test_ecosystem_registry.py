@@ -55,11 +55,14 @@ def test_registry_contract_is_versioned_complete_and_install_free() -> None:
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
-        (lambda value: value["execution_policy"].update(automatic_install=True), "cannot install"),
         (
-            lambda value: value["ecosystems"][0]["commands"]["test"][0][
-                "env"
-            ].update(SECRET="x"),
+            lambda value: value["execution_policy"].update(automatic_install=True),
+            "cannot install",
+        ),
+        (
+            lambda value: value["ecosystems"][0]["commands"]["test"][0]["env"].update(
+                SECRET="x"
+            ),
             "env denied",
         ),
         (
@@ -96,8 +99,12 @@ def test_registry_validation_fails_closed(mutation, message: str) -> None:
 
 
 def test_detection_handles_monorepo_noise_and_real_scan_limit(tmp_path: Path) -> None:
-    _write(tmp_path / "services" / "api" / "pyproject.toml", "[tool.pytest.ini_options]\n")
-    _write(tmp_path / "services" / "api" / "tests" / "test_api.py", "def test_ok(): pass\n")
+    _write(
+        tmp_path / "services" / "api" / "pyproject.toml", "[tool.pytest.ini_options]\n"
+    )
+    _write(
+        tmp_path / "services" / "api" / "tests" / "test_api.py", "def test_ok(): pass\n"
+    )
     _write(
         tmp_path / "apps" / "web" / "package.json",
         json.dumps({"scripts": {"test": "vitest"}}),
@@ -115,8 +122,26 @@ def test_detection_handles_monorepo_noise_and_real_scan_limit(tmp_path: Path) ->
     assert detect_project_ecosystems(tmp_path, max_files=1)["scan_truncated"] is True
 
 
+def test_vite_project_is_classified_as_web_without_claiming_mobile(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "package.json",
+        json.dumps({"scripts": {"build": "vite build"}}),
+    )
+    _write(tmp_path / "vite.config.ts", "export default {};\n")
+    _write(tmp_path / "src" / "App.tsx", "export function App() { return null; }\n")
+
+    observed = detect_project_ecosystems(tmp_path)
+
+    assert {"javascript_typescript", "web_frontend"} <= set(observed["detected_ids"])
+    assert "web_mobile" not in observed["detected_ids"]
+
+
 def test_planner_denies_without_capability_or_authorization(tmp_path: Path) -> None:
-    _write(tmp_path / "tests" / "test_unit.py", "raise RuntimeError('must not execute')\n")
+    _write(
+        tmp_path / "tests" / "test_unit.py", "raise RuntimeError('must not execute')\n"
+    )
 
     missing_capability = plan_ecosystem_command(
         tmp_path,
@@ -142,8 +167,13 @@ def test_planner_denies_without_capability_or_authorization(tmp_path: Path) -> N
 
 
 def test_python_plan_is_exact_bounded_and_does_not_execute(tmp_path: Path) -> None:
-    _write(tmp_path / "tests" / "unit" / "test_nested.py", "raise RuntimeError('sentinel')\n")
-    _write(tmp_path / "node_modules" / "test_hidden.py", "raise RuntimeError('hidden')\n")
+    _write(
+        tmp_path / "tests" / "unit" / "test_nested.py",
+        "raise RuntimeError('sentinel')\n",
+    )
+    _write(
+        tmp_path / "node_modules" / "test_hidden.py", "raise RuntimeError('hidden')\n"
+    )
 
     plan = plan_ecosystem_command(
         tmp_path,
@@ -168,7 +198,9 @@ def test_python_plan_is_exact_bounded_and_does_not_execute(tmp_path: Path) -> No
     assert not (tmp_path / ".pytest_cache").exists()
 
 
-def test_npm_plan_requires_real_script_and_uses_manifest_directory(tmp_path: Path) -> None:
+def test_npm_plan_requires_real_script_and_uses_manifest_directory(
+    tmp_path: Path,
+) -> None:
     package = tmp_path / "apps" / "web" / "package.json"
     _write(package, json.dumps({"scripts": {"test": "echo Error: no test specified"}}))
     runtime = tmp_path / "fake-npm.cmd"
@@ -198,7 +230,9 @@ def test_npm_plan_requires_real_script_and_uses_manifest_directory(tmp_path: Pat
     assert allowed["argv"] == [str(runtime), "test", "--silent"]
 
 
-def test_planned_commands_remain_locked_until_fixture_verification(tmp_path: Path) -> None:
+def test_planned_commands_remain_locked_until_fixture_verification(
+    tmp_path: Path,
+) -> None:
     _write(tmp_path / "go.mod", "module example.test/project\n")
     runtime = tmp_path / "fake-go.exe"
     _write(runtime)

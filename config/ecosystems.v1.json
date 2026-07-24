@@ -552,40 +552,26 @@
       "artifacts": [".build/**"]
     },
     {
-      "id": "web_mobile",
-      "label": "Web / Mobile composite",
+      "id": "web_frontend",
+      "label": "Web frontend",
       "status": "planned",
-      "categories": ["web", "mobile", "composite"],
+      "categories": ["web", "frontend", "composite"],
       "detectors": {
-        "manifests": ["vite.config.js", "vite.config.ts", "next.config.js", "next.config.mjs", "pubspec.yaml", "AndroidManifest.xml", "app.json"],
-        "extensions": [".html", ".css", ".dart"]
+        "manifests": ["vite.config.js", "vite.config.ts", "next.config.js", "next.config.mjs", "next.config.ts", "astro.config.mjs", "astro.config.ts"],
+        "extensions": [".html", ".css", ".scss"]
       },
       "runtimes": [
-        {"id": "flutter", "candidates": ["flutter"], "version_args": ["--version"]}
+        {"id": "node", "candidates": ["node"], "version_args": ["--version"]}
       ],
       "action_dependencies": [],
       "commands": {
         "configure": [],
         "build": [],
-        "test": [
-          {
-            "id": "flutter_test",
-            "runtime_id": "flutter",
-            "argv": ["{runtime}", "test"],
-            "selectors": {"manifests": ["pubspec.yaml"], "globs": ["test/*_test.dart", "test/**/*_test.dart"], "json_script": null, "content_markers": {}},
-            "cwd": "manifest_dir",
-            "env": {"CI": "1", "NO_COLOR": "1"},
-            "timeout_seconds": 1200,
-            "required_capability": "test_execute",
-            "mutates_workspace": false,
-            "project_script": false,
-            "status": "planned"
-          }
-        ],
+        "test": [],
         "lint": [],
         "typecheck": []
       },
-      "artifacts": ["build/**", ".dart_tool/**"]
+      "artifacts": ["dist/**", "build/**", ".next/**"]
     },
     {
       "id": "containers_devcontainers",
@@ -639,6 +625,8 @@
   "known_gaps": [
     "I.6 debe ejecutar fixtures build/test por OS antes de promover cualquier ecosistema a verified.",
     "Los comandos planned son propuestas descriptor-bound y no se ejecutan hasta recibir evidencia y autorización.",
-    "La detección compuesta web/mobile no sustituye descriptores específicos de Android, Flutter o Xcode futuros."
+    "Web frontend es una señal compuesta; build/test/lint/typecheck se ejecutan mediante el descriptor JavaScript/TypeScript del package manager.",
+    "Mobile nativo permanece pospuesto y requiere descriptores específicos Android, Flutter o Xcode antes de anunciar soporte.",
+    "Docker y Dev Containers son opcionales; su detección nunca convierte Docker en requisito ni autoriza instalación automática."
   ]
 }
