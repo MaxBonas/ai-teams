@@ -36,8 +36,9 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
 - El backend/pre-run de compatibilidad perfil+modelo+rol está cerrado y gobierna
   bootstrap, Equipo, hiring, dispatch, fallback y recovery.
 - Los tres run profiles tienen canario vivo cerrado.
-- La matriz canónica cubre 47 modelos × 17 roles: 799 celdas, 116 compatibles
-  y 683 incompatibles con razón explícita.
+- La matriz canónica cubre 47 modelos × 17 roles: 799 celdas, 102 compatibles
+  y 697 incompatibles con razón explícita. `web_scout` exige MCP gobernado y
+  ya no acepta canales API/Antigravity que no puedan proporcionarlo.
 - Sonnet 4.6 conserva `best_for=engineer`, pero ninguna ruta es auto-elegible;
   Luna conserva `context_curator` con esfuerzo `medium` y Flash High conserva
   evidencia exacta de review/QA.
@@ -658,12 +659,13 @@ no se repiten hasta cambio material.
     ejecutables pendientes, 4 fixtures de tools pendientes, 3 candidatos
     manuales y 79 bloqueados por canal/health. Recibo:
     `benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`.
-    Evento vivo `2026-07-24`: 47 modelos/132 destinos; el preflight proyecta
-    8 calibrados, 17 parciales, 15 canarios, 4 fixtures, 3 manuales y 85
+    Evento vivo posterior al gate Web Scout `2026-07-24`: 47 modelos/124
+    destinos; el preflight proyecta 8 calibrados, 17 parciales, 15 canarios,
+    2 fixtures, 3 manuales y 79
     bloqueados al aplicar estrictamente el CLI Codex pendiente y las versiones
     no observadas/stale. No borra evidencia histórica ni cambia defaults.
-    Recibos: `model-catalog-drift-2026-07-24.json` y
-    `model-evaluation-coverage-2026-07-24.json`.
+    Recibos: `model-catalog-drift-2026-07-24-post-web-scout.json` y
+    `model-evaluation-coverage-2026-07-24-post-web-scout.json`.
   - [x] **Lote A — Codex subscription (14 destinos evaluados)**: Luna para scouts/worker;
     Terra para Engineer/MCP/QA/review/test design; Sol para Lead/arquitectura/
     quorum. Reutilizar harnesses por familia de contrato y registrar por rol
@@ -712,7 +714,7 @@ no se repiten hasta cambio material.
       `team_lead`, `architect` y `quorum_auditor`, cada uno con evidencia exacta
       y sin extrapolar aliases semánticamente distintos. Los cinco pares quedan
       `calibrated`; sus agregados críticos enlazan dos familias y seis muestras.
-  - [ ] **Lote B — Antigravity (drift 1.1.6 controlado; un fixture accionable)**:
+  - [x] **Lote B — Antigravity (drift 1.1.6 cerrado sin promoción)**:
     conservar Flash
     High Reviewer como calibrado durable; completar contratos exactos que el
     screening genérico de Lead/scout no demuestra. No repetir review 3/3 ni
@@ -721,9 +723,17 @@ no se repiten hasta cambio material.
     Worker y Web Scout. El cambio material a CLI 1.1.6 reabrió Sonnet/Engineer:
     `config_redactor` pasa 3/3 hidden, pero deja 7 incidencias Ruff en 296,297 s;
     fail-fast impide gastar las otras cinco celdas y la calibración 1.1.5 queda
-    stale para nuevas promociones. Pendiente real ejecutable: fixture exacto
-    Web Scout de Flash Low. Los candidatos manuales y Gemini 3.6 bloqueados no
-    cuentan como calibraciones ejecutables.
+    stale para nuevas promociones. El fixture exacto Flash Low/Web Scout fue
+    fail-fast en seed 1: el executor denegó `mcp:web-scout-canary` con
+    `mcp_adapter_not_supported`, por lo que no existe evidencia de calidad del
+    modelo ni procede gastar seeds 2–3. `web_scout` exige ahora `external_mcp`
+    desde el contrato central y Antigravity deja de nominar modelos para ese
+    rol hasta ofrecer un loop MCP gobernado. El watchdog externo vence antes
+    que el timeout de `agy` para evitar hijos huérfanos que oculten el error
+    original. Los candidatos manuales y Gemini 3.6 bloqueados no cuentan como
+    calibraciones ejecutables. Verificación: 235 tests dirigidos, 1629 tests
+    globales, Ruff F/E9 y diff limpios; matrices de flujo y catálogo verdes,
+    con cero auto-elegibles.
   - [x] **Lote C — locales instalados (8 destinos evaluados, cierre negativo)**:
     Gemma 4 E4B/26B y Qwen 2.5 Coder 14B fueron probados sin descargar modelos
     ausentes. Gemma 26B/Engineer queda `partial` 1/3; los otros siete contratos
@@ -1295,6 +1305,10 @@ no se repiten hasta cambio material.
       por rol. Ninguna ruta automática operativa carece de evidencia exacta.
       Recibo vivo con cero fallos, cero auto-elegibles y un warning stale.
       Verificación: 84 tests dirigidos, Ruff limpio y 1434 tests backend.
+      Reproyección 2026-07-24: al añadir el requisito central
+      `web_scout -> external_mcp` y el modelo 47, la matriz pasa a 799 celdas,
+      697 incompatibles y 102 compatibles; 62 son compatibles no nominadas y
+      40 nominadas compatibles. Conserva cero auto-elegibles y auditoría verde.
     - [x] Separar benchmarks de capacidad general de los canarios exactos por
       rol/tools y usar varias familias de casos para reducir overfitting.
       - [x] **M.8.3.1 Taxonomía de evidencia**:
@@ -1399,7 +1413,8 @@ no se repiten hasta cambio material.
   - Antigravity conserva históricamente 12 pares calibrados y 2 parciales; la
     actualización 1.1.6 vuelve stale Sonnet/Engineer para promoción nueva. Sus
     tres pendientes históricos ya no son tres acciones: GPT-OSS quedó cerrado negativamente y
-    solo Flash Low/Web Scout conserva un fixture exacto pendiente. El cambio
+    Flash Low/Web Scout quedó cerrado negativamente por ausencia de MCP
+    gobernado en Antigravity 1.1.6, sin extrapolar calidad. El cambio
     Antigravity 1.1.6 activó la revalidación Sonnet/Engineer; falló por 7
     incidencias Ruff pese a 3/3 hidden y queda fail-fast, sin completar la
     matriz hasta otro cambio material. Dos roles Flash High tampoco repiten la

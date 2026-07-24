@@ -132,6 +132,41 @@ def test_api_profile_does_not_gain_external_mcp_from_provider_tools() -> None:
     assert decision["code"] == "external_mcp_unsupported"
 
 
+def test_web_scout_role_requires_governed_mcp_without_call_site_hint() -> None:
+    profile = {
+        "id": "antigravity_subscription",
+        "adapter_type": "subscription_cli",
+        "channel": "subscription",
+        "config": {"cli_kind": "antigravity"},
+    }
+    model = _model(
+        "antigravity_subscription", "gemini-3.5-flash-low"
+    )
+
+    decision = _decision(
+        profile, model, "web_scout", data_class="public"
+    )
+
+    assert decision["code"] == "external_mcp_unsupported"
+    assert decision["details"] == {}
+
+
+def test_web_scout_transport_requirement_is_not_a_model_capability() -> None:
+    profile = {
+        "id": "codex_subscription",
+        "adapter_type": "subscription_cli",
+        "channel": "subscription",
+        "config": {"cli_kind": "codex"},
+    }
+    model = _model("codex_subscription", "gpt-5.6-luna")
+
+    decision = _decision(
+        profile, model, "web_scout", data_class="public"
+    )
+
+    assert decision["allowed"] is True
+
+
 def test_json_object_model_is_insufficient_when_schema_is_required() -> None:
     profile = {
         "id": "groq_api_free",

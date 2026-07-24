@@ -111,6 +111,7 @@ def test_antigravity_command_uses_headless_plan_contract(tmp_path, monkeypatch):
     assert ["--mode", "plan"] == command[4:6]
     assert "--sandbox" in command
     assert "--dangerously-skip-permissions" in command
+    assert command[command.index("--print-timeout") + 1] == "95s"
     assert command[-2:] == ["--model", "gemini-3.1-pro-high"]
 
 

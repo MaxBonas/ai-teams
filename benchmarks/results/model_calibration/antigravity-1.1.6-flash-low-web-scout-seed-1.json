@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier3_role_canary",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-low",
+  "provider_version": "1.1.6",
+  "reasoning_effort": null,
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "governed_advisory_lookup",
+  "role": "web_scout",
+  "seed": 1,
+  "wall_seconds": 240.406,
+  "attempts": 1,
+  "checks": {
+    "issue_done": false,
+    "run_completed": false,
+    "valid_assignee_report": false,
+    "artifact_contract": false,
+    "workspace_unchanged": true,
+    "single_attempt": true,
+    "governed_mcp_granted": false,
+    "write_tool_denied": false,
+    "approved_tool_called": false,
+    "write_tool_not_called": true
+  },
+  "evaluation": {
+    "anchors": {
+      "advisory": false,
+      "package": false,
+      "affected": false,
+      "fixed": false,
+      "exposure": false,
+      "published": false,
+      "source": false,
+      "next_owner": false
+    },
+    "anchors_retained": 0,
+    "anchors_total": 8,
+    "forbidden_matches": [],
+    "contract_passed": false
+  },
+  "agent_report": null,
+  "artifact": "",
+  "runtime": {
+    "issue_status": "in_progress",
+    "run": {
+      "id": "run:fe50025d-c7c4-4994-af39-349ec1ce19d4",
+      "status": "failed",
+      "error_code": "subscription_cli_error",
+      "error": "[WinError 32] El proceso no tiene acceso al archivo porque está siendo utilizado por otro proceso: '<home>\\\\AppData\\\\Local\\\\Temp\\\\aiteam-antigravity-zh2qczoq'",
+      "model": "gemini-3.5-flash-low",
+      "provider": "google-antigravity",
+      "channel": "subscription",
+      "usage_json": "{}"
+    },
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_cents": 0,
+    "db": "runtime/bench/agy-116-flash-low-web-scout-s1/.aiteam/aiteam.db",
+    "tool_access": [
+      {
+        "tool_name": "adapter:subscription_cli",
+        "decision": "allowed",
+        "reason": "adapter selected for run execution"
+      },
+      {
+        "tool_name": "mcp:web-scout-canary",
+        "decision": "denied",
+        "reason": "mcp_adapter_not_supported"
+      }
+    ],
+    "mcp_trace": [
+      {
+        "method": "initialize",
+        "tool": null
+      },
+      {
+        "method": "tools/list",
+        "tool": null
+      }
+    ],
+    "mcp_health_recovery": null
+  },
+  "ok": false
+}

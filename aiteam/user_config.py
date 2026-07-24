@@ -117,7 +117,7 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "provider": "google",
         "supported_roles": [
             "reviewer", "code_reviewer", "qa", "test_designer",
-            "file_scout", "web_scout", "context_curator",
+            "file_scout", "context_curator",
         ],
         "data_policy": "provider_free_tier",
         "privacy_note": "El free tier puede usar prompts y respuestas para mejorar productos de Google.",
@@ -137,7 +137,7 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "provider": "groq",
         "supported_roles": [
             "reviewer", "code_reviewer", "qa", "test_designer",
-            "file_scout", "web_scout", "context_curator",
+            "file_scout", "context_curator",
         ],
         "data_policy": "provider_free_tier",
         "config": {
@@ -361,8 +361,8 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
         {
             "value": "gpt-5.6-luna", "label": "GPT-5.6 Luna",
             "tier": "budget", "caps": ["coding", "reasoning", "synthesis", "long_ctx"],
-            "best_for": ["file_scout", "web_scout", "context_curator", "worker"],
-            "price_note": "$1/$6 MTok · Tier 3",
+            "best_for": ["file_scout", "context_curator", "worker"],
+            "price_note": "$1/$6 MTok · Tier 3; API sin MCP externo gobernado",
         },
     ],
     "gemini_api": [
@@ -381,8 +381,8 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
         {
             "value": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite",
             "tier": "budget", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
-            "best_for": ["file_scout", "web_scout", "context_curator"],
-            "price_note": "$0.30/$2.50 MTok · estable · Tier 3",
+            "best_for": ["file_scout", "context_curator"],
+            "price_note": "$0.30/$2.50 MTok · estable · Tier 3; API sin MCP externo gobernado",
         },
     ],
     "gemini_api_free": [
@@ -396,10 +396,10 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
         {
             "value": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite · Free tier",
             "tier": "budget", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
-            "best_for": ["file_scout", "web_scout", "context_curator"],
-            "allowed_roles": ["file_scout", "web_scout", "context_curator"],
+            "best_for": ["file_scout", "context_curator"],
+            "allowed_roles": ["file_scout", "context_curator"],
             "max_criticality": "medium",
-            "price_note": "Free tier BYOK · Tier 3 · cuota del proyecto",
+            "price_note": "Free tier BYOK · Tier 3 · cuota del proyecto · sin MCP externo",
         },
     ],
     "groq_api_free": [
@@ -413,22 +413,22 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
         {
             "value": "qwen/qwen3.6-27b", "label": "Qwen 3.6 27B · Groq Free",
             "tier": "budget", "caps": ["reasoning", "synthesis", "coding"],
-            "best_for": ["file_scout", "web_scout", "context_curator"],
-            "allowed_roles": ["file_scout", "web_scout", "context_curator"],
+            "best_for": ["file_scout", "context_curator"],
+            "allowed_roles": ["file_scout", "context_curator"],
             "max_criticality": "medium",
             "structured_output": "json_object",
             "structured_output_repair": "bounded_once_authority_preserving",
             "automatic": False,
             "requires_probe": True,
-            "price_note": "Free plan · preview · 500 tok/s publicados · Tier 3 manual y probe-gated",
+            "price_note": "Free plan · preview · 500 tok/s · Tier 3 manual; sin MCP externo",
         },
         {
             "value": "openai/gpt-oss-20b", "label": "GPT-OSS 20B · Groq Free",
             "tier": "budget", "caps": ["reasoning", "synthesis", "coding"],
-            "best_for": ["file_scout", "web_scout", "context_curator"],
-            "allowed_roles": ["file_scout", "web_scout", "context_curator"],
+            "best_for": ["file_scout", "context_curator"],
+            "allowed_roles": ["file_scout", "context_curator"],
             "max_criticality": "medium",
-            "price_note": "Free plan · 1000 RPD / 8K TPM · structured output estricto",
+            "price_note": "Free plan · 1000 RPD / 8K TPM · sin MCP externo",
         },
     ],
     "antigravity_subscription": [
@@ -490,14 +490,14 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
         {
             "value": "gemini-3.5-flash-low", "label": "Gemini 3.5 Flash (Low)",
             "tier": "budget", "caps": ["synthesis", "coding", "long_ctx"],
-            "best_for": ["file_scout", "web_scout", "context_curator", "worker"],
-            "price_note": "Suscripción Antigravity · Tier 3",
+            "best_for": ["file_scout", "context_curator", "worker"],
+            "price_note": "Suscripción Antigravity · Tier 3; sin MCP gobernado para Web Scout",
         },
         {
             "value": "gpt-oss-120b-medium", "label": "GPT-OSS 120B (Medium)",
             "tier": "budget", "caps": ["reasoning", "synthesis", "coding"],
-            "best_for": ["file_scout", "web_scout", "worker"],
-            "price_note": "Fallback incluido en el catálogo de Antigravity",
+            "best_for": ["file_scout", "worker"],
+            "price_note": "Fallback de Antigravity; sin MCP gobernado para Web Scout",
         },
     ],
     "anthropic_api": [
@@ -523,8 +523,8 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
         {
             "value": "claude-haiku-4-5", "label": "Claude Haiku 4.5",
             "tier": "budget", "caps": ["reasoning", "synthesis", "coding"],
-            "best_for": ["file_scout", "web_scout", "context_curator", "worker"],
-            "price_note": "$1/$5 MTok · Tier 3",
+            "best_for": ["file_scout", "context_curator", "worker"],
+            "price_note": "$1/$5 MTok · Tier 3; API sin MCP externo gobernado",
         },
     ],
     "claude_subscription_blocked": [
@@ -1472,10 +1472,10 @@ ROLE_CAPABILITY_PROFILES: dict[str, dict[str, Any]] = {
     },
     "web_scout": {
         "preferred_tier": "budget",
-        "capabilities_needed": ["synthesis"],
+        "capabilities_needed": ["synthesis", "external_mcp"],
         "requires_workspace": False,
         "prefers_cheaper": True,
-        "note": "Busca y resume información web para el Lead. Tier 3 — modelo barato.",
+        "note": "Busca y resume información web mediante MCP gobernado. Tier 3 — modelo barato.",
     },
     "context_curator": {
         "preferred_tier": "budget",

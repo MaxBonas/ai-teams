@@ -44,8 +44,16 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad: **cerrar el fixture Flash Low/Web Scout y mantener el drift
-de catálogo por evento**. El inventario del 2026-07-24 descubre Ling 3.0 Flash
+Siguiente unidad: **mantener el drift de catálogo por evento y abordar la
+siguiente calibración ejecutable**. Flash Low/Web Scout quedó cerrado
+negativamente en Antigravity 1.1.6: el canal carece de MCP gobernado, el rol lo
+exige ahora en la política común y no se ejecutaron seeds 2–3 ni se atribuyó el
+fallo al modelo. El watchdog de AI Teams vence antes que el timeout interno de
+`agy`, evitando hijos huérfanos y errores de limpieza que oculten la causa.
+El catálogo conserva el diagnóstico aunque el rol deje de estar nominado:
+799 celdas, 697 incompatibles, 102 compatibles, cero auto-elegibles y auditoría
+verde. Pasan 235 tests dirigidos, 1629 globales, Ruff F/E9 y diff check.
+El inventario del 2026-07-24 descubre Ling 3.0 Flash
 Free en OpenCode: ya está visible como `catalog_only`, sin roles ni selección
 automática. Codex 0.145.0 sigue siendo la última versión publicada en npm, pero
 su cache exige 0.146.0, así que el auditor lo bloquea correctamente. Antigravity

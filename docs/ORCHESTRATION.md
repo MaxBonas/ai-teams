@@ -638,16 +638,18 @@ receipts y estado previo, pero el score final permanece `None`. Una celda
 compatible no calibrada que pudiera entrar en selección automática declara
 `run_exact_canary` o `run_exact_tool_fixture`; nunca hereda calidad de otro rol.
 El auditor rechaza taxonomías o matrices incompletas, scores incompatibles y
-deuda automática sin acción exacta. El recibo vigente contiene 666 celdas
-incompatibles y 116 compatibles: 25 calibradas y 91 aún sin score.
+deuda automática sin acción exacta. La reproyección del 2026-07-24 contiene
+799 celdas: 697 incompatibles y 102 compatibles. Entre las compatibles hay 20
+calibradas y 82 sin calibración vigente; ninguna es auto-elegible.
 M.8.2 queda cerrado con una corrección adicional: `manual_only=false` es política
 del modelo, no permiso para todos los roles compatibles. Una ruta automática
-requiere además nominación exacta en `best_for`. Así, 71 celdas compatibles no
+requiere además nominación exacta en `best_for`. Así, 62 celdas compatibles no
 nominadas siguen disponibles para configuración manual, pero no generan deuda
-ni promoción automática. Hay 45 celdas nominadas; ninguna ruta operativa carece
-de evidencia. Las dos operativas no calibradas —Luna/File Scout y Flash
-Low/Worker— ya conservan agregados íntegros de tres semillas y resultado
-parcial, por lo que fijan `no_rerun_until_material_change` y no reciben quality.
+ni promoción automática. Hay 40 celdas nominadas compatibles: 20 calibradas,
+5 parciales, 13 con canario pendiente y 2 con fixture de tools pendiente según
+la disponibilidad real del canal. Luna/File Scout y Flash Low/Worker conservan
+agregados íntegros de tres semillas y resultado parcial, por lo que fijan
+`no_rerun_until_material_change` y no reciben quality.
 El auditor rechaza una política automática rol divergente o una ruta operativa
 sin recibo exacto.
 
@@ -656,6 +658,14 @@ un canario exacto de rol y un fixture exacto de tools son evidencias distintas
 y no pueden sustituirse entre sí. Los `research_score` declarados se muestran
 como generales, no normalizados y no alimentan el scorer. Cada métrica exacta
 publica `evidence_kind`, familias de casos y riesgo de Goodhart.
+
+El contrato central de `web_scout` exige `external_mcp`. Esta capacidad describe
+el transporte gobernado del canal, no una aptitud intrínseca del modelo:
+Antigravity 1.1.6 puede catalogar Flash Low, pero el executor deniega su fixture
+MCP con `mcp_adapter_not_supported`. El screening se cerró fail-fast en seed 1,
+sin ejecutar las otras dos semillas ni degradar la puntuación del modelo.
+Flash Low y GPT-OSS dejan de estar nominados para Web Scout en ese canal hasta
+que exista un loop MCP con allowlist, deny explícito y trazabilidad por run.
 
 `model_role_score_v2` añade el hard gate `case_diversity`: para automática exige
 al menos dos familias independientes, no simplemente más seeds o más checks

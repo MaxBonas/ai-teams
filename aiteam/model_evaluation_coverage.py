@@ -392,6 +392,18 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
     {
         "profile_id": "antigravity_subscription",
         "model": "gemini-3.5-flash-low",
+        "role": "web_scout",
+        "evaluated_at": "2026-07-24",
+        "provider_version": "1.1.6",
+        "reason": "governed_mcp_transport_unsupported_fail_fast",
+        "receipts": (
+            "benchmarks/results/model_calibration/"
+            "antigravity-1.1.6-flash-low-web-scout-seed-1.json",
+        ),
+    },
+    {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.5-flash-low",
         "role": "file_scout",
         "evaluated_at": "2026-07-23",
         "provider_version": "1.1.5",
@@ -1615,6 +1627,18 @@ def audit_model_evaluation_coverage(
         "models": len(rows),
         "role_pairs": sum(pair_counts.values()),
         "pair_counts": pair_counts,
+        # Diagnostics are evidence history, not automatic-selection debt.
+        # Keep them independently addressable when a role nomination is
+        # removed after a transport or compatibility hard gate changes.
+        "diagnostics": [
+            {
+                "profile_id": key[0],
+                "model": key[1],
+                "role": key[2],
+                **value,
+            }
+            for key, value in sorted(diagnostics.items())
+        ],
         "rows": rows,
         "complete": (
             pair_counts["requires_canary"] == 0

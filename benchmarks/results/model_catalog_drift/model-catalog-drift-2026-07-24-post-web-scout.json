@@ -1,0 +1,975 @@
+{
+  "schema_version": 1,
+  "benchmark": "model_catalog_drift_audit",
+  "observed_at": "2026-07-24T13:07:11.706103+02:00",
+  "policy": {
+    "owner": "AI Teams maintainer",
+    "cadence": "monthly_and_on_cli_or_provider_change",
+    "next_review_due": "2026-07-24",
+    "calibration_next_review_due": "2026-07-24",
+    "triggers": [
+      "cli_version_changed",
+      "provider_catalog_changed",
+      "model_id_added_or_removed",
+      "preview_or_free_offer_changed"
+    ],
+    "promotion_rule": "discovery_never_authorizes_defaults",
+    "calibration_rule": "fresh_exact_profile_model_role_evidence_required"
+  },
+  "catalogs": [
+    {
+      "profile_id": "antigravity_subscription",
+      "source": "agy models",
+      "cli_version": "1.1.6",
+      "status": "current",
+      "declared": [
+        "claude-opus-4-6-thinking",
+        "claude-sonnet-4-6",
+        "gemini-3.1-pro-high",
+        "gemini-3.1-pro-low",
+        "gemini-3.5-flash-high",
+        "gemini-3.5-flash-low",
+        "gemini-3.5-flash-medium",
+        "gemini-3.6-flash-high",
+        "gemini-3.6-flash-low",
+        "gemini-3.6-flash-medium",
+        "gpt-oss-120b-medium"
+      ],
+      "discovered": [
+        "claude-opus-4-6-thinking",
+        "claude-sonnet-4-6",
+        "gemini-3.1-pro-high",
+        "gemini-3.1-pro-low",
+        "gemini-3.5-flash-high",
+        "gemini-3.5-flash-low",
+        "gemini-3.5-flash-medium",
+        "gemini-3.6-flash-high",
+        "gemini-3.6-flash-low",
+        "gemini-3.6-flash-medium",
+        "gpt-oss-120b-medium"
+      ],
+      "excluded_discovered": {},
+      "missing_declared": [],
+      "unexpected_discovered": [],
+      "duplicate_discovered": [],
+      "coverage_ok": true
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "source": "opencode models opencode",
+      "cli_version": "1.18.4",
+      "status": "current",
+      "declared": [
+        "opencode/deepseek-v4-flash-free",
+        "opencode/laguna-s-2.1-free",
+        "opencode/ling-3.0-flash-free",
+        "opencode/mimo-v2.5-free",
+        "opencode/nemotron-3-ultra-free",
+        "opencode/north-mini-code-free"
+      ],
+      "discovered": [
+        "opencode/big-pickle",
+        "opencode/deepseek-v4-flash-free",
+        "opencode/laguna-s-2.1-free",
+        "opencode/ling-3.0-flash-free",
+        "opencode/mimo-v2.5-free",
+        "opencode/nemotron-3-ultra-free",
+        "opencode/north-mini-code-free"
+      ],
+      "excluded_discovered": {
+        "opencode/big-pickle": {
+          "disposition": "rejected",
+          "reason": "identidad opaca; excluido por provenance"
+        }
+      },
+      "missing_declared": [],
+      "unexpected_discovered": [],
+      "duplicate_discovered": [],
+      "coverage_ok": true
+    }
+  ],
+  "codex_catalog": {
+    "source": "codex models_cache.json",
+    "installed_version": "0.145.0",
+    "catalog_client_version": "0.146.0",
+    "status": "cli_update_required",
+    "reason": "catalog_requires_newer_cli",
+    "declared": [
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra"
+    ],
+    "discovered": [
+      "codex-auto-review",
+      "gpt-5.3-codex-spark",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.5",
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra"
+    ],
+    "missing_declared": [],
+    "duplicate_discovered": [],
+    "coverage_ok": true
+  },
+  "model_flow_matrix": {
+    "ok": true,
+    "profile_count": 12,
+    "model_count": 47,
+    "positive_cell_count": 293,
+    "negative_cell_count": 459,
+    "failures": []
+  },
+  "model_tier_matrix": {
+    "ok": true,
+    "policy_version": "capability_economy_speed_v1",
+    "models_audited": 47,
+    "failures": [],
+    "rows": [
+      {
+        "profile_id": "opencode_zen_free",
+        "model": "opencode/nemotron-3-ultra-free",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "temporary_free_gateway",
+          "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "opencode_zen_free",
+        "model": "opencode/deepseek-v4-flash-free",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "temporary_free_gateway",
+          "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "opencode_zen_free",
+        "model": "opencode/mimo-v2.5-free",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "temporary_free_gateway",
+          "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "opencode_zen_free",
+        "model": "opencode/laguna-s-2.1-free",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "temporary_free_gateway",
+          "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "opencode_zen_free",
+        "model": "opencode/ling-3.0-flash-free",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "temporary_free_gateway",
+          "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "opencode_zen_free",
+        "model": "opencode/north-mini-code-free",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "temporary_free_gateway",
+          "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "codex_subscription",
+        "model": "gpt-5.6-sol",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "tokens_runs_duration_and_rate_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "quality_first",
+        "speed_source": "openai_official_family_positioning"
+      },
+      {
+        "profile_id": "codex_subscription",
+        "model": "gpt-5.6-terra",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "tokens_runs_duration_and_rate_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "balanced",
+        "speed_source": "openai_official_family_positioning"
+      },
+      {
+        "profile_id": "codex_subscription",
+        "model": "gpt-5.6-luna",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "tokens_runs_duration_and_rate_limits",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "fast",
+        "speed_source": "openai_official_family_positioning"
+      },
+      {
+        "profile_id": "openai_api",
+        "model": "gpt-5.6-sol",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 500,
+          "output_cents_per_mtok": 3000,
+          "quota_unlimited": false
+        },
+        "speed_class": "quality_first",
+        "speed_source": "openai_official_family_positioning"
+      },
+      {
+        "profile_id": "openai_api",
+        "model": "gpt-5.6-terra",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 250,
+          "output_cents_per_mtok": 1500,
+          "quota_unlimited": false
+        },
+        "speed_class": "balanced",
+        "speed_source": "openai_official_family_positioning"
+      },
+      {
+        "profile_id": "openai_api",
+        "model": "gpt-5.6-luna",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 100,
+          "output_cents_per_mtok": 600,
+          "quota_unlimited": false
+        },
+        "speed_class": "fast",
+        "speed_source": "openai_official_family_positioning"
+      },
+      {
+        "profile_id": "gemini_api",
+        "model": "gemini-3.1-pro-preview",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 200,
+          "output_cents_per_mtok": 1200,
+          "quota_unlimited": false
+        },
+        "speed_class": "quality_first",
+        "speed_source": "google_official_positioning"
+      },
+      {
+        "profile_id": "gemini_api",
+        "model": "gemini-3.6-flash",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 150,
+          "output_cents_per_mtok": 750,
+          "quota_unlimited": false
+        },
+        "speed_class": "balanced_fast",
+        "speed_source": "google_official_positioning"
+      },
+      {
+        "profile_id": "gemini_api",
+        "model": "gemini-3.5-flash-lite",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 30,
+          "output_cents_per_mtok": 250,
+          "quota_unlimited": false
+        },
+        "speed_class": "fastest",
+        "speed_source": "google_official_positioning"
+      },
+      {
+        "profile_id": "gemini_api_free",
+        "model": "gemini-3.6-flash",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "quota_limited_free_api",
+          "measurement_basis": "provider_usage_and_rate_limit_headers",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "balanced_fast",
+        "speed_source": "google_official_positioning"
+      },
+      {
+        "profile_id": "gemini_api_free",
+        "model": "gemini-3.5-flash-lite",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "quota_limited_free_api",
+          "measurement_basis": "provider_usage_and_rate_limit_headers",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "fastest",
+        "speed_source": "google_official_positioning"
+      },
+      {
+        "profile_id": "groq_api_free",
+        "model": "openai/gpt-oss-120b",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "quota_limited_free_api",
+          "measurement_basis": "provider_usage_and_rate_limit_headers",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "very_fast",
+        "speed_source": "groq_official_tokens_per_second"
+      },
+      {
+        "profile_id": "groq_api_free",
+        "model": "qwen/qwen3.6-27b",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "quota_limited_free_api",
+          "measurement_basis": "provider_usage_and_rate_limit_headers",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "very_fast",
+        "speed_source": "groq_official_tokens_per_second"
+      },
+      {
+        "profile_id": "groq_api_free",
+        "model": "openai/gpt-oss-20b",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "quota_limited_free_api",
+          "measurement_basis": "provider_usage_and_rate_limit_headers",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "very_fast",
+        "speed_source": "groq_official_tokens_per_second"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.6-flash-high",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.6-flash-medium",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "fast",
+        "speed_source": "aiteam_durable_review_v4"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.6-flash-low",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.1-pro-high",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.1-pro-low",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.5-flash-high",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "moderate",
+        "speed_source": "aiteam_durable_review_v4"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "claude-opus-4-6-thinking",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "claude-sonnet-4-6",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.5-flash-medium",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gemini-3.5-flash-low",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "gpt-oss-120b-medium",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "anthropic_api",
+        "model": "claude-opus-4-8",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 500,
+          "output_cents_per_mtok": 2500,
+          "quota_unlimited": false
+        },
+        "speed_class": "moderate",
+        "speed_source": "anthropic_official_comparison"
+      },
+      {
+        "profile_id": "anthropic_api",
+        "model": "claude-fable-5",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 1000,
+          "output_cents_per_mtok": 5000,
+          "quota_unlimited": false
+        },
+        "speed_class": "slow",
+        "speed_source": "anthropic_official_comparison"
+      },
+      {
+        "profile_id": "anthropic_api",
+        "model": "claude-sonnet-5",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 300,
+          "output_cents_per_mtok": 1500,
+          "quota_unlimited": false
+        },
+        "speed_class": "fast",
+        "speed_source": "anthropic_official_comparison"
+      },
+      {
+        "profile_id": "anthropic_api",
+        "model": "claude-haiku-4-5",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "metered_api",
+          "measurement_basis": "official_price_per_token",
+          "input_cents_per_mtok": 100,
+          "output_cents_per_mtok": 500,
+          "quota_unlimited": false
+        },
+        "speed_class": "fastest",
+        "speed_source": "anthropic_official_comparison"
+      },
+      {
+        "profile_id": "claude_subscription_blocked",
+        "model": "claude-opus-4-8",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "moderate",
+        "speed_source": "anthropic_official_comparison"
+      },
+      {
+        "profile_id": "claude_subscription_blocked",
+        "model": "claude-fable-5",
+        "tier": "premium",
+        "capability_band": "premium",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "slow",
+        "speed_source": "anthropic_official_comparison"
+      },
+      {
+        "profile_id": "claude_subscription_blocked",
+        "model": "claude-sonnet-5",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "fast",
+        "speed_source": "anthropic_official_comparison"
+      },
+      {
+        "profile_id": "claude_subscription_blocked",
+        "model": "claude-haiku-4-5",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "flat_subscription_quota_limited",
+          "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": false
+        },
+        "speed_class": "fastest",
+        "speed_source": "anthropic_official_comparison"
+      },
+      {
+        "profile_id": "local_qwen_ollama",
+        "model": "qwen3-coder:30b",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "zero_external_cost_local_compute",
+          "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": true,
+          "external_token_consumption": 0,
+          "external_quota_pressure": 0,
+          "host_resource_cost_separate": true
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "local_qwen_ollama",
+        "model": "qwen2.5-coder:14b",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "zero_external_cost_local_compute",
+          "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": true,
+          "external_token_consumption": 0,
+          "external_quota_pressure": 0,
+          "host_resource_cost_separate": true
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "local_qwen_ollama",
+        "model": "qwen2.5-coder:32b",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "zero_external_cost_local_compute",
+          "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": true,
+          "external_token_consumption": 0,
+          "external_quota_pressure": 0,
+          "host_resource_cost_separate": true
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "local_gem4_lmstudio",
+        "model": "gemma-3-4b-it",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "zero_external_cost_local_compute",
+          "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": true,
+          "external_token_consumption": 0,
+          "external_quota_pressure": 0,
+          "host_resource_cost_separate": true
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "local_gem4_lmstudio",
+        "model": "gemma-3-12b-it",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "zero_external_cost_local_compute",
+          "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": true,
+          "external_token_consumption": 0,
+          "external_quota_pressure": 0,
+          "host_resource_cost_separate": true
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "local_gem4_lmstudio",
+        "model": "google/gemma-4-26b-a4b",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "zero_external_cost_local_compute",
+          "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": true,
+          "external_token_consumption": 0,
+          "external_quota_pressure": 0,
+          "host_resource_cost_separate": true
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "local_gemma4_ollama",
+        "model": "gemma4:e4b",
+        "tier": "budget",
+        "capability_band": "budget",
+        "economy": {
+          "cost_class": "zero_external_cost_local_compute",
+          "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": true,
+          "external_token_consumption": 0,
+          "external_quota_pressure": 0,
+          "host_resource_cost_separate": true
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      },
+      {
+        "profile_id": "local_gemma4_ollama",
+        "model": "gemma4:26b",
+        "tier": "standard",
+        "capability_band": "standard",
+        "economy": {
+          "cost_class": "zero_external_cost_local_compute",
+          "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+          "input_cents_per_mtok": 0,
+          "output_cents_per_mtok": 0,
+          "quota_unlimited": true,
+          "external_token_consumption": 0,
+          "external_quota_pressure": 0,
+          "host_resource_cost_separate": true
+        },
+        "speed_class": "unknown",
+        "speed_source": "requires_channel_specific_measurement"
+      }
+    ]
+  },
+  "model_calibration_freshness": {
+    "schema_version": 1,
+    "observed_at": "2026-07-24",
+    "max_age_days": 30,
+    "registry_valid": true,
+    "all_fresh": false,
+    "registered_promotions_fresh": false,
+    "unregistered_promotions_allowed": false,
+    "existing_defaults_changed": false,
+    "entries": [
+      {
+        "profile_id": "codex_subscription",
+        "model": "gpt-5.6-luna",
+        "role": "context_curator",
+        "calibrated_at": "2026-07-22",
+        "age_days": 2,
+        "max_age_days": 30,
+        "provider_version": "0.145.0",
+        "observed_provider_version": "0.145.0",
+        "evidence_receipts": [
+          "benchmarks/results/model_calibration/context-curator-gpt-tier3-cli-0.145.0-aggregate-v3.json",
+          "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+          "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+          "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json",
+          "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+          "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+          "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json"
+        ],
+        "missing_evidence_receipts": [],
+        "evidence_validation_errors": [],
+        "status": "fresh",
+        "stale_reasons": [],
+        "new_promotion_allowed": true,
+        "existing_default_action": "unchanged"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "claude-sonnet-4-6",
+        "role": "engineer",
+        "calibrated_at": "2026-07-21",
+        "age_days": 3,
+        "max_age_days": 30,
+        "provider_version": "1.1.5",
+        "observed_provider_version": "1.1.6",
+        "evidence_receipts": [
+          "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-aggregate-v3.json"
+        ],
+        "missing_evidence_receipts": [],
+        "evidence_validation_errors": [],
+        "status": "stale",
+        "stale_reasons": [
+          "provider_version_changed"
+        ],
+        "new_promotion_allowed": false,
+        "existing_default_action": "unchanged"
+      },
+      {
+        "profile_id": "antigravity_subscription",
+        "model": "claude-sonnet-4-6",
+        "role": "software_engineer",
+        "calibrated_at": "2026-07-21",
+        "age_days": 3,
+        "max_age_days": 30,
+        "provider_version": "1.1.5",
+        "observed_provider_version": "1.1.6",
+        "evidence_receipts": [
+          "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-aggregate-v3.json"
+        ],
+        "missing_evidence_receipts": [],
+        "evidence_validation_errors": [],
+        "status": "stale",
+        "stale_reasons": [
+          "provider_version_changed"
+        ],
+        "new_promotion_allowed": false,
+        "existing_default_action": "unchanged"
+      }
+    ],
+    "registry_errors": []
+  },
+  "gates": {
+    "authenticated_inventories_complete": false,
+    "declared_catalog_coverage": false,
+    "hermetic_model_flow_matrix": true,
+    "model_tier_matrix_complete": true,
+    "promoted_model_calibration_registry": true,
+    "promoted_model_calibrations_fresh": false
+  },
+  "attention_required": [
+    {
+      "profile_id": "codex_subscription",
+      "reason": "catalog_requires_newer_cli"
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "claude-sonnet-4-6",
+      "role": "engineer",
+      "reason": "model_calibration_stale",
+      "stale_reasons": [
+        "provider_version_changed"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "claude-sonnet-4-6",
+      "role": "software_engineer",
+      "reason": "model_calibration_stale",
+      "stale_reasons": [
+        "provider_version_changed"
+      ]
+    }
+  ],
+  "promotion_allowed": false,
+  "ok": false
+}

@@ -13,7 +13,11 @@ from aiteam.project_adapters import (
     choose_adapter_for_new_slot,
     ensure_quorum_agents, ensure_tier3_agents, reconcile_project_agent_policy,
 )
-from aiteam.user_config import record_model_health
+from aiteam.user_config import (
+    DEFAULT_ADAPTER_PROFILES,
+    MODEL_OPTIONS_BY_PROFILE,
+    record_model_health,
+)
 
 
 def _init_db(db_path: Path) -> None:
@@ -335,6 +339,36 @@ class TestProfileScore:
         result = choose_adapter_for_role(role, None, [profile])
         assert result is not None
         assert result["model"] == expected
+
+    @pytest.mark.parametrize(
+        "profile_id",
+        [
+            "antigravity_subscription",
+            "openai_api",
+            "gemini_api",
+            "gemini_api_free",
+            "groq_api_free",
+            "anthropic_api",
+        ],
+    )
+    def test_web_scout_rejects_builtin_profiles_without_governed_mcp(
+        self, profile_id
+    ):
+        profile = next(
+            item for item in DEFAULT_ADAPTER_PROFILES
+            if item["id"] == profile_id
+        )
+        hydrated = {
+            **profile,
+            "model_options": [
+                {**option, "available": True}
+                for option in MODEL_OPTIONS_BY_PROFILE[profile_id]
+            ],
+        }
+
+        assert choose_adapter_for_role(
+            "web_scout", "cheap", [hydrated], data_class="public"
+        ) is None
 
     def test_local_profile_keeps_owner_configured_installed_model(self):
         profile = {

@@ -266,7 +266,11 @@ class ClaudeSubscriptionCliRuntime:
                 # profile or an unrestricted terminal.
                 "--dangerously-skip-permissions",
             ])
-            command.extend(["--print-timeout", f"{self.timeout_sec}s"])
+            # The AI Teams watchdog must expire first so ``run_command`` can
+            # reap the complete Windows process tree before the ephemeral
+            # project directory is removed.  If agy expires first, it can
+            # orphan a child whose cwd keeps that directory locked.
+            command.extend(["--print-timeout", f"{self.timeout_sec + 5}s"])
             if self.model:
                 command.extend(["--model", self.model])
             return command

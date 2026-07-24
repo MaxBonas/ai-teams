@@ -6,8 +6,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import statistics
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -49,6 +51,35 @@ def bootstrap_profile_ids(profile_id: str) -> list[str]:
     if profile_id.startswith("local_"):
         return [profile_id, "codex_subscription"]
     return [profile_id]
+
+
+def cli_version_for_profile(profile_id: str) -> str:
+    command = (
+        "agy"
+        if profile_id == "antigravity_subscription"
+        else "codex"
+        if profile_id == "codex_subscription"
+        else "ollama"
+        if profile_id.startswith("local_")
+        else ""
+    )
+    executable = shutil.which(command) if command else None
+    if not executable:
+        return ""
+    completed = subprocess.run(
+        [executable, "--version"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    match = re.search(
+        r"\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b",
+        f"{completed.stdout}\n{completed.stderr}",
+    )
+    return match.group(1) if completed.returncode == 0 and match else ""
 
 
 CASES: dict[str, dict[str, Any]] = {
@@ -291,7 +322,13 @@ def resolve_case(role: str, case_family: str | None = None) -> tuple[str, dict[s
 
 def _portable_value(value: Any) -> Any:
     if isinstance(value, str):
-        return value.replace(str(REPO_ROOT), ".").replace(str(Path.home()), "<home>")
+        for source, replacement in (
+            (str(REPO_ROOT), "."),
+            (str(Path.home()), "<home>"),
+        ):
+            value = value.replace(source, replacement)
+            value = value.replace(source.replace("\\", "\\\\"), replacement)
+        return value
     if isinstance(value, dict):
         return {key: _portable_value(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -557,6 +594,7 @@ def run_canary(
         "benchmark": "tier3_role_canary",
         "profile_id": profile_id,
         "model": model,
+        "provider_version": cli_version_for_profile(profile_id),
         "reasoning_effort": (
             reasoning_effort if profile_id == "codex_subscription" else None
         ),
@@ -601,6 +639,7 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
             report.get("role"),
             report.get("reasoning_effort"),
             report.get("contract_version"),
+            report.get("provider_version"),
             report.get(
                 "case_family",
                 LEGACY_FAMILY_BY_ROLE.get(str(report.get("role") or ""), ""),
@@ -609,7 +648,13 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         for report in reports
     }
     exact_seeds = {report.get("seed") for report in reports} == {1, 2, 3}
-    comparable = bool(reports) and len(identities) == 1
+    provider_versions = {
+        str(report.get("provider_version") or "") for report in reports
+    }
+    same_provider_version = (
+        len(provider_versions) == 1 and "" not in provider_versions
+    )
+    comparable = bool(reports) and len(identities) == 1 and same_provider_version
     input_tokens = sum(int(report.get("runtime", {}).get("input_tokens") or 0) for report in reports)
     output_tokens = sum(int(report.get("runtime", {}).get("output_tokens") or 0) for report in reports)
     manifest = sorted(
@@ -657,6 +702,7 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "benchmark": "codex_tier_role_canary_aggregate",
         "profile_id": reports[0].get("profile_id") if reports else None,
         "model": reports[0].get("model") if reports else None,
+        "provider_version": next(iter(provider_versions), None),
         "role": role,
         "reasoning_effort": reports[0].get("reasoning_effort") if reports else None,
         "contract_version": reports[0].get("contract_version") if reports else None,
@@ -675,7 +721,11 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "samples_single_attempt": single_attempt,
         "source_receipts": source_receipts,
         "sample_manifest": manifest,
-        "integrity": {"sources_bound": sources_bound, "artifacts_hashed": True},
+        "integrity": {
+            "sources_bound": sources_bound,
+            "artifacts_hashed": True,
+            "same_provider_version": same_provider_version,
+        },
         "checks_passed": checks_passed,
         "checks_total": checks_total,
         "wall_seconds_median": round(statistics.median(seconds), 3) if seconds else None,
@@ -730,6 +780,12 @@ def aggregate_diverse_family_reports(
         for report in aggregates
     }
     expected_identity = {(profile_id, model, role, reasoning_effort)}
+    provider_versions = {
+        str(report.get("provider_version") or "") for report in aggregates
+    }
+    same_provider_version = (
+        len(provider_versions) == 1 and "" not in provider_versions
+    )
     sources = [str(report.get("_source_receipt") or "") for report in aggregates]
     hashes = [
         hashlib.sha256(
@@ -767,6 +823,7 @@ def aggregate_diverse_family_reports(
         len(aggregates) == 2
         and len(families) == 2
         and identities == expected_identity
+        and same_provider_version
         and len(sources) == 2
         and all(sources)
         and len(set(sources)) == 2
@@ -784,6 +841,7 @@ def aggregate_diverse_family_reports(
         "benchmark": "tier3_behavioral_diversity_aggregate",
         "profile_id": profile_id,
         "model": model,
+        "provider_version": next(iter(provider_versions), None),
         "role": role,
         "reasoning_effort": reasoning_effort,
         "contract_version": TIER3_DIVERSITY_CONTRACT,
@@ -798,6 +856,7 @@ def aggregate_diverse_family_reports(
         "source_sha256": hashes,
         "integrity": {
             "same_exact_pair": identities == expected_identity,
+            "same_provider_version": same_provider_version,
             "two_distinct_families": len(families) == 2,
             "sources_bound": len(sources) == 2 and all(sources),
             "sources_hashed": len(hashes) == 2,

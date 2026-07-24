@@ -1104,6 +1104,27 @@ def _evaluation_lookup(
             role = canonical_role(str(role_row.get("role") or ""))
             if profile_id and model and role:
                 result[(profile_id, model, role)] = dict(role_row)
+    for diagnostic in report.get("diagnostics") or ():
+        profile_id = str(diagnostic.get("profile_id") or "")
+        model = str(diagnostic.get("model") or "")
+        role = canonical_role(str(diagnostic.get("role") or ""))
+        if not profile_id or not model or not role:
+            continue
+        row = result.setdefault(
+            (profile_id, model, role),
+            {"role": role, "status": None, "evidence_receipts": []},
+        )
+        row.setdefault("diagnostic_reason", diagnostic.get("reason"))
+        row.setdefault(
+            "diagnostic_receipts",
+            list(diagnostic.get("receipts") or ()),
+        )
+        row.setdefault(
+            "diagnostic_validation_errors",
+            list(diagnostic.get("validation_errors") or ()),
+        )
+        row.setdefault("evaluated_at", diagnostic.get("evaluated_at"))
+        row.setdefault("provider_version", diagnostic.get("provider_version"))
     return result
 
 
@@ -1126,7 +1147,11 @@ def _project_evaluation_cell(
             "next_action": None,
             "prior_evaluation_status": prior.get("status"),
             "evidence_receipts": list(prior.get("evidence_receipts") or ()),
+            "diagnostic_reason": prior.get("diagnostic_reason"),
             "diagnostic_receipts": list(prior.get("diagnostic_receipts") or ()),
+            "diagnostic_validation_errors": list(
+                prior.get("diagnostic_validation_errors") or ()
+            ),
             "evaluated_at": prior.get("evaluated_at"),
             "provider_version": prior.get("provider_version"),
         }

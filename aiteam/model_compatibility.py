@@ -72,6 +72,12 @@ def compatibility_decision(
     data_key = str(data_class or "").strip().lower()
     required = {str(item).strip().lower() for item in required_capabilities if str(item).strip()}
     role_meta = role_profile if isinstance(role_profile, dict) else {}
+    role_caps = {
+        str(item).strip().lower()
+        for item in role_meta.get("capabilities_needed") or []
+        if str(item).strip()
+    }
+    effective_required = required | role_caps
     profile_id = str(profile.get("id") or "")
     model_id = str(selected.get("value") or selected.get("model") or "")
 
@@ -80,8 +86,10 @@ def compatibility_decision(
         "mcp_transport": _mcp_transport(profile),
         "structured_output": _structured_output(profile, selected),
     }
-    required_workspace = _required_workspace_mode(role_key, run_key, required)
-    required_structured = _required_structured_output(required)
+    required_workspace = _required_workspace_mode(
+        role_key, run_key, effective_required
+    )
+    required_structured = _required_structured_output(effective_required)
     allowed_roles = _normalized_values(selected.get("allowed_roles"))
     denied_roles = _normalized_values(selected.get("denied_roles"))
     profile_roles = _normalized_values(profile.get("supported_roles"))
@@ -133,10 +141,9 @@ def compatibility_decision(
 
     if code == "compatible":
         model_caps = {str(item).lower() for item in selected.get("caps") or profile.get("capabilities") or []}
-        role_caps = {
-            str(item).lower() for item in role_meta.get("capabilities_needed") or []
-        }
-        required_model_caps = (required & MODEL_CAPABILITIES) | role_caps
+        # Transport/tool requirements belong to the effective role contract,
+        # but are not intrinsic model capabilities.
+        required_model_caps = effective_required & MODEL_CAPABILITIES
         missing = sorted(required_model_caps - model_caps)
         if missing:
             code = "model_capability_missing"
@@ -147,7 +154,9 @@ def compatibility_decision(
     elif code == "compatible" and required_workspace == "write" and effective["workspace_mode"] != "write":
         code = "workspace_write_required"
 
-    if code == "compatible" and (role_key == "mcp_operator" or "external_mcp" in required):
+    if code == "compatible" and (
+        role_key == "mcp_operator" or "external_mcp" in effective_required
+    ):
         if effective["mcp_transport"] != "governed":
             code = "external_mcp_unsupported"
 

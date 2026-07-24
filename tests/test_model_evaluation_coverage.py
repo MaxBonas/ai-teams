@@ -16,12 +16,23 @@ def test_coverage_inventory_is_conservative_and_tracks_exact_promotions() -> Non
     )
 
     assert report["models"] == 47
-    assert report["role_pairs"] == 132
+    # Web Scout is nominated only on transports that expose governed MCP.
+    assert report["role_pairs"] == 124
     assert report["complete"] is False
     assert report["pair_counts"]["calibrated"] == 25
     assert report["pair_counts"]["partial"] == 5
     assert report["pair_counts"]["requires_canary"] > 0
     assert report["pair_counts"]["requires_tool_fixture"] > 0
+    flash_web_diagnostic = next(
+        row for row in report["diagnostics"]
+        if row["profile_id"] == "antigravity_subscription"
+        and row["model"] == "gemini-3.5-flash-low"
+        and row["role"] == "web_scout"
+    )
+    assert flash_web_diagnostic["reason"] == (
+        "governed_mcp_transport_unsupported_fail_fast"
+    )
+    assert flash_web_diagnostic["validation_errors"] == []
     luna = next(
         row
         for row in report["rows"]

@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from scripts.benchmark_codex_luna_tier3_roles import (
+    _portable_value,
     adapter_config,
     aggregate_diverse_family_reports,
     aggregate_reports,
@@ -6,6 +9,17 @@ from scripts.benchmark_codex_luna_tier3_roles import (
     evaluate_role_artifact,
     reevaluate_report,
 )
+
+
+def test_portable_value_redacts_normal_and_escaped_windows_home() -> None:
+    home = str(Path.home())
+    value = f"{home}\\fixture {home.replace(chr(92), chr(92) * 2)}\\\\fixture"
+
+    redacted = _portable_value(value)
+
+    assert home not in redacted
+    assert home.replace("\\", "\\\\") not in redacted
+    assert redacted.count("<home>") == 2
 
 
 def test_antigravity_adapter_config_does_not_invent_reasoning_effort() -> None:
@@ -167,6 +181,7 @@ def test_aggregate_requires_three_passing_same_role_samples() -> None:
         {
             "profile_id": "codex_subscription",
             "model": "gpt-5.6-terra",
+            "provider_version": "0.145.0",
             "role": "mcp_operator",
             "reasoning_effort": "medium",
             "contract_version": "tier3_causal_report_v2",
@@ -197,6 +212,7 @@ def test_antigravity_aggregate_keeps_missing_usage_unknown() -> None:
         {
             "profile_id": "antigravity_subscription",
             "model": "gemini-3.5-flash-low",
+            "provider_version": "1.1.6",
             "role": "worker",
             "reasoning_effort": None,
             "contract_version": "tier3_causal_report_v2",
@@ -226,6 +242,7 @@ def test_aggregate_rejects_duplicate_seed_or_unbound_sources() -> None:
         {
             "profile_id": "codex_subscription",
             "model": "gpt-5.6-luna",
+            "provider_version": "0.145.0",
             "role": "worker",
             "reasoning_effort": "low",
             "contract_version": "tier3_causal_report_v2",
@@ -256,6 +273,7 @@ def test_diversity_aggregate_requires_two_exact_tier3_families() -> None:
         {
             "profile_id": "codex_subscription",
             "model": "gpt-5.6-luna",
+            "provider_version": "0.145.0",
             "role": "worker",
             "reasoning_effort": "low",
             "case_family": family,
@@ -288,6 +306,36 @@ def test_diversity_aggregate_requires_two_exact_tier3_families() -> None:
         )["conclusion"]["case_diversity_passed"]
         is False
     )
+
+
+def test_aggregate_rejects_mixed_or_missing_provider_versions() -> None:
+    reports = [
+        {
+            "profile_id": "antigravity_subscription",
+            "model": "gemini-3.5-flash-low",
+            "provider_version": "1.1.6",
+            "role": "web_scout",
+            "reasoning_effort": None,
+            "contract_version": "tier3_causal_report_v2",
+            "seed": seed,
+            "ok": True,
+            "wall_seconds": 10,
+            "checks": {},
+            "runtime": {},
+            "artifact": f"artifact-{seed}",
+            "_source_receipt": f"seed-{seed}.json",
+        }
+        for seed in (1, 2, 3)
+    ]
+
+    reports[-1]["provider_version"] = "1.1.5"
+    mixed = aggregate_reports(reports)
+    assert mixed["integrity"]["same_provider_version"] is False
+    assert mixed["conclusion"]["exact_pair_calibrated"] is False
+    reports[-1]["provider_version"] = ""
+    missing = aggregate_reports(reports)
+    assert missing["integrity"]["same_provider_version"] is False
+    assert missing["conclusion"]["exact_pair_calibrated"] is False
 
 
 def test_reevaluation_accepts_english_health_recovery_without_provider_rerun() -> None:
