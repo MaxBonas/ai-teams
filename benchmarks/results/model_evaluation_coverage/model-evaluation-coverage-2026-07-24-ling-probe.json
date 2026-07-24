@@ -1,0 +1,3811 @@
+{
+  "schema_version": 1,
+  "benchmark": "model_role_evaluation_coverage",
+  "observed_at": "2026-07-24T16:18:20.721309+02:00",
+  "policy": {
+    "scope": "automatic_best_for_pairs",
+    "manual_candidates": "evaluate_before_promotion",
+    "negative_diagnostics": "defer_only_while_explicit_policy_receipt_age_and_version_match",
+    "material_change_detection": {
+      "automatic": [
+        "provider_or_cli_version_changed",
+        "diagnostic_age_exceeded",
+        "diagnostic_receipt_invalid"
+      ],
+      "registry_revision_required": [
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed_without_version_change"
+      ]
+    },
+    "removal_rule": "age_alone_never_retires_a_model"
+  },
+  "models": 47,
+  "role_pairs": 124,
+  "pair_counts": {
+    "calibrated": 8,
+    "partial": 17,
+    "deferred_until_material_change": 17,
+    "requires_canary": 0,
+    "requires_tool_fixture": 0,
+    "manual_candidate": 3,
+    "blocked": 79
+  },
+  "diagnostics": [
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "claude-sonnet-4-6",
+      "role": "engineer",
+      "evaluated_at": "2026-07-24",
+      "provider_version": "1.1.6",
+      "reason": "provider_1_1_6_revalidation_hidden_3_of_3_but_ruff_7_fail_fast",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/m83-config-redactor-sonnet-seed-1.json",
+        "benchmarks/results/model_calibration/antigravity-1.1.6-config-redactor-sonnet-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-high",
+      "role": "qa",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.1.5",
+      "reason": "second_qa_family_attack_passed_verify_subscription_cli_timeout",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/m83-webhook-flash-high-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [
+        "provider_version_changed_or_unobserved"
+      ],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-high",
+      "role": "test_designer",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.1.5",
+      "reason": "second_test_designer_family_seed1_passed_seed2_cli_timeout",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/m83-job-state-flash-high-seed-1.json",
+        "benchmarks/results/model_calibration/m83-job-state-flash-high-seed-2.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [
+        "provider_version_changed_or_unobserved"
+      ],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-low",
+      "role": "file_scout",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.1.5",
+      "reason": "second_file_scout_family_submit_work_json_parse_error",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/m83-idempotency-flash-low-file-scout-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [
+        "provider_version_changed_or_unobserved"
+      ],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-low",
+      "role": "web_scout",
+      "evaluated_at": "2026-07-24",
+      "provider_version": "1.1.6",
+      "reason": "governed_mcp_transport_unsupported_fail_fast",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/antigravity-1.1.6-flash-low-web-scout-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gpt-oss-120b-medium",
+      "role": "file_scout",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.1.5",
+      "reason": "exact_durable_contract_submit_work_parse_failure",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/antigravity-gpt-oss-file-scout-v2-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [
+        "provider_version_changed_or_unobserved"
+      ],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gpt-oss-120b-medium",
+      "role": "web_scout",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.1.5",
+      "reason": "exact_durable_contract_submit_work_parse_failure",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/antigravity-gpt-oss-web-scout-v2-seed-1-retry.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [
+        "provider_version_changed_or_unobserved"
+      ],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gpt-oss-120b-medium",
+      "role": "worker",
+      "evaluated_at": "2026-07-24",
+      "provider_version": "1.1.6",
+      "reason": "provider_1_1_6_exact_durable_contract_submit_work_parse_failure",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/antigravity-1.1.6-gpt-oss-worker-v2-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:26b",
+      "role": "reviewer",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "0.32.1",
+      "reason": "exact_durable_review_reject_failed",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/local-gemma26b-reviewer-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:26b",
+      "role": "test_designer",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "0.32.1",
+      "reason": "baseline_suite_failed_despite_mutant_detection",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/local-gemma26b-test-designer-v2-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:e4b",
+      "role": "context_curator",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "0.32.1",
+      "reason": "exact_contract_zero_of_nine_anchors",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/local-gemma-e4b-context-auth-v1-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:e4b",
+      "role": "file_scout",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "0.32.1",
+      "reason": "exact_contract_missing_report_and_failed_retry",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/local-gemma-e4b-file-scout-v2-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:e4b",
+      "role": "worker",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "0.32.1",
+      "reason": "exact_contract_generic_unrelated_artifact",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/local-gemma-e4b-worker-v2-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen2.5-coder:14b",
+      "role": "context_curator",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "0.32.1",
+      "reason": "exact_contract_zero_of_nine_anchors",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/local-qwen14b-context-auth-v1-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen2.5-coder:14b",
+      "role": "file_scout",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "0.32.1",
+      "reason": "exact_contract_incorrect_checkout_claim_and_missing_report",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/local-qwen14b-file-scout-v2-seed-1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/deepseek-v4-flash-free",
+      "role": "reviewer",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/mimo-v2.5-free",
+      "role": "reviewer",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/mimo-v2.5-free",
+      "role": "web_scout",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "role": "architect",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "role": "lead",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "role": "quorum_auditor",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "role": "team_lead",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/north-mini-code-free",
+      "role": "context_curator",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/north-mini-code-free",
+      "role": "file_scout",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/north-mini-code-free",
+      "role": "web_scout",
+      "evaluated_at": "2026-07-23",
+      "provider_version": "1.18.4",
+      "reason": "structured_output_transport_unchanged_closed_without_inference",
+      "rerun_policy": "material_change_only",
+      "receipts": [
+        "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+      ],
+      "validation_errors": [],
+      "stale_reasons": [],
+      "material_change_triggers": [
+        "provider_or_cli_version_changed",
+        "model_or_catalog_identity_changed",
+        "prompt_or_role_contract_changed",
+        "transport_or_tooling_changed",
+        "diagnostic_age_exceeded"
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "deferred_until_material_change",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "lead",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "team_lead",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/deepseek-v4-flash-free",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "reviewer",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/opencode-durable-review-v1-laguna-vs-deepseek-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.18.4",
+          "prompt_version": "v1",
+          "evaluation_reason": "durable_review_behavioral_1_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ]
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/mimo-v2.5-free",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "deferred_until_material_change",
+      "roles": [
+        {
+          "role": "reviewer",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "web_scout",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/laguna-s-2.1-free",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/ling-3.0-flash-free",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/north-mini-code-free",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "temporary_free_gateway",
+        "measurement_basis": "provider_usage_when_available_and_runtime_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "deferred_until_material_change",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "file_scout",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "web_scout",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.18.4",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "structured_output_transport_unchanged_closed_without_inference",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/opencode-1.18.4-negative-closure-v1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        }
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-sol",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "tokens_runs_duration_and_rate_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "quality_first",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-lead-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v2",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-codex-sol-lead-executor-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-v2-codex-sol-quorum-auditor-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v2",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-codex-sol-team-lead-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-terra",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "tokens_runs_duration_and_rate_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "balanced",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": true,
+      "model_status": "calibrated",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/m83-coding-diversity-terra-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "coding_two_family_hidden_suite_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "mcp_operator",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/m83-mcp-operator-diversity-terra-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "mcp_operator_two_family_governance_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "qa",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/m83-qa-diversity-terra-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "adversarial_qa_two_family_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/codex-terra-durable-review-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "durable_review_behavioral_3_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/m83-test-designer-diversity-terra-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "independent_test_designer_two_family_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-luna",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "tokens_runs_duration_and_rate_limits",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/context-curator-gpt-tier3-cli-0.145.0-aggregate-v3.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+            "benchmarks/results/model_calibration/context-curator-auth-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-1.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-2.json",
+            "benchmarks/results/model_calibration/context-curator-queue-gpt-5.6-luna-cli-0.145.0-medium-v3-seed-3.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-22",
+          "provider_version": "0.145.0",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/codex-luna-file-scout-low-v2-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "tier3_causal_quality_3_of_3_single_attempt_1_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "web_scout",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/m83-tier3-diversity-luna-web-scout-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "tier3_web_scout_two_family_causal_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "worker",
+          "status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/m83-tier3-diversity-luna-worker-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.145.0",
+          "prompt_version": "v1",
+          "evaluation_reason": "tier3_worker_two_family_causal_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-sol",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 500,
+        "output_cents_per_mtok": 3000,
+        "quota_unlimited": false
+      },
+      "speed_class": "quality_first",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-terra",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 250,
+        "output_cents_per_mtok": 1500,
+        "quota_unlimited": false
+      },
+      "speed_class": "balanced",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-luna",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 100,
+        "output_cents_per_mtok": 600,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "openai_official_family_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "worker",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.1-pro-preview",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 200,
+        "output_cents_per_mtok": 1200,
+        "quota_unlimited": false
+      },
+      "speed_class": "quality_first",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.6-flash",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 150,
+        "output_cents_per_mtok": 750,
+        "quota_unlimited": false
+      },
+      "speed_class": "balanced_fast",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.5-flash-lite",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 30,
+        "output_cents_per_mtok": 250,
+        "quota_unlimited": false
+      },
+      "speed_class": "fastest",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api_free",
+      "model": "gemini-3.6-flash",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "balanced_fast",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "gemini_api_free",
+      "model": "gemini-3.5-flash-lite",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fastest",
+      "speed_source": "google_official_positioning",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "openai/gpt-oss-120b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "very_fast",
+      "speed_source": "groq_official_tokens_per_second",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "qwen/qwen3.6-27b",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "very_fast",
+      "speed_source": "groq_official_tokens_per_second",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "openai/gpt-oss-20b",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "quota_limited_free_api",
+        "measurement_basis": "provider_usage_and_rate_limit_headers",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "very_fast",
+      "speed_source": "groq_official_tokens_per_second",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.6-flash-high",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.6-flash-medium",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "aiteam_durable_review_v4",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.6-flash-low",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": null,
+          "status": "blocked",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.1-pro-high",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-gemini-3.1-pro-high-architect-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v2",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-executor-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v2",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-quorum-auditor-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v2",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "team_lead",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-gemini-3.1-pro-high-team-lead-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "critical_role_hidden_causal_contract_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.1-pro-low",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": false,
+      "executable": true,
+      "model_status": "manual_candidate",
+      "roles": [
+        {
+          "role": null,
+          "status": "manual_candidate",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-high",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "moderate",
+      "speed_source": "aiteam_durable_review_v4",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "qa",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-flash-high-qa-v2-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "antigravity_adversarial_qa_3_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "second_qa_family_attack_passed_verify_subscription_cli_timeout",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/m83-webhook-flash-high-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ]
+        },
+        {
+          "role": "reviewer",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-durable-review-v4-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "durable_review_behavioral_3_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-flash-high-test-designer-v2-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "antigravity_mutation_test_designer_3_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "second_test_designer_family_seed1_passed_seed2_cli_timeout",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/m83-job-state-flash-high-seed-1.json",
+            "benchmarks/results/model_calibration/m83-job-state-flash-high-seed-2.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ]
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "claude-opus-4-6-thinking",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "manual_candidate",
+      "roles": [
+        {
+          "role": null,
+          "status": "manual_candidate",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "claude-sonnet-4-6",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-coding-cli-conversor-v4-aggregate-v3.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed"
+          ],
+          "evaluated_at": "2026-07-21",
+          "provider_version": "1.1.5",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "provider_1_1_6_revalidation_hidden_3_of_3_but_ruff_7_fail_fast",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/m83-config-redactor-sonnet-seed-1.json",
+            "benchmarks/results/model_calibration/antigravity-1.1.6-config-redactor-sonnet-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ]
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-medium",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "worker",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/m83-tier3-diversity-flash-medium-worker-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "tier3_worker_two_family_causal_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-low",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-flash-low-context-curator-v1-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "antigravity_context_curator_causal_6_of_6",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-flash-low-file-scout-v2-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "antigravity_tier3_causal_report_3_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "second_file_scout_family_submit_work_json_parse_error",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/m83-idempotency-flash-low-file-scout-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ]
+        },
+        {
+          "role": "worker",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-flash-low-worker-v2-aggregate.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "antigravity_tier3_quality_2_of_3_single_attempt_2_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gpt-oss-120b-medium",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "file_scout",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/antigravity-1.1.5-role-calibration-aggregate.json",
+            "benchmarks/results/model_calibration/antigravity-gpt-oss-file-scout-v2-seed-1.json"
+          ],
+          "stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "1.1.5",
+          "prompt_version": "v1",
+          "evaluation_reason": "scout_surrogate_3_of_3_but_exact_durable_parse_failed",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "exact_durable_contract_submit_work_parse_failure",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/antigravity-gpt-oss-file-scout-v2-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [
+            "provider_version_changed_or_unobserved"
+          ],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ]
+        },
+        {
+          "role": "worker",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-24",
+          "provider_version": "1.1.6",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "provider_1_1_6_exact_durable_contract_submit_work_parse_failure",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/antigravity-1.1.6-gpt-oss-worker-v2-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        }
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-opus-4-8",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 500,
+        "output_cents_per_mtok": 2500,
+        "quota_unlimited": false
+      },
+      "speed_class": "moderate",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-fable-5",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 1000,
+        "output_cents_per_mtok": 5000,
+        "quota_unlimited": false
+      },
+      "speed_class": "slow",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-sonnet-5",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 300,
+        "output_cents_per_mtok": 1500,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-haiku-4-5",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "metered_api",
+        "measurement_basis": "official_price_per_token",
+        "input_cents_per_mtok": 100,
+        "output_cents_per_mtok": 500,
+        "quota_unlimited": false
+      },
+      "speed_class": "fastest",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "worker",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-opus-4-8",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "moderate",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "lead_executor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "quorum_auditor",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "team_lead",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-fable-5",
+      "tier": "premium",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "slow",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": false,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "architect",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-sonnet-5",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fast",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "qa",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-haiku-4-5",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "flat_subscription_quota_limited",
+        "measurement_basis": "runs_duration_and_rate_limits_tokens_unavailable",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": false
+      },
+      "speed_class": "fastest",
+      "speed_source": "anthropic_official_comparison",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "worker",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen3-coder:30b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "zero_external_cost_local_compute",
+        "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": true,
+        "external_token_consumption": 0,
+        "external_quota_pressure": 0,
+        "host_resource_cost_separate": true
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "test_designer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen2.5-coder:14b",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "zero_external_cost_local_compute",
+        "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": true,
+        "external_token_consumption": 0,
+        "external_quota_pressure": 0,
+        "host_resource_cost_separate": true
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "deferred_until_material_change",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.32.1",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "exact_contract_zero_of_nine_anchors",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/local-qwen14b-context-auth-v1-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "file_scout",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.32.1",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "exact_contract_incorrect_checkout_claim_and_missing_report",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/local-qwen14b-file-scout-v2-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        }
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen2.5-coder:32b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "zero_external_cost_local_compute",
+        "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": true,
+        "external_token_consumption": 0,
+        "external_quota_pressure": 0,
+        "host_resource_cost_separate": true
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "manual_candidate",
+      "roles": [
+        {
+          "role": null,
+          "status": "manual_candidate",
+          "evidence_receipts": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "gemma-3-4b-it",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "zero_external_cost_local_compute",
+        "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": true,
+        "external_token_consumption": 0,
+        "external_quota_pressure": 0,
+        "host_resource_cost_separate": true
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "file_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "web_scout",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "worker",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "gemma-3-12b-it",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "zero_external_cost_local_compute",
+        "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": true,
+        "external_token_consumption": 0,
+        "external_quota_pressure": 0,
+        "host_resource_cost_separate": true
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "google/gemma-4-26b-a4b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "zero_external_cost_local_compute",
+        "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": true,
+        "external_token_consumption": 0,
+        "external_quota_pressure": 0,
+        "host_resource_cost_separate": true
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": false,
+      "model_status": "blocked",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "blocked",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": null,
+          "provider_version": null,
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:e4b",
+      "tier": "budget",
+      "economy": {
+        "cost_class": "zero_external_cost_local_compute",
+        "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": true,
+        "external_token_consumption": 0,
+        "external_quota_pressure": 0,
+        "host_resource_cost_separate": true
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "deferred_until_material_change",
+      "roles": [
+        {
+          "role": "context_curator",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.32.1",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "exact_contract_zero_of_nine_anchors",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/local-gemma-e4b-context-auth-v1-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "file_scout",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.32.1",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "exact_contract_missing_report_and_failed_retry",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/local-gemma-e4b-file-scout-v2-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "worker",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.32.1",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "exact_contract_generic_unrelated_artifact",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/local-gemma-e4b-worker-v2-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        }
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:26b",
+      "tier": "standard",
+      "economy": {
+        "cost_class": "zero_external_cost_local_compute",
+        "measurement_basis": "zero_external_tokens_and_quota_plus_installed_model_health_latency_and_host_resources",
+        "input_cents_per_mtok": 0,
+        "output_cents_per_mtok": 0,
+        "quota_unlimited": true,
+        "external_token_consumption": 0,
+        "external_quota_pressure": 0,
+        "host_resource_cost_separate": true
+      },
+      "speed_class": "unknown",
+      "speed_source": "requires_channel_specific_measurement",
+      "automatic": true,
+      "executable": true,
+      "model_status": "partial",
+      "roles": [
+        {
+          "role": "engineer",
+          "status": "partial",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/local-gemma26b-engineer-aggregate.json"
+          ],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.32.1",
+          "prompt_version": "v1",
+          "evaluation_reason": "local_exact_engineer_hidden_suite_1_of_3",
+          "evidence_validation_errors": [],
+          "diagnostic_reason": null,
+          "diagnostic_receipts": [],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": null,
+          "material_change_triggers": []
+        },
+        {
+          "role": "reviewer",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.32.1",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "exact_durable_review_reject_failed",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/local-gemma26b-reviewer-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        },
+        {
+          "role": "test_designer",
+          "status": "deferred_until_material_change",
+          "evidence_receipts": [],
+          "stale_reasons": [],
+          "evaluated_at": "2026-07-23",
+          "provider_version": "0.32.1",
+          "prompt_version": null,
+          "evaluation_reason": null,
+          "evidence_validation_errors": [],
+          "diagnostic_reason": "baseline_suite_failed_despite_mutant_detection",
+          "diagnostic_receipts": [
+            "benchmarks/results/model_calibration/local-gemma26b-test-designer-v2-seed-1.json"
+          ],
+          "diagnostic_validation_errors": [],
+          "diagnostic_stale_reasons": [],
+          "rerun_policy": "material_change_only",
+          "material_change_triggers": [
+            "provider_or_cli_version_changed",
+            "model_or_catalog_identity_changed",
+            "prompt_or_role_contract_changed",
+            "transport_or_tooling_changed",
+            "diagnostic_age_exceeded"
+          ],
+          "next_action": "no_rerun_until_material_change"
+        }
+      ]
+    }
+  ],
+  "complete": false
+}

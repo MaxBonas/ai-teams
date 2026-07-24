@@ -132,6 +132,12 @@ interface CatalogCandidate {
     speed_source?: string | null;
     context_window_tokens?: number | null;
     price_note?: string | null;
+    capability_basis?: string | null;
+    probe_status?: string | null;
+    probe_reason?: string | null;
+    probe_version?: string | null;
+    probe_evaluated_at?: string | null;
+    probe_receipts?: string[];
   };
   roles: RoleEvaluation[];
   rank?: number;
@@ -497,9 +503,15 @@ function CandidateDetail({ selection, onClose }: { selection: DetailSelection; o
               <div><dt>Tier</dt><dd>{humanize(candidate.model_metadata.tier)}</dd></div>
               <div><dt>Economía</dt><dd>{humanize(candidate.model_metadata.economy?.cost_class)}</dd></div>
               <div><dt>Velocidad</dt><dd>{humanize(candidate.model_metadata.speed_class)}</dd></div>
+              <div><dt>Probe del modelo</dt><dd>{humanize(candidate.model_metadata.probe_status)}</dd></div>
               <div><dt>Privacidad</dt><dd>{humanize(candidate.provider_metadata?.data_policy)}</dd></div>
               <div><dt>Workspace</dt><dd>{humanize(candidate.provider_metadata?.workspace_mode)}</dd></div>
             </dl>
+            {candidate.model_metadata.probe_receipts?.length ? (
+              <div className="receipt-stack">
+                {candidate.model_metadata.probe_receipts.map((receipt) => <code key={receipt}>{receipt}</code>)}
+              </div>
+            ) : null}
           </div>
         </section>
 

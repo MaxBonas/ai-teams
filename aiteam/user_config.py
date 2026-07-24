@@ -287,15 +287,25 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "label": "Ling 3.0 Flash Free",
             "tier": "standard",
             "caps": ["unclassified"],
-            "capability_basis": "provisional_pending_classification",
+            "capability_basis": (
+                "exact_execution_observed_structured_output_unsupported"
+            ),
             "best_for": [],
             "allowed_roles": [],
             "assignment_policy": "catalog_only",
             "automatic": False,
             "requires_probe": True,
+            "probe_status": "structured_output_unsupported",
+            "probe_reason": "provider_structured_field_null",
+            "probe_version": "1.18.4",
+            "probe_evaluated_at": "2026-07-24",
+            "probe_receipts": [
+                "benchmarks/results/model_calibration/"
+                "opencode-ling-3.0-flash-catalog-probe-v1.json"
+            ],
             "price_note": (
-                "Gratis temporal · catalogado el 2026-07-24 · "
-                "clasificación y canario pendientes"
+                "Gratis temporal · ejecución exacta observada · structured "
+                "output no soportado; sin roles"
             ),
             "temporary": True,
             "confidential_data_allowed": False,

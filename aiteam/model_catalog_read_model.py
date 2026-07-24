@@ -467,6 +467,12 @@ def build_model_catalog_read_model(
                     "speed_source": option.get("speed_source"),
                     "context_window_tokens": option.get("context_window_tokens"),
                     "price_note": option.get("price_note"),
+                    "capability_basis": option.get("capability_basis"),
+                    "probe_status": option.get("probe_status"),
+                    "probe_reason": option.get("probe_reason"),
+                    "probe_version": option.get("probe_version"),
+                    "probe_evaluated_at": option.get("probe_evaluated_at"),
+                    "probe_receipts": list(option.get("probe_receipts") or ()),
                     "general_capability_benchmark": {
                         "kind": GENERAL_CAPABILITY_BENCHMARK,
                         "value": option.get("research_score"),

@@ -99,6 +99,12 @@ def _profile() -> dict:
         "selectable": True,
         "verification_status": "verified",
         "automatic": True,
+        "capability_basis": "exact_probe",
+        "probe_status": "structured_output_unsupported",
+        "probe_reason": "provider_structured_field_null",
+        "probe_version": "1.18.4",
+        "probe_evaluated_at": "2026-07-24",
+        "probe_receipts": ["probe.json"],
     }
     return {
         "id": "openai_api",
@@ -246,6 +252,10 @@ def test_read_model_composes_normalized_score_and_provenance(tmp_path: Path) -> 
     assert len(read_model["content_hash"]) == 64
     candidate = read_model["candidates"][0]
     assert candidate["model_metadata"]["tier"] == "standard"
+    assert candidate["model_metadata"]["probe_status"] == (
+        "structured_output_unsupported"
+    )
+    assert candidate["model_metadata"]["probe_receipts"] == ["probe.json"]
     assert candidate["provider_metadata"]["label"] == "Profile One"
     assert tuple(row["canonical_role"] for row in candidate["roles"]) == CANONICAL_ROLES
     role = _role(read_model, "engineer")

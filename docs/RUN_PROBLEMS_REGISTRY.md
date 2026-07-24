@@ -114,6 +114,25 @@ La matriz Laguna vs DeepSeek completa seis muestras y conserva
 > de liveness siguen siendo válidas: un rol de implementación que no produce
 > cambios no puede cerrar solo con texto. OpenCode Zen sí continúa read-only.
 
+### RUN-024 · RESUELTO — pytest escribía proyectos de fixture en la raíz real
+
+**Detectado:** 2026-07-24
+**Run ID(s):** suite global posterior al probe de Ling 3.0 Flash
+**Proyecto:** AI Teams
+**Síntomas:** tres pruebas de workspace devolvían HTTP 409
+`Could not allocate a unique project path`; la raíz real contenía centenares de
+directorios históricos `Demo`, `Solo`, `Reconcile` y similares.
+**Causas consideradas:** colisión dentro del temporal de pytest, fuga de estado
+entre tests o fallback a la configuración real. La inspección confirmó la
+tercera: `tests/conftest.py` definía `AITEAM_PROJECTS_ROOT` como cadena vacía y
+el API usaba entonces `PROJECT_ROOT.parent`.
+**Fix aplicado:** la sesión de pytest asigna siempre una raíz de proyectos bajo
+su temporal; la suite de workspace refuerza el aislamiento con un directorio
+propio por test.
+**Verificación:** 22/22 pruebas de workspace y 1639/1639 pruebas backend pasan.
+Los directorios históricos no se borran automáticamente porque comparten padre
+con proyectos reales y requieren una revisión explícita del owner.
+
 ### RUN-022 · RESUELTO — CI silenciosa por divergencia `main`/`master`
 
 **Detectado:** 2026-07-24

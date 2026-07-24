@@ -55,6 +55,7 @@ _SESSION_NAME = f"session-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 _TEMP_SESSION = _TEMP_PARENT / _SESSION_NAME
 _USER_CONFIG_SESSION = _USER_CONFIG_PARENT / _SESSION_NAME
 _TEST_ENV_OVERRIDES["AITEAM_USER_CONFIG_DIR"] = str(_USER_CONFIG_SESSION)
+_TEST_ENV_OVERRIDES["AITEAM_PROJECTS_ROOT"] = str(_TEMP_SESSION / "projects")
 
 
 def _remove_test_tree(path: Path) -> None:

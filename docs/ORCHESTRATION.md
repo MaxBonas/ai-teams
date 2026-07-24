@@ -733,7 +733,7 @@ automático hasta cambio material.
 La cobertura histórica de ese cierre queda registrada en
 `benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`.
 La fotografía viva del 2026-07-24 está en
-`benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-24-gpt-oss-worker-closure.json`:
+`benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-24-ling-probe.json`:
 47 modelos y 124 destinos semánticos, con 8 calibrados, 17 parciales, 17
 diferidos, cero canarios o fixtures accionables, 3 candidatos manuales y 79
 bloqueados. Estos estados son de cobertura conductual; no
@@ -1505,9 +1505,14 @@ Fuentes: [FREE-1](ORCHESTRATION_SOURCES.md#free-1-gateway-catálogo-y-privacidad
 y [FREE-3](ORCHESTRATION_SOURCES.md#free-3-cli-mcp-sesiones-y-telemetría).
 
 La vía gratuita es híbrida. `opencode_zen_free` declara seis modelos. Ling 3.0
-Flash Free se descubrió el 2026-07-24 y queda `catalog_only`, manual, probe-gated
-y sin roles aprobados hasta clasificar capacidad y superar un contrato exacto; su
-tier `standard` es una banda provisional de presentación y no concede autoridad. Laguna
+Flash Free se descubrió y probó el 2026-07-24. La inferencia exacta ejecuta y
+retiene el contenido correcto, pero OpenCode lo entrega como pseudo-tool textual:
+`structured=null` y `StructuredOutputError`. Queda `catalog_only`, manual,
+probe-gated y sin roles; no recibe quality ni otra inferencia hasta cambio de
+modelo, CLI o transporte structured output. Su tier `standard` es una banda de
+presentación y no concede autoridad. El teardown del probe excedió su gate,
+aunque no quedó proceso visible y el control start/stop sin inferencia cerró
+proceso y puerto en 0,25 s; se conserva como warning operativo separado. Laguna
 permanece manual/probe-gated tras fallar 0/3 y Big Pickle sigue `rejected`.
 `gemini_api_free` reutiliza una key Google del owner y
 `groq_api_free` usa un runtime OpenAI-compatible con key Groq propia. Son

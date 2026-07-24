@@ -20,6 +20,7 @@ from aiteam.model_catalog_service import get_current_model_catalog
 @pytest.fixture(autouse=True)
 def _verified_api_models(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    monkeypatch.setenv("AITEAM_PROJECTS_ROOT", str(tmp_path / "projects"))
     for profile_id in ("openai_api", "anthropic_api"):
         for option in model_options().get(profile_id, []):
             record_model_health(
@@ -597,6 +598,7 @@ def test_delete_current_project_requires_delete_confirmation(tmp_path: Path, mon
     runtime.mkdir(parents=True)
     (runtime / "aiteam.db").write_text("", encoding="utf-8")
     monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setenv("AITEAM_PROJECTS_ROOT", str(tmp_path))
     previous = get_current_workspace()
     set_current_workspace(project)
     try:
@@ -619,6 +621,7 @@ def test_delete_current_project_post_fallback(tmp_path: Path, monkeypatch) -> No
     runtime.mkdir(parents=True)
     (runtime / "aiteam.db").write_text("", encoding="utf-8")
     monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setenv("AITEAM_PROJECTS_ROOT", str(tmp_path))
     previous = get_current_workspace()
     set_current_workspace(project)
     try:
@@ -639,6 +642,7 @@ def test_delete_current_project_moves_locked_folder_to_tombstone(tmp_path: Path,
     runtime.mkdir(parents=True)
     (runtime / "aiteam.db").write_text("", encoding="utf-8")
     monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
+    monkeypatch.setenv("AITEAM_PROJECTS_ROOT", str(tmp_path))
 
     def fake_rmtree(path: Path) -> None:
         if Path(path) == project:

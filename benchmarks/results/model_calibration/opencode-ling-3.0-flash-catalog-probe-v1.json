@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "benchmark": "opencode_catalog_model_probe",
+  "observed_at": "2026-07-24T16:14:17.946489+02:00",
+  "profile_id": "opencode_zen_free",
+  "model": "opencode/ling-3.0-flash-free",
+  "cli_version": "1.18.4",
+  "discovered_models": [
+    "opencode/big-pickle",
+    "opencode/deepseek-v4-flash-free",
+    "opencode/laguna-s-2.1-free",
+    "opencode/ling-3.0-flash-free",
+    "opencode/mimo-v2.5-free",
+    "opencode/nemotron-3-ultra-free",
+    "opencode/north-mini-code-free"
+  ],
+  "contract": "production_submit_work_json_schema_single_seed_v1",
+  "sample": {
+    "seed": 1,
+    "inference_runs": 1,
+    "session_id": "ses_06b865194ffe5IZtevta6tpnof",
+    "finish": "stop",
+    "text": "<tool_call>StructuredOutput\n<arg_key>status</arg_key>\n<arg_value>completed</arg_value><arg_key>summary</arg_key>\n<arg_value>LING_CATALOG_PROBE_OK</arg_value><arg_key>ops</arg_key>\n<arg_value>[]</arg_value>\n</tool_call>",
+    "structured": null,
+    "provider_error": {
+      "name": "StructuredOutputError",
+      "message": "Model did not produce structured output",
+      "retries": 0
+    },
+    "transport_error": null,
+    "gates": {
+      "session_created": true,
+      "request_completed": true,
+      "structured_submit_work_exact": false,
+      "provider_accepted_submit_work_schema": false,
+      "session_deleted": true
+    }
+  },
+  "checks": {
+    "cli_version_observed": true,
+    "exact_model_discovered": true,
+    "single_inference": true,
+    "session_lifecycle_complete": true,
+    "server_teardown_guaranteed": false
+  },
+  "provider_gate_conclusive": true,
+  "probe_completed": false,
+  "candidate_gate_passed": false,
+  "decision": {
+    "status": "catalog_only_until_transport_or_model_change",
+    "repeat_inference": false,
+    "roles_granted": [],
+    "automatic_selection_allowed": false,
+    "quality_score_allowed": false
+  },
+  "reevaluation": {
+    "reason": "separate_provider_gate_from_operational_cleanup",
+    "provider_rerun": false
+  }
+}

@@ -14,7 +14,11 @@ def test_every_builtin_model_has_capability_economy_and_speed_tier_evidence() ->
         for row in model_options()["opencode_zen_free"]
         if row["value"] == "opencode/ling-3.0-flash-free"
     )
-    assert ling["capability_basis"] == "provisional_pending_classification"
+    assert ling["capability_basis"] == (
+        "exact_execution_observed_structured_output_unsupported"
+    )
+    assert ling["probe_status"] == "structured_output_unsupported"
+    assert ling["allowed_roles"] == []
 
 
 def test_public_model_options_expose_three_axis_tier_metadata() -> None:

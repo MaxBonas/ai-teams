@@ -112,6 +112,39 @@ def test_discovery_catalogues_but_does_not_verify_execution() -> None:
     assert row["states"]["selectable"]["value"] is False
 
 
+def test_exact_negative_probe_verifies_execution_without_enabling_selection() -> None:
+    profiles = _profiles()
+    profiles[-1]["model_options"].append(
+        {
+            "value": "opencode/ling-3.0-flash-free",
+            "automatic": False,
+            "requires_probe": True,
+            "availability": "catalogued",
+            "probe_status": "structured_output_unsupported",
+            "probe_version": "1.18.4",
+            "probe_evaluated_at": "2026-07-24",
+            "probe_receipts": ["probe.json"],
+        }
+    )
+
+    projection = build_model_catalog_identity_projection(
+        profiles=profiles,
+        observed_at=OBSERVED_AT,
+    )
+    row = next(
+        row
+        for row in projection["candidates"]
+        if row["identity"]["model_id"] == "opencode/ling-3.0-flash-free"
+    )
+
+    assert row["states"]["model_verified"]["value"] is True
+    assert row["states"]["model_verified"]["reason"] == (
+        "exact_model_execution_probe_observed"
+    )
+    assert row["states"]["selectable"]["value"] is False
+    assert row["states"]["manual_only"]["value"] is True
+
+
 def test_historical_unknown_profile_remains_visible_with_exact_identity() -> None:
     projection = build_model_catalog_identity_projection(
         profiles=_profiles(),

@@ -67,8 +67,21 @@ verde. Pasan 119 tests focales, 1634 globales y el check frontend completo
 (lint, CSS, límites, 6 unitarios, build y 12 E2E), además de Ruff F/E9 y diff
 check.
 El inventario del 2026-07-24 descubre Ling 3.0 Flash
-Free en OpenCode: ya está visible como `catalog_only`, sin roles ni selección
-automática. Codex 0.145.0 sigue siendo la última versión publicada en npm, pero
+Free en OpenCode. El probe exacto confirma ejecución, pero OpenCode 1.18.4
+devuelve el resultado correcto como pseudo-tool textual y marca
+`StructuredOutputError` con `structured=null`. Ling queda `catalog_only`, sin
+roles, quality ni selección; no repetir hasta cambio material. El teardown del
+probe quedó como warning separado, sin proceso residual observable; el control
+start/stop sin inferencia cerró en 0,25 s. Recibo:
+`opencode-ling-3.0-flash-catalog-probe-v1.json`.
+RUN-024 corrige además una fuga de aislamiento de tests: pytest dejaba
+`AITEAM_PROJECTS_ROOT` vacío y el API creaba fixtures en el padre real del
+repositorio. La sesión usa ahora una raíz temporal y workspace la refuerza por
+test. Los directorios históricos no se eliminan automáticamente porque están
+mezclados con proyectos reales. El cierre conjunto pasa 100 tests focales,
+22/22 de workspace, 1639/1639 backend globales, el check frontend completo,
+Ruff F/E9 y las auditorías de catálogo/cobertura.
+Codex 0.145.0 sigue siendo la última versión publicada en npm, pero
 su cache exige 0.146.0, así que el auditor lo bloquea correctamente. Antigravity
 1.1.6 conserva catálogo, vuelve stale Sonnet/Engineer 1.1.5 y su screening de
 revalidación pasa 3/3 hidden pero falla Ruff con 7 incidencias; no repetir hasta

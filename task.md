@@ -437,6 +437,11 @@ no se repiten hasta cambio material.
     `tests/test_installation_docs.py` protege entrypoints, enlaces y límites.
 
 - [ ] **I.8 Preparar release y aceptación en máquina limpia**.
+  - [x] Aislar los proyectos creados por pytest dentro de su sesión temporal.
+    `AITEAM_PROJECTS_ROOT` ya no queda vacío ni cae sobre el padre real del
+    repositorio; la suite de workspace refuerza una raíz propia por test.
+    RUN-024 conserva el diagnóstico y prohíbe borrar automáticamente los
+    artefactos históricos mezclados con proyectos reales.
   - [x] **I.8.1 Contrato y generador reproducible del artefacto**.
     `release_artifact_v1` empaqueta solo archivos controlados por Git, normaliza
     orden/timestamp/modos y usa ZIP stored para reproducibilidad transversal.
@@ -669,8 +674,8 @@ no se repiten hasta cambio material.
     de prompt, contrato o tooling sin nueva versión debe revisar explícitamente
     el registro diagnóstico en ese mismo cambio.
     No borra evidencia histórica ni cambia defaults. Recibos:
-    `model-evaluation-coverage-2026-07-24-gpt-oss-worker-closure.json` y
-    `model-catalog-read-model-2026-07-24-gpt-oss-worker-closure.json`.
+    `model-evaluation-coverage-2026-07-24-ling-probe.json` y
+    `model-catalog-read-model-2026-07-24-ling-probe.json`.
   - [x] **Lote A — Codex subscription (14 destinos evaluados)**: Luna para scouts/worker;
     Terra para Engineer/MCP/QA/review/test design; Sol para Lead/arquitectura/
     quorum. Reutilizar harnesses por familia de contrato y registrar por rol
@@ -748,10 +753,18 @@ no se repiten hasta cambio material.
   - [x] **Lote D — OpenCode (cierre negativo por transporte sin cambio)**:
     catálogo 1.18.4 y hashes revalidados sin nueva inferencia; DeepSeek Reviewer
     queda `partial` 1/3. El catálogo del 2026-07-24 añade Ling 3.0 Flash Free
-    como sexta opción `catalog_only`: visible, manual/probe-gated y denegada
-    para todos los roles hasta clasificación y canario exacto. Mantener
-    read-only y no reabrir server/SDK hasta un cambio de catálogo, modelo, CLI,
-    transporte o contrato.
+    como sexta opción. Su probe exacto de una inferencia ejecuta, pero devuelve
+    el objeto correcto como pseudo-tool textual, con `structured=null` y
+    `StructuredOutputError`. Permanece `catalog_only`, manual/probe-gated,
+    denegada para todos los roles, sin quality ni selección. El teardown quedó
+    rojo en el recibo, aunque no persistió proceso visible y un control
+    start/stop sin inferencia cerró proceso+puerto en 0,25 s; no repetir el
+    modelo para corregir esa telemetría. Mantener read-only y no reabrir
+    server/SDK hasta un cambio de catálogo, modelo, CLI, transporte o contrato.
+    Recibo:
+    `benchmarks/results/model_calibration/opencode-ling-3.0-flash-catalog-probe-v1.json`.
+    Verificación de cierre: 100 tests focales, 1639 backend globales, check
+    frontend completo, Ruff F/E9 y auditorías de cobertura/read-model verdes.
   - [ ] **Lote E — APIs/Claude bloqueados (79 destinos en total junto con otros
     no ejecutables)**: esperar key, CLI, instalación o health exacto; discovery
     comercial no autoriza consumo ni selección.
@@ -1448,7 +1461,7 @@ no se repiten hasta cambio material.
     no compatibles hasta superar canarios exactos de contrato, criticidad y
     recovery.
   - OpenCode no se reabre salvo cambio de catálogo/modelo, CLI o contrato: sus
-    canarios actuales no autorizaron promoción.
+    canarios actuales, incluido Ling 3.0 Flash, no autorizaron promoción.
 
 - [ ] **Extender BYOK gratuito solo con catálogo ejecutable demostrado**.
   - GitHub Models y OpenRouter requieren credencial real, discovery por ID,

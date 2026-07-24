@@ -322,7 +322,13 @@ def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
         .strip()
         .lower()
     )
-    model_verified = availability == "verified" or any(
+    probe_observed = bool(
+        option.get("probe_status")
+        and option.get("probe_version")
+        and option.get("probe_evaluated_at")
+        and option.get("probe_receipts")
+    )
+    model_verified = availability == "verified" or probe_observed or any(
         item["verified"] for item in sources
     )
     retired = profile_status == "retired" or availability == "retired"
@@ -358,6 +364,12 @@ def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
             "observed_at": verified_sources[-1]["observed_at"],
         }
         if verified_sources
+        else {
+            "source": "exact_model_probe",
+            "version": _optional_text(option.get("probe_version")),
+            "observed_at": str(option.get("probe_evaluated_at") or timestamp),
+        }
+        if probe_observed
         else availability_provenance
     )
     states = {
@@ -380,7 +392,9 @@ def _finalize_candidate(row: dict[str, Any], timestamp: str) -> dict[str, Any]:
         ),
         "model_verified": _state(
             model_verified,
-            "exact_model_execution_verified"
+            "exact_model_execution_probe_observed"
+            if probe_observed
+            else "exact_model_execution_verified"
             if model_verified
             else "discovery_is_not_execution",
             **verified_provenance,
