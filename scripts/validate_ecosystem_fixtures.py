@@ -30,7 +30,7 @@ def main() -> int:
 
     receipt = validate_ecosystem_fixtures(
         fixtures_root=args.fixtures_root,
-        selected_case_ids=args.case,
+        selected_case_ids=args.case or args.require,
         execute=not args.dry_run,
     )
     if args.receipt:

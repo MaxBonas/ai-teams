@@ -36,6 +36,20 @@ def test_runtime_discovery_uses_current_platform_contract(tmp_path: Path) -> Non
     assert Path(plan["argv"][0]).is_file()
 
 
+def test_workspace_cwd_resolves_root_before_containment_check(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "fixture"
+    child = workspace / "apps" / "web"
+    child.mkdir(parents=True)
+
+    assert (
+        ecosystem_validation._resolve_workspace_cwd(workspace, "apps/web")
+        == child.resolve()
+    )
+    assert ecosystem_validation._resolve_workspace_cwd(workspace, "../outside") is None
+
+
 def test_fixture_catalog_is_versioned_and_unique() -> None:
     fixtures = load_ecosystem_fixtures()
     case_ids = [case["id"] for fixture in fixtures for case in fixture["cases"]]

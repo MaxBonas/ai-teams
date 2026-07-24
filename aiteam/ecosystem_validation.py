@@ -8,9 +8,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from aiteam.ecosystem_registry import (
     ACTION_IDS,
@@ -18,7 +19,6 @@ from aiteam.ecosystem_registry import (
     plan_ecosystem_command,
 )
 from aiteam.platform_runtime import architecture_id, platform_id, run_command
-
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SCHEMA_VERSION = "ecosystem_fixture_v1"
@@ -255,10 +255,8 @@ def _validate_action(
             "support_claim": False,
         }
 
-    cwd = (workspace / str(plan["cwd"])).resolve()
-    try:
-        cwd.relative_to(workspace)
-    except ValueError:
+    cwd = _resolve_workspace_cwd(workspace, str(plan["cwd"]))
+    if cwd is None:
         return {
             "action": action_id,
             "status": "failed",
@@ -309,8 +307,7 @@ def _validate_action(
     )
     artifacts = {
         pattern: sorted(
-            path.relative_to(workspace).as_posix()
-            for path in workspace.glob(pattern)
+            path.relative_to(workspace).as_posix() for path in workspace.glob(pattern)
         )[:20]
         for pattern in action["artifacts"]
     }
@@ -339,6 +336,16 @@ def _validate_action(
         "support_claim": False,
         "eligible_for_promotion_review": passed,
     }
+
+
+def _resolve_workspace_cwd(workspace: Path, planned_cwd: str) -> Path | None:
+    resolved_workspace = workspace.resolve()
+    cwd = (resolved_workspace / planned_cwd).resolve()
+    try:
+        cwd.relative_to(resolved_workspace)
+    except ValueError:
+        return None
+    return cwd
 
 
 def _case_result(
@@ -388,9 +395,10 @@ def _validate_fixture(payload: Mapping[str, Any]) -> None:
         raise ValueError("unsupported ecosystem fixture")
     if not str(payload.get("fixture_id") or "").strip():
         raise ValueError("ecosystem fixture id required")
-    if not isinstance(payload.get("expected_detected"), list) or not payload[
-        "expected_detected"
-    ]:
+    if (
+        not isinstance(payload.get("expected_detected"), list)
+        or not payload["expected_detected"]
+    ):
         raise ValueError("ecosystem fixture detections required")
     cases = payload.get("cases")
     if not isinstance(cases, list) or not cases:
@@ -412,7 +420,7 @@ def _validate_fixture(payload: Mapping[str, Any]) -> None:
             if action.get("id") not in ACTION_IDS:
                 raise ValueError("ecosystem fixture action invalid")
             if not isinstance(action.get("artifacts"), list):
-                raise ValueError("ecosystem fixture artifacts invalid")
+                raise TypeError("ecosystem fixture artifacts invalid")
 
 
 def _source_revision() -> str:
