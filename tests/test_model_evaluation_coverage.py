@@ -21,7 +21,7 @@ def test_coverage_inventory_is_conservative_and_tracks_exact_promotions() -> Non
     assert report["complete"] is False
     assert report["pair_counts"]["calibrated"] == 25
     assert report["pair_counts"]["partial"] == 5
-    assert report["pair_counts"]["deferred_until_material_change"] == 1
+    assert report["pair_counts"]["deferred_until_material_change"] == 0
     assert report["pair_counts"]["requires_canary"] > 0
     assert report["pair_counts"]["requires_tool_fixture"] > 0
     assert report["policy"]["material_change_detection"]["automatic"] == [
@@ -278,9 +278,9 @@ def test_existing_behavioral_and_screening_receipts_are_not_lost() -> None:
 
 def test_nonblocking_pool_failures_remain_visible_without_false_promotion() -> None:
     report = audit_model_evaluation_coverage(
-        observed_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
         observed_versions={
-            "antigravity_subscription": "1.1.5",
+            "antigravity_subscription": "1.1.6",
             "local_gemma4_ollama": "0.32.1",
             "local_qwen_ollama": "0.32.1",
         },
@@ -300,7 +300,9 @@ def test_nonblocking_pool_failures_remain_visible_without_false_promotion() -> N
         "no_rerun_until_material_change"
     )
     assert gpt_roles["worker"]["diagnostic_stale_reasons"] == []
-    assert gpt_roles["worker"]["diagnostic_reason"].endswith("parse_failure")
+    assert gpt_roles["worker"]["diagnostic_reason"] == (
+        "provider_1_1_6_exact_durable_contract_submit_work_parse_failure"
+    )
     assert gpt_roles["worker"]["diagnostic_validation_errors"] == []
 
     gemma = next(
@@ -320,10 +322,28 @@ def test_nonblocking_pool_failures_remain_visible_without_false_promotion() -> N
     assert gemma_roles["test_designer"]["diagnostic_validation_errors"] == []
 
 
-def test_material_provider_change_reopens_deferred_diagnostic() -> None:
+def test_matching_provider_version_defers_current_negative_diagnostic() -> None:
     report = audit_model_evaluation_coverage(
         observed_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
         observed_versions={"antigravity_subscription": "1.1.6"},
+    )
+
+    gpt_oss = next(
+        row for row in report["rows"]
+        if row["profile_id"] == "antigravity_subscription"
+        and row["model"] == "gpt-oss-120b-medium"
+    )
+    worker = next(row for row in gpt_oss["roles"] if row["role"] == "worker")
+
+    assert worker["status"] == "deferred_until_material_change"
+    assert worker["next_action"] == "no_rerun_until_material_change"
+    assert worker["diagnostic_stale_reasons"] == []
+
+
+def test_material_provider_change_reopens_deferred_diagnostic() -> None:
+    report = audit_model_evaluation_coverage(
+        observed_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
+        observed_versions={"antigravity_subscription": "1.1.7"},
     )
 
     gpt_oss = next(

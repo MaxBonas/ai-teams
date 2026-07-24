@@ -44,12 +44,18 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad: **canario exacto Antigravity 1.1.6 GPT-OSS/Worker**. La
-cobertura ya separa 16 cierres negativos vigentes mediante
+El canario exacto **Antigravity 1.1.6 GPT-OSS/Worker** queda cerrado. La seed 1
+reproduce en 18,219 s `subscription_cli_parse_error` /
+`submit_work JSON object not found`: modelo y catálogo son ejecutables, pero no
+hay artefacto ni `AGENT-REPORT`; el workspace permanece intacto y se aplica
+fail-fast sin consumir seeds 2–3. Es diagnóstico de contrato/transporte, no de
+calidad del modelo ni motivo de retirada. La cobertura separa ahora 17 cierres
+negativos vigentes mediante
 `deferred_until_material_change`; solo difieren con política explícita, recibo,
-edad y versión coincidentes. Cambio o versión desconocida los reabre. El único
-`requires_canary` actual es GPT-OSS/Worker porque su diagnóstico pertenece a
-Antigravity 1.1.5 y el transporte observado es 1.1.6; no implica promoción.
+edad y versión coincidentes. Cambio o versión desconocida los reabre. Ya no hay
+`requires_canary` ni `requires_tool_fixture` accionables en la fotografía viva.
+Recibo:
+`benchmarks/results/model_calibration/antigravity-1.1.6-gpt-oss-worker-v2-seed-1.json`.
 Flash Low/Web Scout quedó cerrado
 negativamente en Antigravity 1.1.6: el canal carece de MCP gobernado, el rol lo
 exige ahora en la política común y no se ejecutaron seeds 2–3 ni se atribuyó el
@@ -57,7 +63,7 @@ fallo al modelo. El watchdog de AI Teams vence antes que el timeout interno de
 `agy`, evitando hijos huérfanos y errores de limpieza que oculten la causa.
 El catálogo conserva el diagnóstico aunque el rol deje de estar nominado:
 799 celdas, 697 incompatibles, 102 compatibles, cero auto-elegibles y auditoría
-verde. Pasan 100 tests focales, 1633 globales y el check frontend completo
+verde. Pasan 119 tests focales, 1634 globales y el check frontend completo
 (lint, CSS, límites, 6 unitarios, build y 12 E2E), además de Ruff F/E9 y diff
 check.
 El inventario del 2026-07-24 descubre Ling 3.0 Flash
@@ -826,8 +832,8 @@ v2 4/6, también sin override, quedan como fallos preservados y no como evidenci
 causal de un esfuerzo `low`.
 El inventario vivo de cobertura conductual separa la matriz estructural de la
 evidencia real: 47 modelos/124 destinos semánticos, con 8 calibrados, 17
-parciales, 16 diferidos hasta cambio material, un canario ejecutable, cero
-fixtures pendientes, 3 manuales y 79 bloqueados. Los lotes quedan divididos por
+parciales, 17 diferidos hasta cambio material, cero canarios o fixtures
+pendientes, 3 manuales y 79 bloqueados. Los lotes quedan divididos por
 Codex, Antigravity, local, OpenCode y APIs bloqueadas en `task.md`; no se retira
 un modelo solo por ser antiguo.
 El primer bloque Codex Tier 3 alineó `worker` como rol read-only de reporting y

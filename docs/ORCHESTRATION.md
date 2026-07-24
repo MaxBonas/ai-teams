@@ -210,8 +210,9 @@ diagnóstico válido, edad dentro de la ventana y versión local exacta coincide
 Expone `no_rerun_until_material_change` y los triggers que lo invalidan. Un
 cambio o una versión no observable devuelve el par a `requires_canary` o
 `requires_tool_fixture`; nunca se hereda el diferimiento entre modelos, roles o
-canales. La proyección viva del 2026-07-24 contiene 16 diferidos, un único
-canario accionable y cero fixtures accionables, sin auto-elegibles.
+canales. Tras el canario GPT-OSS/Worker 1.1.6, la proyección viva del 2026-07-24
+contiene 17 diferidos y cero canarios o fixtures accionables, sin
+auto-elegibles.
 Versión, edad e integridad del recibo se invalidan automáticamente. Un cambio
 de prompt, contrato o tooling sin cambio de versión exige revisar el registro
 diagnóstico en el mismo cambio; el reporte publica esta distinción y no finge
@@ -653,9 +654,8 @@ compatible no calibrada que pudiera entrar en selección automática declara
 El auditor rechaza taxonomías o matrices incompletas, scores incompatibles y
 deuda automática sin acción exacta. La reproyección del 2026-07-24 contiene
 799 celdas: 697 incompatibles y 102 compatibles. Entre las 40 compatibles y
-nominadas hay 8 calibradas, 17 parciales, 14 diferidas hasta cambio material y
-un canario accionable; las otras 62 son compatibles no nominadas. Ninguna es
-auto-elegible.
+nominadas hay 8 calibradas, 17 parciales y 15 diferidas hasta cambio material;
+las otras 62 son compatibles no nominadas. Ninguna es auto-elegible.
 M.8.2 queda cerrado con una corrección adicional: `manual_only=false` es política
 del modelo, no permiso para todos los roles compatibles. Una ruta automática
 requiere además nominación exacta en `best_for`. Así, las 62 celdas compatibles
@@ -733,10 +733,10 @@ automático hasta cambio material.
 La cobertura histórica de ese cierre queda registrada en
 `benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`.
 La fotografía viva del 2026-07-24 está en
-`benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-24-deferred-policy.json`:
-47 modelos y 124 destinos semánticos, con 8 calibrados, 17 parciales, 16
-diferidos, un canario accionable, cero fixtures accionables, 3 candidatos
-manuales y 79 bloqueados. Estos estados son de cobertura conductual; no
+`benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-24-gpt-oss-worker-closure.json`:
+47 modelos y 124 destinos semánticos, con 8 calibrados, 17 parciales, 17
+diferidos, cero canarios o fixtures accionables, 3 candidatos manuales y 79
+bloqueados. Estos estados son de cobertura conductual; no
 sustituyen las 799 celdas de compatibilidad modelo×rol ni conceden selección
 automática.
 
@@ -1573,13 +1573,14 @@ primer intento de web fue infraestructura saturada y no se contó como calidad.
 Se aplicó fail-fast tras el primer fallo contractual reproducible, en vez de
 gastar tres semillas incapaces de superar el gate de transporte.
 
-El cambio Antigravity 1.1.5→1.1.6 reabre por evento únicamente la frescura de
-Sonnet 4.6/Engineer. El screening comparable `config_redactor` del 2026-07-24
-completa 3/3 tests ocultos en una run, pero deja 7 incidencias Ruff y tarda
-296,297 s. Se aplica fail-fast y no se consumen las otras cinco celdas de la
-matriz de dos familias. El default existente no se cambia por edad o por este
-screening aislado, pero la pareja no puede obtener una promoción nueva hasta
-recalibrarse con una versión/contrato materialmente distinto.
+El cambio Antigravity 1.1.5→1.1.6 reabre por evento la frescura de Sonnet
+4.6/Engineer y el diagnóstico GPT-OSS/Worker. El screening comparable
+`config_redactor` del 2026-07-24 completa 3/3 tests ocultos en una run, pero
+deja 7 incidencias Ruff y tarda 296,297 s. GPT-OSS/Worker vuelve a producir
+`submit_work JSON object not found` en la seed 1, tras 18,219 s, con workspace
+intacto y sin artefacto ni reporte. Ambos aplican fail-fast: no se consumen las
+otras celdas o seeds. El default existente no se cambia y ninguno puede obtener
+una promoción nueva hasta otro cambio material.
 
 En Ollama 0.32.1, Qwen 2.5 Coder 14B no cierra los contratos exactos de
 `file_scout` ni `context_curator`; Gemma 4 E4B tampoco supera

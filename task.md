@@ -661,7 +661,7 @@ no se repiten hasta cambio material.
     manuales y 79 bloqueados por canal/health. Recibo:
     `benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`.
     Evento vivo `2026-07-24`: 47 modelos/124 destinos; el preflight proyecta
-    8 calibrados, 17 parciales, 16 diferidos hasta cambio material, 1 canario,
+    8 calibrados, 17 parciales, 17 diferidos hasta cambio material, 0 canarios,
     0 fixtures, 3 manuales y 79 bloqueados. Un diagnóstico solo difiere si
     declara la política, el recibo es válido, no caducó y la versión CLI local
     observada coincide; cambio o versión desconocida reabre la acción.
@@ -669,8 +669,8 @@ no se repiten hasta cambio material.
     de prompt, contrato o tooling sin nueva versión debe revisar explícitamente
     el registro diagnóstico en ese mismo cambio.
     No borra evidencia histórica ni cambia defaults. Recibos:
-    `model-evaluation-coverage-2026-07-24-deferred-policy.json` y
-    `model-catalog-read-model-2026-07-24-deferred-policy.json`.
+    `model-evaluation-coverage-2026-07-24-gpt-oss-worker-closure.json` y
+    `model-catalog-read-model-2026-07-24-gpt-oss-worker-closure.json`.
   - [x] **Lote A — Codex subscription (14 destinos evaluados)**: Luna para scouts/worker;
     Terra para Engineer/MCP/QA/review/test design; Sol para Lead/arquitectura/
     quorum. Reutilizar harnesses por familia de contrato y registrar por rol
@@ -1226,6 +1226,11 @@ no se repiten hasta cambio material.
           consumen semillas adicionales incapaces de superar el hard gate.
           El `partial` scout previo queda acompañado del diagnóstico exacto;
           tokens Antigravity permanecen `unknown`.
+          Revalidación por evento 1.1.6: `worker` vuelve a fallar en seed 1 con
+          el mismo `submit_work JSON object not found` tras 18,219 s; workspace
+          intacto, una sola run y fail-fast sin seeds 2–3. El recibo 1.1.6
+          sustituye al 1.1.5 solo para este par exacto y lo difiere hasta otro
+          cambio material.
         - [x] **M.7.3.3 Ollama instalado**: evaluar únicamente
           `qwen2.5-coder:14b` en `file_scout`/`context_curator`,
           `gemma4:e4b` en `file_scout`/`context_curator`/`worker` y
@@ -1411,17 +1416,19 @@ no se repiten hasta cambio material.
 - [ ] **Completar calibraciones nuevas por perfil+modelo+rol**.
   - Sol/Terra/Luna, Opus/Sonnet/Haiku y Pro/Flash/Flash-Lite se comparan contra
     baselines locales antes de cambiar gates o cascadas.
-  - Estado vivo: 8 pares `calibrated`, 17 `partial`, 16
-    `deferred_until_material_change`, 1 `requires_canary`, 0
+  - Estado vivo: 8 pares `calibrated`, 17 `partial`, 17
+    `deferred_until_material_change`, 0 `requires_canary`, 0
     `requires_tool_fixture`, 3 manuales y 79 bloqueados. Ningún candidato es
     auto-elegible; una calibración positiva conserva quality exacta, no concede
     un default. El histórico de 25 calibrados permanece visible aunque versiones
     nuevas vuelvan parciales sus promociones.
   - Antigravity conserva históricamente 12 pares calibrados y 2 parciales; la
     actualización 1.1.6 vuelve stale Sonnet/Engineer para promoción nueva. Sus
-    tres pendientes históricos ya no son tres acciones: GPT-OSS conserva su
-    cierre negativo 1.1.5, pero `worker` se reabre como único canario al observar
-    Antigravity 1.1.6; File Scout permanece partial y Web Scout incompatible.
+    tres pendientes históricos ya no son acciones repetibles. GPT-OSS/Worker
+    fue reabierto por Antigravity 1.1.6 y la seed 1 volvió a fallar en 18,219 s
+    con `submit_work JSON object not found`; queda diferido contra el recibo
+    exacto 1.1.6 y no consume seeds 2–3. File Scout permanece partial y Web
+    Scout incompatible.
     Flash Low/Web Scout quedó cerrado negativamente por ausencia de MCP
     gobernado en Antigravity 1.1.6, sin extrapolar calidad. El cambio
     Antigravity 1.1.6 activó la revalidación Sonnet/Engineer; falló por 7

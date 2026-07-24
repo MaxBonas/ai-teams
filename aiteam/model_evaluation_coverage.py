@@ -497,6 +497,21 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
         )
         for role in roles
     ),
+    {
+        "profile_id": "antigravity_subscription",
+        "model": "gpt-oss-120b-medium",
+        "role": "worker",
+        "evaluated_at": "2026-07-24",
+        "provider_version": "1.1.6",
+        "reason": (
+            "provider_1_1_6_exact_durable_contract_submit_work_parse_failure"
+        ),
+        "rerun_policy": "material_change_only",
+        "receipts": (
+            "benchmarks/results/model_calibration/"
+            "antigravity-1.1.6-gpt-oss-worker-v2-seed-1.json",
+        ),
+    },
     *(
         {
             "profile_id": "antigravity_subscription",
@@ -518,11 +533,6 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
                 "web_scout",
                 "benchmarks/results/model_calibration/"
                 "antigravity-gpt-oss-web-scout-v2-seed-1-retry.json",
-            ),
-            (
-                "worker",
-                "benchmarks/results/model_calibration/"
-                "antigravity-gpt-oss-worker-v2-seed-1.json",
             ),
         )
     ),
