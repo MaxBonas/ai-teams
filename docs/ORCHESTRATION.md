@@ -204,6 +204,19 @@ y 131 destinos `best_for`: 8 calibrados, 5 parciales, 32 canarios ejecutables,
 4 fixtures de tools, 3 candidatos manuales y 79 bloqueados por health/canal. La
 antigüedad por sí sola nunca retira un modelo; sí puede volver stale su evidencia.
 
+`deferred_until_material_change` distingue un cierre negativo vigente de una
+acción pendiente. Solo se emite con `rerun_policy=material_change_only`, recibo
+diagnóstico válido, edad dentro de la ventana y versión local exacta coincidente.
+Expone `no_rerun_until_material_change` y los triggers que lo invalidan. Un
+cambio o una versión no observable devuelve el par a `requires_canary` o
+`requires_tool_fixture`; nunca se hereda el diferimiento entre modelos, roles o
+canales. La proyección viva del 2026-07-24 contiene 16 diferidos, un único
+canario accionable y cero fixtures accionables, sin auto-elegibles.
+Versión, edad e integridad del recibo se invalidan automáticamente. Un cambio
+de prompt, contrato o tooling sin cambio de versión exige revisar el registro
+diagnóstico en el mismo cambio; el reporte publica esta distinción y no finge
+detectar semántica que no puede observar.
+
 M.7.1 usa `scripts/benchmark_critical_default_roles.py` para la cohorte premium:
 cada par exacto de Sol o Gemini 3.1 Pro High con `architect`, `lead`,
 `lead_executor`, `quorum_auditor` o `team_lead` necesita dos familias causales
@@ -639,17 +652,18 @@ compatible no calibrada que pudiera entrar en selección automática declara
 `run_exact_canary` o `run_exact_tool_fixture`; nunca hereda calidad de otro rol.
 El auditor rechaza taxonomías o matrices incompletas, scores incompatibles y
 deuda automática sin acción exacta. La reproyección del 2026-07-24 contiene
-799 celdas: 697 incompatibles y 102 compatibles. Entre las compatibles hay 20
-calibradas y 82 sin calibración vigente; ninguna es auto-elegible.
+799 celdas: 697 incompatibles y 102 compatibles. Entre las 40 compatibles y
+nominadas hay 8 calibradas, 17 parciales, 14 diferidas hasta cambio material y
+un canario accionable; las otras 62 son compatibles no nominadas. Ninguna es
+auto-elegible.
 M.8.2 queda cerrado con una corrección adicional: `manual_only=false` es política
 del modelo, no permiso para todos los roles compatibles. Una ruta automática
-requiere además nominación exacta en `best_for`. Así, 62 celdas compatibles no
-nominadas siguen disponibles para configuración manual, pero no generan deuda
-ni promoción automática. Hay 40 celdas nominadas compatibles: 20 calibradas,
-5 parciales, 13 con canario pendiente y 2 con fixture de tools pendiente según
-la disponibilidad real del canal. Luna/File Scout y Flash Low/Worker conservan
-agregados íntegros de tres semillas y resultado parcial, por lo que fijan
-`no_rerun_until_material_change` y no reciben quality.
+requiere además nominación exacta en `best_for`. Así, las 62 celdas compatibles
+no nominadas siguen disponibles para configuración manual, pero no generan
+deuda ni promoción automática. Los diagnósticos negativos vigentes no se
+presentan como canarios repetibles: `deferred_until_material_change` exige
+identidad, versión, edad y recibo válidos. Los pares con evidencia parcial
+conservan esa evidencia sin generar una acción de repetición automática.
 El auditor rechaza una política automática rol divergente o una ruta operativa
 sin recibo exacto.
 
@@ -671,9 +685,10 @@ que exista un loop MCP con allowlist, deny explícito y trazabilidad por run.
 al menos dos familias independientes, no simplemente más seeds o más checks
 sobre el mismo fixture. Una calibración mono-familia conserva su quality exacta
 visible, pero su riesgo Goodhart pasa a material y no puede promocionarse. El
-baseline actual separa 23 canarios de rol y 2 fixtures de tools: 21 pares son
-multi-familia y 4 conservan una sola familia válida tras un screening fallido.
-cohortes de Coding, QA, Test Designer, Tier 3 y MCP Operator.
+cierre histórico de diversidad dejó 21 pares multi-familia y 4 con una sola
+familia válida tras un screening fallido. La cobertura viva posterior aplica
+además frescura de versión y política de diferimiento; sus acciones actuales se
+obtienen del recibo de cobertura, no de aquel reparto histórico.
 
 La cohorte Coding usa `config_redactor` como segunda familia frente a
 `cli_conversor`. Terra/Engineer completó tres seeds, 9/9 tests ocultos y Ruff
@@ -715,12 +730,15 @@ muestras. Con ello M.8.3.3–M.8.3.4 quedan cerrados: 21/25 pares abren diversid
 los cuatro restantes conservan quality anterior, diagnóstico exacto y bloqueo
 automático hasta cambio material.
 
-La cobertura vigente queda registrada en
-`benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`:
-46 modelos, 131 destinos semánticos, 25 calibrados, 5 parciales, 15 canarios,
-4 fixtures de tools, 3 candidatos manuales y 79 bloqueados. Estos estados son
-de cobertura conductual; no sustituyen los 782 estados de compatibilidad de la
-matriz modelo×rol ni conceden selección automática.
+La cobertura histórica de ese cierre queda registrada en
+`benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`.
+La fotografía viva del 2026-07-24 está en
+`benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-24-deferred-policy.json`:
+47 modelos y 124 destinos semánticos, con 8 calibrados, 17 parciales, 16
+diferidos, un canario accionable, cero fixtures accionables, 3 candidatos
+manuales y 79 bloqueados. Estos estados son de cobertura conductual; no
+sustituyen las 799 celdas de compatibilidad modelo×rol ni conceden selección
+automática.
 
 Cuando health no conserva versión, el entrypoint puede reutilizar el último
 `model_catalog_drift_audit` de hasta 30 días como evidencia durable. Solo acepta

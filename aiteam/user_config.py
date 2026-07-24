@@ -1330,6 +1330,47 @@ def codex_catalog_snapshot() -> dict[str, Any]:
     return dict(_codex_catalog_compatibility(config))
 
 
+def observed_profile_cli_version(profile: dict[str, Any]) -> str | None:
+    """Observe the exact local transport version without auth or inference."""
+    config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+    local_provider = str(config.get("local_provider") or "").lower()
+    if local_provider == "ollama":
+        command = "ollama"
+    elif local_provider:
+        # LM Studio is observed through its local HTTP health/catalog endpoint;
+        # the wrapping Codex CLI version is not the model-provider version.
+        return None
+    elif str(profile.get("adapter_type") or "") == "subscription_cli":
+        configured = (
+            config.get("command")
+            if isinstance(config.get("command"), list)
+            else []
+        )
+        command = str((configured or [config.get("cli_kind") or ""])[0])
+    else:
+        return None
+    executable = _resolve_cli_executable(command)
+    if not executable:
+        return None
+    try:
+        completed = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(
+        r"\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b",
+        f"{completed.stdout}\n{completed.stderr}",
+    )
+    return match.group(1) if completed.returncode == 0 and match else None
+
+
 @lru_cache(maxsize=8)
 def _codex_catalog_compatibility_cached(
     command: tuple[str, ...], cache_path: str, cache_mtime: int

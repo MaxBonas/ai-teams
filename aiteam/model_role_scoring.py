@@ -62,6 +62,7 @@ _EVIDENCE_CLASS_SCORE = {
 _EVIDENCE_STATUS_SCORE = {
     "calibrated": 100.0,
     "partial": 45.0,
+    "deferred_until_material_change": 0.0,
     "requires_canary": 0.0,
     "requires_tool_fixture": 0.0,
     "manual_candidate": 0.0,

@@ -115,6 +115,10 @@ def test_current_read_model_uses_authoritative_drift_fallback(
         "aiteam.model_catalog_read_model.profile_is_connected",
         lambda _profile: True,
     )
+    monkeypatch.setattr(
+        "aiteam.model_catalog_read_model.observed_profile_cli_version",
+        lambda _profile: None,
+    )
 
     read_model = build_current_model_catalog_read_model(
         observed_at=datetime(2026, 7, 23, 14, 0, tzinfo=timezone.utc),

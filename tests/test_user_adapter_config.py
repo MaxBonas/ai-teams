@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
 from api.routers.user_adapters import _codex_auth_info, _discover_api_catalog
+from aiteam.project_adapters import choose_adapter_for_role
 from aiteam.user_config import (
     _cmd_command,
     _write_windows_login_launcher,
@@ -16,6 +19,7 @@ from aiteam.user_config import (
     load_adapter_profiles,
     executable_model_options,
     model_fallback_for_role,
+    observed_profile_cli_version,
     _powershell_command,
     record_model_catalog,
     record_model_health,
@@ -24,8 +28,50 @@ from aiteam.user_config import (
     store_secret,
     validate_model_selection,
 )
-from aiteam.project_adapters import choose_adapter_for_role
-import pytest
+
+
+def test_observed_profile_cli_version_uses_local_provider_transport(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "aiteam.user_config._resolve_cli_executable",
+        lambda command: f"C:/tools/{command}.exe",
+    )
+    monkeypatch.setattr(
+        "aiteam.user_config.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, stdout="ollama version is 0.32.1\n", stderr=""
+        ),
+    )
+    profile = {
+        "adapter_type": "subscription_cli",
+        "config": {
+            "cli_kind": "codex",
+            "command": ["codex"],
+            "local_provider": "ollama",
+        },
+    }
+
+    assert observed_profile_cli_version(profile) == "0.32.1"
+
+
+def test_observed_profile_cli_version_does_not_mislabel_lmstudio_as_codex(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "aiteam.user_config._resolve_cli_executable",
+        lambda _command: (_ for _ in ()).throw(AssertionError("unexpected CLI probe")),
+    )
+    profile = {
+        "adapter_type": "subscription_cli",
+        "config": {
+            "cli_kind": "codex",
+            "command": ["codex"],
+            "local_provider": "lmstudio",
+        },
+    }
+
+    assert observed_profile_cli_version(profile) is None
 
 
 def test_user_adapter_profiles_include_subscriptions_and_local_models(tmp_path: Path, monkeypatch) -> None:

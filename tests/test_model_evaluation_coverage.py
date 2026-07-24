@@ -21,8 +21,14 @@ def test_coverage_inventory_is_conservative_and_tracks_exact_promotions() -> Non
     assert report["complete"] is False
     assert report["pair_counts"]["calibrated"] == 25
     assert report["pair_counts"]["partial"] == 5
+    assert report["pair_counts"]["deferred_until_material_change"] == 1
     assert report["pair_counts"]["requires_canary"] > 0
     assert report["pair_counts"]["requires_tool_fixture"] > 0
+    assert report["policy"]["material_change_detection"]["automatic"] == [
+        "provider_or_cli_version_changed",
+        "diagnostic_age_exceeded",
+        "diagnostic_receipt_invalid",
+    ]
     flash_web_diagnostic = next(
         row for row in report["diagnostics"]
         if row["profile_id"] == "antigravity_subscription"
@@ -289,7 +295,11 @@ def test_nonblocking_pool_failures_remain_visible_without_false_promotion() -> N
     gpt_roles = {row["role"]: row for row in gpt_oss["roles"]}
     assert gpt_roles["file_scout"]["status"] == "partial"
     assert "parse_failed" in gpt_roles["file_scout"]["evaluation_reason"]
-    assert gpt_roles["worker"]["status"] == "requires_canary"
+    assert gpt_roles["worker"]["status"] == "deferred_until_material_change"
+    assert gpt_roles["worker"]["next_action"] == (
+        "no_rerun_until_material_change"
+    )
+    assert gpt_roles["worker"]["diagnostic_stale_reasons"] == []
     assert gpt_roles["worker"]["diagnostic_reason"].endswith("parse_failure")
     assert gpt_roles["worker"]["diagnostic_validation_errors"] == []
 
@@ -301,11 +311,33 @@ def test_nonblocking_pool_failures_remain_visible_without_false_promotion() -> N
     )
     gemma_roles = {row["role"]: row for row in gemma["roles"]}
     assert gemma_roles["engineer"]["status"] == "partial"
-    assert gemma_roles["reviewer"]["status"] == "requires_canary"
+    assert gemma_roles["reviewer"]["status"] == (
+        "deferred_until_material_change"
+    )
     assert gemma_roles["test_designer"]["diagnostic_reason"] == (
         "baseline_suite_failed_despite_mutant_detection"
     )
     assert gemma_roles["test_designer"]["diagnostic_validation_errors"] == []
+
+
+def test_material_provider_change_reopens_deferred_diagnostic() -> None:
+    report = audit_model_evaluation_coverage(
+        observed_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
+        observed_versions={"antigravity_subscription": "1.1.6"},
+    )
+
+    gpt_oss = next(
+        row for row in report["rows"]
+        if row["profile_id"] == "antigravity_subscription"
+        and row["model"] == "gpt-oss-120b-medium"
+    )
+    worker = next(row for row in gpt_oss["roles"] if row["role"] == "worker")
+
+    assert worker["status"] == "requires_canary"
+    assert worker["next_action"] == "run_exact_canary"
+    assert worker["diagnostic_stale_reasons"] == [
+        "provider_version_changed_or_unobserved"
+    ]
 
 
 def test_tampered_critical_sample_invalidates_exact_role_evidence(tmp_path) -> None:

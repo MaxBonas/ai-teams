@@ -75,6 +75,10 @@ interface RoleEvaluation {
     provider_version?: string | null;
     evidence_receipts?: string[];
     diagnostic_receipts?: string[];
+    diagnostic_stale_reasons?: string[];
+    rerun_policy?: string | null;
+    material_change_triggers?: string[];
+    next_action?: string | null;
     stale_reasons?: string[];
   };
   runtime_metrics?: Record<string, unknown>;
@@ -474,8 +478,15 @@ function CandidateDetail({ selection, onClose }: { selection: DetailSelection; o
               <div><dt>Muestras</dt><dd>{score?.confidence?.seeds || 0} seeds · {score?.confidence?.cases || 0} casos</dd></div>
               <div><dt>Evaluado</dt><dd>{formatObservedAt(evaluation?.evaluation?.evaluated_at)}</dd></div>
               <div><dt>Versión</dt><dd>{evaluation?.evaluation?.provider_version || 'No observada'}</dd></div>
+              <div><dt>Siguiente acción</dt><dd>{humanize(evaluation?.evaluation?.next_action)}</dd></div>
+              <div><dt>Política de repetición</dt><dd>{humanize(evaluation?.evaluation?.rerun_policy)}</dd></div>
               <div><dt>Goodhart</dt><dd>{humanize(score?.confidence?.goodhart_risk)}</dd></div>
             </dl>
+            {evaluation?.evaluation?.material_change_triggers?.length ? (
+              <p className="detail-empty-note">
+                Se reabre con: {evaluation.evaluation.material_change_triggers.map(humanize).join(' · ')}
+              </p>
+            ) : null}
             {receipts.length ? (
               <div className="receipt-stack">{receipts.map((receipt) => <code key={receipt}>{receipt}</code>)}</div>
             ) : <p className="detail-empty-note">Sin recibos exactos para este par.</p>}

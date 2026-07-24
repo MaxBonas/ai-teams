@@ -17,6 +17,7 @@ from aiteam.user_config import (  # noqa: E402
     DEFAULT_ADAPTER_PROFILES,
     executable_model_options,
     model_is_selectable,
+    observed_profile_cli_version,
 )
 
 
@@ -28,6 +29,10 @@ def _versions_from_drift(path: Path) -> dict[str, str | None]:
     }
     codex = report.get("codex_catalog") or {}
     versions["codex_subscription"] = str(codex.get("installed_version") or "") or None
+    for profile in DEFAULT_ADAPTER_PROFILES:
+        live_version = observed_profile_cli_version(profile)
+        if live_version:
+            versions[str(profile.get("id") or "")] = live_version
     return versions
 
 

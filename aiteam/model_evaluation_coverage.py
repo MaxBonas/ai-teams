@@ -385,9 +385,18 @@ MODEL_ROLE_EVALUATION_EVIDENCE: tuple[dict[str, Any], ...] = (
 )
 
 
-# Negative screenings remain visible without being promoted to ``partial``:
-# failing one frozen case is useful routing evidence, but it does not satisfy
-# the three-seed contract and must not make the remaining canary debt disappear.
+# Negative screenings remain visible without being promoted to ``partial``.
+# A screening can defer another identical run only when it declares an explicit
+# material-change policy and its version, age and receipt gates still hold.
+DEFERRED_UNTIL_MATERIAL_CHANGE = "deferred_until_material_change"
+MATERIAL_CHANGE_TRIGGERS = (
+    "provider_or_cli_version_changed",
+    "model_or_catalog_identity_changed",
+    "prompt_or_role_contract_changed",
+    "transport_or_tooling_changed",
+    "diagnostic_age_exceeded",
+)
+
 MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
     {
         "profile_id": "antigravity_subscription",
@@ -396,6 +405,7 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
         "evaluated_at": "2026-07-24",
         "provider_version": "1.1.6",
         "reason": "governed_mcp_transport_unsupported_fail_fast",
+        "rerun_policy": "material_change_only",
         "receipts": (
             "benchmarks/results/model_calibration/"
             "antigravity-1.1.6-flash-low-web-scout-seed-1.json",
@@ -408,6 +418,7 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
         "evaluated_at": "2026-07-23",
         "provider_version": "1.1.5",
         "reason": "second_file_scout_family_submit_work_json_parse_error",
+        "rerun_policy": "material_change_only",
         "receipts": (
             "benchmarks/results/model_calibration/"
             "m83-idempotency-flash-low-file-scout-seed-1.json",
@@ -420,6 +431,7 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
         "evaluated_at": "2026-07-23",
         "provider_version": "1.1.5",
         "reason": "second_test_designer_family_seed1_passed_seed2_cli_timeout",
+        "rerun_policy": "material_change_only",
         "receipts": (
             "benchmarks/results/model_calibration/"
             "m83-job-state-flash-high-seed-1.json",
@@ -434,6 +446,7 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
         "evaluated_at": "2026-07-23",
         "provider_version": "1.1.5",
         "reason": "second_qa_family_attack_passed_verify_subscription_cli_timeout",
+        "rerun_policy": "material_change_only",
         "receipts": (
             "benchmarks/results/model_calibration/"
             "m83-webhook-flash-high-seed-1.json",
@@ -448,6 +461,7 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
         "reason": (
             "provider_1_1_6_revalidation_hidden_3_of_3_but_ruff_7_fail_fast"
         ),
+        "rerun_policy": "material_change_only",
         "receipts": (
             "benchmarks/results/model_calibration/"
             "m83-config-redactor-sonnet-seed-1.json",
@@ -463,6 +477,7 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
             "evaluated_at": "2026-07-23",
             "provider_version": "1.18.4",
             "reason": "structured_output_transport_unchanged_closed_without_inference",
+            "rerun_policy": "material_change_only",
             "receipts": (
                 "benchmarks/results/model_calibration/"
                 "opencode-1.18.4-negative-closure-v1.json",
@@ -490,6 +505,7 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
             "evaluated_at": "2026-07-23",
             "provider_version": "1.1.5",
             "reason": "exact_durable_contract_submit_work_parse_failure",
+            "rerun_policy": "material_change_only",
             "receipts": (receipt,),
         }
         for role, receipt in (
@@ -518,6 +534,7 @@ MODEL_ROLE_EVALUATION_DIAGNOSTICS: tuple[dict[str, Any], ...] = (
             "evaluated_at": "2026-07-23",
             "provider_version": "0.32.1",
             "reason": reason,
+            "rerun_policy": "material_change_only",
             "receipts": (receipt,),
         }
         for profile_id, model, role, reason, receipt in (
@@ -1459,10 +1476,27 @@ def audit_model_evaluation_coverage(
             validation_errors.append("diagnostic_receipt_not_found")
         if key in diagnostics:
             validation_errors.append("duplicate_diagnostic_identity")
+        stale_reasons: list[str] = []
+        try:
+            evaluated_on = date.fromisoformat(str(entry["evaluated_at"]))
+            age_days = (observation - evaluated_on).days
+            if age_days < 0:
+                stale_reasons.append("diagnostic_date_in_future")
+            elif age_days > CALIBRATION_MAX_AGE_DAYS:
+                stale_reasons.append("diagnostic_age_exceeded")
+        except (KeyError, ValueError):
+            stale_reasons.append("diagnostic_date_invalid")
+        observed_version = str(observed_versions.get(key[0]) or "")
+        if observed_version != str(entry.get("provider_version") or ""):
+            stale_reasons.append("provider_version_changed_or_unobserved")
+        if validation_errors:
+            stale_reasons.append("diagnostic_receipt_invalid")
         diagnostics[key] = {
             **entry,
             "receipts": receipts,
             "validation_errors": validation_errors,
+            "stale_reasons": stale_reasons,
+            "material_change_triggers": list(MATERIAL_CHANGE_TRIGGERS),
         }
     profiles = {
         str(profile.get("id") or ""): profile for profile in DEFAULT_ADAPTER_PROFILES
@@ -1471,6 +1505,7 @@ def audit_model_evaluation_coverage(
     pair_counts = {
         "calibrated": 0,
         "partial": 0,
+        DEFERRED_UNTIL_MATERIAL_CHANGE: 0,
         "requires_canary": 0,
         "requires_tool_fixture": 0,
         "manual_candidate": 0,
@@ -1519,6 +1554,12 @@ def audit_model_evaluation_coverage(
                         status = "partial"
                     elif supplemental:
                         status = str(supplemental["effective_status"])
+                    elif (
+                        diagnostic
+                        and diagnostic.get("rerun_policy") == "material_change_only"
+                        and not diagnostic.get("stale_reasons")
+                    ):
+                        status = DEFERRED_UNTIL_MATERIAL_CHANGE
                     elif automatic and "external_mcp" in default_capabilities_for_role(
                         role
                     ):
@@ -1551,6 +1592,8 @@ def audit_model_evaluation_coverage(
                                 if entry
                                 else supplemental.get("evaluated_at")
                                 if supplemental
+                                else diagnostic.get("evaluated_at")
+                                if diagnostic
                                 else None
                             ),
                             "provider_version": (
@@ -1558,6 +1601,8 @@ def audit_model_evaluation_coverage(
                                 if entry
                                 else supplemental.get("provider_version")
                                 if supplemental
+                                else diagnostic.get("provider_version")
+                                if diagnostic
                                 else None
                             ),
                             "prompt_version": (
@@ -1586,6 +1631,40 @@ def audit_model_evaluation_coverage(
                                 if diagnostic
                                 else []
                             ),
+                            "diagnostic_stale_reasons": (
+                                list(diagnostic.get("stale_reasons") or ())
+                                if diagnostic
+                                else []
+                            ),
+                            "rerun_policy": (
+                                diagnostic.get("rerun_policy")
+                                if diagnostic
+                                else None
+                            ),
+                            "material_change_triggers": (
+                                list(diagnostic.get("material_change_triggers") or ())
+                                if diagnostic
+                                else []
+                            ),
+                            **(
+                                {
+                                    "next_action": (
+                                        "no_rerun_until_material_change"
+                                        if status
+                                        == DEFERRED_UNTIL_MATERIAL_CHANGE
+                                        else "run_exact_tool_fixture"
+                                        if status == "requires_tool_fixture"
+                                        else "run_exact_canary"
+                                    )
+                                }
+                                if status
+                                in {
+                                    DEFERRED_UNTIL_MATERIAL_CHANGE,
+                                    "requires_tool_fixture",
+                                    "requires_canary",
+                                }
+                                else {}
+                            ),
                         }
                     )
             statuses = {row["status"] for row in role_rows}
@@ -1595,6 +1674,8 @@ def audit_model_evaluation_coverage(
                 model_status = "blocked"
             elif statuses == {"manual_candidate"}:
                 model_status = "manual_candidate"
+            elif statuses == {DEFERRED_UNTIL_MATERIAL_CHANGE}:
+                model_status = DEFERRED_UNTIL_MATERIAL_CHANGE
             elif statuses == {"requires_tool_fixture"}:
                 model_status = "requires_tool_fixture"
             elif "calibrated" in statuses or "partial" in statuses:
@@ -1622,6 +1703,21 @@ def audit_model_evaluation_coverage(
         "policy": {
             "scope": "automatic_best_for_pairs",
             "manual_candidates": "evaluate_before_promotion",
+            "negative_diagnostics": (
+                "defer_only_while_explicit_policy_receipt_age_and_version_match"
+            ),
+            "material_change_detection": {
+                "automatic": [
+                    "provider_or_cli_version_changed",
+                    "diagnostic_age_exceeded",
+                    "diagnostic_receipt_invalid",
+                ],
+                "registry_revision_required": [
+                    "model_or_catalog_identity_changed",
+                    "prompt_or_role_contract_changed",
+                    "transport_or_tooling_changed_without_version_change",
+                ],
+            },
             "removal_rule": "age_alone_never_retires_a_model",
         },
         "models": len(rows),

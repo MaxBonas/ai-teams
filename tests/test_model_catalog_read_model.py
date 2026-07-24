@@ -542,6 +542,41 @@ def test_partial_exact_evidence_is_not_scheduled_again_without_change() -> None:
     assert audit_model_catalog_read_model(read_model)["ok"] is True
 
 
+def test_deferred_negative_diagnostic_preserves_material_change_contract() -> None:
+    profile = _profile()
+    report = _evaluation_report()
+    role = report["rows"][0]["roles"][0]
+    role.update(
+        {
+            "status": "deferred_until_material_change",
+            "next_action": "no_rerun_until_material_change",
+            "rerun_policy": "material_change_only",
+            "material_change_triggers": ["provider_or_cli_version_changed"],
+            "diagnostic_receipts": ["negative-seed-1.json"],
+        }
+    )
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=report,
+        observed_at=OBSERVED_AT,
+    )
+
+    engineer = _role(read_model, "engineer")
+
+    assert engineer["evaluation"]["status"] == (
+        "deferred_until_material_change"
+    )
+    assert engineer["evaluation"]["next_action"] == (
+        "no_rerun_until_material_change"
+    )
+    assert engineer["evaluation"]["material_change_triggers"] == [
+        "provider_or_cli_version_changed"
+    ]
+    assert engineer["score"]["score"] is None
+    assert audit_model_catalog_read_model(read_model)["ok"] is True
+
+
 def test_auditor_rejects_operational_automatic_pair_without_exact_evidence() -> None:
     profile = _profile()
     read_model = build_model_catalog_read_model(

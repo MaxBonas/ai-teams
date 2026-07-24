@@ -44,15 +44,22 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad: **mantener el drift de catálogo por evento y abordar la
-siguiente calibración ejecutable**. Flash Low/Web Scout quedó cerrado
+Siguiente unidad: **canario exacto Antigravity 1.1.6 GPT-OSS/Worker**. La
+cobertura ya separa 16 cierres negativos vigentes mediante
+`deferred_until_material_change`; solo difieren con política explícita, recibo,
+edad y versión coincidentes. Cambio o versión desconocida los reabre. El único
+`requires_canary` actual es GPT-OSS/Worker porque su diagnóstico pertenece a
+Antigravity 1.1.5 y el transporte observado es 1.1.6; no implica promoción.
+Flash Low/Web Scout quedó cerrado
 negativamente en Antigravity 1.1.6: el canal carece de MCP gobernado, el rol lo
 exige ahora en la política común y no se ejecutaron seeds 2–3 ni se atribuyó el
 fallo al modelo. El watchdog de AI Teams vence antes que el timeout interno de
 `agy`, evitando hijos huérfanos y errores de limpieza que oculten la causa.
 El catálogo conserva el diagnóstico aunque el rol deje de estar nominado:
 799 celdas, 697 incompatibles, 102 compatibles, cero auto-elegibles y auditoría
-verde. Pasan 235 tests dirigidos, 1629 globales, Ruff F/E9 y diff check.
+verde. Pasan 100 tests focales, 1633 globales y el check frontend completo
+(lint, CSS, límites, 6 unitarios, build y 12 E2E), además de Ruff F/E9 y diff
+check.
 El inventario del 2026-07-24 descubre Ling 3.0 Flash
 Free en OpenCode: ya está visible como `catalog_only`, sin roles ni selección
 automática. Codex 0.145.0 sigue siendo la última versión publicada en npm, pero
@@ -817,12 +824,12 @@ GPT-5.5 sin override de esfuerzo queda como control histórico 6/6 y promueve
 Luna `medium` 6/6 como Tier 3 para `context_curator`; Luna original 3/6 y prompt
 v2 4/6, también sin override, quedan como fallos preservados y no como evidencia
 causal de un esfuerzo `low`.
-El inventario nuevo de cobertura conductual separa la matriz estructural de la
-evidencia real: 46 modelos/131 destinos semánticos, con 8 calibrados, 5
-parciales, 32 canarios ejecutables, 4 fixtures de tools pendientes, 3 manuales y
-79 bloqueados. Los lotes vivos quedan divididos por Codex, Antigravity, local,
-OpenCode y APIs bloqueadas en `task.md`; no se retira un modelo solo por ser
-antiguo.
+El inventario vivo de cobertura conductual separa la matriz estructural de la
+evidencia real: 47 modelos/124 destinos semánticos, con 8 calibrados, 17
+parciales, 16 diferidos hasta cambio material, un canario ejecutable, cero
+fixtures pendientes, 3 manuales y 79 bloqueados. Los lotes quedan divididos por
+Codex, Antigravity, local, OpenCode y APIs bloqueadas en `task.md`; no se retira
+un modelo solo por ser antiguo.
 El primer bloque Codex Tier 3 alineó `worker` como rol read-only de reporting y
 cerró el hueco que permitía a worker/scouts/test runner marcar `done` sin
 `AGENT-REPORT`: hay una corrección y después bloqueo+escalado durable. Luna

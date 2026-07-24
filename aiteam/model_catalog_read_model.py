@@ -33,6 +33,7 @@ from aiteam.user_config import (
     ROLE_CAPABILITY_PROFILES,
     load_adapter_profiles,
     model_options,
+    observed_profile_cli_version,
     profile_is_connected,
 )
 
@@ -600,11 +601,14 @@ def build_current_model_catalog_read_model(
         health = (
             profile.get("health") if isinstance(profile.get("health"), Mapping) else {}
         )
-        observed_versions[profile_id] = str(health.get("version") or "") or None
+        live_version = observed_profile_cli_version(profile)
+        observed_versions[profile_id] = (
+            live_version or str(health.get("version") or "") or None
+        )
         if observed_versions[profile_id]:
             version_evidence[profile_id] = {
                 "version": observed_versions[profile_id],
-                "source": "adapter_health",
+                "source": "live_cli_version" if live_version else "adapter_health",
             }
         for model in health.get("catalog_models") or ():
             discoveries.append(
@@ -1123,6 +1127,15 @@ def _evaluation_lookup(
             "diagnostic_validation_errors",
             list(diagnostic.get("validation_errors") or ()),
         )
+        row.setdefault(
+            "diagnostic_stale_reasons",
+            list(diagnostic.get("stale_reasons") or ()),
+        )
+        row.setdefault("rerun_policy", diagnostic.get("rerun_policy"))
+        row.setdefault(
+            "material_change_triggers",
+            list(diagnostic.get("material_change_triggers") or ()),
+        )
         row.setdefault("evaluated_at", diagnostic.get("evaluated_at"))
         row.setdefault("provider_version", diagnostic.get("provider_version"))
     return result
@@ -1151,6 +1164,13 @@ def _project_evaluation_cell(
             "diagnostic_receipts": list(prior.get("diagnostic_receipts") or ()),
             "diagnostic_validation_errors": list(
                 prior.get("diagnostic_validation_errors") or ()
+            ),
+            "diagnostic_stale_reasons": list(
+                prior.get("diagnostic_stale_reasons") or ()
+            ),
+            "rerun_policy": prior.get("rerun_policy"),
+            "material_change_triggers": list(
+                prior.get("material_change_triggers") or ()
             ),
             "evaluated_at": prior.get("evaluated_at"),
             "provider_version": prior.get("provider_version"),

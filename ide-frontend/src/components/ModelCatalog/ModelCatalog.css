@@ -234,6 +234,7 @@
 .role-evidence-pip { grid-column: 1; align-self: center; width: 22px; height: 2px; background: var(--text-dim); }
 .role-evidence-pip.status-calibrated { background: var(--accent); }
 .role-evidence-pip.status-partial { background: var(--model-amber); }
+.role-evidence-pip.status-deferred_until_material_change { background: var(--model-cyan); }
 .role-score-cell::after { content: ''; grid-column: 2; align-self: center; justify-self: end; width: 16px; height: 2px; background: linear-gradient(90deg, var(--model-cyan) 35%, var(--border) 35%); }
 .role-cell-empty { color: #35404b; font-family: 'JetBrains Mono', monospace; }
 

@@ -653,19 +653,24 @@ no se repiten hasta cambio material.
     workspace, salida estructurada, MCP gobernado y roles deterministas. Tier y
     `best_for` orientan ranking, pero nunca conceden herramientas o autoridad.
   - [x] Generar un inventario durable de cobertura conductual por par exacto
-    perfil+modelo+rol: `calibrated`, `partial`, `requires_canary`,
-    `requires_tool_fixture`, `manual_candidate` o `blocked`. Baseline actual:
+    perfil+modelo+rol: `calibrated`, `partial`,
+    `deferred_until_material_change`, `requires_canary`,
+    `requires_tool_fixture`, `manual_candidate` o `blocked`. Baseline histórico:
     46 modelos/131 destinos semánticos; 25 calibrados, 5 parciales, 15 canarios
     ejecutables pendientes, 4 fixtures de tools pendientes, 3 candidatos
     manuales y 79 bloqueados por canal/health. Recibo:
     `benchmarks/results/model_evaluation_coverage/model-evaluation-coverage-2026-07-23.json`.
-    Evento vivo posterior al gate Web Scout `2026-07-24`: 47 modelos/124
-    destinos; el preflight proyecta 8 calibrados, 17 parciales, 15 canarios,
-    2 fixtures, 3 manuales y 79
-    bloqueados al aplicar estrictamente el CLI Codex pendiente y las versiones
-    no observadas/stale. No borra evidencia histórica ni cambia defaults.
-    Recibos: `model-catalog-drift-2026-07-24-post-web-scout.json` y
-    `model-evaluation-coverage-2026-07-24-post-web-scout.json`.
+    Evento vivo `2026-07-24`: 47 modelos/124 destinos; el preflight proyecta
+    8 calibrados, 17 parciales, 16 diferidos hasta cambio material, 1 canario,
+    0 fixtures, 3 manuales y 79 bloqueados. Un diagnóstico solo difiere si
+    declara la política, el recibo es válido, no caducó y la versión CLI local
+    observada coincide; cambio o versión desconocida reabre la acción.
+    Versión, edad e integridad se detectan automáticamente; un cambio semántico
+    de prompt, contrato o tooling sin nueva versión debe revisar explícitamente
+    el registro diagnóstico en ese mismo cambio.
+    No borra evidencia histórica ni cambia defaults. Recibos:
+    `model-evaluation-coverage-2026-07-24-deferred-policy.json` y
+    `model-catalog-read-model-2026-07-24-deferred-policy.json`.
   - [x] **Lote A — Codex subscription (14 destinos evaluados)**: Luna para scouts/worker;
     Terra para Engineer/MCP/QA/review/test design; Sol para Lead/arquitectura/
     quorum. Reutilizar harnesses por familia de contrato y registrar por rol
@@ -1406,13 +1411,17 @@ no se repiten hasta cambio material.
 - [ ] **Completar calibraciones nuevas por perfil+modelo+rol**.
   - Sol/Terra/Luna, Opus/Sonnet/Haiku y Pro/Flash/Flash-Lite se comparan contra
     baselines locales antes de cambiar gates o cascadas.
-  - Estado actual: 25 pares `calibrated`, 5 `partial`, 15
-    `requires_canary`, 4 `requires_tool_fixture`, 3 manuales y 79 bloqueados.
-    Ningún candidato es auto-elegible; una calibración positiva conserva quality
-    exacta, no concede un default.
+  - Estado vivo: 8 pares `calibrated`, 17 `partial`, 16
+    `deferred_until_material_change`, 1 `requires_canary`, 0
+    `requires_tool_fixture`, 3 manuales y 79 bloqueados. Ningún candidato es
+    auto-elegible; una calibración positiva conserva quality exacta, no concede
+    un default. El histórico de 25 calibrados permanece visible aunque versiones
+    nuevas vuelvan parciales sus promociones.
   - Antigravity conserva históricamente 12 pares calibrados y 2 parciales; la
     actualización 1.1.6 vuelve stale Sonnet/Engineer para promoción nueva. Sus
-    tres pendientes históricos ya no son tres acciones: GPT-OSS quedó cerrado negativamente y
+    tres pendientes históricos ya no son tres acciones: GPT-OSS conserva su
+    cierre negativo 1.1.5, pero `worker` se reabre como único canario al observar
+    Antigravity 1.1.6; File Scout permanece partial y Web Scout incompatible.
     Flash Low/Web Scout quedó cerrado negativamente por ausencia de MCP
     gobernado en Antigravity 1.1.6, sin extrapolar calidad. El cambio
     Antigravity 1.1.6 activó la revalidación Sonnet/Engineer; falló por 7
