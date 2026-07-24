@@ -9,6 +9,10 @@ from typing import Any
 
 from aiteam.context_curator import build_context_curation_target
 from aiteam.db.agent_reports import latest_agent_report
+from aiteam.objective_classification import (
+    classification_from_metadata,
+    objective_contract,
+)
 
 
 def _parse_agent_report(body: str) -> dict[str, str] | None:
@@ -89,6 +93,7 @@ def build_wake_payload(
         acceptance_criteria = [
             str(item) for item in (_issue_meta.get("acceptance_criteria") or []) if str(item).strip()
         ]
+        _objective_classification = classification_from_metadata(_issue_meta)
 
         # Comments: most recent first, capped
         comment_rows = conn.execute(
@@ -309,6 +314,11 @@ def build_wake_payload(
             "created_at": issue.get("created_at"),
             "updated_at": issue.get("updated_at"),
             "acceptance_criteria": acceptance_criteria,
+            "objective_classification": (
+                _objective_classification.to_metadata()
+                if _objective_classification is not None
+                else None
+            ),
         },
         "parent": parent_summary,
         "comments": comments,
@@ -322,6 +332,10 @@ def build_wake_payload(
         "trigger_comment_id": comment_id,
         "children": children_summary,
     }
+    if _objective_classification is not None:
+        payload["objective_contract"] = objective_contract(
+            _objective_classification.kind
+        )
     if str(issue.get("role") or "").strip().lower() == "context_curator" and issue.get("parent_id"):
         payload["context_curation_target"] = build_context_curation_target(
             db_path, issue_id=str(issue["parent_id"])

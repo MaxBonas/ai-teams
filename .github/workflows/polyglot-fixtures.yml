@@ -1,0 +1,352 @@
+name: Polyglot fixture matrix
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/polyglot-fixtures.yml"
+      - "aiteam/ecosystem_registry.py"
+      - "aiteam/ecosystem_validation.py"
+      - "config/ecosystems.v1.json"
+      - "scripts/validate_ecosystem_fixtures.py"
+      - "scripts/audit_ecosystem_ci_receipts.py"
+      - "tests/fixtures/ecosystems/**"
+      - "tests/test_ecosystem_registry.py"
+      - "tests/test_ecosystem_validation.py"
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  python-node:
+    name: Python + Node · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Configure Node 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install locked Python environment
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.lock
+          python -m pip install --no-deps -e .
+
+      - name: Validate descriptor-bound fixtures
+        shell: pwsh
+        env:
+          AITEAM_FIXTURE_RECEIPT: ${{ runner.temp }}/ecosystem-${{ matrix.os }}.json
+        run: |
+          python scripts/validate_ecosystem_fixtures.py `
+            --require python_pytest `
+            --require javascript_npm `
+            --require monorepo_python `
+            --require monorepo_javascript `
+            --receipt "$env:AITEAM_FIXTURE_RECEIPT"
+
+      - name: Upload validation receipt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ecosystem-${{ matrix.os }}-receipt
+          path: ${{ runner.temp }}/ecosystem-${{ matrix.os }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  java-maven:
+    name: Java + Maven · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Configure Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: tests/fixtures/ecosystems/java_maven_minimal/pom.xml
+
+      - name: Install AI Teams package without provider dependencies
+        shell: pwsh
+        run: python -m pip install --no-deps -e .
+
+      - name: Validate Java/Maven fixture
+        shell: pwsh
+        env:
+          AITEAM_FIXTURE_RECEIPT: ${{ runner.temp }}/ecosystem-java-${{ matrix.os }}.json
+        run: |
+          python scripts/validate_ecosystem_fixtures.py `
+            --case java_maven_junit `
+            --require java_maven_junit `
+            --receipt "$env:AITEAM_FIXTURE_RECEIPT"
+
+      - name: Upload Java validation receipt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ecosystem-java-${{ matrix.os }}-receipt
+          path: ${{ runner.temp }}/ecosystem-java-${{ matrix.os }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  dotnet:
+    name: .NET · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Configure .NET SDK 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install AI Teams package without provider dependencies
+        shell: pwsh
+        run: python -m pip install --no-deps -e .
+
+      - name: Validate .NET fixture
+        shell: pwsh
+        env:
+          AITEAM_FIXTURE_RECEIPT: ${{ runner.temp }}/ecosystem-dotnet-${{ matrix.os }}.json
+        run: |
+          python scripts/validate_ecosystem_fixtures.py `
+            --case dotnet_xunit `
+            --require dotnet_xunit `
+            --receipt "$env:AITEAM_FIXTURE_RECEIPT"
+
+      - name: Upload .NET validation receipt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ecosystem-dotnet-${{ matrix.os }}-receipt
+          path: ${{ runner.temp }}/ecosystem-dotnet-${{ matrix.os }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  go:
+    name: Go · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Configure Go 1.25.9
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.9"
+          cache: false
+
+      - name: Install AI Teams package without provider dependencies
+        shell: pwsh
+        run: python -m pip install --no-deps -e .
+
+      - name: Validate Go fixture
+        shell: pwsh
+        env:
+          AITEAM_FIXTURE_RECEIPT: ${{ runner.temp }}/ecosystem-go-${{ matrix.os }}.json
+        run: |
+          python scripts/validate_ecosystem_fixtures.py `
+            --case go_builtin `
+            --require go_builtin `
+            --receipt "$env:AITEAM_FIXTURE_RECEIPT"
+
+      - name: Upload Go validation receipt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ecosystem-go-${{ matrix.os }}-receipt
+          path: ${{ runner.temp }}/ecosystem-go-${{ matrix.os }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  rust:
+    name: Rust · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install AI Teams package without provider dependencies
+        shell: pwsh
+        run: python -m pip install --no-deps -e .
+
+      - name: Validate runner-provided Rust toolchain
+        shell: pwsh
+        env:
+          AITEAM_FIXTURE_RECEIPT: ${{ runner.temp }}/ecosystem-rust-${{ matrix.os }}.json
+        run: |
+          python scripts/validate_ecosystem_fixtures.py `
+            --case rust_cargo `
+            --require rust_cargo `
+            --receipt "$env:AITEAM_FIXTURE_RECEIPT"
+
+      - name: Upload Rust validation receipt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ecosystem-rust-${{ matrix.os }}-receipt
+          path: ${{ runner.temp }}/ecosystem-rust-${{ matrix.os }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  c-cpp:
+    name: C/C++ + CMake · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install AI Teams package without provider dependencies
+        shell: pwsh
+        run: python -m pip install --no-deps -e .
+
+      - name: Validate runner-provided CMake toolchain
+        shell: pwsh
+        env:
+          AITEAM_FIXTURE_RECEIPT: ${{ runner.temp }}/ecosystem-c-cpp-${{ matrix.os }}.json
+        run: |
+          python scripts/validate_ecosystem_fixtures.py `
+            --case c_cpp_cmake `
+            --require c_cpp_cmake `
+            --receipt "$env:AITEAM_FIXTURE_RECEIPT"
+
+      - name: Upload C/C++ validation receipt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ecosystem-c-cpp-${{ matrix.os }}-receipt
+          path: ${{ runner.temp }}/ecosystem-c-cpp-${{ matrix.os }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  evidence-gate:
+    name: Audit SHA-bound polyglot evidence
+    if: always()
+    needs: [python-node, java-maven, dotnet, go, rust, c-cpp]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download all matrix receipts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ecosystem-*-receipt
+          path: ${{ runner.temp }}/ecosystem-receipts
+          merge-multiple: true
+
+      - name: Audit complete matrix and exact revision
+        env:
+          AITEAM_EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >
+          python scripts/audit_ecosystem_ci_receipts.py
+          --receipts-root "${{ runner.temp }}/ecosystem-receipts"
+          --expected-revision "${AITEAM_EXPECTED_SOURCE_SHA}"
+          --output "${{ runner.temp }}/ecosystem-ci-evidence.json"
+
+      - name: Upload aggregate evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ecosystem-ci-evidence
+          path: ${{ runner.temp }}/ecosystem-ci-evidence.json
+          if-no-files-found: error
+          retention-days: 30

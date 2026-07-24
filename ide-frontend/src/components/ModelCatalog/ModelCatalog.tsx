@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 
 import { apiFetch } from '../../lib/api';
+import './ModelCatalog.css';
 
 type StateValue = true | false | null;
 
@@ -525,12 +526,15 @@ export function ModelCatalog() {
     }
   }, []);
 
-  useEffect(() => { void loadCatalog(); }, [loadCatalog, refreshKey]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadCatalog(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadCatalog, refreshKey]);
 
   useEffect(() => {
     if (!filters.role) {
-      setRoleCandidates(null);
-      return;
+      const timer = window.setTimeout(() => setRoleCandidates(null), 0);
+      return () => window.clearTimeout(timer);
     }
     let cancelled = false;
     const loadRole = async () => {

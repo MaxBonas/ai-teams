@@ -1,6 +1,6 @@
 # Índice y autoridad documental
 
-Actualizado: `2026-07-23`
+Actualizado: `2026-07-24`
 
 Este índice distingue contratos activos e historial. Objetivos, pendientes y
 orden de ejecución viven juntos en `../task.md`; no existen planes paralelos.
@@ -11,6 +11,9 @@ orden de ejecución viven juntos en `../task.md`; no existen planes paralelos.
 |---|---|
 | `MIGRATION_PAPERCLIP.md` | Plan rector de reconstruccion Paperclip-like sobre SQLite. |
 | `INSTALLATION_AND_INTEGRATION.md` | Instalación, traslado entre máquinas, soporte de plataformas y protocolo de integración para personas/IA. |
+| `RELEASE_ARTIFACT.md` | Contrato reproducible de paquete, checksums, SBOM/licencias, blockers y protocolo de CI/publicación. |
+| `UPGRADE_AND_ROLLBACK.md` | Actualización side-by-side, verificación, migración SQLite y restauración segura. |
+| `ECOSYSTEM_SUPPORT_MATRIX.md` | Cobertura poliglota por fixture, OS y toolchain, con límites de promoción. |
 | `PAPERCLIP_GUIDE.md` | Guia practica para consultar Paperclip y adaptar sus patrones sin perder identidad AI Teams. |
 | `EXECUTION_SEMANTICS.md` | Contrato de issues, runs, wakeups, interactions, relaciones padre/hijo y liveness. |
 | `ORCHESTRATION.md` | Fuente canónica de routing, delegación, verificación, contexto, liveness y economía multi-LLM. |

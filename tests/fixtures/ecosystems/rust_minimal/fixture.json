@@ -1,0 +1,15 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "rust_minimal",
+  "expected_detected": ["rust"],
+  "cases": [
+    {
+      "id": "rust_cargo",
+      "ecosystem_id": "rust",
+      "actions": [
+        {"id": "build", "artifacts": ["target/debug/deps/*.rlib"]},
+        {"id": "test", "artifacts": []}
+      ]
+    }
+  ]
+}

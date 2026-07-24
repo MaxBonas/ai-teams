@@ -1,11 +1,34 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ThreadView } from './components/ThreadView';
+import { ProfileBadge } from './components/ProfileBadge';
+import { RunsPanel } from './components/RunsPanel';
+import { IssuePanel, IssuePipeline } from './components/IssuePanel';
+import { ChatPanel } from './components/ChatPanel';
 import { ModelCatalog } from './components/ModelCatalog';
 import { ModelRoleSelector } from './components/ModelRoleSelector';
+import { QuorumStepper } from './components/QuorumStepper';
+import {
+  type ConfigSection,
+} from './components/ConfigurationPanel';
+import {
+  CliSetupGuide,
+} from './components/ConfigurationPanel/CliSettings';
+import type { OrientationMeasurement } from './components/ConfigurationPanel/OrientationSettings';
+import { ConfigurationWorkspace } from './components/ConfigurationPanel/ConfigurationWorkspace';
+import type {
+  ModelCompatibility,
+} from './components/ConfigurationPanel/types';
+import { InfoTip } from './components/InfoTip';
+import { InboxPanel } from './components/InboxPanel';
+import {
+  HiringDecisionDetail,
+  type ProposedTeamMember,
+} from './components/InboxPanel/HiringDecisionDetail';
+import { useQuorum } from './hooks/useQuorum';
+import { useConfigurationData } from './hooks/useConfigurationData';
+import './components/TeamPanel.css';
 import {
   Activity,
   AlertCircle,
-  ArrowDown,
   Bell,
   Boxes,
   CheckCircle2,
@@ -17,16 +40,24 @@ import {
   GitBranch,
   KeyRound,
   ListChecks,
-  LockKeyhole,
   MessageSquare,
   Play,
   Plus,
   RefreshCcw,
   Send,
-  Trash2,
   Users,
 } from 'lucide-react';
 import { API_BASE, apiFetch, getWorkspacePath, setWorkspacePath } from './lib/api';
+import { formatTime, statusLabel } from './lib/format';
+import { renderMarkdownLite } from './lib/markdown';
+import type {
+  ChatMessage,
+  Comment,
+  Interaction,
+  Issue,
+  Run,
+  RunEvent,
+} from './types/cockpit';
 
 interface HealthPayload {
   status?: string;
@@ -111,63 +142,6 @@ interface LoopHealth {
   summary: { total_loops: number; total_at_risk: number; requires_attention: boolean };
 }
 
-interface ProjectSkill {
-  name: string;
-  body?: string;
-  applies_to_roles?: string[];
-  origin?: string;
-  status?: string;
-  approved_by?: string;
-  updated_at?: string;
-  evidence?: string[];
-}
-
-interface SkillGovernance {
-  max_project_skills: number;
-  max_learned_skills: number;
-  max_active_skill_bytes: number;
-  project_skills: number;
-  learned_skills: number;
-  active_skill_bytes: number;
-}
-
-interface McpServer {
-  name: string;
-  source?: string;
-  version?: string;
-  applies_to_roles?: string[];
-  status?: string;
-  approved_by?: string;
-  justification?: string;
-  updated_at?: string;
-  approved_tools?: Array<{ name: string; access: 'read' | 'write' }>;
-  health?: {
-    status?: string;
-    detail?: string;
-    checked_at?: string;
-    next_check_at?: string | null;
-    consecutive_failures?: number;
-    tools?: Array<{ name: string; read_only?: boolean }>;
-  };
-}
-
-interface McpCatalogEntry {
-  id: string;
-  display_name: string;
-  description: string;
-  publisher: string;
-  homepage: string;
-  source: string;
-  required_local_command: string;
-  version: string;
-  distribution_version: string;
-  env_required: string[];
-  applies_to_roles: string[];
-  capabilities: string[];
-  risk: string;
-  reviewed_at: string;
-}
-
 interface WorkspacePayload {
   workspace?: string;
   configured?: boolean;
@@ -179,85 +153,7 @@ interface WorkspacePayload {
   missing_workspace?: string;
 }
 
-interface Issue {
-  id: string;
-  parent_id?: string | null;
-  title: string;
-  description?: string | null;
-  status: string;
-  role?: string | null;
-  complexity?: string | null;
-  criticality?: string | null;
-  assignee_agent_id?: string | null;
-  priority?: number;
-  created_at?: string;
-  metadata_json?: string | null;
-  phase?: IssuePhase;
-  active_run?: ActiveIssueRun | null;
-  active_agent?: ActiveIssueAgent | null;
-}
-
-type IssuePhase = 'planning' | 'engineer' | 'tests' | 'review' | 'gate' | 'done';
-
-interface ActiveIssueRun {
-  id: string;
-  status: string;
-  agent_id?: string | null;
-  adapter_type?: string | null;
-  provider?: string | null;
-  model?: string | null;
-  channel?: string | null;
-  started_at?: string | null;
-}
-
-interface ActiveIssueAgent {
-  id: string;
-  role: string;
-  name: string;
-}
-
-interface QuorumContribution {
-  ordinal: number;
-  provider?: string | null;
-  model?: string | null;
-  channel?: string | null;
-  result?: Record<string, unknown> | string | null;
-  valid: boolean;
-}
-
-interface QuorumPayload {
-  success: boolean;
-  issue_id: string;
-  session: {
-    id: string;
-    issue_id: string;
-    status: string;
-    requested_contributions: number;
-    min_valid_contributions: number;
-    skipped_reason?: string | null;
-    final_plan_revision_id?: string | null;
-  };
-  contributions: QuorumContribution[];
-  gate: {
-    ready: boolean;
-    status: string;
-    valid_contributions: number;
-    total_contributions: number;
-    distinct_providers: number;
-    missing_valid: number;
-    diversity_satisfied: boolean;
-    reduced_quorum: boolean;
-  };
-}
-
-const ISSUE_PHASES: Array<{ key: IssuePhase; short: string; label: string }> = [
-  { key: 'planning', short: 'Plan', label: 'Planificación' },
-  { key: 'engineer', short: 'Dev', label: 'Ingeniería' },
-  { key: 'tests', short: 'Test', label: 'Pruebas' },
-  { key: 'review', short: 'Rev', label: 'Revisión' },
-  { key: 'gate', short: 'Gate', label: 'Gate' },
-  { key: 'done', short: 'Done', label: 'Finalizada' },
-];
+type ObjectiveKind = 'auto' | 'software' | 'research' | 'operations' | 'mixed';
 
 interface Agent {
   id: string;
@@ -272,50 +168,10 @@ interface Agent {
   supervisor_agent_id?: string | null;
 }
 
-interface ProposedTeamMember {
-  id: string;
-  role: string;
-  name: string;
-  seniority?: string;
-  adapter_type?: string;
-  adapter_config?: Record<string, unknown>;
-  adapter_profile_id?: string;
-  model?: string;
-  rationale?: string;
-  supervisor_agent_id?: string | null;
-}
-
 interface CapabilityEntry {
   description: string;
   tool_family: string;
   label: string;
-}
-
-interface AdapterProfile {
-  id: string;
-  label: string;
-  adapter_type: string;
-  channel?: string;
-  provider?: string;
-  status?: string;
-  config?: Record<string, unknown>;
-  model_options?: Array<{
-    value: string;
-    label: string;
-    available?: boolean;
-    selectable?: boolean;
-    availability?: string;
-    availability_reason?: string;
-    compatibility?: RoleModelOption['compatibility'];
-  }>;
-  model_catalog?: {
-    status?: string;
-    source?: string;
-    reason?: string;
-    installed_version?: string | null;
-    catalog_client_version?: string | null;
-  };
-  health?: AdapterHealth;
 }
 
 interface RoleModelOption {
@@ -330,67 +186,7 @@ interface RoleModelOption {
   selectable?: boolean;
   availability?: string;
   availability_reason?: string;
-  compatibility?: {
-    allowed?: boolean;
-    code?: string;
-    reason?: string;
-    alternatives?: Array<{ value: string; label: string }>;
-  };
-}
-
-interface CliStatus {
-  id: string;
-  label: string;
-  command: string;
-  available: boolean;
-  login_supported?: boolean;
-  login_hint?: string;
-  login_command?: string;
-  alternate_login_commands?: string[];
-  setup_url?: string;
-  setup_url_label?: string;
-  setup_steps?: string[];
-  credential_storage?: string;
-  post_login_check?: string;
-}
-
-function CliSetupGuide({ item }: { item: CliStatus }) {
-  if (!item.setup_steps?.length && !item.setup_url && !item.credential_storage) return null;
-  return (
-    <details className="cli-setup-guide">
-      <summary>Guía de configuración</summary>
-      {item.login_hint && <p>{item.login_hint}</p>}
-      {item.setup_steps?.length ? (
-        <ol>
-          {item.setup_steps.map((step) => <li key={step}>{step}</li>)}
-        </ol>
-      ) : null}
-      {item.setup_url && (
-        <a href={item.setup_url} target="_blank" rel="noreferrer">
-          {item.setup_url_label || 'Abrir documentación oficial'}
-        </a>
-      )}
-      {item.credential_storage && <p className="cli-credential-note">{item.credential_storage}</p>}
-      {item.post_login_check && (
-        <p>Comprobación manual: <code>{item.post_login_check}</code></p>
-      )}
-    </details>
-  );
-}
-
-interface AdapterHealth {
-  status: 'ok' | 'installed' | 'failed' | 'untested' | string;
-  checked_at?: string;
-  reason?: string;
-  detail?: string;
-  hint?: string;
-}
-
-interface SecretInfo {
-  ref: string;
-  provider: string;
-  name: string;
-  has_secret: boolean;
+  compatibility?: ModelCompatibility;
 }
 
 interface BudgetInfo {
@@ -500,21 +296,6 @@ const FIELD_TIPS = {
   name: 'Identificador del agente dentro del equipo. Por convención: rol-número (ej. eng-1, review-2).',
 };
 
-// ── InfoTip component ────────────────────────────────────────────────────────
-function InfoTip({ tip, wide }: { tip: string; wide?: boolean }) {
-  return (
-    // tabIndex hace el tooltip alcanzable por teclado (el CSS ya cubre :focus-within)
-    <span className={`info-tip${wide ? ' info-tip-wide' : ''}`} tabIndex={0}>
-      <svg className="info-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/>
-        <path d="M8 7.5v3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-        <circle cx="8" cy="5.5" r="0.75" fill="currentColor"/>
-      </svg>
-      <span className="info-tooltip" role="tooltip">{tip}</span>
-    </span>
-  );
-}
-
 const PROFILE_OPTIONS = [
   { value: 'full_team', label: 'Equipo completo', desc: 'Lead + Engineer + Reviewer' },
   { value: 'lead_quorum', label: 'Lead + Quorum', desc: 'Lead con auditores senior para planificación' },
@@ -536,6 +317,21 @@ const PROFILE_GUIDANCE: Record<string, { cost: string; risk: string }> = {
   },
 };
 
+const OBJECTIVE_KIND_OPTIONS: Array<{ value: ObjectiveKind; label: string }> = [
+  { value: 'auto', label: 'Automático (recomendado)' },
+  { value: 'software', label: 'Software' },
+  { value: 'research', label: 'Investigación / análisis' },
+  { value: 'operations', label: 'Operaciones' },
+  { value: 'mixed', label: 'Mixto' },
+];
+
+const OBJECTIVE_KIND_LABELS: Record<string, string> = {
+  software: 'Software',
+  research: 'Investigación',
+  operations: 'Operaciones',
+  mixed: 'Mixto',
+};
+
 // Perfil de ejecución de una issue, leído de metadata_json (persistido por el backend).
 const PROFILE_BADGES: Record<string, { label: string; cls: string }> = {
   full_team: { label: 'Equipo completo', cls: 'team' },
@@ -555,6 +351,15 @@ function issueMetadata(issue: Issue | null | undefined): Record<string, unknown>
 function issueProfile(issue: Issue | null | undefined): string | null {
   const profile = String(issueMetadata(issue).profile || '').trim().toLowerCase();
   return profile in PROFILE_BADGES ? profile : null;
+}
+
+function issueObjectiveKind(issue: Issue | null | undefined): string | null {
+  const metadata = issueMetadata(issue);
+  const classification = typeof metadata.objective_classification === 'object' && metadata.objective_classification
+    ? metadata.objective_classification as Record<string, unknown>
+    : {};
+  const kind = String(classification.kind || '').trim().toLowerCase();
+  return kind in OBJECTIVE_KIND_LABELS ? kind : null;
 }
 
 function issueCompatibilityContext(issue: Issue | null | undefined) {
@@ -585,164 +390,6 @@ function modelOptionCacheKey(profileId: string, role: string, issue: Issue | nul
   return `${profileId}:${role}:${context.runProfile}:${context.criticality}:${context.dataClass}`;
 }
 
-function ProfileBadge({ profile, compact }: { profile: string | null; compact?: boolean }) {
-  if (!profile) return null;
-  const badge = PROFILE_BADGES[profile];
-  if (!badge) return null;
-  return (
-    <span className={`profile-badge profile-${badge.cls}${compact ? ' profile-badge-compact' : ''}`}>
-      {badge.label}
-    </span>
-  );
-}
-
-function IssuePipeline({ issue }: { issue: Issue }) {
-  if (!issue.phase) return null;
-  const currentIndex = ISSUE_PHASES.findIndex((phase) => phase.key === issue.phase);
-  const actor = issue.active_agent?.name || issue.active_run?.agent_id || '';
-  return (
-    <div className="issue-pipeline" aria-label={`Fase actual: ${ISSUE_PHASES[currentIndex]?.label || issue.phase}`}>
-      <div className="issue-pipeline-track">
-        {ISSUE_PHASES.map((phase, index) => (
-          <span
-            key={phase.key}
-            className={`issue-pipeline-step${index < currentIndex ? ' complete' : ''}${index === currentIndex ? ' current' : ''}`}
-            title={phase.label}
-          >
-            <i />
-            <small>{phase.short}</small>
-          </span>
-        ))}
-      </div>
-      {actor && issue.phase !== 'done' ? (
-        <span className="issue-pipeline-actor" title={issue.active_run?.model || undefined}>
-          {actor}{issue.active_run?.status ? ` · ${statusLabel(issue.active_run.status)}` : ''}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function QuorumStepper({
-  quorum,
-  loading,
-  onCreateExecutionTask,
-}: {
-  quorum: QuorumPayload | null;
-  loading: boolean;
-  onCreateExecutionTask?: () => void;
-}) {
-  if (loading) return <div className="quorum-stepper quorum-loading">Leyendo quorum…</div>;
-  if (!quorum) return null;
-
-  const { session, contributions, gate } = quorum;
-  const skipped = session.status === 'skipped';
-  const degraded = session.status === 'degraded';
-  const synthesized = Boolean(session.final_plan_revision_id);
-  const requestComplete = skipped || contributions.length > 0 || gate.ready;
-  const auditComplete = skipped || gate.valid_contributions >= session.min_valid_contributions;
-  const steps = [
-    { label: 'Solicitud', detail: `${session.requested_contributions} aportes`, complete: requestComplete },
-    { label: 'Auditorías', detail: `${gate.valid_contributions}/${session.min_valid_contributions} válidas`, complete: auditComplete },
-    { label: 'Gate', detail: skipped ? 'omitido' : gate.ready ? 'superado' : `${gate.missing_valid} pendientes`, complete: skipped || gate.ready },
-    { label: 'Síntesis', detail: synthesized ? 'plan aceptado' : skipped ? 'no requerida' : 'pendiente', complete: skipped || synthesized },
-  ];
-
-  return (
-    <section className={`quorum-stepper${skipped ? ' skipped' : ''}${degraded ? ' degraded' : ''}`} aria-label="Estado del quorum de planificación">
-      <div className="quorum-stepper-header">
-        <div>
-          <span className="quorum-eyebrow">Quorum de planificación</span>
-          <strong>{skipped ? 'No requerido' : statusLabel(session.status)}</strong>
-        </div>
-        <span className={`quorum-gate-badge${gate.ready ? ' ready' : ''}`}>{gate.ready ? 'Gate listo' : 'Gate pendiente'}</span>
-        {gate.reduced_quorum && <span className="quorum-gate-badge">Quorum reducido · 1 senior</span>}
-      </div>
-      <div className="quorum-steps">
-        {steps.map((step, index) => (
-          <div className={`quorum-step${step.complete ? ' complete' : ''}`} key={step.label}>
-            <span className="quorum-step-node">{step.complete ? <CheckCircle2 size={15} /> : index + 1}</span>
-            <div><strong>{step.label}</strong><small>{step.detail}</small></div>
-          </div>
-        ))}
-      </div>
-      {(skipped || degraded) && <p className="quorum-skip-reason">{session.skipped_reason || 'El perfil de esta issue no requiere quorum.'}</p>}
-      {session.status === 'accepted' && session.final_plan_revision_id && onCreateExecutionTask && (
-        <div className="quorum-next-step">
-          <span>Plan aceptado — la planificación terminó. El siguiente paso es ejecutarlo:</span>
-          <button className="quorum-cta" data-testid="accepted-plan-cta" onClick={onCreateExecutionTask}>
-            Crear tarea de ejecución con este plan
-          </button>
-        </div>
-      )}
-      {!skipped && contributions.length > 0 && (
-        <div className="quorum-contributions">
-          {contributions.map((contribution) => (
-            <details key={contribution.ordinal} className={contribution.valid ? 'valid' : 'invalid'}>
-              <summary>
-                <span>Auditoría {contribution.ordinal}</span>
-                <span>{contribution.provider || 'provider'} · {contribution.model || 'modelo'}</span>
-                <span>{contribution.valid ? 'válida' : 'inválida'}</span>
-              </summary>
-              <pre>{typeof contribution.result === 'string' ? contribution.result : pretty(contribution.result)}</pre>
-            </details>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-interface Comment {
-  id: string;
-  issue_id: string;
-  body: string;
-  author_agent_id?: string | null;
-  author_user_id?: string | null;
-  source_run_id?: string | null;
-  created_at?: string;
-}
-
-interface Interaction {
-  id: string;
-  issue_id: string;
-  kind: string;
-  status: string;
-  title?: string | null;
-  summary?: string | null;
-  created_by_agent_id?: string | null;
-  resolved_by_user_id?: string | null;
-  created_at?: string;
-  resolved_at?: string | null;
-  payload?: Record<string, unknown>;
-  result?: Record<string, unknown>;
-}
-
-interface Run {
-  id: string;
-  agent_id: string;
-  issue_id?: string | null;
-  status: string;
-  invocation_source?: string;
-  error?: string | null;
-  error_code?: string | null;
-  created_at?: string;
-  started_at?: string | null;
-  finished_at?: string | null;
-  actual_cost_cents?: number | null;
-  result?: Record<string, unknown> | null;
-  usage?: Record<string, unknown> | null;
-}
-
-interface RunEvent {
-  id: string;
-  run_id: string;
-  event_type: string;
-  seq: number;
-  stream?: string | null;
-  payload?: Record<string, unknown> | null;
-  created_at?: string;
-}
 
 interface TimelineItem {
   id: string;
@@ -806,29 +453,6 @@ interface ProjectStatePayload {
   plan_document?: PlanDocument | null;
 }
 
-interface OrientationMeasurement {
-  consent: {
-    enabled: boolean;
-    current_session_id: string | null;
-    consented_at: string | null;
-    revoked_at: string | null;
-  };
-  sessions: Record<'active' | 'completed' | 'abandoned' | 'revoked', number>;
-  event_count: number;
-  flows: Record<string, Record<string, number>>;
-  privacy: {
-    storage: string;
-    external_transmission: boolean;
-    free_text_collected: boolean;
-    issue_or_workspace_ids_collected: boolean;
-  };
-  interpretation: {
-    constructs_not_measured: string[];
-    conclusion_allowed: boolean;
-    reason: string;
-  };
-}
-
 type TimelineType = 'issue' | 'comment' | 'interaction' | 'run' | 'activity' | 'cost' | 'tool';
 const TIMELINE_TYPES: TimelineType[] = ['issue', 'comment', 'interaction', 'run', 'activity', 'cost', 'tool'];
 
@@ -845,132 +469,6 @@ const TIMELINE_TYPE_LABELS: Record<TimelineType, string> = {
 
 type ViewMode = 'timeline' | 'issue' | 'plan' | 'runs' | 'chat' | 'inbox' | 'files' | 'team' | 'models' | 'config';
 
-// Secciones del panel de configuración, agrupadas por ámbito.
-type ConfigSection =
-  | 'proyecto' | 'autonomia' | 'medicion' | 'skills' | 'mcp' | 'danger'
-  | 'keys' | 'clis' | 'adapters' | 'sistema';
-
-interface ChatMessage {
-  id: string;
-  source_id: string;
-  item_type: 'message' | 'interaction';
-  sender: 'user' | 'agent';
-  author: string;
-  body: string;
-  title: string | null;
-  summary: string | null;
-  kind: string | null;
-  interaction_status: string | null;
-  payload: Record<string, unknown>;
-  issue_id: string;
-  source_run_id: string | null;
-  created_at: string;
-}
-
-function pretty(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-function renderMarkdownLite(markdown: string): React.ReactNode[] {
-  const lines = markdown.split(/\r?\n/);
-  const nodes: React.ReactNode[] = [];
-  let paragraph: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
-
-  const flushParagraph = () => {
-    if (!paragraph.length) return;
-    nodes.push(<p key={`p-${nodes.length}`}>{renderInlineMarkdown(paragraph.join(' '))}</p>);
-    paragraph = [];
-  };
-  const flushList = () => {
-    if (!list) return;
-    const Tag = list.ordered ? 'ol' : 'ul';
-    nodes.push(
-      <Tag key={`list-${nodes.length}`}>
-        {list.items.map((item, index) => <li key={index}>{renderInlineMarkdown(item)}</li>)}
-      </Tag>,
-    );
-    list = null;
-  };
-
-  lines.forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      flushParagraph();
-      flushList();
-      return;
-    }
-    const heading = /^(#{1,4})\s+(.+)$/.exec(trimmed);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      const level = Math.min(heading[1].length + 1, 4);
-      const content = renderInlineMarkdown(heading[2]);
-      if (level === 2) nodes.push(<h2 key={`h-${nodes.length}`}>{content}</h2>);
-      else if (level === 3) nodes.push(<h3 key={`h-${nodes.length}`}>{content}</h3>);
-      else nodes.push(<h4 key={`h-${nodes.length}`}>{content}</h4>);
-      return;
-    }
-    const ordered = /^\d+\.\s+(.+)$/.exec(trimmed);
-    const unordered = /^[-*]\s+(.+)$/.exec(trimmed);
-    if (ordered || unordered) {
-      flushParagraph();
-      const isOrdered = Boolean(ordered);
-      const item = (ordered || unordered)?.[1] || '';
-      if (!list || list.ordered !== isOrdered) {
-        flushList();
-        list = { ordered: isOrdered, items: [] };
-      }
-      list.items.push(item);
-      return;
-    }
-    flushList();
-    paragraph.push(trimmed);
-  });
-  flushParagraph();
-  flushList();
-  return nodes;
-}
-
-function renderInlineMarkdown(text: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
-  let last = 0;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > last) nodes.push(text.slice(last, match.index));
-    const token = match[0];
-    if (token.startsWith('`')) {
-      nodes.push(<code key={nodes.length}>{token.slice(1, -1)}</code>);
-    } else {
-      nodes.push(<strong key={nodes.length}>{token.slice(2, -2)}</strong>);
-    }
-    last = match.index + token.length;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
-}
-
-function statusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    accepted: 'aceptado',
-    blocked: 'bloqueado',
-    cancelled: 'cancelado',
-    completed: 'completado',
-    degraded: 'degradado',
-    done: 'done',
-    failed: 'fallido',
-    in_progress: 'en progreso',
-    pending: 'pendiente',
-    queued: 'en cola',
-    rejected: 'rechazado',
-    running: 'ejecutando',
-    skipped: 'sin trabajo',
-    todo: 'todo',
-  };
-  return labels[status] || status.replaceAll('_', ' ');
-}
-
 // Terminal statuses = the issue is closed (no more work expected).
 const CLOSED_ISSUE_STATUSES = new Set(['done', 'cancelled', 'completed']);
 function isClosedIssue(status: string): boolean {
@@ -980,30 +478,6 @@ function isClosedIssue(status: string): boolean {
 function shortPath(path: string): string {
   const parts = path.replaceAll('\\', '/').split('/');
   return parts.slice(-2).join('/');
-}
-
-function parseTime(value?: string | null): number {
-  if (!value) return 0;
-  let iso = value.includes('T') ? value : value.replace(' ', 'T');
-  // DB timestamps are UTC in two shapes: naive ("2026-07-09 14:35:58", from
-  // SQLite CURRENT_TIMESTAMP) and offset-suffixed ("...+00:00", from Python).
-  // A naive string parsed by Date.parse is treated as LOCAL time, which ran
-  // every clock in the app behind by the user's UTC offset. Tag naive strings
-  // as UTC; toLocaleString then renders in the system timezone.
-  if (iso.includes('T') && !/(?:Z|[+-]\d{2}:?\d{2})$/.test(iso)) iso += 'Z';
-  const parsed = Date.parse(iso);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatTime(value?: string | null): string {
-  const parsed = parseTime(value);
-  if (!parsed) return '-';
-  return new Date(parsed).toLocaleString([], {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 function clip(text: string, max = 220): string {
@@ -1018,10 +492,6 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [workspace, setWorkspace] = useState(getWorkspacePath());
   const [workspaceConfigured, setWorkspaceConfigured] = useState(false);
-  const [projectsRoot, setProjectsRoot] = useState('');
-  // Application-level settings (projects root, etc.)
-  const [settingsConfigured, setSettingsConfigured] = useState(true); // optimistic until loaded
-  const [settingsDraft, setSettingsDraft] = useState('');
   const [workspaceDraft, setWorkspaceDraft] = useState(getWorkspacePath());
   const [projectName, setProjectName] = useState('Nuevo Proyecto AI Teams');
   const [initialTask, setInitialTask] = useState('');
@@ -1036,8 +506,6 @@ export default function App() {
   const [selectedIssueId, setSelectedIssueId] = useState('issue:intake');
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [planDocument, setPlanDocument] = useState<PlanDocument | null>(null);
-  const [quorum, setQuorum] = useState<QuorumPayload | null>(null);
-  const [quorumLoading, setQuorumLoading] = useState(false);
   const [timelineTypeFilter, setTimelineTypeFilter] = useState<TimelineType | ''>('');
   const [issueFilter, setIssueFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [commentDraft, setCommentDraft] = useState('');
@@ -1050,8 +518,10 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   // Team profile for new tasks
   const [newTaskProfile, setNewTaskProfile] = useState<string>('full_team');
+  const [newTaskObjectiveKind, setNewTaskObjectiveKind] = useState<ObjectiveKind>('auto');
   // Perfil inicial conservador; quorum se elige explícitamente cuando el riesgo lo justifica.
   const [newProjectRunProfile, setNewProjectRunProfile] = useState<string>('full_team');
+  const [newProjectObjectiveKind, setNewProjectObjectiveKind] = useState<ObjectiveKind>('auto');
   const [newProjectDataClass, setNewProjectDataClass] = useState<string>('internal');
   // Plan aceptado adjunto a la próxima tarea (recibo por revisión, no texto copiado)
   const [pendingPlanRef, setPendingPlanRef] = useState<{ revisionId: string; sourceIssueId: string } | null>(null);
@@ -1078,13 +548,7 @@ export default function App() {
   }>>({});
   // Tool capability catalog
   const [capabilityCatalog, setCapabilityCatalog] = useState<Record<string, CapabilityEntry>>({});
-  const [adapterProfiles, setAdapterProfiles] = useState<AdapterProfile[]>([]);
-  const [adapterTestModels, setAdapterTestModels] = useState<Record<string, string>>({});
   const [roleModelOptions, setRoleModelOptions] = useState<Record<string, RoleModelOption[]>>({});
-  const [cliStatus, setCliStatus] = useState<CliStatus[]>([]);
-  const [secrets, setSecrets] = useState<SecretInfo[]>([]);
-  const [secretProvider, setSecretProvider] = useState('openai');
-  const [secretValue, setSecretValue] = useState('');
   const [selectedProjectAdapterIds, setSelectedProjectAdapterIds] = useState<string[]>([]);
   const [leadAdapterProfileId, setLeadAdapterProfileId] = useState('');
   const [leadModel, setLeadModel] = useState('');
@@ -1124,22 +588,44 @@ export default function App() {
   const [projectList, setProjectList] = useState<Array<{ name: string; path: string; current: boolean }>>([]);
   const [projectListOpen, setProjectListOpen] = useState(false);
   const [loopHealth, setLoopHealth] = useState<LoopHealth | null>(null);
-  // Autonomy policy (P5): supervised (default) | autonomous
-  const [autonomyMode, setAutonomyMode] = useState<string>('supervised');
-  const [autonomySaving, setAutonomySaving] = useState(false);
-  // Project skills (self-extension PR1)
-  const [projectSkills, setProjectSkills] = useState<ProjectSkill[]>([]);
-  const [skillGovernance, setSkillGovernance] = useState<SkillGovernance | null>(null);
-  const [skillDraft, setSkillDraft] = useState<{ name: string; roles: string; body: string; status: string }>({ name: '', roles: '', body: '', status: 'active' });
-  const [skillSaving, setSkillSaving] = useState(false);
-  // MCP server proposals (self-extension PR2) — read-only; approve/reject via the Pendientes popup
-  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
-  const [mcpCatalog, setMcpCatalog] = useState<McpCatalogEntry[]>([]);
-  const [mcpBusy, setMcpBusy] = useState<string>('');
-  const [mcpToolDrafts, setMcpToolDrafts] = useState<Record<string, Record<string, 'off' | 'read' | 'write'>>>({});
   // In-flight guard: the 20 s baseline and 2 s active-run intervals overlap;
   // skip a poll tick while the previous /api/project/state is still pending.
   const projectStatePollBusy = useRef(false);
+
+  const configurationData = useConfigurationData({
+    setGlobalBusy: setLoading,
+    reportError: setError,
+    reportResult: setLastResult,
+    setSelectedProjectAdapterIds,
+  });
+  const {
+    projectsRoot,
+    setProjectsRoot,
+    settingsConfigured,
+    settingsDraft,
+    setSettingsDraft,
+    adapterProfiles,
+    adapterTestModels,
+    setAdapterTestModels,
+    cliStatus,
+    secretProvider,
+    setSecretProvider,
+    secretValue,
+    setSecretValue,
+    autonomyMode,
+    setAutonomyMode,
+    autonomySaving,
+    profileState,
+    loadAppSettings,
+    saveAppSettings,
+    loadUserAdapters,
+    saveAutonomy,
+    loadProjectSkills,
+    loadMcpServers,
+    saveSecret,
+    launchCliLogin,
+    testAdapterProfile,
+  } = configurationData;
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedIssueId) || issues[0] || null,
@@ -1180,70 +666,12 @@ export default function App() {
     || wakeTargetId.replace(/^role:/, '').replace(/_/g, ' ');
   const projectDisplayName = workspace ? (workspace.replaceAll('\\', '/').split('/').filter(Boolean).pop() || 'Proyecto') : 'AI Teams';
   const selectedIssueProfile = issueProfile(selectedIssue);
-  const profileState = (profile: AdapterProfile) => {
-    const provider = String(profile.provider || '').toLowerCase();
-    const secretProvider = provider.includes('google') || provider.includes('gemini')
-      ? 'google'
-      : provider.includes('anthropic') || provider.includes('claude')
-        ? 'anthropic'
-        : provider.includes('openai') || provider.includes('codex')
-          ? 'openai'
-          : provider;
-    const hasSecret = Boolean(secretProvider && secrets.some((secret) => secret.provider === secretProvider && secret.has_secret));
-    const healthStatus = String(profile.health?.status || 'untested');
-    const connected = healthStatus === 'ok' || (profile.channel === 'api' && hasSecret);
-    const selectable = profile.status !== 'blocked_by_provider' && connected;
-    const label = connected
-      ? (healthStatus === 'ok' ? 'conectado y probado' : 'API key guardada')
-      : healthStatus === 'installed'
-        ? 'CLI instalado; login sin verificar'
-        : profile.status === 'blocked_by_provider'
-          ? 'bloqueado por proveedor'
-          : profile.channel === 'api'
-            ? 'falta API key'
-            : 'sin conectar';
-    return { connected, selectable, label, secretProvider };
-  };
-
-  const loadAppSettings = async () => {
-    try {
-      const res = await apiFetch('/api/settings');
-      if (!res.ok) return;
-      const data = (await res.json()) as { configured?: boolean; projects_root?: string; projects_root_effective?: string };
-      const configured = Boolean(data.configured);
-      setSettingsConfigured(configured);
-      const effective = data.projects_root_effective || data.projects_root || '';
-      setProjectsRoot(effective);
-      if (!settingsDraft) setSettingsDraft(data.projects_root || '');
-    } catch {
-      // settings unavailable — treat as configured so we don't block the UI
-      setSettingsConfigured(true);
-    }
-  };
-
-  const saveAppSettings = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await apiFetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projects_root: settingsDraft.trim() }),
-      });
-      if (!res.ok) {
-        const err = (await res.json()) as { detail?: string };
-        throw new Error(err.detail || `settings:${res.status}`);
-      }
-      const data = (await res.json()) as { configured?: boolean; projects_root_effective?: string };
-      setSettingsConfigured(Boolean(data.configured));
-      setProjectsRoot(data.projects_root_effective || settingsDraft.trim());
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'save_settings_failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  const { quorum, quorumLoading } = useQuorum({
+    workspaceConfigured,
+    issueId: selectedIssueId,
+    issueProfile: selectedIssueProfile,
+    reportError: setError,
+  });
   const applyWorkspace = (payload: WorkspacePayload) => {
     const confirmedWorkspace = payload.workspace || '';
     const configured = Boolean(payload.configured && confirmedWorkspace);
@@ -1286,45 +714,6 @@ export default function App() {
     }
   };
 
-  const loadUserAdapters = async () => {
-    try {
-      const response = await apiFetch('/api/user-adapters');
-      if (!response.ok) return;
-      const json = (await response.json()) as {
-        profiles?: AdapterProfile[];
-        cli_status?: CliStatus[];
-        secrets?: SecretInfo[];
-      };
-      const profiles = json.profiles || [];
-      const nextSecrets = json.secrets || [];
-      setAdapterProfiles(profiles);
-      setSelectedProjectAdapterIds((current) => {
-        if (current.length > 0) return current;
-        const preferred = profiles
-          .filter((profile) => profile.status !== 'blocked_by_provider')
-          .filter((profile) => {
-            const provider = String(profile.provider || '').toLowerCase();
-            const secretProvider = provider.includes('google') || provider.includes('gemini')
-              ? 'google'
-              : provider.includes('anthropic') || provider.includes('claude')
-                ? 'anthropic'
-                : provider.includes('openai') || provider.includes('codex')
-                  ? 'openai'
-                  : provider;
-            const hasSecret = nextSecrets.some((secret) => secret.provider === secretProvider && secret.has_secret);
-            return String(profile.health?.status || '') === 'ok' || (profile.channel === 'api' && hasSecret);
-          })
-          .slice(0, 2)
-          .map((profile) => profile.id);
-        return preferred;
-      });
-      setCliStatus(json.cli_status || []);
-      setSecrets(nextSecrets);
-    } catch {
-      // non-critical local setup panel
-    }
-  };
-
   const loadPlanDocument = async (issueId: string) => {
     try {
       const response = await apiFetch(`/api/issues/${encodeURIComponent(issueId)}/documents/plan`);
@@ -1347,38 +736,6 @@ export default function App() {
       setPlanDocument(null);
     }
   };
-
-  useEffect(() => {
-    // Solo los perfiles de planificación multicultural crean una sesión. Evita
-    // sondear (y registrar 404 de red) en cada issue de ejecución ordinaria.
-    if (!workspaceConfigured || !selectedIssueId || selectedIssueProfile !== 'lead_quorum') {
-      setQuorum(null);
-      setQuorumLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    setQuorumLoading(true);
-    apiFetch(`/api/issues/${encodeURIComponent(selectedIssueId)}/quorum`, { signal: controller.signal })
-      .then(async (response) => {
-        if (response.status === 404) return null;
-        const json = (await response.json()) as QuorumPayload & { detail?: string };
-        if (!response.ok) throw new Error(json.detail || `quorum:${response.status}`);
-        return json;
-      })
-      .then((payload) => {
-        if (!controller.signal.aborted) setQuorum(payload);
-      })
-      .catch((reason: unknown) => {
-        if (!controller.signal.aborted) {
-          setQuorum(null);
-          setError(reason instanceof Error ? reason.message : 'No se pudo leer el quorum');
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setQuorumLoading(false);
-      });
-    return () => controller.abort();
-  }, [selectedIssueId, selectedIssueProfile, workspaceConfigured]);
 
   const loadProjectData = async (issueId = selectedIssueId, typeFilter = timelineTypeFilter) => {
     const params = new URLSearchParams({
@@ -1408,64 +765,6 @@ export default function App() {
     void loadBudgets();
     void loadCostSummary();
     void loadLoopHealth();
-  };
-
-  const saveAutonomy = async (mode: string) => {
-    if (mode === autonomyMode || autonomySaving) return;
-    setAutonomySaving(true);
-    const previous = autonomyMode;
-    setAutonomyMode(mode); // optimistic; revert on failure
-    try {
-      const res = await apiFetch('/api/project/autonomy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
-      });
-      const json = (await res.json()) as { success?: boolean; autonomy?: string; detail?: string };
-      if (!res.ok || !json.success) throw new Error(json.detail || `autonomy:${res.status}`);
-      setAutonomyMode(json.autonomy || mode);
-    } catch {
-      setAutonomyMode(previous);
-    } finally {
-      setAutonomySaving(false);
-    }
-  };
-
-  const loadProjectSkills = async () => {
-    try {
-      const res = await apiFetch('/api/project/skills');
-      if (!res.ok) return;
-      const json = (await res.json()) as { skills?: ProjectSkill[]; governance?: SkillGovernance };
-      setProjectSkills(json.skills || []);
-      setSkillGovernance(json.governance || null);
-    } catch { /* ignore */ }
-  };
-
-  const loadMcpServers = async () => {
-    try {
-      const [res, catalogRes] = await Promise.all([
-        apiFetch('/api/project/extensions/mcp'),
-        apiFetch('/api/project/extensions/mcp/catalog'),
-      ]);
-      if (!res.ok) return;
-      const json = (await res.json()) as { mcp_servers?: McpServer[] };
-      const servers = json.mcp_servers || [];
-      setMcpServers(servers);
-      if (catalogRes.ok) {
-        const catalogJson = (await catalogRes.json()) as { entries?: McpCatalogEntry[] };
-        setMcpCatalog(catalogJson.entries || []);
-      }
-      setMcpToolDrafts((current) => {
-        const next = { ...current };
-        for (const server of servers) {
-          const approved = new Map((server.approved_tools || []).map((tool) => [tool.name, tool.access]));
-          next[server.name] = Object.fromEntries(
-            (server.health?.tools || []).map((tool) => [tool.name, approved.get(tool.name) || 'off']),
-          );
-        }
-        return next;
-      });
-    } catch { /* ignore */ }
   };
 
   const loadOrientationMeasurement = async () => {
@@ -1559,135 +858,6 @@ export default function App() {
     await recordOrientationEvent('profile_selection', 'flow_completed', profile);
   };
 
-  const runMcpHealth = async (server: McpServer) => {
-    if (mcpBusy) return;
-    setMcpBusy(server.name);
-    setError('');
-    try {
-      const res = await apiFetch(`/api/project/extensions/mcp/${encodeURIComponent(server.name)}/health`, { method: 'POST' });
-      const json = (await res.json()) as { success?: boolean; detail?: string; mcp_server?: McpServer };
-      if (!res.ok) throw new Error(json.detail || `mcp_health:${res.status}`);
-      if (!json.success) setError(json.mcp_server?.health?.detail || 'El servidor no superó el health check.');
-      await loadMcpServers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'mcp_health_failed');
-    } finally {
-      setMcpBusy('');
-    }
-  };
-
-  const saveMcpToolPolicy = async (server: McpServer) => {
-    if (mcpBusy) return;
-    const draft = mcpToolDrafts[server.name] || {};
-    const tools = Object.entries(draft)
-      .filter(([, access]) => access !== 'off')
-      .map(([name, access]) => ({ name, access }));
-    if (tools.length === 0) {
-      setError('Aprueba al menos una herramienta o retira el servidor.');
-      return;
-    }
-    setMcpBusy(server.name);
-    setError('');
-    try {
-      const res = await apiFetch(`/api/project/extensions/mcp/${encodeURIComponent(server.name)}/tools`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tools }),
-      });
-      const json = (await res.json()) as { success?: boolean; detail?: string };
-      if (!res.ok || !json.success) throw new Error(json.detail || `mcp_tools:${res.status}`);
-      await loadMcpServers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'mcp_tools_failed');
-    } finally {
-      setMcpBusy('');
-    }
-  };
-
-  const transitionMcpServer = async (server: McpServer, action: 'retire' | 'reactivate') => {
-    if (mcpBusy) return;
-    setMcpBusy(server.name);
-    setError('');
-    try {
-      const res = await apiFetch(`/api/project/extensions/mcp/${encodeURIComponent(server.name)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      });
-      const json = (await res.json()) as { success?: boolean; detail?: string };
-      if (!res.ok || !json.success) throw new Error(json.detail || `mcp_lifecycle:${res.status}`);
-      await loadMcpServers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'mcp_lifecycle_failed');
-    } finally {
-      setMcpBusy('');
-    }
-  };
-
-  const saveProjectSkill = async () => {
-    const name = skillDraft.name.trim();
-    const body = skillDraft.body.trim();
-    if (!name || !body || skillSaving) return;
-    setSkillSaving(true);
-    try {
-      const roles = skillDraft.roles.split(',').map((r) => r.trim()).filter(Boolean);
-      const res = await apiFetch('/api/project/skills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, body, applies_to_roles: roles, status: skillDraft.status }),
-      });
-      const json = (await res.json()) as { success?: boolean; detail?: string };
-      if (!res.ok || !json.success) throw new Error(json.detail || `skill:${res.status}`);
-      setSkillDraft({ name: '', roles: '', body: '', status: 'active' });
-      await loadProjectSkills();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'skill_save_failed');
-    } finally {
-      setSkillSaving(false);
-    }
-  };
-
-  const editProjectSkill = (skill: ProjectSkill) => {
-    setSkillDraft({
-      name: skill.name,
-      roles: (skill.applies_to_roles || []).join(', '),
-      body: skill.body || '',
-      status: skill.status || 'active',
-    });
-  };
-
-  const toggleProjectSkill = async (skill: ProjectSkill) => {
-    const next = skill.status === 'active' ? 'retired' : 'active';
-    try {
-      const res = await apiFetch(`/api/project/skills/${encodeURIComponent(skill.name)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
-      });
-      const json = (await res.json()) as { success?: boolean; detail?: string };
-      if (!res.ok || !json.success) throw new Error(json.detail || `skill_status:${res.status}`);
-      await loadProjectSkills();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'skill_status_failed');
-    }
-  };
-
-  const deleteProjectSkill = async (skill: ProjectSkill) => {
-    try {
-      const res = await apiFetch(`/api/project/skills/${encodeURIComponent(skill.name)}`, { method: 'DELETE' });
-      const json = (await res.json()) as { success?: boolean; detail?: string };
-      if (!res.ok || !json.success) throw new Error(json.detail || `skill_delete:${res.status}`);
-      await loadProjectSkills();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'skill_delete_failed');
-    }
-  };
-
-  /**
-   * Poll issue:intake every 2 s until the Lead has started running (status ≠ 'todo').
-   * Shows the projectInitializing overlay during the wait.
-   * Times out after 90 s so the user is never permanently blocked.
-   */
   const waitForLeadInit = async () => {
     setProjectInitializing(true);
     const MAX_POLLS = 45; // 45 × 2 s = 90 s max
@@ -1753,7 +923,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    void refresh();
+    // Deferir al siguiente task evita una actualización en cascada durante el
+    // commit inicial y mantiene `refresh` reutilizable por los reintentos.
+    const timer = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1819,14 +992,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceConfigured, hasActiveRun, selectedIssueId, timelineTypeFilter]);
 
-  const loadChat = async () => {
+  async function loadChat() {
     try {
       const res = await apiFetch('/api/chat?limit=120');
       if (!res.ok) return;
       const json = (await res.json()) as { messages?: ChatMessage[] };
       setChatMessages(json.messages || []);
     } catch { /* ignore */ }
-  };
+  }
 
   const scrollChatToBottom = () => {
     const el = chatFeedRef.current;
@@ -1911,30 +1084,32 @@ export default function App() {
 
   // Lazy-load project skills + MCP servers only when the Config tab is open.
   useEffect(() => {
-    if (viewMode === 'config' && workspaceConfigured) {
+    if (viewMode !== 'config' || !workspaceConfigured) return undefined;
+    const timer = window.setTimeout(() => {
       void loadProjectSkills();
       void loadMcpServers();
       void loadOrientationMeasurement();
-    }
-  }, [viewMode, workspaceConfigured]);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadMcpServers, loadProjectSkills, viewMode, workspaceConfigured]);
 
-  const loadWsFiles = async () => {
+  async function loadWsFiles() {
     try {
       const res = await apiFetch('/api/workspace/files');
       if (!res.ok) return;
       const json = (await res.json()) as { files?: Array<{ path: string; size_bytes: number; mime: string }> };
       setWsFiles(json.files || []);
     } catch { /* ignore */ }
-  };
+  }
 
-  const loadLoopHealth = async () => {
+  async function loadLoopHealth() {
     try {
       const res = await apiFetch('/api/loop-health');
       if (!res.ok) return;
       const json = (await res.json()) as LoopHealth & { success?: boolean };
       setLoopHealth(json);
     } catch { /* non-critical — ignore */ }
-  };
+  }
 
   const loadWsFile = async (path: string) => {
     setWsFileLoading(true);
@@ -1949,32 +1124,32 @@ export default function App() {
     finally { setWsFileLoading(false); }
   };
 
-  const loadProjectList = async () => {
+  async function loadProjectList() {
     try {
       const res = await apiFetch('/api/projects');
       if (!res.ok) return;
       const json = (await res.json()) as { projects?: Array<{ name: string; path: string; current: boolean }> };
       setProjectList(json.projects || []);
     } catch { /* ignore */ }
-  };
+  }
 
-  const loadBudgets = async () => {
+  async function loadBudgets() {
     try {
       const res = await apiFetch('/api/budget');
       if (!res.ok) return;
       const json = (await res.json()) as { budgets?: BudgetInfo[] };
       setBudgets((json.budgets || []).filter((b) => b.budget_monthly_cents > 0));
     } catch { /* ignore */ }
-  };
+  }
 
-  const loadCostSummary = async () => {
+  async function loadCostSummary() {
     try {
       const res = await apiFetch('/api/costs/summary');
       if (!res.ok) return;
       const json = (await res.json()) as CostSummary & { success?: boolean };
       setCostSummary(json);
     } catch { /* ignore */ }
-  };
+  }
 
   const switchProject = async (path: string) => {
     setProjectListOpen(false);
@@ -2067,6 +1242,7 @@ export default function App() {
         body: JSON.stringify({
           name: projectName,
           initial_task: initialTask,
+          objective_kind: newProjectObjectiveKind,
           adapter_profile_ids: selectedProjectAdapterIds,
           lead_adapter_profile_id: leadAdapterProfileId,
           lead_model: leadModel,
@@ -2227,6 +1403,7 @@ export default function App() {
           status: 'todo',
           role: 'lead',
           complexity: 'medium',
+          objective_kind: newTaskObjectiveKind,
           assignee_agent_id: 'role:lead',
           metadata: {
             source: 'frontend_project_cockpit',
@@ -2274,6 +1451,7 @@ export default function App() {
 
       const runOnceJson = await runControlPlane();
       setNewTaskDraft('');
+      setNewTaskObjectiveKind('auto');
       setPendingPlanRef(null);
       setSelectedIssueId(issue.id);
       setViewMode('chat');
@@ -2318,68 +1496,6 @@ export default function App() {
       await loadProjectData(selectedIssueId);
     } catch (agentError) {
       setError(agentError instanceof Error ? agentError.message : 'agent_save_failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const saveSecret = async () => {
-    if (!secretValue.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const response = await apiFetch('/api/user-adapters/secrets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: secretProvider, name: 'default', secret: secretValue.trim() }),
-      });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.detail || `secret:${response.status}`);
-      setSecretValue('');
-      setLastResult(json);
-      await loadUserAdapters();
-    } catch (secretError) {
-      setError(secretError instanceof Error ? secretError.message : 'secret_save_failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const launchCliLogin = async (cliId: string) => {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await apiFetch('/api/user-adapters/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cli_id: cliId }),
-      });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.detail || `login:${response.status}`);
-      setLastResult(json);
-      await loadUserAdapters();
-    } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : 'subscription_login_failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const testAdapterProfile = async (profileId: string, model?: string) => {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await apiFetch('/api/user-adapters/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile_id: profileId, ...(model ? { model } : {}) }),
-      });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.detail || `adapter-test:${response.status}`);
-      setLastResult(json);
-      await loadUserAdapters();
-    } catch (testError) {
-      setError(testError instanceof Error ? testError.message : 'adapter_test_failed');
     } finally {
       setLoading(false);
     }
@@ -2776,11 +1892,11 @@ export default function App() {
     });
   };
 
-  const fetchRoleModelOptions = async (
+  async function fetchRoleModelOptions(
     profileId: string,
     role: string,
     issue: Issue | null | undefined = selectedIssue,
-  ): Promise<RoleModelOption[]> => {
+  ): Promise<RoleModelOption[]> {
     if (!profileId || !role) return [];
     const context = issueCompatibilityContext(issue);
     const key = modelOptionCacheKey(profileId, role, issue);
@@ -2834,7 +1950,7 @@ export default function App() {
     } catch {
       return [];
     }
-  };
+  }
 
   const updateHiringMemberSelection = (
     interactionId: string,
@@ -2996,6 +2112,18 @@ export default function App() {
               value={initialTask}
               onChange={(event) => setInitialTask(event.target.value)}
             />
+          </label>
+          <label>
+            Tipo de objetivo
+            <select
+              value={newProjectObjectiveKind}
+              onChange={(event) => setNewProjectObjectiveKind(event.target.value as ObjectiveKind)}
+            >
+              {OBJECTIVE_KIND_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <span className="hint">Controla el equipo, la evidencia y si corresponde ejecutar tests. Puedes dejar que AI Teams lo detecte.</span>
           </label>
 
           {/* ── Cómo empezar: el plan es la base ── */}
@@ -3606,6 +2734,18 @@ export default function App() {
               value={newTaskDraft}
               onChange={(event) => setNewTaskDraft(event.target.value)}
             />
+            <label>
+              Tipo de objetivo
+              <select
+                data-testid="new-task-objective-kind"
+                value={newTaskObjectiveKind}
+                onChange={(event) => setNewTaskObjectiveKind(event.target.value as ObjectiveKind)}
+              >
+                {OBJECTIVE_KIND_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
             {pendingPlanRef && (
               <div className="attached-plan-chip" data-testid="attached-plan" title={`Revisión ${pendingPlanRef.revisionId} de ${pendingPlanRef.sourceIssueId}`}>
                 📋 Plan aceptado adjunto
@@ -3797,63 +2937,20 @@ export default function App() {
           ) : null}
 
           {viewMode === 'issue' ? (
-            <section className="panel issue-panel">
-              {selectedIssue ? (
-                <>
-                  <div className="issue-header">
-                    <div>
-                      <h2>{selectedIssue.title}</h2>
-                      <p>{selectedIssue.description || selectedIssue.title}</p>
-                    </div>
-                    <div className="issue-header-tags">
-                      <ProfileBadge profile={selectedIssueProfile} />
-                      <span className={`status-pill status-${selectedIssue.status}`}>{statusLabel(selectedIssue.status)}</span>
-                    </div>
-                  </div>
-                  <div className="issue-meta">
-                    <span>Owner: {selectedIssue.assignee_agent_id || 'sin asignar'}</span>
-                    <span>Rol: {selectedIssue.role || '-'}</span>
-                    <span>Complejidad: {selectedIssue.complexity || '-'}</span>
-                    <span>Creada: {formatTime(selectedIssue.created_at)}</span>
-                  </div>
-
-                  {selectedInteractions.length ? (
-                    <div className="inline-interactions">
-                      {selectedInteractions.map((interaction) => (
-                        <span key={interaction.id}>{interaction.title || interaction.kind}: {statusLabel(interaction.status)}</span>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <div className="thread">
-                    {selectedIssue ? (
-                      <ThreadView
-                        key={selectedIssue.id}
-                        issueId={selectedIssue.id}
-                        preloadedComments={selectedComments}
-                      />
-                    ) : (
-                      <p className="muted">Sin comentarios.</p>
-                    )}
-                  </div>
-
-                  <div className="composer">
-                    <textarea
-                      placeholder="Añade contexto o una instruccion..."
-                      value={commentDraft}
-                      onChange={(event) => setCommentDraft(event.target.value)}
-                    />
-                    <button onClick={() => void addComment()} disabled={loading || !commentDraft.trim()}>
-                      Enviar
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <p className="muted">Sin issue seleccionada.</p>
-              )}
-            </section>
+            <IssuePanel
+              issue={selectedIssue}
+              profile={selectedIssueProfile}
+              objectiveLabel={issueObjectiveKind(selectedIssue)
+                ? OBJECTIVE_KIND_LABELS[issueObjectiveKind(selectedIssue) || ''] || null
+                : null}
+              interactions={selectedInteractions}
+              comments={selectedComments}
+              commentDraft={commentDraft}
+              busy={loading}
+              onCommentDraftChange={setCommentDraft}
+              onSubmitComment={addComment}
+            />
           ) : null}
-
           {viewMode === 'plan' ? (
             <section className="panel plan-panel">
               <div className="panel-title">
@@ -3917,117 +3014,32 @@ export default function App() {
           ) : null}
 
           {viewMode === 'chat' ? (
-            <section className="panel chat-panel-main">
-              <div className="chat-context-bar">
-                <MessageSquare size={13} />
-                <span>
-                  Conversación con <strong>Lead</strong>
-                  {selectedIssue ? <> · issue <strong>{clip(selectedIssue.title, 60)}</strong></> : null}
-                </span>
-                <ProfileBadge profile={selectedIssueProfile} compact />
-              </div>
-              <div className="chat-feed chat-feed-main" ref={chatFeedRef} onScroll={handleChatScroll}>
-                {chatMessages.length === 0 && (
-                  <p className="muted chat-empty">Sin mensajes aún. Escribe algo al Lead o despiértalo para empezar.</p>
-                )}
-                {chatMessages.map((msg) => {
-                  if (msg.item_type === 'interaction') {
-                    const isPending = msg.interaction_status === 'pending';
-                    return (
-                      <div key={msg.id} className={`chat-deciref${isPending ? ' pending' : ' resolved'}`}>
-                        {isPending ? <AlertCircle size={14} /> : <CheckCircle2 size={14} />}
-                        <div className="chat-deciref-body">
-                          <strong>{msg.title || msg.kind}</strong>
-                          {(msg.summary || msg.body) && (
-                            <span className="chat-deciref-sub">{clip(msg.summary || msg.body, 120)}</span>
-                          )}
-                        </div>
-                        {isPending ? (
-                          <button
-                            className="secondary-button chat-deciref-go"
-                            onClick={() => { setSelectedInteractionId(msg.source_id); setViewMode('inbox'); }}
-                          >
-                            Revisar en Bandeja →
-                          </button>
-                        ) : (
-                          <span className="chat-resolved-badge">{statusLabel(msg.interaction_status || '')}</span>
-                        )}
-                        <time className="chat-time">{formatTime(msg.created_at)}</time>
-                      </div>
-                    );
-                  }
-                  const isUser = msg.sender === 'user';
-                  // Derive a readable display name from the author field (e.g. "role:engineer" → "Engineer")
-                  const authorLabel = isUser
-                    ? 'Tú'
-                    : (msg.author || '')
-                        .replace(/^role:/, '')
-                        .replace(/_/g, ' ')
-                        .replace(/\b\w/g, (c) => c.toUpperCase()) || 'Agente';
-                  return (
-                    <div key={msg.id} className={`chat-bubble${isUser ? ' user' : ' agent'}`}>
-                      <div className="chat-bubble-meta">
-                        <span className="chat-author">{authorLabel}</span>
-                        <time className="chat-time">{formatTime(msg.created_at)}</time>
-                      </div>
-                      <div className="chat-bubble-body">
-                        {isUser ? msg.body : renderMarkdownLite(msg.body)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {chatJumpVisible && (
-                <button className="chat-jump-bottom" onClick={scrollChatToBottom} title="Ir al final del chat">
-                  <ArrowDown size={15} />
-                </button>
-              )}
-              <div className="chat-input-row chat-input-row-main">
-                <span
-                  className="chat-dest-chip"
-                  title={`El mensaje se envía al Lead en la issue "${selectedIssue?.title || 'intake'}" (la seleccionada en el sidebar)`}
-                >
-                  → Lead · {clip(selectedIssue?.title || 'intake', 26)}
-                </span>
-                <input
-                  type="text"
-                  className="chat-input"
-                  placeholder="Escribe al Lead... (Enter para enviar)"
-                  value={chatDraft}
-                  onChange={(e) => setChatDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendChatMessage(); } }}
-                  disabled={chatSending}
-                />
-                <button
-                  className="chat-send-btn"
-                  onClick={() => void sendChatMessage()}
-                  disabled={chatSending || !chatDraft.trim()}
-                  title="Enviar"
-                >
-                  <Send size={15} />
-                </button>
-                <button
-                  className="secondary-button"
-                  onClick={() => void loadChat()}
-                  title="Actualizar"
-                  type="button"
-                  style={{ padding: '0 10px' }}
-                >
-                  <RefreshCcw size={14} />
-                </button>
-              </div>
-            </section>
+            <ChatPanel
+              issueTitle={selectedIssue?.title || ''}
+              profile={selectedIssueProfile}
+              messages={chatMessages}
+              feedRef={chatFeedRef}
+              onFeedScroll={handleChatScroll}
+              jumpVisible={chatJumpVisible}
+              draft={chatDraft}
+              sending={chatSending}
+              onReviewInteraction={(interactionId) => {
+                setSelectedInteractionId(interactionId);
+                setViewMode('inbox');
+              }}
+              onJumpToBottom={scrollChatToBottom}
+              onDraftChange={setChatDraft}
+              onSend={sendChatMessage}
+              onRefresh={loadChat}
+            />
           ) : null}
-
           {viewMode === 'inbox' ? (
-            <section className="panel inbox-panel">
-              {(() => {
-                const resolved = interactions
-                  .filter((i) => i.status !== 'pending')
-                  .sort((a, b) => parseTime(b.resolved_at || b.created_at) - parseTime(a.resolved_at || a.created_at))
-                  .slice(0, 20);
-                const ordered = [...pendingInteractions, ...resolved];
-                const current = ordered.find((i) => i.id === selectedInteractionId) || pendingInteractions[0] || ordered[0] || null;
+            <InboxPanel
+              interactions={interactions}
+              pendingInteractions={pendingInteractions}
+              selectedInteractionId={selectedInteractionId}
+              onSelect={setSelectedInteractionId}
+              renderDetail={(current) => {
                 const currentIssue = current ? issues.find((item) => item.id === current.issue_id) : null;
                 const isPending = current?.status === 'pending';
                 const isHiring = current?.kind === 'suggest_tasks';
@@ -4051,38 +3063,9 @@ export default function App() {
                   if (option?.compatibility?.allowed === false) return option.compatibility.reason || option.compatibility.code || 'Modelo incompatible';
                   return '';
                 }).find(Boolean) || '';
+                if (!current) return <p className="muted">Selecciona una decisión de la lista.</p>;
                 return (
-                  <div className="inbox-layout">
-                    <aside className="inbox-list">
-                      <div className="inbox-list-header">
-                        <Bell size={14} />
-                        <span>Decisiones</span>
-                        {hasPending && <span className="notif-badge">{pendingInteractions.length}</span>}
-                      </div>
-                      {ordered.length === 0 && (
-                        <p className="muted inbox-empty">
-                          Nada pendiente. Las preguntas y propuestas del equipo aparecerán aquí.
-                        </p>
-                      )}
-                      {ordered.map((interaction) => (
-                        <button
-                          key={interaction.id}
-                          className={`inbox-item${interaction.id === current?.id ? ' active' : ''}${interaction.status === 'pending' ? ' pending' : ' resolved'}`}
-                          onClick={() => setSelectedInteractionId(interaction.id)}
-                        >
-                          <span className="inbox-item-kind">
-                            {interaction.kind}{' · '}{formatTime(interaction.created_at)}
-                          </span>
-                          <span className="inbox-item-title">{interaction.title || interaction.kind}</span>
-                          <span className={`inbox-item-status status-${interaction.status}`}>{statusLabel(interaction.status)}</span>
-                        </button>
-                      ))}
-                    </aside>
-                    <div className="inbox-detail">
-                      {!current ? (
-                        <p className="muted">Selecciona una decisión de la lista.</p>
-                      ) : (
-                        <>
+                  <>
                           <div className="inbox-detail-header">
                             {isPending ? <AlertCircle size={15} /> : <CheckCircle2 size={15} />}
                             <h3>{current.title || current.kind}</h3>
@@ -4149,61 +3132,27 @@ export default function App() {
                             </div>
                           )}
 
-                          {isHiring && isDirect && (
-                            <p className="hiring-direct">Solo Lead — ejecutará directamente sin contratar equipo.</p>
-                          )}
-                          {isHiring && !isDirect && hiringTeam.length > 0 && (
-                            <div className="inbox-hiring">
-                              <div className="hiring-header">Equipo propuesto — ajusta adapter y modelo antes de contratar:</div>
-                              <div className="inbox-table-scroll">
-                                <table className="hiring-table">
-                                  <thead>
-                                    <tr><th>Rol</th><th>Agente</th><th>Adapter</th><th>Modelo</th><th>Por qué</th></tr>
-                                  </thead>
-                                  <tbody>
-                                    {hiringTeam.map((member, idx) => {
-                                      const pId = String(member.adapter_profile_id || (member.adapter_config || {}).profile_id || '');
-                                      const interactionIssue = issues.find((item) => item.id === current?.issue_id) || selectedIssue;
-                                      const roleKey = modelOptionCacheKey(pId, member.role || '', interactionIssue);
-                                      const roleOpts = roleModelOptions[roleKey];
-                                      const topRec = roleOpts?.find((o) => o.recommended);
-                                      return (
-                                        <tr key={member.id}>
-                                          <td className="hiring-table-role">{member.role}</td>
-                                          <td className="hiring-table-name">{member.name}</td>
-                                          <td colSpan={2}>
-                                            <ModelRoleSelector
-                                              role={member.role || ''}
-                                              issueId={interactionIssue?.id || ''}
-                                              profileId={pId}
-                                              model={String(member.model || (member.adapter_config || {}).model || '')}
-                                              {...issueCompatibilityContext(interactionIssue)}
-                                              disabled={!isPending}
-                                              onChange={({ profileId, model, candidateId }) => updateHiringMemberSelection(
-                                                current.id, hiringTeam, idx, profileId, model, candidateId,
-                                              )}
-                                            />
-                                          </td>
-                                          <td className="hiring-table-why">{topRec?.fit_reason || member.rationale || '—'}</td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                              {suggestedIssues.length > 0 && (
-                                <>
-                                  <div className="hiring-header">Issues que se crearán:</div>
-                                  {suggestedIssues.map((iss) => (
-                                    <div className="hiring-issue" key={String(iss.id)}>
-                                      <span className="hiring-delegation">{String(iss.delegation_type || 'work')}</span>
-                                      <span className="hiring-issue-title">{String(iss.title || '')}</span>
-                                      <span className="hiring-assignee">→ {String(iss.assignee_agent_id || iss.role || '?')}</span>
-                                    </div>
-                                  ))}
-                                </>
+                          {isHiring && (
+                            <HiringDecisionDetail
+                              direct={isDirect}
+                              team={hiringTeam}
+                              suggestedIssues={suggestedIssues}
+                              interactionId={current.id}
+                              issueId={hiringIssue?.id || ''}
+                              {...issueCompatibilityContext(hiringIssue)}
+                              pending={isPending}
+                              getRoleOptions={(profileId, role) => roleModelOptions[
+                                modelOptionCacheKey(profileId, role, hiringIssue)
+                              ]}
+                              onSelectionChange={(index, profileId, model, candidateId) => updateHiringMemberSelection(
+                                current.id,
+                                hiringTeam,
+                                index,
+                                profileId,
+                                model,
+                                candidateId,
                               )}
-                            </div>
+                            />
                           )}
 
                           {isPending && (
@@ -4252,116 +3201,25 @@ export default function App() {
                             </div>
                           )}
                           <time className="chat-time">{formatTime(current.created_at)}</time>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                  </>
                 );
-              })()}
-            </section>
+              }}
+            />
           ) : null}
 
           {viewMode === 'runs' ? (
-            <section className="panel runs-panel">
-              <div className="runs-layout">
-                <div className="run-list-col">
-                  <div className="panel-title">
-                    <GitBranch size={18} />
-                    Runs
-                  </div>
-                  <div className="run-table">
-                    {runs.map((run) => (
-                      <button
-                        className={`run-row${selectedRun?.id === run.id ? ' active' : ''} status-bg-${run.status}`}
-                        key={run.id}
-                        onClick={() => { setRunId(run.id); void loadRunDetail(run.id); }}
-                      >
-                        <div className="run-row-header">
-                          <span className={`status-pill status-${run.status}`}>{statusLabel(run.status)}</span>
-                          <span className="run-time">{formatTime(run.started_at || run.created_at)}</span>
-                        </div>
-                        <span className="run-id-label">{run.id.slice(-12)}</span>
-                        <small>{run.agent_id}</small>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="form-row compact-row">
-                    <input placeholder="run id completo" value={runId} onChange={(event) => setRunId(event.target.value)} />
-                    <button onClick={() => void loadRunDetail(runId)} disabled={loading || !runId.trim()}>Ver</button>
-                  </div>
-                </div>
-
-                {selectedRun ? (
-                  <div className="run-detail-col">
-                    <div className="panel-title">
-                      <Activity size={18} />
-                      Detalle
-                    </div>
-                    <dl className="run-meta">
-                      <dt>ID</dt><dd>{selectedRun.id}</dd>
-                      <dt>Agente</dt><dd>{selectedRun.agent_id}</dd>
-                      <dt>Issue</dt><dd>{selectedRun.issue_id || '-'}</dd>
-                      <dt>Estado</dt>
-                      <dd><span className={`status-pill status-${selectedRun.status}`}>{statusLabel(selectedRun.status)}</span></dd>
-                      {selectedRun.error ? <><dt>Error</dt><dd className="run-error">{selectedRun.error}{selectedRun.error_code ? ` (${selectedRun.error_code})` : ''}</dd></> : null}
-                      {selectedRun.actual_cost_cents ? <><dt>Coste</dt><dd>{selectedRun.actual_cost_cents}¢</dd></> : null}
-                      <dt>Inicio</dt><dd>{formatTime(selectedRun.started_at || selectedRun.created_at)}</dd>
-                      <dt>Fin</dt><dd>{formatTime(selectedRun.finished_at) || '-'}</dd>
-                    </dl>
-                    {runEvents.length > 0 ? (
-                      <div className="run-events">
-                        <div className="run-events-header">Eventos ({runEvents.length})</div>
-                        {runEvents.map((ev) => {
-                          // file_ops: show a nice file list instead of raw JSON
-                          if (ev.event_type === 'file_ops' && ev.payload) {
-                            const ops = (ev.payload.ops as Array<{ op: string; path: string }> | undefined) || [];
-                            return (
-                              <div className="run-event run-event-fileops stream-tool" key={ev.id}>
-                                <span className="ev-seq">#{ev.seq}</span>
-                                <span className="ev-type ev-type-fileops">
-                                  <FolderOpen size={13} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-                                  file_ops ({ops.length})
-                                </span>
-                                {ops.length > 0 && (
-                                  <ul className="ev-fileops-list">
-                                    {ops.map((op, i) => (
-                                      <li key={i} className={`ev-fileop ev-fileop-${op.op}`}>
-                                        <span className="ev-fileop-badge">{op.op}</span>
-                                        <span className="ev-fileop-path">{op.path}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                                <time>{formatTime(ev.created_at)}</time>
-                              </div>
-                            );
-                          }
-                          const text = ev.payload?.text
-                            ? String(ev.payload.text).slice(0, 300)
-                            : ev.payload
-                              ? JSON.stringify(ev.payload).slice(0, 200)
-                              : '';
-                          return (
-                            <div className={`run-event stream-${ev.stream || 'none'}`} key={ev.id}>
-                              <span className="ev-seq">#{ev.seq}</span>
-                              <span className="ev-type">{ev.event_type}{ev.stream ? `/${ev.stream}` : ''}</span>
-                              {text ? <p className="ev-body">{text}</p> : null}
-                              <time>{formatTime(ev.created_at)}</time>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="muted">Sin eventos registrados.</p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="run-detail-col muted-center">
-                    <p className="muted">Selecciona una run para ver su detalle y eventos.</p>
-                  </div>
-                )}
-              </div>
-            </section>
+            <RunsPanel
+              runs={runs}
+              selectedRun={selectedRun}
+              events={runEvents}
+              runId={runId}
+              busy={loading}
+              onRunIdChange={setRunId}
+              onSelectRun={async (nextRunId) => {
+                setRunId(nextRunId);
+                await loadRunDetail(nextRunId);
+              }}
+            />
           ) : null}
           {viewMode === 'files' ? (
             <section className="panel files-panel">
@@ -4420,570 +3278,28 @@ export default function App() {
           ) : null}
 
           {viewMode === 'config' ? (
-            <section className="panel config-panel">
-              <div className="config-layout">
-                <nav className="config-nav" aria-label="Secciones de configuración">
-                  <div className="config-nav-group">Este proyecto · {projectDisplayName}</div>
-                  <button className={`config-nav-item${cfgSection === 'proyecto' ? ' active' : ''}`} onClick={() => setCfgSection('proyecto')}>Proyecto activo</button>
-                  <button className={`config-nav-item${cfgSection === 'autonomia' ? ' active' : ''}`} onClick={() => setCfgSection('autonomia')}>Autonomía</button>
-                  <button data-testid="orientation-config-nav" className={`config-nav-item${cfgSection === 'medicion' ? ' active' : ''}`} onClick={() => setCfgSection('medicion')}>Privacidad y medición</button>
-                  <button className={`config-nav-item${cfgSection === 'skills' ? ' active' : ''}`} onClick={() => setCfgSection('skills')}>Skills del proyecto</button>
-                  <button className={`config-nav-item${cfgSection === 'mcp' ? ' active' : ''}`} onClick={() => setCfgSection('mcp')}>Extensiones MCP</button>
-                  <button className={`config-nav-item config-nav-danger${cfgSection === 'danger' ? ' active' : ''}`} onClick={() => setCfgSection('danger')}>Zona de peligro</button>
-                  <div className="config-nav-group">Aplicación · global</div>
-                  <button className={`config-nav-item${cfgSection === 'keys' ? ' active' : ''}`} onClick={() => setCfgSection('keys')}>Credenciales API</button>
-                  <button className={`config-nav-item${cfgSection === 'clis' ? ' active' : ''}`} onClick={() => setCfgSection('clis')}>CLIs de suscripción</button>
-                  <button className={`config-nav-item${cfgSection === 'adapters' ? ' active' : ''}`} onClick={() => setCfgSection('adapters')}>Adapters y salud</button>
-                  <button className={`config-nav-item${cfgSection === 'sistema' ? ' active' : ''}`} onClick={() => setCfgSection('sistema')}>Carpeta y sistema</button>
-                </nav>
-
-                <div className="config-main">
-                  {['proyecto', 'autonomia', 'medicion', 'skills', 'mcp', 'danger'].includes(cfgSection) ? (
-                    <p className="config-scope-note">Ámbito: solo este proyecto. Los demás proyectos no cambian.</p>
-                  ) : (
-                    <p className="config-scope-note">Ámbito: toda la aplicación — afecta a todos los proyectos.</p>
-                  )}
-
-                  {cfgSection === 'proyecto' && (
-                    <div className="config-subsection">
-                      <div className="config-subsection-label">
-                        Proyecto activo
-                        <InfoTip tip="El proyecto que el backend tiene abierto ahora. Cada proyecto tiene su propia base de datos SQLite. Para cambiar de proyecto usa el selector del nombre en la barra superior." wide />
-                      </div>
-                      <dl className="config-dl config-dl-compact">
-                        <dt>Estado</dt>
-                        <dd>
-                          <span className={`cfg-status-chip${health?.status === 'ok' ? ' ok' : ''}`}>
-                            {health?.status || '—'}
-                          </span>
-                        </dd>
-                        <dt>Modo</dt><dd>{health?.mode || '—'}</dd>
-                        <dt>Ruta</dt><dd className="config-path">{workspace || '—'}</dd>
-                      </dl>
-                      <details className="config-advanced">
-                        <summary>Abrir ruta manualmente (avanzado)</summary>
-                        <div className="config-field-row" style={{ marginTop: '8px' }}>
-                          <input
-                            value={workspaceDraft}
-                            onChange={(event) => setWorkspaceDraft(event.target.value)}
-                            placeholder="Ruta absoluta al proyecto"
-                          />
-                          <button className="config-inline-btn" onClick={() => void saveWorkspace()} disabled={loading}>
-                            Aplicar
-                          </button>
-                        </div>
-                      </details>
-                    </div>
-                  )}
-
-                  {cfgSection === 'autonomia' && (
-                    <div className="config-subsection">
-                      <div className="config-subsection-label">
-                        Autonomía
-                        <InfoTip
-                          tip="Supervisado: todas las escalaciones esperan tu decisión. Autónomo: las escalaciones operativas (breakers, bucles, hijos bloqueados) se auto-resuelven con su opción segura una vez por issue; las decisiones de producto (cierre de ciclo, alcance, preguntas) siempre te esperan."
-                          wide
-                        />
-                      </div>
-                      <div className="config-field-row">
-                        <button
-                          className={autonomyMode === 'supervised' ? 'config-inline-btn' : 'secondary-button'}
-                          onClick={() => void saveAutonomy('supervised')}
-                          disabled={autonomySaving || !workspaceConfigured}
-                        >
-                          Supervisado
-                        </button>
-                        <button
-                          className={autonomyMode === 'autonomous' ? 'config-inline-btn' : 'secondary-button'}
-                          onClick={() => void saveAutonomy('autonomous')}
-                          disabled={autonomySaving || !workspaceConfigured}
-                        >
-                          Autónomo
-                        </button>
-                      </div>
-                      <p className="config-hint">
-                        Modo actual: <code>{autonomyMode}</code>
-                        {autonomyMode === 'autonomous'
-                          ? ' — las interacciones operativas se resuelven solas (una vez por issue y motivo).'
-                          : ' — el equipo se detiene en cada escalación hasta que respondas.'}
-                        {' '}También conmutable desde la barra superior.
-                      </p>
-                    </div>
-                  )}
-
-                  {cfgSection === 'medicion' && (
-                    <div className="config-subsection orientation-lab" data-testid="orientation-measurement-panel">
-                      <div className="orientation-lab-head">
-                        <div className="orientation-lab-icon"><LockKeyhole size={19} /></div>
-                        <div>
-                          <span className="orientation-eyebrow">Instrumentación local · opt-in</span>
-                          <h3>Medir la orientación sin leer tu trabajo</h3>
-                        </div>
-                        <span className={`orientation-signal${orientationMeasurement?.consent.enabled ? ' live' : ''}`} data-testid="orientation-measurement-status">
-                          <i />{orientationMeasurement?.consent.enabled ? 'Midiendo' : 'Apagado'}
-                        </span>
-                      </div>
-
-                      <p className="orientation-intro">
-                        Registra únicamente pasos en Bandeja, selección de perfil y plan aceptado → tarea.
-                        Los datos se quedan en la SQLite de este proyecto y nunca incluyen títulos, prompts,
-                        rutas, issues ni texto escrito.
-                      </p>
-
-                      <div className="orientation-privacy-grid" aria-label="Garantías de privacidad">
-                        <span><strong>LOCAL</strong> SQLite del proyecto</span>
-                        <span><strong>0</strong> transmisión externa</span>
-                        <span><strong>0</strong> campos de texto</span>
-                        <span><strong>3</strong> flujos cerrados</span>
-                      </div>
-
-                      <div className="orientation-console">
-                        <div><strong>{Object.values(orientationMeasurement?.sessions || {}).reduce((sum, count) => sum + count, 0)}</strong><span>sesiones</span></div>
-                        <div><strong>{orientationMeasurement?.sessions.abandoned || 0}</strong><span>abandonos</span></div>
-                        <div><strong>{orientationMeasurement?.event_count || 0}</strong><span>eventos</span></div>
-                      </div>
-
-                      <div className="orientation-actions">
-                        <button
-                          type="button"
-                          data-testid="orientation-consent-toggle"
-                          aria-pressed={Boolean(orientationMeasurement?.consent.enabled)}
-                          className={`orientation-consent-button${orientationMeasurement?.consent.enabled ? ' active' : ''}`}
-                          disabled={orientationBusy || !orientationMeasurement}
-                          onClick={() => void changeOrientationConsent(!orientationMeasurement?.consent.enabled)}
-                        >
-                          <span className="orientation-toggle-track"><i /></span>
-                          {orientationMeasurement?.consent.enabled ? 'Revocar consentimiento' : 'Activar medición local'}
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="orientation-delete-data"
-                          className="orientation-delete-button"
-                          disabled={orientationBusy || !orientationMeasurement || (orientationMeasurement.event_count === 0 && Object.values(orientationMeasurement.sessions).every((count) => count === 0))}
-                          onClick={() => void eraseOrientationMeasurement()}
-                        >
-                          <Trash2 size={14} /> Borrar medidas
-                        </button>
-                      </div>
-
-                      <p className="orientation-boundary">
-                        <AlertCircle size={14} /> Estos conteos detectan fricción y abandono; por sí solos no
-                        demuestran adopción, claridad, satisfacción ni causalidad. Las conclusiones requieren
-                        sesiones humanas y un criterio definido antes de observarlas.
-                      </p>
-                    </div>
-                  )}
-
-                  {cfgSection === 'skills' && (
-                    <div className="config-subsection">
-                      <div className="config-subsection-label">
-                        Skills del proyecto
-                        <InfoTip
-                          tip="Conocimiento local que se inyecta a los roles indicados en cada run, ADEMÁS de su skill base. Refina el rol (p.ej. 'las escenas Unity se regeneran con Tools > Create Test Scene'); nunca contradice tus directivas. Deja los roles vacíos para aplicar a todos."
-                          wide
-                        />
-                      </div>
-                      {skillGovernance && (
-                        <p className="config-help">
-                          Uso: {skillGovernance.project_skills}/{skillGovernance.max_project_skills} skills;{' '}
-                          {skillGovernance.learned_skills}/{skillGovernance.max_learned_skills} aprendidas;{' '}
-                          {skillGovernance.active_skill_bytes.toLocaleString()}/{skillGovernance.max_active_skill_bytes.toLocaleString()} bytes activos.
-                        </p>
-                      )}
-                      {projectSkills.length > 0 && (
-                        <div className="skill-list">
-                          {projectSkills.map((skill) => (
-                            <div key={skill.name} className={`skill-item${skill.status === 'active' ? '' : ' retired'}`}>
-                              <div className="skill-item-head">
-                                <strong>{skill.name}</strong>
-                                <span className="skill-roles">
-                                  {(skill.applies_to_roles && skill.applies_to_roles.length > 0)
-                                    ? skill.applies_to_roles.join(', ')
-                                    : 'todos los roles'}
-                                </span>
-                                {skill.status === 'retired' && <span className="skill-badge">retirada</span>}
-                                {skill.origin === 'learned' && <span className="skill-badge">aprendida</span>}
-                                {skill.status === 'proposed' && <span className="skill-badge">pendiente de aprobación</span>}
-                              </div>
-                              {skill.evidence && skill.evidence.length > 0 && (
-                                <div className="config-help">Evidencia: {skill.evidence.join(' · ')}</div>
-                              )}
-                              <div className="skill-item-actions">
-                                <button className="config-inline-btn" onClick={() => editProjectSkill(skill)}>Editar</button>
-                                <button className="secondary-button" onClick={() => void toggleProjectSkill(skill)}>
-                                  {skill.status === 'active' ? 'Retirar' : 'Activar'}
-                                </button>
-                                <button className="danger-button" onClick={() => void deleteProjectSkill(skill)}>Borrar</button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className="skill-form">
-                        <input
-                          placeholder="Nombre (p.ej. unity-scene-regen)"
-                          value={skillDraft.name}
-                          onChange={(e) => setSkillDraft((d) => ({ ...d, name: e.target.value }))}
-                        />
-                        <input
-                          placeholder="Roles separados por coma (vacío = todos)"
-                          value={skillDraft.roles}
-                          onChange={(e) => setSkillDraft((d) => ({ ...d, roles: e.target.value }))}
-                        />
-                        <textarea
-                          placeholder="Conocimiento en markdown que verán los agentes…"
-                          value={skillDraft.body}
-                          onChange={(e) => setSkillDraft((d) => ({ ...d, body: e.target.value }))}
-                          rows={4}
-                        />
-                        <button
-                          className="config-inline-btn"
-                          onClick={() => void saveProjectSkill()}
-                          disabled={skillSaving || !workspaceConfigured || !skillDraft.name.trim() || !skillDraft.body.trim()}
-                        >
-                          {skillSaving ? 'Guardando…' : 'Guardar skill'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {cfgSection === 'mcp' && (
-                    <div className="config-subsection">
-                      <div className="config-subsection-label">
-                        Extensiones MCP
-                        <InfoTip
-                          tip="El Lead propone activar un servidor MCP ya instalado cuando el equipo se topa con un límite real. Ejecutar código de terceros SIEMPRE espera tu aprobación en la Bandeja. Después, esta pantalla comprueba el servidor y te permite autorizar cada herramienta como lectura o escritura."
-                          wide
-                        />
-                      </div>
-                      <div className="mcp-catalog">
-                        <div className="mcp-tool-policy-title">
-                          <span>Catálogo revisado</span>
-                          <small>Solo descriptores: no instala, aprueba ni ejecuta nada.</small>
-                        </div>
-                        <div className="skill-list">
-                          {mcpCatalog.map((entry) => (
-                            <div key={entry.id} className="skill-item mcp-item">
-                              <div className="skill-item-head">
-                                <strong>{entry.display_name}</strong>
-                                <code className="mcp-version">{entry.distribution_version}</code>
-                                <span className="skill-badge">revisado {entry.reviewed_at}</span>
-                              </div>
-                              <p className="config-hint" style={{ margin: 0 }}>{entry.description}</p>
-                              <p className="config-hint" style={{ margin: 0 }}>
-                                ID <code>{entry.id}</code> · requiere <code>{entry.required_local_command}</code> · serverInfo <code>{entry.version}</code>
-                              </p>
-                              <p className="config-hint" style={{ margin: 0 }}>
-                                Roles: {entry.applies_to_roles.join(', ')} · Capacidades: {entry.capabilities.join(', ')}
-                              </p>
-                              <p className="config-hint" style={{ margin: 0 }}>{entry.risk}</p>
-                              <div className="skill-item-actions">
-                                <a className="config-inline-btn" href={entry.homepage} target="_blank" rel="noreferrer">Fuente oficial</a>
-                                <button className="secondary-button" onClick={() => void navigator.clipboard.writeText(entry.id)}>Copiar ID</button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      {mcpServers.length === 0 ? (
-                        <p className="config-hint">
-                          Ninguna todavía. Cuando el Lead identifique una necesidad real, te llegará una propuesta a la Bandeja.
-                        </p>
-                      ) : (
-                        <div className="skill-list">
-                          {mcpServers.map((server) => (
-                            <div key={server.name} className={`skill-item mcp-item status-${server.status || 'approved'}`}>
-                              <div className="skill-item-head">
-                                <strong>{server.name}</strong>
-                                {server.version && <code className="mcp-version">v{server.version}</code>}
-                                <span className="skill-roles">
-                                  {(server.applies_to_roles && server.applies_to_roles.length > 0)
-                                    ? server.applies_to_roles.join(', ')
-                                    : 'sin roles asignados'}
-                                </span>
-                                <span className="skill-badge">{server.status || 'approved'}</span>
-                              </div>
-                              {server.source && <p className="config-hint" style={{ margin: 0 }}><code>{server.source}</code></p>}
-                              {server.justification && <p className="config-hint" style={{ margin: 0 }}>{server.justification}</p>}
-                              {server.health && (
-                                <div className="mcp-health-line">
-                                  <span className={`mcp-health-dot ${server.health.status === 'ok' ? 'ok' : 'bad'}`} />
-                                  <span>{server.health.status === 'ok' ? 'Health vigente' : server.health.detail || 'Health fallido'}</span>
-                                  {server.health.consecutive_failures ? <strong>{server.health.consecutive_failures}/3 fallos</strong> : null}
-                                </div>
-                              )}
-                              {(server.health?.tools || []).length > 0 && server.status === 'active' && (
-                                <div className="mcp-tool-policy">
-                                  <div className="mcp-tool-policy-title">
-                                    <span>Permisos explícitos</span>
-                                    <small>Las sugerencias del servidor no conceden acceso.</small>
-                                  </div>
-                                  {(server.health?.tools || []).map((tool) => (
-                                    <label key={tool.name} className="mcp-tool-row">
-                                      <code>{tool.name}</code>
-                                      <span>{tool.read_only ? 'sugiere lectura' : 'sin garantía'}</span>
-                                      <select
-                                        value={mcpToolDrafts[server.name]?.[tool.name] || 'off'}
-                                        onChange={(event) => setMcpToolDrafts((current) => ({
-                                          ...current,
-                                          [server.name]: {
-                                            ...(current[server.name] || {}),
-                                            [tool.name]: event.target.value as 'off' | 'read' | 'write',
-                                          },
-                                        }))}
-                                        disabled={mcpBusy === server.name}
-                                      >
-                                        <option value="off">No autorizar</option>
-                                        <option value="read">Lectura</option>
-                                        <option value="write">Escritura</option>
-                                      </select>
-                                    </label>
-                                  ))}
-                                </div>
-                              )}
-                              <div className="skill-item-actions mcp-actions">
-                                {['approved', 'failed', 'active'].includes(server.status || 'approved') && (
-                                  <button className="config-inline-btn" onClick={() => void runMcpHealth(server)} disabled={Boolean(mcpBusy)}>
-                                    {mcpBusy === server.name ? 'Comprobando…' : server.status === 'approved' ? 'Probar y activar' : 'Comprobar ahora'}
-                                  </button>
-                                )}
-                                {server.status === 'active' && (server.health?.tools || []).length > 0 && (
-                                  <button onClick={() => void saveMcpToolPolicy(server)} disabled={Boolean(mcpBusy)}>
-                                    Guardar permisos
-                                  </button>
-                                )}
-                                {!['retired', 'rejected'].includes(server.status || '') ? (
-                                  <button className="danger-button" onClick={() => void transitionMcpServer(server, 'retire')} disabled={Boolean(mcpBusy)}>Retirar</button>
-                                ) : (
-                                  <button className="secondary-button" onClick={() => void transitionMcpServer(server, 'reactivate')} disabled={Boolean(mcpBusy)}>Reactivar</button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {cfgSection === 'danger' && (
-                    <div className="config-subsection danger-config-section">
-                      <div className="config-subsection-label danger-config-title">
-                        Zona de peligro
-                        <InfoTip tip="Las acciones de esta sección son irreversibles. No hay papelera de reciclaje: el proyecto se borra permanentemente del disco." wide />
-                      </div>
-                      <div className="danger-zone">
-                        <div className="danger-zone-desc">
-                          <strong>Eliminar proyecto actual</strong>
-                          <p>
-                            Borra la carpeta completa del proyecto{workspace ? `: ${shortPath(workspace)}` : ''}.
-                            Esta acción no se puede deshacer.
-                          </p>
-                        </div>
-                        <div className="delete-row">
-                          <input
-                            value={deleteConfirm}
-                            onChange={(event) => setDeleteConfirm(event.target.value)}
-                            placeholder="Escribe DELETE para confirmar"
-                          />
-                          <button
-                            className="danger-button"
-                            onClick={() => void deleteProject()}
-                            disabled={loading || deleteConfirm !== 'DELETE'}
-                          >
-                            Eliminar proyecto
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {cfgSection === 'keys' && (
-                    <div className="config-subsection">
-                      <div className="config-subsection-label">
-                        API Keys
-                        <InfoTip tip="Cada key activa los adapters de API directa de ese proveedor. Se envían al backend local y se cifran en vault; una vez guardadas solo se indica si existen — no se pueden leer de vuelta." wide />
-                      </div>
-                      <div className="api-key-rows">
-                        {([
-                          { id: 'openai',    label: 'OpenAI',         desc: 'GPT-5.6 Sol / Terra / Luna' },
-                          { id: 'google',    label: 'Google Gemini',  desc: 'Gemini 3.1 Pro / 3.5 Flash / Flash-Lite' },
-                          { id: 'google-free', label: 'Google Gemini Free', desc: 'Free tier BYOK · separado del perfil pagado' },
-                          { id: 'anthropic', label: 'Anthropic',      desc: 'Claude Opus 4.8 / Sonnet 5 / Haiku 4.5' },
-                          { id: 'groq',      label: 'Groq Free',      desc: 'GPT-OSS 120B, Qwen 3.6, Llama 3.3' },
-                        ] as const).map((prov) => {
-                          const saved = secrets.some((s) => s.provider === prov.id && s.has_secret);
-                          const isActive = secretProvider === prov.id;
-                          return (
-                            <div key={prov.id} className={`api-key-row${saved ? ' key-saved' : ''}`}>
-                              <div className="api-key-row-meta">
-                                <span className={`api-key-dot${saved ? ' saved' : ''}`} />
-                                <span className="api-key-label">{prov.label}</span>
-                                <span className="api-key-models">{prov.desc}</span>
-                                <span className={`api-key-badge${saved ? ' ok' : ''}`}>
-                                  {saved ? 'key guardada ✓' : 'sin key'}
-                                </span>
-                              </div>
-                              <div className="api-key-row-input">
-                                <input
-                                  type="password"
-                                  placeholder={saved ? '●●●●●●  (guardada — pega nueva para actualizar)' : 'sk-…  Pega tu API key aquí'}
-                                  value={isActive ? secretValue : ''}
-                                  onFocus={() => setSecretProvider(prov.id)}
-                                  onChange={(e) => { setSecretProvider(prov.id); setSecretValue(e.target.value); }}
-                                />
-                                <button
-                                  className="config-inline-btn"
-                                  disabled={loading || !isActive || !secretValue.trim()}
-                                  onClick={() => void saveSecret()}
-                                >
-                                  {saved ? 'Actualizar' : 'Guardar'}
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {cfgSection === 'clis' && (
-                    <div className="config-subsection">
-                      <div className="config-subsection-label">
-                        CLIs de suscripción
-                        <InfoTip tip="Si tienes una suscripción activa a ChatGPT Plus, Claude Pro o Gemini Advanced, el CLI correspondiente puede ejecutar agentes sin consumir créditos de API. Requiere instalar el CLI y hacer login en tu cuenta." wide />
-                      </div>
-                      <div className="cli-status-grid">
-                        {cliStatus.map((item) => (
-                          <div key={item.id} className={`cli-card${item.available ? ' ok' : ''}`}>
-                            <div className="cli-card-header">
-                              <span className={`cli-dot${item.available ? ' ok' : ''}`} />
-                              <span className="cli-card-label">{item.label}</span>
-                              <span className="cli-card-avail">{item.available ? 'disponible' : 'no instalado'}</span>
-                            </div>
-                            <code className="cli-command">{item.login_command || item.command}</code>
-                            {item.login_supported && (
-                              <button
-                                type="button"
-                                onClick={() => void launchCliLogin(item.id)}
-                                disabled={loading || !item.available}
-                                title={item.login_hint}
-                              >
-                                {item.id === 'opencode' ? 'Conectar OpenCode Zen' : 'Login'}
-                              </button>
-                            )}
-                            <CliSetupGuide item={item} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {cfgSection === 'adapters' && (
-                    <div className="config-subsection">
-                      <div className="config-subsection-label">
-                        Estado de adapters
-                        <InfoTip tip="Prueba un adapter para verificar que su credencial es válida y la llamada funciona. El resultado se guarda y actualiza los indicadores de conexión en toda la UI." wide />
-                      </div>
-                      <div className="adapter-test-list">
-                        {adapterProfiles.map((profile) => {
-                          const pState = profileState(profile);
-                          const healthStatus = profile.health?.status || 'untested';
-                          const testModel = adapterTestModels[profile.id]
-                            || String(profile.config?.model || profile.model_options?.[0]?.value || '');
-                          return (
-                            <div
-                              key={profile.id}
-                              className={`adapter-test-row${pState.connected ? ' connected' : ''}${profile.status === 'blocked_by_provider' ? ' blocked' : ''}`}
-                            >
-                              <span className={`adapter-row-dot${pState.connected ? ' connected' : profile.status === 'blocked_by_provider' ? ' blocked' : ''}`} />
-                              <div className="adapter-test-info">
-                                <span className="adapter-test-label">{profile.label}</span>
-                                <span className="adapter-test-meta">{profile.adapter_type} · {profile.channel}</span>
-                              </div>
-                              <span className={`adapter-test-status hs-${healthStatus}`}>
-                                {profile.status === 'blocked_by_provider' ? 'bloqueado por proveedor'
-                                  : healthStatus === 'ok'    ? `funcional${profile.health?.reason ? ` · ${profile.health.reason}` : ''}`
-                                  : healthStatus === 'failed'    ? `falló: ${profile.health?.reason || 'test'}`
-                                  : healthStatus === 'installed' ? 'instalado, auth sin verificar'
-                                  : 'sin probar'}
-                              </span>
-                              {profile.model_options?.length ? (
-                                <select
-                                  value={testModel}
-                                  onChange={(event) => setAdapterTestModels((current) => ({
-                                    ...current,
-                                    [profile.id]: event.target.value,
-                                  }))}
-                                >
-                                  {profile.model_options.map((option) => (
-                                    <option key={option.value} value={option.value}>{option.label}</option>
-                                  ))}
-                                </select>
-                              ) : null}
-                              <button
-                                className="secondary-button"
-                                type="button"
-                                disabled={loading || profile.status === 'blocked_by_provider'}
-                                onClick={() => void testAdapterProfile(profile.id, testModel)}
-                              >
-                                Probar
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {cfgSection === 'sistema' && (
-                    <>
-                      <div className="config-subsection">
-                        <div className="config-subsection-label">
-                          Carpeta raíz de proyectos
-                          <InfoTip tip="Todos los proyectos se crean como subcarpetas aquí. Cambiarla no mueve proyectos existentes. También configurable con AITEAM_PROJECTS_ROOT en .env (tiene prioridad)." wide />
-                        </div>
-                        <div className="config-field-row">
-                          <input
-                            className="config-path-input"
-                            value={settingsDraft || projectsRoot}
-                            onChange={(ev) => setSettingsDraft(ev.target.value)}
-                            placeholder="Ruta absoluta de la carpeta de proyectos"
-                          />
-                          <button
-                            className="config-inline-btn"
-                            onClick={() => void saveAppSettings().then(() => void refresh())}
-                            disabled={loading || !(settingsDraft || '').trim()}
-                          >
-                            Guardar
-                          </button>
-                        </div>
-                        {projectsRoot && (
-                          <p className="config-hint">Efectiva: <code>{projectsRoot}</code></p>
-                        )}
-                      </div>
-                      <div className="config-subsection">
-                        <div className="config-subsection-label">Sistema</div>
-                        <dl className="config-dl config-dl-compact">
-                          <dt>Backend</dt><dd><code>{window.location.origin}</code></dd>
-                          <dt>Modo</dt><dd>{health?.mode || '—'}</dd>
-                          <dt>Var. entorno</dt>
-                          <dd>
-                            <code>AITEAM_PROJECTS_ROOT</code> en <code>.env</code> sobreescribe la carpeta raíz guardada.
-                            <InfoTip tip="Si defines AITEAM_PROJECTS_ROOT en el archivo .env del proyecto, tiene prioridad sobre lo que configures en esta pantalla. Útil para CI/CD o instalaciones sin UI." wide />
-                          </dd>
-                        </dl>
-                      </div>
-                      {lastResult ? (
-                        <details className="config-subsection config-debug">
-                          <summary>Última acción — debug</summary>
-                          <pre className="last-result-body">{pretty(lastResult).slice(0, 1200)}</pre>
-                        </details>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              </div>
-            </section>
+            <ConfigurationWorkspace
+              projectDisplayName={projectDisplayName}
+              section={cfgSection}
+              onSectionChange={setCfgSection}
+              configuration={configurationData}
+              health={health}
+              workspace={workspace}
+              workspaceDraft={workspaceDraft}
+              workspaceConfigured={workspaceConfigured}
+              loading={loading}
+              onWorkspaceDraftChange={setWorkspaceDraft}
+              onSaveWorkspace={saveWorkspace}
+              orientationMeasurement={orientationMeasurement}
+              orientationBusy={orientationBusy}
+              onOrientationConsentChange={changeOrientationConsent}
+              onEraseOrientation={eraseOrientationMeasurement}
+              deleteConfirmation={deleteConfirm}
+              onDeleteConfirmationChange={setDeleteConfirm}
+              onDeleteProject={deleteProject}
+              lastResult={lastResult}
+              onRefresh={refresh}
+            />
           ) : null}
 
           {viewMode === 'team' ? (

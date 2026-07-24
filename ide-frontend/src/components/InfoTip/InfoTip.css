@@ -1,0 +1,40 @@
+/* ── InfoTip ─────────────────────────────────────────────────────────────────── */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 3px;
+  flex-shrink: 0;
+}
+.info-icon {
+  width: 13px; height: 13px;
+  color: var(--text-dim);
+  cursor: help;
+  display: block;
+  transition: color 0.1s;
+}
+.info-tip:hover .info-icon,
+.info-tip:focus-within .info-icon { color: var(--accent-text); }
+.info-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 8px 11px;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--text);
+  width: 200px;
+  z-index: 200;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+  pointer-events: none;
+  white-space: pre-line;
+}
+.info-tip-wide .info-tooltip { width: 260px; }
+.info-tip:hover .info-tooltip,
+.info-tip:focus-within .info-tooltip { display: block; }

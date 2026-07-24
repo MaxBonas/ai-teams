@@ -195,20 +195,21 @@
       "properties": {
         "id": {
           "enum": [
-            "python", "javascript", "java", "kotlin", "go", "rust",
-            "dotnet", "php", "ruby", "swift", "containers"
+            "python", "javascript_typescript", "java_kotlin", "go", "rust",
+            "c_cpp", "dotnet", "php", "ruby", "swift", "web_mobile",
+            "containers_devcontainers"
           ]
         },
         "manifest_detected": {"type": "boolean"},
         "manifests": {
           "type": "array",
-          "items": {"type": "string", "pattern": "^[^/\\\\]*$"},
+          "items": {"type": "string", "minLength": 1, "pattern": "^(?![A-Za-z]:)(?![/\\\\]).+$"},
           "uniqueItems": true
         },
         "binary_installed": {"type": "boolean"},
         "version": {"type": ["string", "null"]},
         "executable": {"type": ["string", "null"], "pattern": "^[^/\\\\]*$"},
-        "source": {"const": "root_manifest_and_path_lookup"},
+        "source": {"const": "ecosystem_registry_v1_and_path_lookup"},
         "support_claim": {"const": false},
         "diagnostic_state": {
           "enum": ["not_detected", "absent", "unverified", "ready"]

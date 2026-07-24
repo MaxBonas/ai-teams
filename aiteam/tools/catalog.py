@@ -73,6 +73,7 @@ DEFAULT_CAPABILITIES_BY_ROLE: dict[str, list[str]] = {
     "reviewer":         ["repo_read", "lsp_symbols", "lsp_references"],
     "qa":               ["repo_read", "repo_write", "browser_test", "test_execute"],
     "test_designer":    ["repo_read", "repo_write", "lsp_symbols", "lsp_references"],
+    "test_runner":      ["repo_read", "test_execute"],
     "mcp_operator":     ["repo_read", "external_mcp", "skill_run"],
     # Tier 3 specialists — explicit entries so substring fallback is never needed
     "worker":           ["repo_read"],

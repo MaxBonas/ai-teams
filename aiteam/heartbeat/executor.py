@@ -44,12 +44,25 @@ from aiteam.db.quorum_sessions import (
 )
 from aiteam.db.wake_payload import build_wake_payload, project_open_issues, _parse_agent_report
 from aiteam.db.wakeups import enqueue_wakeup, finish_wakeup
+from aiteam.ecosystem_registry import (
+    plan_ecosystem_command,
+    project_toolchain_projection,
+)
 from aiteam.heartbeat.scheduler import DispatchResult
 from aiteam.lead_intake import apply_accepted_team_proposal, build_team_proposal, format_team_proposal
 from aiteam.hiring_economics import log_hiring_decision
 from aiteam.mcp_runtime import mcp_servers_for_run
 from aiteam.model_selection import same_profile_fallback
 from aiteam.model_selection_context import contextual_model_selection
+from aiteam.objective_classification import (
+    MIXED,
+    NON_PROGRAMMING_KINDS,
+    PROGRAMMING_ROLES,
+    SOFTWARE,
+    classify_objective,
+    inherited_classification,
+    objective_kind_from_issue,
+)
 from aiteam.plan_contract import PLAN_FORMAT, encode_plan_contract
 from aiteam.project_adapters import (
     choose_adapter_for_new_slot,
@@ -712,6 +725,18 @@ class RunExecutor:
                             "thin-delegation feedback injection failed for issue %r",
                             issue_id_str, exc_info=True,
                         )
+                try:
+                    payload["project_toolchains"] = project_toolchain_projection(
+                        workspace_root,
+                        role=agent_role,
+                        granted_capabilities=get_agent_capabilities(agent_info or {}),
+                    )
+                except Exception:
+                    logger.warning(
+                        "project toolchain projection failed for issue %r",
+                        issue_id_str,
+                        exc_info=True,
+                    )
                 payload_json = json.dumps(payload, ensure_ascii=False)
             except Exception:
                 logger.warning("Failed to build wake payload for run %r issue %r", run_id, issue_id_str, exc_info=True)
@@ -2516,9 +2541,10 @@ class RunExecutor:
         la run: el runner cumplió informando, la issue queda blocked para que
         el Lead re-delegue el arreglo.
         """
-        issue_id = str(run.get("issue_id") or "")
         root = workspace_root_for_db(self.db_path)
-        cmd, suite_kind = self._resolve_test_command(root)
+        cmd, suite_kind, test_cwd, descriptor_timeout, descriptor_env = (
+            self._resolve_test_command(root)
+        )
         if cmd is None:
             output = (
                 "Test runner: no se encontró una suite ejecutable en el workspace "
@@ -2536,12 +2562,15 @@ class RunExecutor:
                 actions={"issue_status": "blocked", "notify_supervisor": True},
             )
 
-        timeout_sec = int(os.environ.get("AITEAM_TEST_RUNNER_TIMEOUT_SEC", "600") or "600")
+        requested_timeout = int(
+            os.environ.get("AITEAM_TEST_RUNNER_TIMEOUT_SEC", "600") or "600"
+        )
+        timeout_sec = max(1, min(requested_timeout, descriptor_timeout))
         # P3 — pytest corre BAJO coverage cuando la herramienta existe en ese
         # intérprete: una sola ejecución produce exit code Y métrica de
         # cobertura. El data file va a .aiteam/ (gitignorado) para no
         # contaminar el workspace del equipo.
-        runner_env = {**os.environ}
+        runner_env = {**os.environ, **descriptor_env}
         measuring_coverage = False
         if suite_kind == "pytest" and self._python_has_module(cmd[0], "coverage"):
             runner_env["COVERAGE_FILE"] = str(Path(root) / ".aiteam" / ".coverage")
@@ -2551,7 +2580,7 @@ class RunExecutor:
         try:
             proc = subprocess.run(
                 cmd,
-                cwd=str(root),
+                cwd=str(test_cwd),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2588,7 +2617,7 @@ class RunExecutor:
         if measuring_coverage and passed:
             cov = self._run_quiet(
                 [cmd[0], "-m", "coverage", "report", "--format=total"],
-                cwd=root, env=runner_env,
+                cwd=test_cwd, env=runner_env,
             )
             if cov is not None and cov.returncode == 0:
                 with contextlib.suppress(ValueError):
@@ -2597,7 +2626,7 @@ class RunExecutor:
         if suite_kind == "pytest" and self._python_has_module(cmd[0], "ruff"):
             ruff = self._run_quiet(
                 [cmd[0], "-m", "ruff", "check", "--output-format=concise", "."],
-                cwd=root, env=runner_env,
+                cwd=test_cwd, env=runner_env,
             )
             if ruff is not None and ruff.returncode in (0, 1):
                 lint_issues = len([l for l in (ruff.stdout or "").splitlines() if l.strip()])
@@ -2653,57 +2682,51 @@ class RunExecutor:
             actions={"issue_status": "done" if passed else "blocked", "notify_supervisor": True},
         )
 
-    def _resolve_test_command(self, root: Path) -> tuple[list[str] | None, str]:
-        """Detecta la suite del workspace y devuelve (comando, tipo).
-
-        Python primero (pytest con el venv del workspace o, en su defecto, el
-        intérprete del orquestador — que siempre existe y trae pytest), luego
-        npm test si package.json declara un script test real. Devuelve
-        (None, "") si no hay nada ejecutable.
-        """
-        has_pytest_signals = False
-        pytest_targets: list[str] = []
-        node_pkg: Path | None = None
+    def _resolve_test_command(
+        self,
+        root: Path,
+    ) -> tuple[list[str] | None, str, Path, int, dict[str, str]]:
+        """Planifica un test descriptor-bound; no descubre comandos ad hoc."""
         try:
-            for rel_path in snapshot_workspace(root):
-                path_key = str(rel_path).replace("\\", "/")
-                name = path_key.rsplit("/", 1)[-1]
-                if name in {"pytest.ini", "tox.ini", "noxfile.py"}:
-                    has_pytest_signals = True
-                elif path_key.startswith(("tests/", "test/")) and name.startswith("test_") and name.endswith(".py"):
-                    has_pytest_signals = True
-                    pytest_targets.append(path_key)
-                elif name.startswith("test_") and name.endswith(".py"):
-                    has_pytest_signals = True
-                    pytest_targets.append(path_key)
-                elif name == "pyproject.toml":
-                    with contextlib.suppress(Exception):
-                        if "pytest" in (root / rel_path).read_text(encoding="utf-8", errors="ignore").lower():
-                            has_pytest_signals = True
-                elif name == "package.json" and node_pkg is None:
-                    node_pkg = root / rel_path
-        except Exception:
-            logger.warning("test command scan failed for %s", root, exc_info=True)
-            return None, ""
-
-        if has_pytest_signals:
             python = self._resolve_workspace_python(root)
-            if python:
-                # Pass discovered test files explicitly. Pytest's recursive
-                # collection can otherwise enter locked CLI scratch folders on
-                # Windows and fail an otherwise green solo run with WinError 5.
-                return [python, "-m", "pytest", "-q", *sorted(set(pytest_targets))], "pytest"
+            python_plan = plan_ecosystem_command(
+                root,
+                ecosystem_id="python",
+                action_id="test",
+                granted_capabilities=("test_execute",),
+                authorized=True,
+                runtime_overrides={"python": python} if python else {},
+            )
+            if python_plan["allowed"]:
+                cwd = (root / str(python_plan["cwd"])).resolve()
+                return (
+                    list(python_plan["argv"]),
+                    "pytest",
+                    cwd,
+                    int(python_plan["timeout_seconds"]),
+                    dict(python_plan["env"]),
+                )
 
-        if node_pkg is not None:
-            with contextlib.suppress(Exception):
-                pkg = json.loads(node_pkg.read_text(encoding="utf-8", errors="ignore"))
-                test_script = str((pkg.get("scripts") or {}).get("test") or "")
-                if test_script and "no test specified" not in test_script:
-                    import shutil as _shutil  # noqa: PLC0415
-                    npm = _shutil.which("npm.cmd") or _shutil.which("npm")
-                    if npm:
-                        return [npm, "test", "--silent"], "npm test"
-        return None, ""
+            npm_plan = plan_ecosystem_command(
+                root,
+                ecosystem_id="javascript_typescript",
+                action_id="test",
+                granted_capabilities=("test_execute",),
+                authorized=True,
+            )
+            if npm_plan["allowed"]:
+                cwd = (root / str(npm_plan["cwd"])).resolve()
+                return (
+                    list(npm_plan["argv"]),
+                    "npm test",
+                    cwd,
+                    int(npm_plan["timeout_seconds"]),
+                    dict(npm_plan["env"]),
+                )
+        except Exception:
+            logger.warning("test command planning failed for %s", root, exc_info=True)
+            return None, "", root, 600, {}
+        return None, "", root, 600, {}
 
     # Cache de sondas (python, module) — el intérprete no cambia entre runs y
     # cada sonda cuesta un arranque de Python (~1s en Windows).
@@ -3739,6 +3762,37 @@ class RunExecutor:
         _issue_specs = [
             spec for spec in (actions.get("create_issues") or []) if isinstance(spec, dict)
         ]
+        _objective_kind = objective_kind_from_issue(
+            get_issue(self.db_path, issue_id=issue_id) or {}
+        )
+        if _objective_kind in NON_PROGRAMMING_KINDS:
+            accepted_specs: list[dict[str, Any]] = []
+            rejected_specs: list[dict[str, str]] = []
+            for spec in _issue_specs:
+                requested_role = str(spec.get("role") or "engineer").strip().lower()
+                if requested_role in PROGRAMMING_ROLES:
+                    rejected_specs.append(
+                        {
+                            "title": str(spec.get("title") or ""),
+                            "role": requested_role,
+                        }
+                    )
+                else:
+                    accepted_specs.append(spec)
+            _issue_specs = accepted_specs
+            if rejected_specs:
+                log_activity(
+                    self.db_path,
+                    action="objective.programming_delegation_rejected",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id") or ""),
+                    payload={
+                        "objective_kind": _objective_kind,
+                        "rejected": rejected_specs,
+                    },
+                )
         if _run_profile == SOLO_LEAD and str(agent_role or "").strip().lower() in {"lead", "team_lead"}:
             # ``solo_lead`` is a true single-agent mode: the Lead itself owns
             # planning, implementation and verification. Any child creation
@@ -3959,6 +4013,43 @@ class RunExecutor:
                     )
                 role_for_issue = _effective_role
 
+            parent_issue = get_issue(self.db_path, issue_id=issue_id) or {}
+            parent_objective_kind = objective_kind_from_issue(parent_issue)
+            if parent_objective_kind == MIXED:
+                delegated_classification = classify_objective(
+                    title_val,
+                    _desc_val,
+                    explicit_kind=str(spec.get("objective_kind") or "auto"),
+                )
+            else:
+                delegated_classification = classify_objective(
+                    title_val,
+                    _desc_val,
+                    explicit_kind=parent_objective_kind,
+                )
+            if role_for_issue in PROGRAMMING_ROLES and (
+                parent_objective_kind in NON_PROGRAMMING_KINDS
+                or (
+                    parent_objective_kind == MIXED
+                    and delegated_classification.kind != SOFTWARE
+                )
+            ):
+                log_activity(
+                    self.db_path,
+                    action="objective.programming_delegation_rejected",
+                    target_type="issue",
+                    target_id=issue_id,
+                    actor_agent_id=agent_id,
+                    run_id=str(run.get("id") or ""),
+                    payload={
+                        "objective_kind": parent_objective_kind,
+                        "delegated_kind": delegated_classification.kind,
+                        "title": title_val,
+                        "role": role_for_issue,
+                    },
+                )
+                return None
+
             # Idempotency: don't create if a non-terminal child with same role already exists
             with contextlib.closing(_connect(self.db_path)) as _conn:
                 _existing = _conn.execute(
@@ -3979,7 +4070,6 @@ class RunExecutor:
                 source_run_id=str(run.get("id") or ""),
                 issue_id=issue_id,
             )
-            parent_issue = get_issue(self.db_path, issue_id=issue_id)
             # Structured acceptance criteria travel with the issue so the
             # engineer knows the done-bar and the reviewer can judge against
             # an explicit list instead of re-deriving it from prose.
@@ -3989,6 +4079,11 @@ class RunExecutor:
                 if isinstance(item, str) and str(item).strip()
             ]
             _issue_metadata: dict[str, Any] = {"source": metadata_source, "parent_issue_id": issue_id}
+            _issue_metadata["objective_classification"] = (
+                delegated_classification.to_metadata()
+                if parent_objective_kind == MIXED
+                else inherited_classification(parent_objective_kind)
+            )
             _spec_metadata = spec.get("metadata")
             if isinstance(_spec_metadata, dict) and isinstance(_spec_metadata.get("context_budget"), dict):
                 _issue_metadata["context_budget"] = _spec_metadata["context_budget"]
@@ -4050,6 +4145,10 @@ class RunExecutor:
         run: dict[str, Any],
         created_child_roles: list[str],
     ) -> None:
+        if objective_kind_from_issue(
+            get_issue(self.db_path, issue_id=issue_id) or {}
+        ) in NON_PROGRAMMING_KINDS:
+            return
         if "reviewer" in created_child_roles or "code_reviewer" in created_child_roles:
             return
         if not {"engineer", "lead_executor"} & set(created_child_roles):
@@ -4111,6 +4210,8 @@ class RunExecutor:
         if not independent_tests_enabled():
             return
         parent_issue = get_issue(self.db_path, issue_id=issue_id) or {}
+        if objective_kind_from_issue(parent_issue) in NON_PROGRAMMING_KINDS:
+            return
         parent_meta = _decode_json(parent_issue.get("metadata_json") or "{}")
         if normalize_run_profile(parent_meta.get("profile") or "") != FULL_TEAM:
             return
@@ -5258,7 +5359,7 @@ class RunExecutor:
         # The Lead verifies that the workspace actually contains real files —
         # not just that the team reported they created them.  This prevents
         # closing a cycle where the engineer delivered stubs or placeholders.
-        workspace_warnings = self._workspace_verification_lines()
+        workspace_warnings = self._workspace_verification_lines(issue_id=issue_id)
 
         # ── Build the summary ─────────────────────────────────────────────────
         parts: list[str] = []
@@ -6911,8 +7012,15 @@ class RunExecutor:
         except Exception:
             logger.warning("cost_breaker: failed to create escalation for %s", root_id, exc_info=True)
 
-    def _workspace_verification_lines(self) -> list[str]:
+    def _workspace_verification_lines(self, *, issue_id: str | None = None) -> list[str]:
         """Scan the workspace for emptiness and stub/placeholder deliverables."""
+        if issue_id and objective_kind_from_issue(
+            get_issue(self.db_path, issue_id=issue_id) or {}
+        ) in NON_PROGRAMMING_KINDS:
+            return [
+                "Objetivo non-code: aceptación por cobertura, fuentes, supuestos y "
+                "entregable documental; no se exige artefacto ejecutable."
+            ]
         warnings: list[str] = []
         try:
             _ws_root = workspace_root_for_db(self.db_path)
@@ -7002,7 +7110,16 @@ class RunExecutor:
             logger.warning("test signal scan failed", exc_info=True)
         return False
 
-    def _test_runner_gate_line(self, rows: list[dict[str, Any]]) -> str | None:
+    def _test_runner_gate_line(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        issue_id: str | None = None,
+    ) -> str | None:
+        if issue_id and objective_kind_from_issue(
+            get_issue(self.db_path, issue_id=issue_id) or {}
+        ) in NON_PROGRAMMING_KINDS:
+            return None
         if not self._workspace_has_test_signals():
             return None
 
@@ -7034,6 +7151,8 @@ class RunExecutor:
     def _quality_close_denied(self, *, issue_id: str) -> str | None:
         issue = get_issue(self.db_path, issue_id=issue_id) or {}
         metadata = _decode_json(issue.get("metadata_json") or "{}")
+        if objective_kind_from_issue(issue) in NON_PROGRAMMING_KINDS:
+            return None
         if normalize_run_profile(metadata.get("profile") or "") == LEAD_QUORUM:
             with contextlib.closing(_connect(self.db_path)) as conn:
                 session = conn.execute(
@@ -7049,7 +7168,7 @@ class RunExecutor:
             rows = self._child_issue_rows(issue_id)
         except Exception:
             return None
-        test_gate = self._test_runner_gate_line(rows)
+        test_gate = self._test_runner_gate_line(rows, issue_id=issue_id)
         if test_gate and test_gate.startswith("BLOQUEANTE:"):
             issue = get_issue(self.db_path, issue_id=issue_id) or {}
             metadata = _decode_json(issue.get("metadata_json") or "{}")
@@ -7078,20 +7197,25 @@ class RunExecutor:
         if cached:
             return True
         root = workspace_root_for_db(self.db_path)
-        cmd, suite_kind = self._resolve_test_command(root)
+        cmd, suite_kind, test_cwd, descriptor_timeout, descriptor_env = (
+            self._resolve_test_command(root)
+        )
         if cmd is None:
             return False
-        timeout_sec = int(os.environ.get("AITEAM_TEST_RUNNER_TIMEOUT_SEC", "600") or "600")
+        requested_timeout = int(
+            os.environ.get("AITEAM_TEST_RUNNER_TIMEOUT_SEC", "600") or "600"
+        )
+        timeout_sec = max(1, min(requested_timeout, descriptor_timeout))
         try:
             proc = subprocess.run(
                 cmd,
-                cwd=str(root),
+                cwd=str(test_cwd),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout_sec,
-                env={**os.environ},
+                env={**os.environ, **descriptor_env},
             )
         except Exception as exc:
             log_activity(
@@ -7112,6 +7236,7 @@ class RunExecutor:
             payload={
                 "suite_kind": suite_kind,
                 "command": cmd,
+                "cwd": "." if test_cwd == root else test_cwd.relative_to(root).as_posix(),
                 "exit_code": int(proc.returncode),
                 "output_tail": tail,
             },
@@ -7308,7 +7433,7 @@ class RunExecutor:
         sod_line = self._separation_of_duties_line(rows)
         if sod_line:
             lines.append(sod_line)
-        test_gate_line = self._test_runner_gate_line(rows)
+        test_gate_line = self._test_runner_gate_line(rows, issue_id=issue_id)
         if test_gate_line:
             if test_gate_line.startswith("BLOQUEANTE:") and self._runtime_verification_waived(issue_id):
                 test_gate_line = (
@@ -7339,7 +7464,7 @@ class RunExecutor:
                     "Tests independientes: NO hay suite del test_designer — la aceptación "
                     "solo la verificó quien implementó."
                 )
-        lines.extend(self._workspace_verification_lines())
+        lines.extend(self._workspace_verification_lines(issue_id=issue_id))
         cost_line = self._cycle_cost_line(issue_id)
         if cost_line:
             lines.append(cost_line)

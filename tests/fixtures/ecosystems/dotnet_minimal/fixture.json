@@ -1,0 +1,15 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "dotnet_minimal",
+  "expected_detected": ["dotnet"],
+  "cases": [
+    {
+      "id": "dotnet_xunit",
+      "ecosystem_id": "dotnet",
+      "actions": [
+        {"id": "build", "artifacts": ["bin/**/DotnetFixture.dll"]},
+        {"id": "test", "artifacts": []}
+      ]
+    }
+  ]
+}

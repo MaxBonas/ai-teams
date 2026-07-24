@@ -6,9 +6,9 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
-
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACT_PATH = ROOT / "config" / "installation_support.v1.json"
@@ -24,7 +24,7 @@ def load_installation_support_contract(path: Path | None = None) -> dict[str, An
         raise ValueError("installation support statuses drift")
     acceptance = payload.get("acceptance_contract")
     if not isinstance(acceptance, dict):
-        raise ValueError("acceptance_contract must be an object")
+        raise TypeError("acceptance_contract must be an object")
     if acceptance.get("schema_version") != "windows_clean_room_acceptance_v1":
         raise ValueError("unsupported clean-room acceptance schema")
     required_steps = acceptance.get("required_steps")
@@ -34,6 +34,21 @@ def load_installation_support_contract(path: Path | None = None) -> dict[str, An
         or len(required_steps) != len(set(required_steps))
     ):
         raise ValueError("acceptance_contract required_steps are invalid")
+    release_acceptance = payload.get("release_acceptance_contract")
+    if not isinstance(release_acceptance, dict):
+        raise TypeError("release_acceptance_contract must be an object")
+    if (
+        release_acceptance.get("schema_version")
+        != "release_archive_acceptance_v1"
+    ):
+        raise ValueError("unsupported release acceptance schema")
+    release_steps = release_acceptance.get("required_steps")
+    if (
+        not isinstance(release_steps, list)
+        or not release_steps
+        or len(release_steps) != len(set(release_steps))
+    ):
+        raise ValueError("release_acceptance_contract required_steps are invalid")
     for collection in ("distributions", "platforms", "runtimes", "adapters"):
         rows = payload.get(collection)
         if not isinstance(rows, list) or not rows:
@@ -92,8 +107,9 @@ def _observe_version(candidates: list[str], args: list[str]) -> str | None:
             timeout=8,
             encoding="utf-8",
             errors="replace",
+            check=False,
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return "installed_version_unavailable"
     output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
     if proc.returncode != 0:

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { writeFile } from 'node:fs/promises';
 
 const issue = {
@@ -266,6 +267,16 @@ test('orientación: Bandeja, perfiles y CTA del plan requieren pocos pasos obser
 
   await writeFile(testInfo.outputPath('orientation-metrics.json'), JSON.stringify(metrics, null, 2));
   await page.screenshot({ path: testInfo.outputPath('orientation.png'), fullPage: true });
+  const accessibility = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(accessibility.violations, JSON.stringify(accessibility.violations, null, 2)).toEqual([]);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const horizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(horizontalOverflow, 'La aplicación no debe desbordar horizontalmente en móvil').toBeLessThanOrEqual(1);
 
   await testInfo.attach('orientation-metrics.json', {
     body: JSON.stringify(metrics, null, 2),

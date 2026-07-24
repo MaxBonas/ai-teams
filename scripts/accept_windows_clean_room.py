@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import sqlite3
@@ -12,7 +14,6 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_PORT = 8010
@@ -46,8 +47,10 @@ def _redact(text: str, *, fixture_root: Path | None = None) -> str:
     replacements.sort(key=lambda item: len(str(item[0])), reverse=True)
     for path, marker in replacements:
         for value in {str(path), path.as_posix()}:
-            redacted = redacted.replace(value, marker)
-    return redacted[:1000]
+            redacted = re.sub(re.escape(value), marker, redacted, flags=re.IGNORECASE)
+    if len(redacted) <= 2000:
+        return redacted
+    return redacted[:800] + "\n...[truncated]...\n" + redacted[-1200:]
 
 
 def _port_is_free(port: int) -> bool:
@@ -79,7 +82,6 @@ def _run(
         "encoding": "utf-8",
         "errors": "replace",
         "timeout": timeout,
-        "check": False,
     }
     if capture_output:
         options["capture_output"] = True
@@ -88,7 +90,7 @@ def _run(
         # handles heredados abiertos y hace que subprocess espere al teardown.
         options["stdout"] = subprocess.DEVNULL
         options["stderr"] = subprocess.DEVNULL
-    return subprocess.run(command, **options)
+    return subprocess.run(command, check=False, **options)
 
 
 def _wait_for_closed_ports(timeout: float = 20.0) -> bool:
@@ -125,6 +127,22 @@ def _fixture_summary(db_path: Path) -> dict[str, int]:
     }
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _is_lower_hex(value: str | None, lengths: set[int]) -> bool:
+    return bool(
+        value
+        and len(value) in lengths
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def _github_provenance(revision: str) -> tuple[bool, dict[str, str | None]]:
     provenance = {
         "repository": os.environ.get("GITHUB_REPOSITORY"),
@@ -159,6 +177,19 @@ def main() -> int:
     )
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--fixture-root", type=Path, required=True)
+    parser.add_argument(
+        "--source-kind",
+        choices=("git_checkout", "release_archive"),
+        default="git_checkout",
+    )
+    parser.add_argument(
+        "--source-revision",
+        help="Revisión del manifiesto; obligatoria para release_archive.",
+    )
+    parser.add_argument(
+        "--archive-sha256",
+        help="SHA-256 verificado del ZIP; obligatorio para release_archive.",
+    )
     args = parser.parse_args()
 
     receipt_path = args.receipt.resolve()
@@ -181,8 +212,14 @@ def main() -> int:
             "python_bootstrap": platform.python_version(),
         },
         "source": {
-            "checkout": "actions_checkout" if os.environ.get("GITHUB_ACTIONS") == "true" else "existing_checkout",
+            "kind": args.source_kind,
+            "checkout": (
+                "actions_checkout"
+                if os.environ.get("GITHUB_ACTIONS") == "true"
+                else "existing_checkout"
+            ),
             "revision": None,
+            "archive_sha256": args.archive_sha256,
         },
         "ci_provenance": None,
         "steps": [],
@@ -226,11 +263,31 @@ def main() -> int:
                 "Los puertos 8010/9490 ya están ocupados; no se detendrán procesos ajenos"
             )
 
-        revision = step(
-            "source_revision",
-            ["git", "rev-parse", "HEAD"],
-            30,
-        ).stdout.strip()
+        if args.source_kind == "release_archive":
+            if not args.source_revision or not args.archive_sha256:
+                raise RuntimeError(
+                    "release_archive exige source_revision y archive_sha256"
+                )
+            if not _is_lower_hex(args.archive_sha256, {64}):
+                raise RuntimeError("archive_sha256 no es un SHA-256 válido")
+            if not _is_lower_hex(args.source_revision, {40, 64}):
+                raise RuntimeError("source_revision no es una revisión Git válida")
+            revision = args.source_revision
+            receipt["source"]["checkout"] = "extracted_release_archive"
+            receipt["steps"].append(
+                {
+                    "name": "source_revision",
+                    "ok": True,
+                    "exit_code": 0,
+                    "duration_seconds": 0.0,
+                }
+            )
+        else:
+            revision = step(
+                "source_revision",
+                ["git", "rev-parse", "HEAD"],
+                30,
+            ).stdout.strip()
         receipt["source"]["revision"] = revision
         independent, provenance = _github_provenance(revision)
         receipt["independent_machine"] = independent
@@ -279,6 +336,24 @@ def main() -> int:
             item["ready"] for item in receipt["installation_audit"]["runtimes"]
         ):
             raise RuntimeError("installation_audit no conservó runtimes listos")
+
+        step(
+            "minimum_tests",
+            [
+                "cmd.exe",
+                "/d",
+                "/c",
+                "scripts\\pytest_local.bat",
+                "tests\\test_e2e_non_code_canary.py",
+                (
+                    "tests\\test_dev_lifecycle_contract.py::"
+                    "test_bootstrap_requires_versioned_locks_and_has_concurrency_guards"
+                ),
+                "-q",
+                "--tb=short",
+            ],
+            180,
+        )
 
         step(
             "start",
@@ -350,6 +425,72 @@ def main() -> int:
             {"name": "ports_released", "ok": True, "exit_code": 0, "duration_seconds": 0.0}
         )
 
+        original_hash = _sha256_file(db_path)
+        step(
+            "migration_dry_run",
+            [
+                "cmd.exe",
+                "/d",
+                "/c",
+                "scripts\\python_local.bat",
+                "scripts\\migrate_to_v2.py",
+                "--db",
+                str(db_path),
+                "--json",
+            ],
+            120,
+        )
+        migration = step(
+            "migration_apply_with_backup",
+            [
+                "cmd.exe",
+                "/d",
+                "/c",
+                "scripts\\python_local.bat",
+                "scripts\\migrate_to_v2.py",
+                "--db",
+                str(db_path),
+                "--apply",
+                "--json",
+            ],
+            120,
+        )
+        migration_payload = json.loads(migration.stdout)
+        backup_value = migration_payload.get("backup_path")
+        if not backup_value:
+            raise RuntimeError("La migración aplicada no produjo backup")
+        backup_path = Path(str(backup_value)).resolve()
+        if backup_path.parent != db_path.parent or not backup_path.is_file():
+            raise RuntimeError("La migración devolvió un backup fuera del proyecto fixture")
+        backup_hash = _sha256_file(backup_path)
+        if backup_hash != original_hash:
+            raise RuntimeError("El backup no coincide con la base previa a migración")
+        rollback_probe = sqlite3.connect(db_path)
+        try:
+            rollback_probe.execute(
+                "CREATE TABLE acceptance_rollback_probe (id INTEGER)"
+            )
+            rollback_probe.commit()
+        finally:
+            rollback_probe.close()
+        shutil.copy2(backup_path, db_path)
+        restored_hash = _sha256_file(db_path)
+        if restored_hash != original_hash:
+            raise RuntimeError("La restauración no recuperó los bytes originales")
+        receipt["steps"].append(
+            {
+                "name": "database_rollback_restore",
+                "ok": True,
+                "exit_code": 0,
+                "duration_seconds": 0.0,
+            }
+        )
+        receipt["database_rollback"] = {
+            "backup_created": True,
+            "backup_matches_original": True,
+            "restored_matches_original": True,
+        }
+
         receipt["global_cli_inventory_after"] = _cli_inventory()
         introduced = [
             name
@@ -364,7 +505,9 @@ def main() -> int:
         receipt["ok"] = True
         receipt["promotion_allowed"] = receipt["independent_machine"]
         return 0
-    except Exception as exc:
+    # El recibo y el teardown deben producirse incluso ante un fallo inesperado
+    # del bootstrap o de un subprocess externo.
+    except Exception as exc:  # noqa: BLE001
         receipt["failure"] = _redact(str(exc), fixture_root=fixture_root)
         return 1
     finally:

@@ -1,0 +1,14 @@
+.model-role-selector {
+  display: grid;
+  gap: 0.35rem;
+  min-width: min(34rem, 100%);
+}
+
+.model-role-selector select {
+  width: 100%;
+}
+
+.model-role-default {
+  color: var(--text-dim);
+  line-height: 1.35;
+}

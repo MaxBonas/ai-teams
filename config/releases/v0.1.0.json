@@ -1,0 +1,24 @@
+{
+  "schema_version": "release_descriptor_v1",
+  "version": "0.1.0",
+  "tag": "v0.1.0",
+  "notes_path": "docs/releases/v0.1.0.md",
+  "upgrade_path": "docs/UPGRADE_AND_ROLLBACK.md",
+  "required_note_headings": [
+    "# AI Teams v0.1.0",
+    "## Novedades",
+    "## Instalación y actualización",
+    "## Migración y rollback",
+    "## Límites conocidos"
+  ],
+  "database": {
+    "migration_command_path": "scripts/migrate_to_v2.py",
+    "backup_required": true,
+    "rollback_requires_backup_restore": true
+  },
+  "publish": {
+    "github_release": true,
+    "enabled": false,
+    "prerelease": false
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aiteams.local/schemas/release_descriptor.v1.schema.json",
+  "title": "AI Teams release descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "version",
+    "tag",
+    "notes_path",
+    "upgrade_path",
+    "required_note_headings",
+    "database",
+    "publish"
+  ],
+  "properties": {
+    "schema_version": {"const": "release_descriptor_v1"},
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "notes_path": {"type": "string", "minLength": 1},
+    "upgrade_path": {"type": "string", "minLength": 1},
+    "required_note_headings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "migration_command_path",
+        "backup_required",
+        "rollback_requires_backup_restore"
+      ],
+      "properties": {
+        "migration_command_path": {"const": "scripts/migrate_to_v2.py"},
+        "backup_required": {"const": true},
+        "rollback_requires_backup_restore": {"const": true}
+      }
+    },
+    "publish": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["github_release", "enabled", "prerelease"],
+      "properties": {
+        "github_release": {"const": true},
+        "enabled": {"type": "boolean"},
+        "prerelease": {"type": "boolean"}
+      }
+    }
+  }
+}

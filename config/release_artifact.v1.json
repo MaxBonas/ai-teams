@@ -1,0 +1,124 @@
+{
+  "schema_version": "release_artifact_v1",
+  "archive": {
+    "format": "zip",
+    "root_template": "ai-teams-{version}",
+    "compression": "stored",
+    "timestamp_source": "git_commit",
+    "file_modes": {
+      "default": "0644",
+      "executable": "0755"
+    }
+  },
+  "source": {
+    "strategy": "git_tracked",
+    "required_paths": [
+      "README.md",
+      "pyproject.toml",
+      "uv.lock",
+      "requirements.lock",
+      "requirements-dev.lock",
+      "LICENSE",
+      "NOTICE",
+      "package.json",
+      "ide-frontend/package.json",
+      "ide-frontend/package-lock.json",
+      "config/installation_support.v1.json",
+      "config/release_descriptor.v1.schema.json",
+      "config/releases/v0.1.0.json",
+      "docs/INSTALLATION_AND_INTEGRATION.md",
+      "docs/UPGRADE_AND_ROLLBACK.md",
+      "docs/releases/v0.1.0.md",
+      "scripts/prepare_dev_env.bat",
+      "scripts/prepare_dev_env.sh",
+      "scripts/accept_release_archive.py",
+      "scripts/accept_posix_clean_room.py",
+      "scripts/accept_windows_clean_room.py",
+      "scripts/validate_release_candidate.py",
+      "scripts/verify_release_artifact.py"
+    ],
+    "allowed_runtime_paths": [
+      "runtime/ollama/Modelfile.aiteam-qwen-coder"
+    ],
+    "allowed_sensitive_paths": [
+      ".env.example"
+    ],
+    "forbidden_path_segments": [
+      ".git",
+      ".pytest_cache",
+      ".ruff_cache",
+      ".vite",
+      "__pycache__",
+      "build",
+      "dist",
+      "node_modules",
+      "test-results",
+      "venv"
+    ],
+    "forbidden_names": [
+      ".env",
+      ".env.local",
+      ".npmrc",
+      ".pypirc",
+      "credentials.json",
+      "service_account.json"
+    ],
+    "forbidden_name_prefixes": [
+      ".env.",
+      "credentials.",
+      "service_account"
+    ],
+    "forbidden_suffixes": [
+      ".key",
+      ".p12",
+      ".pem",
+      ".sqlite",
+      ".sqlite3"
+    ],
+    "maximum_file_bytes": 26214400
+  },
+  "secret_scan": {
+    "allowed_test_literals": [
+      "sk-never-export-this",
+      "sk-supersecretvalue12345"
+    ],
+    "patterns": [
+      {
+        "id": "private_key",
+        "regex": "-----BEGIN (?:EC |OPENSSH |PGP |RSA )?PRIVATE KEY-----"
+      },
+      {
+        "id": "openai_key",
+        "regex": "\\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\\b"
+      },
+      {
+        "id": "github_token",
+        "regex": "\\bgh[oprsu]_[A-Za-z0-9]{30,}\\b"
+      },
+      {
+        "id": "slack_token",
+        "regex": "\\bxox[baprs]-[A-Za-z0-9-]{20,}\\b"
+      },
+      {
+        "id": "aws_access_key",
+        "regex": "\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b"
+      }
+    ]
+  },
+  "metadata": {
+    "directory": "RELEASE-METADATA",
+    "manifest": "manifest.json",
+    "sbom": "sbom.cdx.json",
+    "licenses": "licenses.json",
+    "checksums": "SHA256SUMS"
+  },
+  "sbom": {
+    "format": "CycloneDX",
+    "spec_version": "1.6",
+    "python_project": "pyproject.toml",
+    "python_lockfile": "uv.lock",
+    "node_lockfiles": [
+      "ide-frontend/package-lock.json"
+    ]
+  }
+}

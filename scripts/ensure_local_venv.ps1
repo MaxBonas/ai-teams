@@ -270,7 +270,7 @@ function Install-ProjectDependencies {
     if (-not (Test-Path $lockPath)) {
         throw "No se encontro requirements-dev.lock."
     }
-    Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "-r", $lockPath) -StepName "Instalando dependencias bloqueadas" -WorkingDirectory $rootDir
+    Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "--require-hashes", "-r", $lockPath) -StepName "Instalando dependencias bloqueadas" -WorkingDirectory $rootDir
     Invoke-PythonChecked -PythonExe $venvPython -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "--no-deps", "--no-build-isolation", "-e", ".") -StepName "Instalando AI Teams editable" -WorkingDirectory $rootDir
     Write-StoredDependencyHash -HashValue (Get-ProjectDependencyHash)
 }

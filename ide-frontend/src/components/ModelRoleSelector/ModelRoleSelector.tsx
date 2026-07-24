@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { apiFetch } from '../../lib/api';
+import './ModelRoleSelector.css';
 
 interface SelectionScore {
   score?: number | null;

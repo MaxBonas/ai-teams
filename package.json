@@ -1,6 +1,7 @@
 {
   "name": "aiteam-hybrid",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "description": "AI Team Hybrid Orchestrator — dev workspace root",
@@ -8,9 +9,10 @@
     "start": "node scripts/dev.mjs",
     "build": "cd ide-frontend && npm run build",
     "test": ".\\scripts\\pytest_local.bat",
-    "lint":  "cd ide-frontend && npm run lint"
+    "lint": "cd ide-frontend && npm run lint",
+    "check:frontend": "cd ide-frontend && npm run check"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   }
 }

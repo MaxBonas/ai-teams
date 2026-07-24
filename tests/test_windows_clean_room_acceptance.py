@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from scripts.accept_windows_clean_room import _fixture_summary, _github_provenance, _redact
+from scripts.accept_windows_clean_room import (
+    _fixture_summary,
+    _github_provenance,
+    _redact,
+)
 
 
 def test_clean_room_receipt_redacts_repo_fixture_and_user_profile(

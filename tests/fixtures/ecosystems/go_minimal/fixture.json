@@ -1,0 +1,15 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "go_minimal",
+  "expected_detected": ["go"],
+  "cases": [
+    {
+      "id": "go_builtin",
+      "ecosystem_id": "go",
+      "actions": [
+        {"id": "build", "artifacts": []},
+        {"id": "test", "artifacts": []}
+      ]
+    }
+  ]
+}

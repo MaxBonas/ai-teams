@@ -1,0 +1,15 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "java_maven_minimal",
+  "expected_detected": ["java_kotlin"],
+  "cases": [
+    {
+      "id": "java_maven_junit",
+      "ecosystem_id": "java_kotlin",
+      "actions": [
+        {"id": "build", "artifacts": ["target/java-maven-fixture-1.0.0.jar"]},
+        {"id": "test", "artifacts": ["target/surefire-reports/*.txt"]}
+      ]
+    }
+  ]
+}

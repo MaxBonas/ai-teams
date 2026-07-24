@@ -182,22 +182,80 @@ distintos lenguajes mediante capacidades demostradas.
   frontends por plataforma. Locks de dependencias/bootstrap, ownership
   incremental y diez casos de recovery están implementados; POSIX permanece
   preview/planned hasta completar su aceptación independiente.
-- El soporte de lenguajes se modelará mediante descriptores versionados de
+- El soporte de lenguajes se modela mediante `ecosystem_registry_v1`: doce
+  descriptores versionados de
   detección, manifests, comandos permitidos, artefactos y requisitos. Reconocer
   archivos no equivale a soportar un ecosistema: se exige fixture build/test por
   OS y recepción durable.
-- Lead, hiring, prompts, tools y gates consumirán el mismo perfil de proyecto;
-  una carencia se expresa como `capability_gap`, no mediante comandos inventados.
+- Doctor, Lead, hiring, wake payload, tools y gates consumen el mismo perfil de proyecto;
+  una carencia se expresa como `capability_gap_v1`, con descriptor, owner,
+  razón y remediación, no mediante comandos inventados.
+- I.6 valida los descriptores con `ecosystem_validation_receipt_v1`: copia cada
+  fixture a una ruta temporal con espacios/Unicode, ejecuta sin shell, comprueba
+  timeout y artefactos y registra provenance/runtime sin rutas absolutas. Un
+  pass queda elegible para revisión, pero nunca promueve soporte por sí mismo.
+- El entregable se clasifica y persiste mediante `objective_classification_v1`
+  (`software`, `research`, `operations`, `mixed`). Research/operations usan
+  evidencia documental y no activan roles ni gates de programación. Mixed exige
+  sub-issues `software` explícitos antes de habilitar toolchain o tests. El
+  override del owner prevalece sobre la recomendación determinista.
 - `docs/INSTALLATION_AND_INTEGRATION.md` es el onboarding canónico para personas
   y agentes de IA y separa estrictamente lo operativo hoy de los objetivos.
 
-Estado: I.1 cerrado el `2026-07-23`. El run independiente `30023876549` y el
+Estado: I.1–I.5, I.6.1 e I.6.3 cerrados el `2026-07-23`. I.5 entrega catálogo, detector
+read-only, planner fail-closed y proyección común sin promover ningún ecosistema
+a `supported`. I.6 tiene cuatro celdas Python/npm y una Java/Maven verdes solo
+en Windows local; .NET conserva un gap correcto porque el host no tiene SDK.
+Go/Rust ya tienen fixtures, pero esta máquina solo conserva gaps de runtime.
+C/C++ incorpora dependencias de acción descriptor-bound para
+`configure → build → test`; esta máquina conserva un gap de CMake. La workflow
+de tres OS cubre nueve casos y sigue pendiente de artifacts; el
+resto del catálogo conserva la validación build/test por OS. El run
+independiente `30023876549` y el
 recibo `windows-clean-room-f2a20ed.json` verifican Windows x86_64 para clone,
 bootstrap, audit, start/stop y fixture sin instalar CLIs globales. Git checkout
 y ese alcance del control plane pasan a `verified`; adapters vivos, releases,
 ARM64, Linux/macOS y la matriz poliglota conservan gates separados. El
 onboarding de OpenCode Zen guía la API key personal en el CLI sin copiarla a AI
-Teams. I.2.1 fija el contrato `configuration_layers_v1`, provenance, merge
+Teams. I.9.1 fija React/Vite/ESLint y el gate web reproducible; I.9.2a inicia la
+modularización sin big bang: catálogo, selector y quorum poseen componentes/CSS
+propios, el quorum usa un hook abortable keyed por issue y no quedan excepciones
+`set-state-in-effect`. I.9.2b1 separa además shells/CSS de Configuración y
+Bandeja, junto a Proyecto, Autonomía, Orientación y selección de decisiones;
+I.9.2b2 separa Skills, MCP y el detalle de hiring mediante props tipadas sin
+mover scoring, approvals ni gates de autoridad a las vistas. I.9.2b3 cierra el
+dominio: `ConfigurationWorkspace` y `useConfigurationData` aíslan credenciales,
+CLIs, adapters, sistema y zona de peligro; `App.tsx` queda por debajo de 4000
+líneas e `index.css` por debajo de 1800. I.9.2c separa Chat, Issues y Runs,
+extrae tipos/markdown compartidos y añade un ratchet de tamaño al gate
+reproducible; las hojas aisladas recuperan especificidad estricta. I.9.3 añade
+Vitest/React Testing Library para estados, errores y teclado, conserva la suite
+completa en Chromium escritorio y ejecuta un smoke crítico con Axe/overflow en
+Chromium móvil, Firefox y WebKit. El primer móvil detectó y corrigió el timeline
+de Runs desplazable pero no enfocable. El build queda protegido por presupuestos
+fail-closed de JS/CSS raw y gzip. I.9 queda cerrado sin confundir esa matriz
+smoke con soporte exhaustivo multinavegador.
+I.8.1 introduce el contrato `release_artifact_v1`: fuente exclusivamente Git,
+ZIP stored con orden/timestamp/modos estables, hashes internos/externos,
+manifiesto, CycloneDX 1.6 y reporte de licencias. El generador falla cerrado
+ante suciedad salvo preview explícito, symlinks, runtime, dependencias
+reconstruibles, SQLite y secretos. CI sube previews y bloquea tags no
+promocionables; no publica releases. I.8.2a resuelve los dos blockers: el owner
+elige Apache-2.0 con copyright 2026 Max Bonas Fuertes, sin versionar su
+identificador fiscal, y `uv.lock` 0.11.31 fija 58 paquetes para seis
+combinaciones OS/arquitectura. Exports con hashes mantienen interoperabilidad
+con `pip`; CI verifica lock y regeneración exacta. I.8.2b añade descriptores por
+versión, notas, verificación completa del ZIP y upgrade/rollback side-by-side
+con restauración SQLite. La publicación separa el job read-only del único job
+con `contents: write`: revalida un tag anotado, crea un draft con cinco assets y
+solo después lo publica. I.8.3 añade aceptación externa del ZIP con 17 gates:
+bootstrap idempotente, audit/tests/start-stop, fixture, migración/backup,
+restauración SQLite exacta y retirada completa. La run local detecta y corrige
+la ausencia de setuptools en venv Python 3.12 y una cabecera no reproducible de
+`uv export`. `v0.1.0` permanece deshabilitada hasta la aceptación independiente
+y multiplataforma I.8.4.
+I.2.1 fija el contrato
+`configuration_layers_v1`, provenance, merge
 conservador de defaults y actualización Windows `pull --ff-only` para
 instalaciones activas sin copiar ni borrar estado local. I.2.2 añade un paquete
 hasheado con perfiles/política no secreta,

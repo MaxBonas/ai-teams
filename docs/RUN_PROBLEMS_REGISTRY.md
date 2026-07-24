@@ -21,30 +21,21 @@ Registro de problemas detectados en runs reales del proyecto. Cada entrada docum
 
 ## Problemas abiertos
 
-### RUN-018 · MITIGADO — Instalación externa sin contrato de mínimos ni tipo de entregable
+### RUN-020 · ABIERTO — Starlette anuncia migración de `httpx` a `httpx2`
 
-**Detectado:** 2026-07-23; incidente ocurrido el 2026-07-22
-**Run ID(s):** no disponibles; reporte del owner sobre una instalación externa
-**Proyecto:** estudio empresarial de una empresa de limpieza
-**Síntomas:** faltaban CLIs y el proyecto arrancó con errores; OpenCode pidió una
-API key inesperada; el agente integrador instaló Ollama y LM Studio como si
-fueran obligatorios; un objetivo teórico creó tests, falló runs y se bloqueó.
-**Causas confirmadas:** no existía una fuente machine-readable que separase
-runtimes requeridos, opciones primarias y adapters opcionales; el onboarding no
-explicaba con suficiente proximidad que Zen exige credencial personal aunque el
-modelo tenga precio cero; los perfiles locales no publicaban clase de setup; el
-producto no persiste tipo de entregable y el Lead sigue presentado como equipo
-de software con `full_team` por defecto.
-**Mitigación aplicada:** `installation_support_v1`, auditor read-only al final
-del bootstrap, guía de una sola opción Lead-capable, OpenCode opcional con auth
-humana explícita y perfiles Ollama/LM Studio marcados opcionales. La skill del
-Lead prohíbe roles/tests de programación para investigación sin artefacto
-ejecutable.
-**Pendiente:** I.3 debe añadir doctor/auth/health; P0.J debe persistir tipo,
-gobernar gates y reproducir el estudio como fixture e2e.
-**Verificación:** I.1.4 cerró después en el run independiente `30023876549`;
-Windows x86_64 queda `verified` para control plane sin instalar CLIs. Los
-adapters siguen sin declararse autenticados por esa evidencia.
+**Detectado:** 2026-07-24
+**Run ID(s):** lock universal I.8.2a
+**Proyecto:** AI Teams
+**Síntomas:** la suite pasa 1588/1588, pero `fastapi.testclient` emite
+`StarletteDeprecationWarning` porque el stack upstream de Starlette 1.3.1
+considera deprecado `httpx` y recomienda `httpx2`.
+**Causa raíz:** transición upstream expuesta al fijar FastAPI 0.139.2,
+Starlette 1.3.1 y httpx 0.28.1; no hay fallo funcional local.
+**Mitigación vigente:** conservar el lock probado y no sustituir imports o
+dependencias a ciegas. Revalidar cuando FastAPI documente/adopte el camino o la
+advertencia se convierta en incompatibilidad.
+**Verificación:** bootstrap canónico verde, 29/29 pruebas focalizadas y suite
+backend 1588/1588; frontend build y audit cero.
 
 ### RUN-019 — El harness de start quedaba esperando handles heredados
 
@@ -122,6 +113,52 @@ La matriz Laguna vs DeepSeek completa seis muestras y conserva
 > `RunExecutor` los materializa antes de medir el delta, bajo RBAC. Sus lecciones
 > de liveness siguen siendo válidas: un rol de implementación que no produce
 > cambios no puede cerrar solo con texto. OpenCode Zen sí continúa read-only.
+
+### RUN-021 · RESUELTO — El ZIP limpio no podía instalar su backend de build
+
+**Detectado:** 2026-07-24
+**Run ID(s):** primeras aceptaciones I.8.3 del ZIP preview
+**Proyecto:** AI Teams release `0.1.0-preview.1`
+**Síntomas:** `bootstrap_first` fallaba en un venv Python 3.12 nuevo con
+`BackendUnavailable: Cannot import 'setuptools.build_meta'`. La comparación
+byte a byte de exports en CI también era imposible porque la cabecera de uv
+incluía la ruta distinta de cada `--output-file`.
+**Causa raíz:** Python 3.12 dejó de sembrar setuptools en `venv`; el editable
+usa deliberadamente `--no-build-isolation`, pero build tooling no estaba en el
+lock dev. Además, el gate comparaba metadatos dependientes de ruta, no solo el
+contenido reproducible.
+**Fix aplicado:** setuptools 83.0.0 y wheel 0.47.0 quedan en `uv.lock` y
+`requirements-dev.lock` con hashes. Los exports canónicos y CI usan
+`--no-header`. La limpieza de fixture/instalación pertenece al wrapper externo,
+después de terminar el proceso que usa SQLite.
+**Verificación:** `release_archive_acceptance_v1` completa 17/17 gates sobre
+1164 archivos: bootstrap ×2, audit/tests, start/health/stop, fixture,
+migración/backup, restauración byte a byte y cleanup. Recibo redacted
+`release-preview-local-f69f8e7.json`; no promociona por ser preview local.
+
+### RUN-018 · RESUELTO — Instalación externa sin contrato de mínimos ni tipo de entregable
+
+**Detectado:** 2026-07-23; incidente ocurrido el 2026-07-22
+**Run ID(s):** no disponibles; reporte del owner sobre una instalación externa
+**Proyecto:** estudio empresarial de una empresa de limpieza
+**Síntomas:** faltaban CLIs y el proyecto arrancó con errores; OpenCode pidió una
+API key inesperada; el agente integrador instaló Ollama y LM Studio como si
+fueran obligatorios; un objetivo teórico creó tests, falló runs y se bloqueó.
+**Causas confirmadas:** faltaban contratos machine-readable de instalación y
+tipo de objetivo; el onboarding no distinguía bastante bien auth de precio cero;
+`full_team` asumía software y los quality gates no conocían el entregable.
+**Fix aplicado:** `installation_support_v1` separa requisitos y adapters
+opcionales. `objective_classification_v1` persiste `software`, `research`,
+`operations` o `mixed` desde API/UI; el owner puede corregirlo. Hiring,
+delegación, wake payload y gates consumen el contrato. Research/operations
+contratan scouts/curator y no pueden crear roles ni gates de programación;
+`mixed` exige que cada hijo ejecutable sea explícitamente `software`.
+**Verificación:** el run independiente `30023876549` valida el control plane en
+Windows limpio. El fixture SQLite exacto del estudio de limpieza aplica el plan,
+crea solo Lead/scout/curator, conserva dependencias y evidencia documental,
+ignora señales de tests ajenas y cierra sin crear tests ni manifests. Pasan 228
+tests dirigidos, 1561/1561 tests backend, lint/diff, typecheck frontend y 10/10
+focalizados posteriores al hardening de propuestas editadas.
 
 ### RUN-017 · RESUELTO — El canario no podía probar un modelo nuevo fuera del catálogo declarado
 

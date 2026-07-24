@@ -36,6 +36,48 @@
       "Una ejecución local valida el harness, pero no cuenta como máquina independiente."
     ]
   },
+  "release_acceptance_contract": {
+    "schema_version": "release_archive_acceptance_v1",
+    "platform_families": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "workflow": ".github/workflows/release-artifact.yml",
+    "required_steps": [
+      "archive_verified",
+      "source_revision",
+      "bootstrap_first",
+      "bootstrap_second",
+      "installation_audit",
+      "minimum_tests",
+      "start",
+      "backend_health",
+      "frontend_health",
+      "fixture_project_create",
+      "stop",
+      "ports_released",
+      "migration_dry_run",
+      "migration_apply_with_backup",
+      "database_rollback_restore",
+      "fixtures_removed",
+      "installation_removed"
+    ],
+    "promotion_requires": [
+      "archive promotion_allowed=true",
+      "package acceptance ok=true",
+      "la misma candidata pasa Windows/Linux/macOS",
+      "independent_machine=true",
+      "database rollback restored_matches_original=true",
+      "installation_removed=true",
+      "recibo redacted conservado como artefacto"
+    ],
+    "limits": [
+      "No instala ni autentica CLIs de proveedores.",
+      "No ejecuta inferencias ni demuestra que un adapter esté verde.",
+      "Un preview local valida el harness, pero no permite promoción."
+    ]
+  },
   "distributions": [
     {
       "id": "git_checkout",
@@ -52,7 +94,7 @@
     },
     {
       "id": "versioned_release_artifact",
-      "status": "planned",
+      "status": "preview",
       "channel": "GitHub Release",
       "required_contents": [
         "versión inmutable",
@@ -62,7 +104,11 @@
         "instrucciones de actualización y rollback",
         "test de ausencia de secretos y estado local"
       ],
-      "notes": "Debe incluir checksum, SBOM/licencias, notas de migración y rollback."
+      "local_preview_evidence": "benchmarks/results/installation_acceptance/release-preview-local-f69f8e7.json",
+      "local_preview_evidence_sha256": "c965f5c5c54a16eeacf425d613821db471b9f3fc648c59002a0ea5896e5ced74",
+      "local_preview_artifact_sha256": "a046cb04b2a71fbd8094f832e9ffefd3ea04817de00c299ebec8e790be7beb1b",
+      "evidence_date": "2026-07-24",
+      "notes": "Preview local aceptado 17/17; falta un tag limpio en runner independiente antes de verified/publicación."
     },
     {
       "id": "container",
@@ -93,7 +139,7 @@
       "artifact_sha256": "b8b714f97b103ba602419849c0bccdeb18362de49e2bbae8e2533f7e37d20806",
       "evidence_run": "https://github.com/MaxBonas/ai-teams/actions/runs/30023876549",
       "limitations": [
-        "No existe todavía artefacto de release versionado.",
+        "El ZIP preview está aceptado localmente; falta candidato promocionable desde tag y runner independiente.",
         "La aceptación no instala, autentica ni ejecuta adapters de proveedor."
       ]
     },

@@ -18,6 +18,7 @@ def test_support_contract_separates_required_primary_and_optional_local() -> Non
     adapters = {item["id"]: item for item in contract["adapters"]}
     distributions = {item["id"]: item for item in contract["distributions"]}
     acceptance = contract["acceptance_contract"]
+    release_acceptance = contract["release_acceptance_contract"]
 
     assert {item["status"] for item in contract["platforms"]} <= {
         "verified",
@@ -33,12 +34,22 @@ def test_support_contract_separates_required_primary_and_optional_local() -> Non
     assert adapters["ollama"]["setup_class"] == "optional_local"
     assert adapters["lmstudio"]["setup_class"] == "optional_local"
     assert all(item["automatic_install"] is False for item in adapters.values())
-    assert "checksums SHA-256" in distributions["versioned_release_artifact"]["required_contents"]
+    assert (
+        "checksums SHA-256"
+        in distributions["versioned_release_artifact"]["required_contents"]
+    )
+    release_distribution = distributions["versioned_release_artifact"]
+    assert release_distribution["status"] == "preview"
+    preview_receipt = ROOT / release_distribution["local_preview_evidence"]
+    assert (
+        hashlib.sha256(preview_receipt.read_bytes()).hexdigest()
+        == (release_distribution["local_preview_evidence_sha256"])
+    )
+    assert len(release_distribution["local_preview_artifact_sha256"]) == 64
     assert distributions["git_checkout"]["integrity"] == "tag o commit SHA explícito"
     assert distributions["git_checkout"]["status"] == "verified"
     windows = next(
-        item for item in contract["platforms"]
-        if item["id"] == "windows_native_x86_64"
+        item for item in contract["platforms"] if item["id"] == "windows_native_x86_64"
     )
     assert windows["status"] == "verified"
     assert windows["evidence"].endswith("windows-clean-room-f2a20ed.json")
@@ -47,11 +58,18 @@ def test_support_contract_separates_required_primary_and_optional_local() -> Non
     assert acceptance["required_steps"].count("bootstrap_first") == 1
     assert "independent_machine=true" in acceptance["promotion_requires"]
     assert "No ejecuta inferencias" in " ".join(acceptance["limits"])
-    posix = [
-        item
-        for item in contract["platforms"]
-        if item["os"] in {"linux", "macos"}
+    assert release_acceptance["schema_version"] == "release_archive_acceptance_v1"
+    assert release_acceptance["platform_families"] == [
+        "windows",
+        "linux",
+        "macos",
     ]
+    assert release_acceptance["workflow"] == ".github/workflows/release-artifact.yml"
+    assert "database_rollback_restore" in release_acceptance["required_steps"]
+    assert "fixtures_removed" in release_acceptance["required_steps"]
+    assert "installation_removed" in release_acceptance["required_steps"]
+    assert "independent_machine=true" in release_acceptance["promotion_requires"]
+    posix = [item for item in contract["platforms"] if item["os"] in {"linux", "macos"}]
     assert all(item["status"] == "planned" for item in posix)
     assert all(item["bootstrap"] == "sh scripts/prepare_dev_env.sh" for item in posix)
 
@@ -91,7 +109,10 @@ def test_machine_audit_does_not_treat_optional_tools_as_blockers() -> None:
     assert report["control_plane_ready"] is True
     assert report["live_runs"]["status"] == "adapter_installed_auth_health_required"
     assert report["live_runs"]["ready"] is False
-    assert report["acceptance_contract"]["workflow"] == ".github/workflows/windows-clean-room.yml"
+    assert (
+        report["acceptance_contract"]["workflow"]
+        == ".github/workflows/windows-clean-room.yml"
+    )
     assert {item["id"] for item in report["runtimes"]} == {
         "python",
         "node",
@@ -100,7 +121,10 @@ def test_machine_audit_does_not_treat_optional_tools_as_blockers() -> None:
         "powershell",
     }
     assert all(item["ready"] for item in report["runtimes"])
-    assert next(item for item in report["adapters"] if item["id"] == "ollama")["installed"] is False
+    assert (
+        next(item for item in report["adapters"] if item["id"] == "ollama")["installed"]
+        is False
+    )
 
 
 def test_machine_audit_requires_a_primary_adapter_for_live_runs() -> None:

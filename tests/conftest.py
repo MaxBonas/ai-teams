@@ -20,6 +20,10 @@ import pytest
 from scripts.cleanup_test_artifacts import pid_is_running
 
 
+# Estos archivos son inputs copiados y ejecutados por la matriz I.6. No forman
+# parte de la suite del repositorio anfitrión.
+collect_ignore_glob = ["fixtures/ecosystems/**/test_*.py"]
+
 _TEST_ENV_OVERRIDES = {
     "AITEAM_REQUIRE_API_KEYS": "0",
     "AITEAM_ENABLE_LIVE_API": "0",

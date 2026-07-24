@@ -211,8 +211,14 @@ límites actuales y la estrategia de soporte poliglota.
 Documentación activa adicional:
 
 - [Plan y tareas](task.md)
+- [Contrato del artefacto de release](docs/RELEASE_ARTIFACT.md)
 - [Migración Paperclip-like](docs/MIGRATION_PAPERCLIP.md)
 - [Orquestación](docs/ORCHESTRATION.md)
 - [Índice documental](docs/INDEX.md)
 - [Handoff vigente](HANDOFF.md)
 - [Instrucciones para agentes de desarrollo](AGENTS.md)
+
+## Licencia
+
+AI Teams se distribuye bajo
+[Apache License 2.0](LICENSE). Copyright 2026 Max Bonas Fuertes.

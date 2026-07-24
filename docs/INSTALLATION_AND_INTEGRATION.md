@@ -119,7 +119,7 @@ Set-Location ai-teams
 El script coordina validación de runtime, entorno Python y dependencias del
 frontend, y termina mostrando adapters primarios y opcionales. Debe ejecutarse
 en primer plano y puede repetirse. Un lock exclusivo impide dos bootstraps
-simultáneos; `requirements-dev.lock` y `package-lock.json` fijan las versiones,
+simultáneos; `uv.lock`, `requirements-dev.lock` y `package-lock.json` fijan las versiones,
 y un lock ausente o incoherente falla sin sustituirse por una instalación
 abierta. No actualiza `pip`, no ejecuta `npm install` como fallback y no instala
 ni autentica CLIs.
@@ -221,6 +221,30 @@ listos, 10/10 pasos, una issue/26 tablas, inventario CLI antes/después y ausenc
 de rutas o secretos. Por ello Windows x86_64 y `git_checkout` pasan a
 `verified` únicamente para el alcance descrito.
 
+### Aceptación de un ZIP de release
+
+El checkout limpio y el ZIP tienen fronteras distintas. El ZIP se acepta desde
+fuera del paquete para que la propia instalación no pueda declarar que se
+eliminó. El harness verifica el archivo, lo extrae side-by-side, ejecuta dentro
+los gates del control plane y, cuando ese proceso termina, retira fixture e
+instalación:
+
+```powershell
+.\scripts\python_local.bat scripts\accept_release_archive.py `
+  --archive C:\Descargas\ai-teams-0.1.0.zip `
+  --checksum C:\Descargas\ai-teams-0.1.0.zip.sha256 `
+  --workspace-root "$env:TEMP\aiteam-release-acceptance" `
+  --receipt "$env:TEMP\release-acceptance-receipt.json"
+```
+
+`--allow-preview` existe solo para depuración local y fuerza
+`promotion_allowed=false`. El recibo canónico exige 17/17 pasos, restauración
+SQLite byte a byte y ausencia de CLIs globales nuevos. En un tag, el workflow de
+release ejecuta este harness sobre el mismo ZIP en `windows-latest`,
+`ubuntu-latest` y `macos-latest`; el job de publicación depende de las tres
+celdas. En PR/manual también ejecuta la matriz con `--allow-preview`, de modo
+que prueba portabilidad sin declarar el paquete promocionable.
+
 ## Linux y macOS
 
 El código Python declara `>=3.10` y la pila web es portable en principio. I.4.1
@@ -237,10 +261,10 @@ sh scripts/python_local.sh scripts/migrate_to_v2.py --json
 `stop_ide.sh` consume el mismo registro de identidad y es idempotente. El
 bootstrap usa `venv/`, `node_modules/` y `runtime/` del checkout, locks
 versionados y exclusión mutua, nunca instalaciones globales. La misma matriz de
-recovery está implementada como contrato, pero sus filas POSIX permanecen
-`preview/contract_tested`: todavía faltan aceptación independiente y merge
-conservador de upgrades. Disponer de estos scripts no convierte la plataforma
-en `verified`.
+recovery está implementada como contrato y el harness POSIX ya ejecuta los 17
+gates del ZIP. Sus filas permanecen `planned` hasta conservar receipts reales
+de CI ligados al SHA y repetir la aceptación en máquinas físicas. Disponer del
+harness no convierte la plataforma en `verified`.
 
 El contrato común se inspecciona sin ejecutar acciones:
 
@@ -454,28 +478,62 @@ health se debe volver a comprobar después de actualizar.
 7. Migrar una DB solo con backup y el migrador canónico. Una DB de proyecto es
    dato del usuario, no parte del paquete de aplicación.
 
-Las releases con checksum, notas de migración y rollback son trabajo pendiente
-I.8. Mientras no existan, Git es la vía canónica de actualización.
+I.8 aporta un generador reproducible con checksum, manifiesto, SBOM, licencias,
+notas y rollback; consulta `RELEASE_ARTIFACT.md`. El preview local completa
+17/17 gates y detectó/corrigió el backend de build ausente en Python 3.12.
+Todavía no existe una GitHub Release: falta ejecutar el candidato limpio desde
+tag en runners independientes. Hasta cerrar I.8.4, Git continúa siendo la vía
+canónica de actualización.
 
 ## Integración poliglota
 
-“Máximo de lenguajes” se consigue con un registro extensible, no con una lista
-de extensiones ni prompts genéricos. Cada descriptor de ecosistema debe declarar:
+“Máximo de lenguajes” se consigue con el registro versionado
+`config/ecosystems.v1.json`, validado por
+`config/ecosystem_registry.v1.schema.json`, no con condicionales dispersos ni
+prompts genéricos. Cada descriptor declara:
 
 - detectores y manifests con prioridad;
 - binarios y rangos de versión observables;
-- comandos permitidos de build, test, lint y typecheck;
+- comandos permitidos de configure, build, test, lint y typecheck, incluidas
+  dependencias explícitas entre fases;
 - directorio de trabajo, variables, timeout y artefactos esperados;
 - capacidades/tools necesarias y riesgos de ejecutar scripts del proyecto;
 - fixtures por OS, incluido monorepo cuando aplique.
 
-La detección es read-only. Instalar runtimes o dependencias y ejecutar scripts
-del repositorio son acciones separadas y gobernadas. El Lead, hiring, prompts,
-roles y gates deben consumir el mismo perfil detectado. Si falta una capacidad,
-el resultado correcto es `capability_gap` con siguiente acción, no improvisar un
-comando ni marcar éxito.
+La inspección humana o de una IA puede ejecutarse sin mutar ni lanzar comandos:
 
-La prioridad inicial de fixtures está detallada en P0.I.5: Python, JS/TS,
+```powershell
+.\scripts\python_local.bat scripts\ecosystem_registry.py catalog
+.\scripts\python_local.bat scripts\ecosystem_registry.py --root C:\ruta\proyecto detect
+.\scripts\python_local.bat scripts\ecosystem_registry.py --root C:\ruta\proyecto --role lead project
+```
+
+`detect` enumera señales y `project` explica acciones aplicables, requisitos de
+hiring y gaps, pero ambos declaran `commands_executed=false`,
+`installation_performed=false` y `support_claim=false`. El planner interno solo
+devuelve argv descriptor-bound cuando coinciden selector, capability,
+autorización, estado verificado, runtime, cwd dentro del workspace y timeout.
+Nunca instala runtimes o dependencias. El Lead, hiring, wake payload,
+`machine_doctor_v1` y el runner determinista consumen este mismo perfil.
+
+I.6 dispone además de un validador aislado. Es la única ruta que puede abrir
+temporalmente comandos `planned`, siempre contra fixtures versionados, con
+autorización explícita y sin cambiar el estado del catálogo:
+
+```powershell
+.\scripts\python_local.bat scripts\validate_ecosystem_fixtures.py `
+  --require python_pytest `
+  --require javascript_npm `
+  --require monorepo_python `
+  --require monorepo_javascript `
+  --receipt runtime\receipts\ecosystem-local.json
+```
+
+El receipt señala si el worktree estaba sucio, no contiene rutas absolutas y
+mantiene `support_claim=false`. Consultar `ECOSYSTEM_SUPPORT_MATRIX.md` antes de
+afirmar soporte para un lenguaje o sistema operativo.
+
+La prioridad inicial de fixtures está detallada en P0.I.6: Python, JS/TS,
 Java/Kotlin, Go, Rust, C/C++, .NET, PHP, Ruby, Swift, web/mobile y
 Docker/devcontainers. Ninguna celda se llama `supported` antes de completar su
 ciclo build/test en la plataforma correspondiente.

@@ -2,7 +2,7 @@
 
 # Handoff actual
 
-Fecha: `2026-07-23`
+Fecha: `2026-07-24`
 
 AI Teams ya no está en reconstrucción inicial. Es un control plane multiagente Paperclip-like funcional, centrado en SQLite, y se encuentra en fase de endurecimiento operativo, validación con proveedores reales y medición frente a un agente único.
 
@@ -44,14 +44,145 @@ Implementado y activo:
 
 La compatibilidad legacy ya no gobierna el runtime. Persisten únicamente shims o migraciones aisladas que deben eliminarse solo tras confirmar consumidores reales.
 
-Siguiente unidad ejecutable: **P0.I.5**, registro versionado de
-ecosistemas/toolchains y frontera detectar/ejecutar. M.8 queda abierto como
+Siguiente unidad: **P0.I.8.4c obtener y auditar receipts del mismo ZIP en
+runners Windows/Linux/macOS; después I.8.4d en máquinas reales**. I.8.3 está
+cerrado localmente y I.8.4a/b ya implementa el harness y el gate, pero el
+descriptor v0.1.0 conserva `publish.enabled=false`: no crear el tag hasta que la
+evidencia independiente esté preparada.
+I.8.1 e I.9 ya están cerrados.
+PHP/Ruby queda pausado por prioridad del owner. I.6.2
+espera artifacts reales de CI; `evidence-gate` ya exige 18 receipts/27 celdas
+ligadas al mismo SHA, pero no promover por el YAML ni por el canario local
+sucio. M.8 queda abierto como
 mantenimiento por evento/mes; sus 25 pares
 calibrados ya tienen quality exacta, 21 abren diversidad y los cuatro restantes
 no deben repetirse hasta un cambio material.
 
 ## Trabajo reciente
 
+- I.8.3 acepta el ZIP desde un wrapper externo mediante 17 gates canónicos:
+  verificación/extracción, bootstrap ×2, audit, tests, start/health/stop,
+  fixture, backup/restauración SQLite exacta y retirada completa. La run real
+  descubrió que un venv Python 3.12 carece de setuptools: ahora setuptools
+  83.0.0 y wheel 0.47.0 están fijados con hashes. También se eliminó la cabecera
+  dependiente de ruta de `uv export`, que invalidaba el `cmp` de CI. El recibo
+  local redacted `release-preview-local-f69f8e7.json` pasa 17/17 sobre 1164
+  archivos; sigue no promocionable por worktree sucio/host no independiente.
+  `release-acceptance` queda como matriz obligatoria Windows/Linux/macOS y
+  dependencia de `publish`; el wrapper elige harness Windows o POSIX y PR/manual
+  prueban previews sin promocionarlos. I.8.4a/b pasa 50/50 pruebas de
+  release/instalación, el gate polyglot 17/17 y la suite backend 1611/1611;
+  Ruff/diff/YAML verdes. Faltan los receipts reales hosted y físicos.
+- I.8.2b añade `release_descriptor_v1`, notas v0.1.0 y una guía de
+  upgrade/rollback side-by-side con backup/restauración SQLite. El verificador
+  comprueba checksum externo, rutas/duplicados, cobertura interna completa y
+  manifiesto promocionable. CI construye read-only; un job separado bajo
+  `github-release` recibe `contents: write`, revalida, crea draft, exige cinco
+  assets y publica sin overwrite. El candidato sigue bloqueado hasta I.8.4.
+  Pasan 26/26 pruebas focalizadas, 1600/1600 backend, Ruff y parseo YAML; un
+  preview integral de 1162 archivos se construyó y verificó como no
+  promocionable por suciedad.
+- I.8.2a resuelve los dos blockers decididos por el owner. Apache-2.0 usa el
+  texto oficial exacto, `NOTICE` atribuye copyright 2026 a Max Bonas Fuertes y
+  ningún identificador fiscal se versiona. `uv.lock` 0.11.31 fija 58 paquetes
+  para Windows/Linux/macOS × x86-64/ARM64; exports runtime/dev con hashes
+  mantienen `pip` como bootstrap interoperable. CI verifica lock y exports,
+  bootstrap exige hashes y el SBOM consume versiones Python bloqueadas.
+  Resolución universal, bootstrap, `pip --dry-run`, 29/29 focalizadas,
+  1588/1588 backend, frontend build y audit cero pasan. RUN-020 conserva la
+  advertencia upstream Starlette/httpx2 sin migración especulativa.
+- I.8.1 añade `release_artifact_v1`, esquema y generador reproducible:
+  solo Git, ZIP stored, orden/timestamps/modos estables, manifiesto y hashes por
+  archivo, checksum externo, CycloneDX 1.6 e informe de licencias. Rutas
+  runtime/dependencias/SQLite/secretos fallan cerrado; los falsos positivos
+  conocidos usan dos literales exactos. La workflow crea previews auditables,
+  pero un tag exige `promotion_allowed=true` y nunca publica una GitHub Release.
+  El preview local previo empaquetó 1032 archivos y registró 367 dependencias
+  npm. Los blockers de licencia/lock se cierran en I.8.2a. Pasan 10/10 tests propios,
+  18/18 con documentación, Ruff y 1588/1588 backend.
+- I.9.3 cierra el hardening web previsto. Vitest + React Testing Library
+  aportan 6/6 pruebas de componente para estados, errores y teclado en Chat,
+  Issues y Runs. Playwright mantiene los nueve recorridos completos en Chromium
+  escritorio y ejecuta el smoke crítico del cockpit en Chromium móvil, Firefox
+  y WebKit; son 12/12 ejecuciones, sin declarar cobertura exhaustiva fuera de
+  Chromium escritorio. Axe y overflow están en la matriz; el primer móvil
+  reveló y permitió corregir el timeline desplazable no enfocable. El gate
+  completo añade presupuestos fail-closed: JS 366071 B raw/107539 gzip bajo
+  400/120 KiB, CSS 101679/18106 B bajo 120/25 KiB. ESLint, Stylelint, tamaño,
+  unitarias, typecheck/build, E2E y audit cero pasan.
+- I.9.2c cierra la separación estructural prevista: `ChatPanel`, `IssuePanel`,
+  `IssuePipeline` y `RunsPanel` tienen contratos y hojas propias; tipos de
+  cockpit y markdown ya no viven en `App.tsx`. El nuevo `lint:size` aplica
+  límites 600 TS/TSX y 500 CSS, con ratchets explícitos para los tres módulos
+  legacy mayores. Las hojas aisladas reactivan `no-descending-specificity`.
+  `App.tsx` baja 3984→3546 e `index.css` 1692→1246. ESLint, Stylelint, tamaño,
+  build, 9/9 E2E —incluido Chat→Detalle→Runs— y audit cero.
+- I.9.2b3 cierra Configuración y Bandeja. `ConfigurationWorkspace` compone
+  credenciales, CLIs, adapters, sistema y zona de peligro; el hook
+  `useConfigurationData` concentra estado, cargas y mutaciones de Config sin
+  duplicar scoring ni fetches. Workspace, navegación y confirmación destructiva
+  permanecen en `App.tsx`. CSS de conexiones, `InfoTip` y Equipo queda aislado.
+  Resultado final de b: `App.tsx` 4682→3984, `index.css` 2143→1692; ESLint,
+  Stylelint, build, 8/8 E2E y audit cero.
+- I.9.2b2 separa `SkillsSettings`, `McpSettings` y el detalle tipado de hiring
+  de Bandeja. Las vistas reciben estado y callbacks explícitos: no recalculan
+  scoring, no conceden tools MCP y no deciden aceptación. El gate de
+  compatibilidad de hiring y las transiciones owner permanecen en `App.tsx`.
+  `App.tsx` baja de 4931 a 4682 líneas; `index.css` permanece en 2143. ESLint,
+  Stylelint, build, 8/8 E2E y audit cero. Siguiente corte: I.9.2b3,
+  configuración global/sistema y zona de peligro.
+- I.9.2b1 separa los shells y superficies menos acopladas de Configuración y
+  Bandeja. `ConfigurationPanel`, Proyecto, Autonomía, Orientación, `InfoTip` y
+  la lista/selección de `InboxPanel` tienen módulos tipados; CSS y responsive
+  viven con su dominio. Los formatters compartidos preservan la semántica UTC de
+  SQLite. `App.tsx` pasa de 5141 a 4931 líneas e `index.css` de 2552 a 2143.
+  ESLint, Stylelint, build, 8/8 E2E y audit cero.
+- I.9.2a completa el primer corte estructural seguro. `ModelCatalog`,
+  `ModelRoleSelector` y `QuorumStepper` poseen CSS propio; el quorum sale de
+  `App.tsx` hacia un hook keyed por issue, abortable y tipado, y su vista y
+  formatters quedan en módulos independientes. Las cargas iniciales diferidas
+  evitan el doble fetch de StrictMode y se corrigió el fixture de retry para
+  exigir una sola caída real. No quedan excepciones `set-state-in-effect`.
+  `index.css` pasa de 2974 a 2552 líneas y `App.tsx` de 5298 a 5141. ESLint,
+  Stylelint, build, 8/8 E2E y audit cero.
+- I.9.1 endurece el frontend principal: React 19.2.8, Vite 8.1.5, ESLint 10,
+  plugins actuales y TypeScript 5.9.3 por compatibilidad declarada de
+  `typescript-eslint`. `npm audit` pasa de diez vulnerabilidades a cero. El gate
+  único `npm run check` cubre ESLint, Stylelint, build y 8 E2E; Axe WCAG 2.1 AA,
+  viewport móvil y ausencia de overflow horizontal quedan protegidos. Se
+  corrigieron contraste, CSS deprecado/duplicado y funciones React no hoisted.
+  La workflow `frontend-quality.yml` lo reproduce con Node 24 y lockfile.
+- I.6.1 e I.6.3 quedan cerrados sin sobrepromover ecosistemas.
+  `ecosystem_validation_receipt_v1` ejecuta fixtures Python/npm mínimos y un
+  monorepo multi-language desde rutas temporales con espacios/Unicode, valida
+  artefactos, timeout y errores, y registra OS, arquitectura, SHA, dirty bit y
+  versión del runtime sin rutas absolutas. Los planes denegados exponen
+  `capability_gap_v1` con owner y remediación. Python/npm pasan 4/4 celdas;
+  Java/Maven añade package+JUnit verde y .NET queda bloqueado correctamente
+  porque el host tiene runtime sin SDK. Los receipts ya redaccionan rutas
+  absolutas. Pasan 30 tests focalizados, 190 de integración y 1578/1578
+  globales, pero `support_claim=false` por worktree sucio. La workflow
+  Windows/Linux/macOS cubre ya nueve casos. Go/Rust tienen fixtures build/test;
+  en Windows local ambos devuelven gap de runtime y no se instalaron. I.6.2 no
+  cierra hasta auditar artifacts. C/C++ añade `configure` al contrato y fuerza
+  `configure → build → test`; Windows bloquea las tres fases en cascada sin
+  ejecutar fuera de orden. PHP/Ruby son la siguiente unidad de I.6.4.
+- P0.J queda cerrado. `objective_classification_v1` persiste `software`,
+  `research`, `operations` o `mixed` desde creación de proyecto/tarea y lo
+  muestra en el cockpit, plan y wake payload. Hiring/delegación rechazan roles
+  de programación para research/operations; mixed exige hijos `software`.
+  Quality/test gates ya no bloquean entregables documentales. El fixture e2e
+  exacto del estudio de empresa de limpieza cierra con Lead, scout y curator,
+  sin tests ni manifests. Pasan 228 pruebas dirigidas, 1561/1561 backend,
+  lint/diff, typecheck frontend y 10/10 focalizados posteriores al hardening
+  contra propuestas editadas.
+- I.5 queda cerrado como contrato, no como afirmación global de soporte.
+  `ecosystem_registry_v1` contiene doce descriptores, detector read-only
+  acotado, planner fail-closed y proyección común a doctor, Lead/hiring, wake
+  payload y runner determinista. Solo pytest/npm conservan estado
+  `legacy_enabled`; todo comando `planned` queda bloqueado hasta I.6. Pasan 28
+  pruebas focalizadas, 116 de `RunExecutor` y 1550/1550 backend globales;
+  ningún descriptor emite `support_claim=true`.
 - I.4 queda cerrado. I.4.3 añade diez casos versionados de recovery y registra
   cada proceso inmediatamente después de su spawn. Preflight falla antes de
   mutar ante inputs ausentes; los batch usan UTF-8. Los canarios Windows cubren
@@ -162,8 +293,8 @@ no deben repetirse hasta un cambio material.
   con API key personal y Ollama/LM Studio son locales opcionales. La máquina
   La auditoría local inicial reportó Windows x86_64 `preview`, control plane listo, Codex 0.145.0,
   Antigravity 1.1.5 y OpenCode 1.18.4 presentes, sin fingir auth/health. El caso
-  externo del 2026-07-22 queda en RUN-018; la parte no programativa abre P0.J y
-  recibe mitigación inmediata en la skill del Lead. Verificación: bootstrap
+  externo del 2026-07-22 queda documentado y resuelto en RUN-018; la parte no
+  programativa está cerrada por P0.J. Verificación: bootstrap
   completo, 37 tests dirigidos, Ruff limpio y 1456 tests backend. El contrato
   de release exige versión, SHA-256, SBOM/licencias, migración y rollback; su
   materialización permanece en I.8.

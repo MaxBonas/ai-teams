@@ -3535,6 +3535,9 @@ def test_circuit_breaker_payload_has_mandatory_instruction(tmp_path: Path) -> No
     assert "unblock_action_required" in payload
     assert "mandatory_instruction" in payload
     assert payload["unblock_action_required"][0]["child_issue_id"] == "issue:child"
+    assert payload["project_toolchains"]["schema_version"] == "project_toolchain_projection_v1"
+    assert payload["project_toolchains"]["commands_executed"] is False
+    assert payload["project_toolchains"]["support_claim"] is False
 
 
 def test_update_child_issue_empty_body_requeue_rejected(tmp_path: Path) -> None:

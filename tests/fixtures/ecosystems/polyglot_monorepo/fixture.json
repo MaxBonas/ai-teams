@@ -1,0 +1,22 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "polyglot_monorepo",
+  "expected_detected": ["python", "javascript_typescript"],
+  "cases": [
+    {
+      "id": "monorepo_python",
+      "ecosystem_id": "python",
+      "actions": [
+        {"id": "test", "artifacts": []}
+      ]
+    },
+    {
+      "id": "monorepo_javascript",
+      "ecosystem_id": "javascript_typescript",
+      "actions": [
+        {"id": "build", "artifacts": ["apps/web/dist/fixture.txt"]},
+        {"id": "test", "artifacts": []}
+      ]
+    }
+  ]
+}

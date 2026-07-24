@@ -225,9 +225,9 @@ async function installApiFixture(page: Page, options: { failCatalogOnce?: boolea
     };
     else if (path === '/api/model-catalog') {
       catalogCalls += 1;
-      // React StrictMode ejecuta el efecto inicial dos veces en desarrollo.
-      // Ambas peticiones deben fallar para ejercitar el botón de reintento.
-      if (options.failCatalogOnce && catalogCalls <= 2) {
+      // La carga diferida cancela el montaje de prueba de StrictMode: solo la
+      // primera petición real falla y el botón debe lanzar la segunda.
+      if (options.failCatalogOnce && catalogCalls === 1) {
         status = 503;
         body = { detail: 'fixture_unavailable' };
       } else {

@@ -1070,7 +1070,19 @@ para satisfacer gates de software. Usa scouts/curator y, cuando reduzca un
 riesgo concreto, revisión independiente de fuentes o método. Su evidencia es
 cobertura, citas fechadas, supuestos, cálculos y una conclusión accionable. En
 trabajo `mixed`, solo el sub-issue realmente ejecutable activa build/tests.
-P0.J llevará esta mitigación de prompt a metadata, UI y enforcement determinista.
+Esto ya no depende solo del prompt. `objective_classification_v1` es el contrato
+canónico persistido en metadata y proyectado en UI, plan y wake payload:
+
+- `software`: admite roles y gates de programación proporcionales al riesgo;
+- `research`: evidencia documental, fuentes y síntesis;
+- `operations`: procedimientos, comprobaciones y recibos operativos;
+- `mixed`: hereda el workflow no programativo y solo admite roles/gates de
+  programación en sub-issues clasificados explícitamente `software`.
+
+El clasificador determinista es conservador: ante ambigüedad elige `software`;
+un override explícito del owner tiene precedencia. Hiring y delegación rechazan
+de forma determinista cualquier propuesta incompatible, aunque un LLM ignore
+estas instrucciones.
 
 Preferir evidencia en este orden:
 

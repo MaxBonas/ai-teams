@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-teams.local/schemas/release_artifact.v1.schema.json",
+  "title": "AI Teams release artifact contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "archive",
+    "source",
+    "secret_scan",
+    "metadata",
+    "sbom"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "release_artifact_v1"
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "root_template",
+        "compression",
+        "timestamp_source",
+        "file_modes"
+      ],
+      "properties": {
+        "format": {"const": "zip"},
+        "root_template": {"type": "string", "pattern": "\\{version\\}"},
+        "compression": {"const": "stored"},
+        "timestamp_source": {"const": "git_commit"},
+        "file_modes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default", "executable"],
+          "properties": {
+            "default": {"const": "0644"},
+            "executable": {"const": "0755"}
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy",
+        "required_paths",
+        "allowed_runtime_paths",
+        "allowed_sensitive_paths",
+        "forbidden_path_segments",
+        "forbidden_names",
+        "forbidden_name_prefixes",
+        "forbidden_suffixes",
+        "maximum_file_bytes"
+      ],
+      "properties": {
+        "strategy": {"const": "git_tracked"},
+        "required_paths": {"$ref": "#/$defs/stringArray"},
+        "allowed_runtime_paths": {"$ref": "#/$defs/stringArray"},
+        "allowed_sensitive_paths": {"$ref": "#/$defs/stringArray"},
+        "forbidden_path_segments": {"$ref": "#/$defs/stringArray"},
+        "forbidden_names": {"$ref": "#/$defs/stringArray"},
+        "forbidden_name_prefixes": {"$ref": "#/$defs/stringArray"},
+        "forbidden_suffixes": {"$ref": "#/$defs/stringArray"},
+        "maximum_file_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "secret_scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_test_literals", "patterns"],
+      "properties": {
+        "allowed_test_literals": {"$ref": "#/$defs/stringArray"},
+        "patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "regex"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "regex": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directory", "manifest", "sbom", "licenses", "checksums"],
+      "properties": {
+        "directory": {"type": "string", "minLength": 1},
+        "manifest": {"type": "string", "minLength": 1},
+        "sbom": {"type": "string", "minLength": 1},
+        "licenses": {"type": "string", "minLength": 1},
+        "checksums": {"type": "string", "minLength": 1}
+      }
+    },
+    "sbom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "spec_version", "python_project", "python_lockfile", "node_lockfiles"],
+      "properties": {
+        "format": {"const": "CycloneDX"},
+        "spec_version": {"const": "1.6"},
+        "python_project": {"type": "string", "minLength": 1},
+        "python_lockfile": {"type": "string", "minLength": 1},
+        "node_lockfiles": {"$ref": "#/$defs/stringArray"}
+      }
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    }
+  }
+}

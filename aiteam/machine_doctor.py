@@ -15,6 +15,7 @@ from aiteam.installation_support import (
     load_installation_support_contract,
     version_meets_minimum,
 )
+from aiteam.ecosystem_registry import detect_project_ecosystems, doctor_probe_specs
 from aiteam.platform_runtime import (
     architecture_id,
     platform_id,
@@ -32,24 +33,7 @@ DEFAULT_PORTS = (
     ("frontend", 9490),
 )
 _BASE_RUNTIME_IDS = ("python", "node", "npm", "git", "powershell", "sqlite")
-_TOOLCHAIN_PROBES = (
-    ("python", ("pyproject.toml", "requirements.txt", "setup.py"), ("python",), ("--version",)),
-    ("javascript", ("package.json",), ("node",), ("--version",)),
-    ("java", ("pom.xml", "build.gradle", "build.gradle.kts"), ("java",), ("--version",)),
-    ("kotlin", ("build.gradle.kts", "settings.gradle.kts"), ("kotlinc",), ("-version",)),
-    ("go", ("go.mod",), ("go",), ("version",)),
-    ("rust", ("Cargo.toml",), ("rustc",), ("--version",)),
-    ("dotnet", ("*.sln", "*.csproj", "*.fsproj"), ("dotnet",), ("--version",)),
-    ("php", ("composer.json",), ("php",), ("--version",)),
-    ("ruby", ("Gemfile",), ("ruby",), ("--version",)),
-    ("swift", ("Package.swift",), ("swift",), ("--version",)),
-    (
-        "containers",
-        ("Dockerfile", "compose.yaml", "docker-compose.yml", ".devcontainer/devcontainer.json"),
-        ("docker",),
-        ("--version",),
-    ),
-)
+_TOOLCHAIN_PROBES = doctor_probe_specs()
 _SAFE_ENV_KEYS = {
     "COMSPEC",
     "LANG",
@@ -291,7 +275,7 @@ def validate_machine_inventory(report: Mapping[str, Any]) -> None:
         if not isinstance(report.get(collection), list):
             raise ValueError(f"machine doctor {collection} must be a list")
     toolchain_ids = [str(item.get("id") or "") for item in report["toolchains"]]
-    expected_toolchains = {item[0] for item in _TOOLCHAIN_PROBES}
+    expected_toolchains = {str(item["id"]) for item in _TOOLCHAIN_PROBES}
     if set(toolchain_ids) != expected_toolchains or len(toolchain_ids) != len(
         set(toolchain_ids)
     ):
@@ -398,19 +382,20 @@ def _observe_toolchains(
     os_id: str,
     command_probe: Callable[[list[str]], tuple[bool, str | None]],
 ) -> list[dict[str, Any]]:
+    detection = detect_project_ecosystems(root)
+    detected_by_id = {
+        str(item["id"]): item for item in detection["ecosystems"]
+    }
     observations: list[dict[str, Any]] = []
-    for toolchain_id, patterns, commands, version_args in _TOOLCHAIN_PROBES:
-        manifests = sorted(
-            {
-                candidate.name
-                for pattern in patterns
-                for candidate in root.glob(pattern)
-                if candidate.is_file()
-            }
-        )
-        resolved = _resolve_runtime(list(commands), os_id=os_id)
+    for probe in _TOOLCHAIN_PROBES:
+        toolchain_id = str(probe["id"])
+        observed = detected_by_id.get(toolchain_id, {})
+        manifests = sorted(str(item) for item in observed.get("manifests", ()))
+        resolved = _resolve_runtime(list(probe["runtime_candidates"]), os_id=os_id)
         installed, version = (
-            command_probe([resolved, *version_args]) if resolved else (False, None)
+            command_probe([resolved, *probe["version_args"]])
+            if resolved
+            else (False, None)
         )
         observations.append(
             {
@@ -420,7 +405,7 @@ def _observe_toolchains(
                 "binary_installed": installed,
                 "version": version,
                 "executable": Path(resolved).name if resolved else None,
-                "source": "root_manifest_and_path_lookup",
+                "source": "ecosystem_registry_v1_and_path_lookup",
                 "support_claim": False,
                 "diagnostic_state": (
                     "not_detected"

@@ -12,10 +12,23 @@ from aiteam.compatibility_service import (
     issue_compatibility_context,
     require_compatible_assignment,
 )
-from aiteam.db.dependencies import sync_default_child_dependencies
+from aiteam.db.dependencies import add_dependency_if_missing, sync_default_child_dependencies
+from aiteam.db.issues import get_issue
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.hiring_economics import log_hiring_decision
 from aiteam.model_selection_intent import normalize_owner_explicit_selection
+from aiteam.objective_classification import (
+    MIXED,
+    NON_CODE,
+    NON_PROGRAMMING_KINDS,
+    OPERATIONS,
+    PROGRAMMING_ROLES,
+    SOFTWARE,
+    classification_from_metadata,
+    classify_objective,
+    inherited_classification,
+    objective_kind_from_issue,
+)
 from aiteam.project_adapters import apply_adapter_policy_to_member, project_profiles
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES
 from aiteam.provider_identity import profile_perspective_key
@@ -75,6 +88,16 @@ def build_team_proposal(
     description = str(issue.get("description") or title).strip()
     parent_issue_id = str(issue.get("id") or "issue:intake").strip() or "issue:intake"
 
+    try:
+        issue_metadata = json.loads(str(issue.get("metadata_json") or "{}"))
+    except (TypeError, ValueError):
+        issue_metadata = {}
+    if not isinstance(issue_metadata, dict):
+        issue_metadata = {}
+    objective_classification = (
+        classification_from_metadata(issue_metadata)
+        or classify_objective(title, description)
+    )
     blueprint = build_default_team_blueprint(
         goal_id=parent_issue_id,
         raw_profile=effective_profile,
@@ -82,16 +105,16 @@ def build_team_proposal(
         source="lead_intake",
     )
     pconf = profile_config(effective_profile)
-    try:
-        issue_metadata = json.loads(str(issue.get("metadata_json") or "{}"))
-    except (TypeError, ValueError):
-        issue_metadata = {}
-    if not isinstance(issue_metadata, dict):
-        issue_metadata = {}
+    blueprint_agents = (
+        _non_code_agent_blueprints(objective_classification.kind)
+        if objective_classification.kind in {*NON_PROGRAMMING_KINDS, MIXED}
+        and effective_profile != LEAD_QUORUM
+        else blueprint.agents
+    )
 
     proposed_team: list[dict[str, Any]] = []
     used_quorum_perspectives: set[str] = set()
-    for agent in blueprint.agents:
+    for agent in blueprint_agents:
         if agent.role in {"team_lead", "lead"}:
             continue
         candidates = adapter_profiles or []
@@ -122,13 +145,22 @@ def build_team_proposal(
                 ))
         proposed_team.append(member)
 
-    suggested_issues = _suggested_issues_for_profile(effective_profile, parent_issue_id, proposed_team)
+    suggested_issues = _suggested_issues_for_profile(
+        effective_profile,
+        parent_issue_id,
+        proposed_team,
+        objective_kind=objective_classification.kind,
+    )
 
-    accountability = _accountability_for_profile(effective_profile)
+    accountability = _accountability_for_profile(
+        effective_profile,
+        objective_kind=objective_classification.kind,
+    )
 
     return {
         "version": 1,
         "profile": effective_profile,
+        "objective_classification": objective_classification.to_metadata(),
         "direct_work": effective_profile == SOLO_LEAD,  # executor reads this to skip suggest_tasks
         "goal": {
             "issue_id": issue.get("id"),
@@ -201,7 +233,56 @@ def _blueprint_to_member(
     )
 
 
-def _accountability_for_profile(profile: str) -> list[dict[str, Any]]:
+def _non_code_agent_blueprints(
+    objective_kind: str,
+) -> tuple[AgentBlueprint, ...]:
+    source_role = "file_scout" if objective_kind == OPERATIONS else "web_scout"
+    source_name = "File Scout" if source_role == "file_scout" else "Web Scout"
+    return (
+        AgentBlueprint(
+            agent_id=f"role:{source_role}",
+            role=source_role,
+            name=source_name,
+            seniority="cheap",
+            capabilities=("repo_read",) if source_role == "file_scout" else ("external_mcp",),
+            supervisor_agent_id="role:lead",
+            preferred_tier="budget_or_local",
+            preferred_channel="api_or_local",
+            assignment_reason="Recopila fuentes acotadas sin inventar trabajo de programación.",
+        ),
+        AgentBlueprint(
+            agent_id="role:context_curator",
+            role="context_curator",
+            name="Context Curator",
+            seniority="cheap",
+            capabilities=("repo_read",),
+            supervisor_agent_id="role:lead",
+            preferred_tier="budget_or_local",
+            preferred_channel="api_or_local",
+            assignment_reason="Sintetiza evidencia y estructura el entregable documental.",
+        ),
+    )
+
+
+def _accountability_for_profile(
+    profile: str,
+    *,
+    objective_kind: str = "software",
+) -> list[dict[str, Any]]:
+    if objective_kind in {*NON_PROGRAMMING_KINDS, MIXED} and profile != LEAD_QUORUM:
+        source_role = "file_scout" if objective_kind == OPERATIONS else "web_scout"
+        return [
+            {
+                "from": source_role,
+                "to": "lead",
+                "reason": "fuentes/contexto, alcance y fecha",
+            },
+            {
+                "from": "context_curator",
+                "to": "lead",
+                "reason": "síntesis, supuestos y trazabilidad",
+            },
+        ]
     if profile == SOLO_LEAD:
         return []
     if profile == LEAD_QUORUM:
@@ -219,6 +300,8 @@ def _suggested_issues_for_profile(
     profile: str,
     parent_issue_id: str,
     proposed_team: list[dict[str, Any]],
+    *,
+    objective_kind: str = "software",
 ) -> list[dict[str, Any]]:
     def child_id(suffix: str) -> str:
         return f"{parent_issue_id}:{suffix}"
@@ -271,6 +354,101 @@ def _suggested_issues_for_profile(
                 "risk_checks": ["plan demasiado ambicioso", "dependencias no modeladas"],
             }
             for i, m in enumerate(proposed_team)
+        ]
+
+    if objective_kind in {*NON_PROGRAMMING_KINDS, MIXED}:
+        source_id = child_id("source_research")
+        synthesis_id = child_id("evidence_synthesis")
+        source_role = "file_scout" if objective_kind == OPERATIONS else "web_scout"
+        source_action = "scout_files" if source_role == "file_scout" else "scout_web"
+        mixed_note = (
+            " Identificar por separado cualquier sub-issue ejecutable y marcarla "
+            "explícitamente como software antes de contratar ingeniería."
+            if objective_kind == MIXED
+            else " No crear código, aplicaciones ni tests."
+        )
+        return [
+            {
+                "id": source_id,
+                "title": "Recopilar fuentes y necesidades de información",
+                "description": (
+                    "Recopilar únicamente las fuentes necesarias y proponer preguntas para "
+                    "cubrir necesidades, operaciones, clientes, costes, riesgos y decisiones."
+                ),
+                "role": source_role,
+                "objective_kind": (
+                    OPERATIONS if objective_kind == OPERATIONS else NON_CODE
+                ),
+                "assignee_agent_id": f"role:{source_role}",
+                "complexity": "low",
+                "criticality": "low",
+                "action_type": source_action,
+                "priority": 90,
+                "delegation_type": "web_research",
+                "cost_tier": "cheap_worker",
+                "report_to": "role:lead",
+                "reviewed_by": "role:lead",
+                "evidence_required": [
+                    "fuentes fechadas o declaración explícita de que no hacen falta",
+                    "preguntas agrupadas por objetivo de decisión",
+                    "supuestos y huecos de información",
+                ],
+                "risk_checks": ["preguntas sin propósito", "fuentes sin fecha"],
+            },
+            {
+                "id": synthesis_id,
+                "title": "Sintetizar formularios y marco de análisis",
+                "description": (
+                    "Convertir la evidencia en formularios utilizables y un marco de análisis "
+                    f"trazable.{mixed_note}"
+                ),
+                "role": "context_curator",
+                "objective_kind": NON_CODE,
+                "assignee_agent_id": "role:context_curator",
+                "complexity": "low",
+                "criticality": "medium",
+                "action_type": "synthesis",
+                "priority": 70,
+                "delegation_type": "context_compression",
+                "cost_tier": "cheap_worker",
+                "report_to": "role:lead",
+                "reviewed_by": "role:lead",
+                "depends_on": [source_id],
+                "evidence_required": [
+                    "formularios listos para usar",
+                    "mapeo pregunta → necesidad → decisión",
+                    "criterios de interpretación y limitaciones",
+                ],
+                "risk_checks": ["datos sensibles innecesarios", "preguntas sesgadas"],
+            },
+            {
+                "id": child_id("accept_delivery"),
+                "title": "Revisar y entregar el estudio documental",
+                "description": (
+                    "Validar cobertura, trazabilidad, supuestos y utilidad práctica. Cerrar con "
+                    "un entregable listo para decisión; no exigir suite ni exit code al tramo "
+                    "documental."
+                ),
+                "role": "lead",
+                "objective_kind": NON_CODE,
+                "assignee_agent_id": "role:lead",
+                "complexity": "medium",
+                "criticality": "medium",
+                "action_type": "synthesis",
+                "priority": 50,
+                "delegation_type": "acceptance_verification",
+                "cost_tier": "lead",
+                "report_to": None,
+                "reviewed_by": "user_or_light_review",
+                "depends_on": [synthesis_id],
+                "evidence_required": [
+                    "cobertura de necesidades",
+                    "fuentes y fecha",
+                    "supuestos y cálculos",
+                    "formularios y entregable listo para decisión",
+                ],
+                "risk_checks": ["conclusiones sin evidencia", "alcance no cubierto"],
+            },
         ]
 
     # full_team — plan + engineer + reviewer.
@@ -369,6 +547,10 @@ def format_team_proposal(proposal: dict[str, Any]) -> str:
         "Propuesta inicial del Lead",
         "",
         f"Perfil: {profile}",
+        (
+            "Tipo de objetivo: "
+            f"{(proposal.get('objective_classification') or {}).get('kind', 'software')}"
+        ),
     ]
 
     if direct_work:
@@ -417,6 +599,47 @@ def apply_accepted_team_proposal(
     # La propuesta puede haber sido editada por el usuario entre sugerencia y
     # aceptación. Revalídala completa antes de abrir la transacción para que
     # una combinación incompatible no deje contrataciones parciales.
+    parent_issue = get_issue(db_path, issue_id=parent_issue_id) or {}
+    objective_kind = objective_kind_from_issue(parent_issue)
+    proposal_kind = str(
+        (proposal.get("objective_classification") or {}).get("kind") or ""
+    )
+    if proposal_kind and proposal_kind != objective_kind:
+        raise ValueError("team proposal objective classification drift")
+    for member in proposal.get("proposed_team") or []:
+        if (objective_kind in NON_PROGRAMMING_KINDS or objective_kind == MIXED) and str(
+            member.get("role") or ""
+        ).lower() in PROGRAMMING_ROLES:
+            raise ValueError(
+                "programming roles require hiring from a software sub-issue"
+            )
+    item_classifications: dict[str, dict[str, Any]] = {}
+    for item in proposal.get("suggested_issues") or []:
+        if objective_kind == MIXED:
+            item_classification = classify_objective(
+                str(item.get("title") or ""),
+                str(item.get("description") or ""),
+                explicit_kind=str(item.get("objective_kind") or "auto"),
+            )
+        else:
+            item_classification = classify_objective(
+                str(item.get("title") or ""),
+                str(item.get("description") or ""),
+                explicit_kind=objective_kind,
+            )
+        item_classifications[str(item.get("id") or "")] = (
+            item_classification.to_metadata()
+            if objective_kind == MIXED
+            else inherited_classification(objective_kind)
+        )
+        if str(item.get("role") or "").lower() in PROGRAMMING_ROLES and (
+            objective_kind in NON_PROGRAMMING_KINDS
+            or (objective_kind == MIXED and item_classification.kind != SOFTWARE)
+        ):
+            raise ValueError(
+                "programming issue requires a software objective classification"
+            )
+
     compatibility_context = issue_compatibility_context(db_path, parent_issue_id)
     available_profiles = project_profiles(Path(db_path).parent)
     for member in proposal.get("proposed_team") or []:
@@ -560,6 +783,9 @@ def apply_accepted_team_proposal(
                             "reviewed_by": item.get("reviewed_by"),
                             "evidence_required": item.get("evidence_required") or [],
                             "risk_checks": item.get("risk_checks") or [],
+                            "objective_classification": item_classifications[
+                                str(item["id"])
+                            ],
                         },
                         ensure_ascii=False,
                     ),
@@ -601,6 +827,13 @@ def apply_accepted_team_proposal(
             (parent_issue_id,),
         )
 
+    for item in proposal.get("suggested_issues") or []:
+        for dependency_id in item.get("depends_on") or []:
+            add_dependency_if_missing(
+                db_path,
+                issue_id=str(item["id"]),
+                depends_on_issue_id=str(dependency_id),
+            )
     sync_default_child_dependencies(db_path, parent_issue_id=parent_issue_id)
 
     # Audit each adapter assignment with its economics (cost policy, A2).

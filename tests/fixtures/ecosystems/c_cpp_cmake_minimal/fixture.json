@@ -1,0 +1,16 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "c_cpp_cmake_minimal",
+  "expected_detected": ["c_cpp"],
+  "cases": [
+    {
+      "id": "c_cpp_cmake",
+      "ecosystem_id": "c_cpp",
+      "actions": [
+        {"id": "configure", "artifacts": ["build/CMakeCache.txt"]},
+        {"id": "build", "artifacts": ["build/**/calculator_test*"]},
+        {"id": "test", "artifacts": []}
+      ]
+    }
+  ]
+}

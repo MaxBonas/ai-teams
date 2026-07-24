@@ -17,7 +17,6 @@ from aiteam.dev_lifecycle_contract import (
     validate_dev_lifecycle_contract,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -133,11 +132,16 @@ def test_bootstrap_requires_versioned_locks_and_has_concurrency_guards() -> None
     )
 
     assert (ROOT / "requirements-dev.lock").is_file()
+    dev_lock = (ROOT / "requirements-dev.lock").read_text(encoding="utf-8")
+    assert "\nsetuptools==" in dev_lock
+    assert "\nwheel==" in dev_lock
     assert "FileShare]::None" in windows
     assert "if ($ownsLock)" in windows
     assert ".bootstrap.lock.d" in posix
     assert "owner aun no observable" in posix
     assert "requirements-dev.lock" in venv
+    assert '"--require-hashes"' in venv
+    assert "--require-hashes" in posix
     assert "--no-deps" in venv
     assert '"--upgrade", "pip"' not in venv
     assert '@("ci"' in frontend

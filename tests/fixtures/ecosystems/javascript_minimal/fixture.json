@@ -1,0 +1,17 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "javascript_minimal",
+  "expected_detected": ["javascript_typescript"],
+  "cases": [
+    {
+      "id": "javascript_npm",
+      "ecosystem_id": "javascript_typescript",
+      "actions": [
+        {"id": "build", "artifacts": ["dist/fixture.txt"]},
+        {"id": "test", "artifacts": []},
+        {"id": "lint", "artifacts": []},
+        {"id": "typecheck", "artifacts": []}
+      ]
+    }
+  ]
+}

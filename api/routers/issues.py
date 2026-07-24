@@ -22,6 +22,10 @@ from aiteam.db.quorum_sessions import (
     list_quorum_contributions,
 )
 from aiteam.hiring_economics import detect_policy_deviations, provider_router_health
+from aiteam.objective_classification import (
+    classify_objective,
+    classification_from_metadata,
+)
 from aiteam.project_adapters import ensure_quorum_agents, project_profiles
 from aiteam.provider_governor import GOVERNOR
 from aiteam.plan_contract import present_plan_document
@@ -46,6 +50,9 @@ class CreateIssueRequest(BaseModel):
     parallel_workstreams: int | None = None
     reversible: bool | None = None
     run_profile: Literal["auto", "solo_lead", "lead_quorum", "full_team"] | None = None
+    objective_kind: Literal[
+        "auto", "software", "research", "operations", "mixed", "non_code"
+    ] | None = None
     priority: int = 0
     assignee_agent_id: str | None = None
     data_class: Literal["public", "internal", "confidential", "restricted"] | None = None
@@ -62,6 +69,9 @@ class UpdateIssueRequest(BaseModel):
     criticality: str | None = None
     metadata: dict[str, Any] | None = None
     data_class: Literal["public", "internal", "confidential", "restricted"] | None = None
+    objective_kind: Literal[
+        "auto", "software", "research", "operations", "mixed", "non_code"
+    ] | None = None
 
 
 @router.post("/api/issues")
@@ -69,6 +79,9 @@ async def post_issue(body: CreateIssueRequest, request: Request):
     _require_api_auth_request(request)
     db = _db(request)
     metadata = dict(body.metadata or {})
+    # The durable classification can only be selected through objective_kind;
+    # arbitrary metadata must not forge its source/reasons.
+    metadata.pop("objective_classification", None)
     metadata_profile = str(metadata.get("profile") or "").strip() or None
     try:
         selection = select_execution_profile(
@@ -83,6 +96,14 @@ async def post_issue(body: CreateIssueRequest, request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     metadata["profile"] = selection.profile
     metadata["profile_selection"] = selection.to_metadata()
+    persisted_classification = classification_from_metadata(metadata)
+    if body.objective_kind or persisted_classification is None:
+        classification = classify_objective(
+            body.title,
+            body.description or "",
+            explicit_kind=body.objective_kind,
+        )
+        metadata["objective_classification"] = classification.to_metadata()
     if body.data_class:
         metadata["data_class"] = body.data_class
     source_plan_revision_id = str(metadata.get("source_plan_revision_id") or "").strip()
@@ -389,17 +410,44 @@ async def patch_issue(issue_id: str, body: UpdateIssueRequest, request: Request)
     _require_api_auth_request(request)
     db = _db(request)
     try:
-        metadata = body.metadata
-        if body.data_class is not None:
-            current = get_issue(db, issue_id=issue_id)
-            current_metadata: dict[str, Any] = {}
-            if current:
-                try:
-                    import json
-                    current_metadata = json.loads(str(current.get("metadata_json") or "{}"))
-                except (TypeError, ValueError):
-                    current_metadata = {}
-            metadata = {**current_metadata, **(body.metadata or {}), "data_class": body.data_class}
+        current = get_issue(db, issue_id=issue_id)
+        current_metadata: dict[str, Any] = {}
+        if current:
+            try:
+                import json
+                current_metadata = json.loads(str(current.get("metadata_json") or "{}"))
+            except (TypeError, ValueError):
+                current_metadata = {}
+        incoming_metadata = dict(body.metadata or {})
+        incoming_metadata.pop("objective_classification", None)
+        metadata = (
+            {**current_metadata, **incoming_metadata}
+            if body.metadata is not None
+            or body.data_class is not None
+            or body.objective_kind is not None
+            or body.title is not None
+            or body.description is not None
+            else None
+        )
+        if metadata is not None and body.data_class is not None:
+            metadata["data_class"] = body.data_class
+        current_classification = classification_from_metadata(current_metadata)
+        should_reclassify = body.objective_kind is not None or (
+            current_classification is not None
+            and current_classification.source == "deterministic_signals"
+            and (body.title is not None or body.description is not None)
+        )
+        if metadata is not None and should_reclassify:
+            classification = classify_objective(
+                body.title if body.title is not None else str((current or {}).get("title") or ""),
+                (
+                    body.description
+                    if body.description is not None
+                    else str((current or {}).get("description") or "")
+                ),
+                explicit_kind=body.objective_kind,
+            )
+            metadata["objective_classification"] = classification.to_metadata()
         row = update_issue(
             db, issue_id=issue_id, status=body.status, title=body.title,
             description=body.description, assignee_agent_id=body.assignee_agent_id,
@@ -426,6 +474,7 @@ async def patch_issue(issue_id: str, body: UpdateIssueRequest, request: Request)
             "complexity": body.complexity,
             "criticality": body.criticality,
             "data_class": body.data_class,
+            "objective_kind": body.objective_kind,
         },
     )
     # Unblock dependent issues when this one reaches a terminal state

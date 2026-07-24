@@ -1,0 +1,267 @@
+name: Release artifact contract
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/release-artifact.yml"
+      - "aiteam/release_artifact.py"
+      - "aiteam/release_descriptor.py"
+      - "config/release_artifact.v1.json"
+      - "config/release_artifact.v1.schema.json"
+      - "config/installation_support.v1.json"
+      - "config/release_descriptor.v1.schema.json"
+      - "config/releases/**"
+      - "scripts/build_release_artifact.py"
+      - "scripts/accept_release_archive.py"
+      - "scripts/accept_posix_clean_room.py"
+      - "scripts/accept_windows_clean_room.py"
+      - "scripts/validate_release_candidate.py"
+      - "scripts/verify_release_artifact.py"
+      - "tests/test_release_artifact.py"
+      - "tests/test_release_acceptance.py"
+      - "tests/test_release_descriptor.py"
+      - "tests/test_release_workflow.py"
+      - "docs/releases/**"
+      - "docs/UPGRADE_AND_ROLLBACK.md"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "requirements.lock"
+      - "requirements-dev.lock"
+      - "package.json"
+      - "ide-frontend/package-lock.json"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Configure locked uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+
+      - name: Resolve immutable artifact version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            require_tag="--require-release-tag"
+          else
+            version="0.1.0+${GITHUB_SHA::7}"
+            require_tag=""
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "require_tag=${require_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify canonical lock and interoperable exports
+        shell: bash
+        run: |
+          uv lock --check
+          uv export --locked --no-header --no-dev --no-emit-project --format requirements.txt --output-file "${RUNNER_TEMP}/requirements.lock" --quiet
+          uv export --locked --no-header --extra dev --no-emit-project --format requirements.txt --output-file "${RUNNER_TEMP}/requirements-dev.lock" --quiet
+          cmp requirements.lock "${RUNNER_TEMP}/requirements.lock"
+          cmp requirements-dev.lock "${RUNNER_TEMP}/requirements-dev.lock"
+
+      - name: Install exact test environment
+        run: >
+          python -m pip install --disable-pip-version-check --require-hashes
+          -r requirements-dev.lock &&
+          python -m pip install --disable-pip-version-check --no-deps
+          --no-build-isolation -e .
+
+      - name: Run release contract tests
+        run: >
+          python -m pytest tests/test_release_artifact.py
+          tests/test_release_descriptor.py -q
+
+      - name: Validate tag, notes and rollback contract
+        if: github.ref_type == 'tag'
+        run: >
+          python scripts/validate_release_candidate.py
+          --version "${{ steps.version.outputs.version }}"
+          --require-tag
+
+      - name: Build deterministic artifact and sidecars
+        run: >
+          python scripts/build_release_artifact.py
+          --version "${{ steps.version.outputs.version }}"
+          --output-dir dist/release
+          ${{ steps.version.outputs.require_tag }}
+
+      - name: Require promotable metadata for tags
+        if: github.ref_type == 'tag'
+        run: >
+          python scripts/verify_release_artifact.py
+          "dist/release/ai-teams-${{ steps.version.outputs.version }}.zip"
+          --checksum
+          "dist/release/ai-teams-${{ steps.version.outputs.version }}.zip.sha256"
+          --require-promotable
+
+      - name: Smoke extracted package
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          extract_dir="${RUNNER_TEMP}/ai-teams-release-smoke"
+          python -m zipfile -e \
+            "dist/release/ai-teams-${{ steps.version.outputs.version }}.zip" \
+            "${extract_dir}"
+          package_root="${extract_dir}/ai-teams-${{ steps.version.outputs.version }}"
+          test -f "${package_root}/README.md"
+          test -f "${package_root}/scripts/prepare_dev_env.bat"
+          (
+            cd "${RUNNER_TEMP}"
+            PYTHONPATH="${package_root}" python -c \
+              "import aiteam; from aiteam.release_artifact import verify_release_artifact"
+          )
+
+      - name: Upload artifact and audit sidecars
+        uses: actions/upload-artifact@v6
+        with:
+          name: ai-teams-${{ steps.version.outputs.version }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release-acceptance:
+    needs: artifact
+    name: Release acceptance · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout exact tagged revision
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Configure Node 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Download verified candidate
+        uses: actions/download-artifact@v8
+        with:
+          name: ai-teams-${{ needs.artifact.outputs.version }}
+          path: dist/release
+
+      - name: Accept extracted package and rollback
+        shell: bash
+        run: |
+          extra_args=()
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            extra_args+=(--allow-preview)
+          fi
+          python scripts/accept_release_archive.py \
+            --archive "dist/release/ai-teams-${{ needs.artifact.outputs.version }}.zip" \
+            --checksum "dist/release/ai-teams-${{ needs.artifact.outputs.version }}.zip.sha256" \
+            --workspace-root "${RUNNER_TEMP}/aiteam-release-acceptance" \
+            --receipt "${RUNNER_TEMP}/release-acceptance-receipt.json" \
+            "${extra_args[@]}"
+
+      - name: Upload redacted acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-acceptance-${{ needs.artifact.outputs.version }}-${{ matrix.os }}
+          path: ${{ runner.temp }}\release-acceptance-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [artifact, release-acceptance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: github-release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact tagged revision
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Configure Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download already-verified artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ai-teams-${{ needs.artifact.outputs.version }}
+          path: dist/release
+
+      - name: Revalidate publication inputs
+        shell: bash
+        run: |
+          version="${{ needs.artifact.outputs.version }}"
+          python scripts/validate_release_candidate.py \
+            --version "${version}" --require-tag
+          python scripts/verify_release_artifact.py \
+            "dist/release/ai-teams-${version}.zip" \
+            --checksum "dist/release/ai-teams-${version}.zip.sha256" \
+            --require-promotable
+          test "$(git rev-list -n 1 "${GITHUB_REF_NAME}")" = "${GITHUB_SHA}"
+
+      - name: Create verified draft and publish it
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ needs.artifact.outputs.version }}"
+          notes="docs/releases/v${version}.md"
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+          prerelease=()
+          if [[ "${version}" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "${GITHUB_REF_NAME}" dist/release/* \
+            --verify-tag \
+            --draft \
+            "${prerelease[@]}" \
+            --title "AI Teams ${GITHUB_REF_NAME}" \
+            --notes-file "${notes}"
+          asset_count="$(
+            gh release view "${GITHUB_REF_NAME}" \
+              --json assets,isDraft \
+              --jq 'select(.isDraft == true) | .assets | length'
+          )"
+          test "${asset_count}" = "5"
+          gh release edit "${GITHUB_REF_NAME}" --draft=false

@@ -224,7 +224,7 @@ def test_toolchains_separate_manifest_binary_and_support_claim(
         "binary_installed": False,
         "version": None,
         "executable": None,
-        "source": "root_manifest_and_path_lookup",
+        "source": "ecosystem_registry_v1_and_path_lookup",
         "support_claim": False,
         "diagnostic_state": "absent",
     }

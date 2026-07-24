@@ -411,6 +411,46 @@ def test_issue_creation_auto_selects_and_persists_execution_profile(client):
     assert metadata["profile_selection"]["reason"] == "bounded_reversible_single_agent_work"
 
 
+def test_issue_creation_persists_non_code_objective_classification(client):
+    goal_id = client.post("/api/goals", json={"title": "G"}).json()["goal"]["id"]
+    response = client.post(
+        "/api/issues",
+        json={
+            "title": "Estudio para una empresa de limpieza",
+            "description": "Crear formularios para analizar sus necesidades y operaciones.",
+            "goal_id": goal_id,
+            "run_profile": "full_team",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    metadata = json.loads(response.json()["issue"]["metadata_json"])
+    assert metadata["objective_classification"]["kind"] == "research"
+    assert metadata["objective_classification"]["source"] == "deterministic_signals"
+
+
+def test_issue_owner_can_override_and_preserve_objective_classification(client):
+    goal_id = client.post("/api/goals", json={"title": "G"}).json()["goal"]["id"]
+    created = client.post(
+        "/api/issues",
+        json={
+            "title": "Formulario ambiguo",
+            "goal_id": goal_id,
+            "objective_kind": "non_code",
+        },
+    ).json()["issue"]
+    issue_id = created["id"]
+
+    updated = client.patch(
+        f"/api/issues/{issue_id}",
+        json={"title": "Implementar API"},
+    )
+
+    metadata = json.loads(updated.json()["issue"]["metadata_json"])
+    assert metadata["objective_classification"]["kind"] == "research"
+    assert metadata["objective_classification"]["source"] == "owner_explicit"
+
+
 def test_issue_creation_defaults_to_team_and_honours_quorum_override(client):
     goal_id = client.post("/api/goals", json={"title": "G"}).json()["goal"]["id"]
     conservative = client.post(

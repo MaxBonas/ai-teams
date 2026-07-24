@@ -6,6 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "aiteam-hybrid"
 version = "0.1.0"
 description = "AI Team orchestrator with Pro-first routing and API fallback"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+    {name = "Max Bonas Fuertes"},
+]
 requires-python = ">=3.10"
 dependencies = [
     "fastapi",
@@ -26,11 +31,25 @@ dependencies = [
 dev = [
     "httpx",
     "pytest",
+    # Python 3.12+ no incluye setuptools en un venv nuevo. El editable usa
+    # --no-build-isolation, así que su backend debe llegar fijado por este lock.
+    "setuptools>=68",
+    "wheel",
     # quality_runner builtin: cobertura y lint como evidencia determinista de
     # los proyectos capa-2 (degrada con gracia si faltan, pero con ellas el
     # gate de calidad sube el listón mecánicamente).
     "coverage",
     "ruff",
+]
+
+[tool.uv]
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'win32' and platform_machine == 'ARM64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 [project.scripts]

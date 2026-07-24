@@ -353,6 +353,10 @@ def test_create_solo_lead_project_bootstraps_only_the_lead(tmp_path: Path, monke
                 "name": "Solo",
                 "adapter_profile_ids": ["openai_api"],
                 "run_profile": "solo_lead",
+                "initial_task": (
+                    "Estudio para una empresa de limpieza: crear formularios "
+                    "para analizar sus necesidades y operaciones."
+                ),
             },
         )
         payload = response.json()
@@ -363,7 +367,13 @@ def test_create_solo_lead_project_bootstraps_only_the_lead(tmp_path: Path, monke
     db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
     with sqlite3.connect(str(db_path)) as conn:
         agents = conn.execute("SELECT id, role FROM agents ORDER BY id").fetchall()
+        metadata = json.loads(
+            conn.execute(
+                "SELECT metadata_json FROM issues WHERE id='issue:intake'"
+            ).fetchone()[0]
+        )
     assert agents == [("role:lead", "lead")]
+    assert metadata["objective_classification"]["kind"] == "research"
 
 
 def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypatch) -> None:

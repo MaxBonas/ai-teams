@@ -1,0 +1,317 @@
+{
+  "archive": {
+    "files_verified": 1164,
+    "promotion_allowed": false,
+    "revision": "f69f8e71bddbf9656063c05189a9b43eb42b1114",
+    "sha256": "a046cb04b2a71fbd8094f832e9ffefd3ea04817de00c299ebec8e790be7beb1b",
+    "version": "0.1.0-preview.1"
+  },
+  "archive_verified": true,
+  "cleanup": {
+    "fixtures_removed": true,
+    "installation_removed": true
+  },
+  "contract": {
+    "duplicate_steps": [],
+    "failed_steps": [],
+    "missing_steps": [],
+    "ok": true,
+    "required_steps": [
+      "archive_verified",
+      "source_revision",
+      "bootstrap_first",
+      "bootstrap_second",
+      "installation_audit",
+      "minimum_tests",
+      "start",
+      "backend_health",
+      "frontend_health",
+      "fixture_project_create",
+      "stop",
+      "ports_released",
+      "migration_dry_run",
+      "migration_apply_with_backup",
+      "database_rollback_restore",
+      "fixtures_removed",
+      "installation_removed"
+    ],
+    "schema_version": "release_acceptance_contract_result_v1"
+  },
+  "ok": true,
+  "package_acceptance": {
+    "ci_provenance": null,
+    "database_rollback": {
+      "backup_created": true,
+      "backup_matches_original": true,
+      "restored_matches_original": true
+    },
+    "environment_class": "local_existing_host",
+    "fixture": {
+      "created": true,
+      "goals": 0,
+      "issues": 1,
+      "tables": 26
+    },
+    "global_cli_inventory_after": {
+      "antigravity": true,
+      "codex": true,
+      "lmstudio": false,
+      "ollama": true,
+      "opencode": true
+    },
+    "global_cli_inventory_before": {
+      "antigravity": true,
+      "codex": true,
+      "lmstudio": false,
+      "ollama": true,
+      "opencode": true
+    },
+    "host": {
+      "architecture": "amd64",
+      "os": "windows",
+      "python_bootstrap": "3.12.10"
+    },
+    "independent_machine": false,
+    "installation_audit": {
+      "contract_updated_at": "2026-07-23",
+      "control_plane_ready": true,
+      "live_runs_status": "adapter_installed_auth_health_required",
+      "runtimes": [
+        {
+          "id": "python",
+          "minimum_version": "3.10",
+          "ready": true,
+          "version": "3.12.10"
+        },
+        {
+          "id": "node",
+          "minimum_version": "22",
+          "ready": true,
+          "version": "v24.14.0"
+        },
+        {
+          "id": "npm",
+          "minimum_version": "10",
+          "ready": true,
+          "version": "11.9.0"
+        },
+        {
+          "id": "git",
+          "minimum_version": "2.23",
+          "ready": true,
+          "version": "git version 2.49.0.windows.1"
+        },
+        {
+          "id": "powershell",
+          "minimum_version": "5.1",
+          "ready": true,
+          "version": "7.6.3"
+        }
+      ],
+      "schema_version": "installation_support_audit_v1",
+      "support_id": "windows_native_x86_64",
+      "support_status": "verified"
+    },
+    "ok": true,
+    "promotion_allowed": false,
+    "schema_version": "windows_clean_room_acceptance_v1",
+    "source": {
+      "archive_sha256": "a046cb04b2a71fbd8094f832e9ffefd3ea04817de00c299ebec8e790be7beb1b",
+      "checkout": "extracted_release_archive",
+      "kind": "release_archive",
+      "revision": "f69f8e71bddbf9656063c05189a9b43eb42b1114"
+    },
+    "steps": [
+      {
+        "duration_seconds": 0.0,
+        "exit_code": 0,
+        "name": "source_revision",
+        "ok": true
+      },
+      {
+        "duration_seconds": 45.781,
+        "exit_code": 0,
+        "name": "bootstrap_first",
+        "ok": true
+      },
+      {
+        "duration_seconds": 2.219,
+        "exit_code": 0,
+        "name": "bootstrap_second",
+        "ok": true
+      },
+      {
+        "duration_seconds": 1.688,
+        "exit_code": 0,
+        "name": "installation_audit",
+        "ok": true
+      },
+      {
+        "duration_seconds": 2.375,
+        "exit_code": 0,
+        "name": "minimum_tests",
+        "ok": true
+      },
+      {
+        "duration_seconds": 4.687,
+        "exit_code": 0,
+        "name": "start",
+        "ok": true
+      },
+      {
+        "duration_seconds": 0.203,
+        "exit_code": 0,
+        "name": "backend_health",
+        "ok": true
+      },
+      {
+        "duration_seconds": 0.172,
+        "exit_code": 0,
+        "name": "frontend_health",
+        "ok": true
+      },
+      {
+        "duration_seconds": 0.422,
+        "exit_code": 0,
+        "name": "fixture_project_create",
+        "ok": true
+      },
+      {
+        "duration_seconds": 0.156,
+        "exit_code": 0,
+        "name": "stop",
+        "ok": true
+      },
+      {
+        "duration_seconds": 0.0,
+        "exit_code": 0,
+        "name": "ports_released",
+        "ok": true
+      },
+      {
+        "duration_seconds": 0.39,
+        "exit_code": 0,
+        "name": "migration_dry_run",
+        "ok": true
+      },
+      {
+        "duration_seconds": 0.36,
+        "exit_code": 0,
+        "name": "migration_apply_with_backup",
+        "ok": true
+      },
+      {
+        "duration_seconds": 0.0,
+        "exit_code": 0,
+        "name": "database_rollback_restore",
+        "ok": true
+      }
+    ]
+  },
+  "promotion_allowed": false,
+  "schema_version": "release_archive_acceptance_v1",
+  "steps": [
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "archive_verified",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "source_revision",
+      "ok": true
+    },
+    {
+      "duration_seconds": 45.781,
+      "exit_code": 0,
+      "name": "bootstrap_first",
+      "ok": true
+    },
+    {
+      "duration_seconds": 2.219,
+      "exit_code": 0,
+      "name": "bootstrap_second",
+      "ok": true
+    },
+    {
+      "duration_seconds": 1.688,
+      "exit_code": 0,
+      "name": "installation_audit",
+      "ok": true
+    },
+    {
+      "duration_seconds": 2.375,
+      "exit_code": 0,
+      "name": "minimum_tests",
+      "ok": true
+    },
+    {
+      "duration_seconds": 4.687,
+      "exit_code": 0,
+      "name": "start",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.203,
+      "exit_code": 0,
+      "name": "backend_health",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.172,
+      "exit_code": 0,
+      "name": "frontend_health",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.422,
+      "exit_code": 0,
+      "name": "fixture_project_create",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.156,
+      "exit_code": 0,
+      "name": "stop",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "ports_released",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.39,
+      "exit_code": 0,
+      "name": "migration_dry_run",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.36,
+      "exit_code": 0,
+      "name": "migration_apply_with_backup",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "database_rollback_restore",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "fixtures_removed",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "installation_removed",
+      "ok": true
+    }
+  ]
+}

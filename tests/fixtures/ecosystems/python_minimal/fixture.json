@@ -1,0 +1,14 @@
+{
+  "schema_version": "ecosystem_fixture_v1",
+  "fixture_id": "python_minimal",
+  "expected_detected": ["python"],
+  "cases": [
+    {
+      "id": "python_pytest",
+      "ecosystem_id": "python",
+      "actions": [
+        {"id": "test", "artifacts": []}
+      ]
+    }
+  ]
+}

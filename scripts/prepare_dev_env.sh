@@ -77,7 +77,7 @@ fi
 if [ "$PYPROJECT_HASH" != "$STORED_PYPROJECT_HASH" ]; then
     (
         cd "$ROOT_DIR"
-        "$PYTHON_EXE" -m pip install --disable-pip-version-check -r requirements-dev.lock
+        "$PYTHON_EXE" -m pip install --disable-pip-version-check --require-hashes -r requirements-dev.lock
         "$PYTHON_EXE" -m pip install --disable-pip-version-check --no-deps --no-build-isolation -e .
     )
     printf '%s\n' "$PYPROJECT_HASH" > "$STATE_HASH"

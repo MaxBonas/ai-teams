@@ -1,0 +1,644 @@
+{
+  "schema_version": "ecosystem_registry_v1",
+  "contract_status": "preview",
+  "action_ids": ["configure", "build", "test", "lint", "typecheck"],
+  "execution_policy": {
+    "detection_mutates": false,
+    "automatic_install": false,
+    "descriptor_only_commands": true,
+    "requires_authorization": true,
+    "cwd_within_workspace": true,
+    "max_timeout_seconds": 1200,
+    "allowed_env": ["CI", "NO_COLOR", "PYTHONUTF8"]
+  },
+  "ecosystems": [
+    {
+      "id": "python",
+      "label": "Python",
+      "status": "preview",
+      "categories": ["backend", "data", "automation"],
+      "detectors": {
+        "manifests": ["pyproject.toml", "requirements.txt", "setup.py", "pytest.ini", "tox.ini", "noxfile.py"],
+        "extensions": [".py", ".pyi"]
+      },
+      "runtimes": [
+        {"id": "python", "candidates": ["python3", "python"], "version_args": ["--version"]}
+      ],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [
+          {
+            "id": "python_build",
+            "runtime_id": "python",
+            "argv": ["{runtime}", "-m", "build"],
+            "selectors": {"manifests": ["pyproject.toml"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"PYTHONUTF8": "1"},
+            "timeout_seconds": 600,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "test": [
+          {
+            "id": "pytest",
+            "runtime_id": "python",
+            "argv": ["{runtime}", "-m", "pytest", "-q", "{test_targets}"],
+            "selectors": {
+              "manifests": ["pytest.ini", "tox.ini", "noxfile.py"],
+              "globs": ["test_*.py", "tests/test_*.py", "tests/**/test_*.py", "test/test_*.py", "test/**/test_*.py"],
+              "json_script": null,
+              "content_markers": {"pyproject.toml": ["pytest"]}
+            },
+            "cwd": "workspace",
+            "env": {"PYTHONUTF8": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 600,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "legacy_enabled"
+          }
+        ],
+        "lint": [
+          {
+            "id": "ruff",
+            "runtime_id": "python",
+            "argv": ["{runtime}", "-m", "ruff", "check", "."],
+            "selectors": {"manifests": [], "globs": [], "json_script": null, "content_markers": {"pyproject.toml": ["ruff"]}},
+            "cwd": "workspace",
+            "env": {"PYTHONUTF8": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 300,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "typecheck": []
+      },
+      "artifacts": ["dist/*.whl", "dist/*.tar.gz", ".coverage", "htmlcov/**"]
+    },
+    {
+      "id": "javascript_typescript",
+      "label": "JavaScript / TypeScript",
+      "status": "preview",
+      "categories": ["frontend", "backend", "web"],
+      "detectors": {
+        "manifests": ["package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"],
+        "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"]
+      },
+      "runtimes": [
+        {"id": "node", "candidates": ["node"], "version_args": ["--version"]},
+        {"id": "npm", "candidates": ["npm.cmd", "npm"], "version_args": ["--version"]}
+      ],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [
+          {
+            "id": "npm_build",
+            "runtime_id": "npm",
+            "argv": ["{runtime}", "run", "build"],
+            "selectors": {"manifests": [], "globs": [], "json_script": "build", "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 900,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": true,
+            "status": "planned"
+          }
+        ],
+        "test": [
+          {
+            "id": "npm_test",
+            "runtime_id": "npm",
+            "argv": ["{runtime}", "test", "--silent"],
+            "selectors": {"manifests": [], "globs": [], "json_script": "test", "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 600,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": true,
+            "status": "legacy_enabled"
+          }
+        ],
+        "lint": [
+          {
+            "id": "npm_lint",
+            "runtime_id": "npm",
+            "argv": ["{runtime}", "run", "lint"],
+            "selectors": {"manifests": [], "globs": [], "json_script": "lint", "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 600,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": true,
+            "status": "planned"
+          }
+        ],
+        "typecheck": [
+          {
+            "id": "npm_typecheck",
+            "runtime_id": "npm",
+            "argv": ["{runtime}", "run", "typecheck"],
+            "selectors": {"manifests": [], "globs": [], "json_script": "typecheck", "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 600,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": true,
+            "status": "planned"
+          }
+        ]
+      },
+      "artifacts": ["dist/**", "build/**", "coverage/**", ".next/**"]
+    },
+    {
+      "id": "java_kotlin",
+      "label": "Java / Kotlin",
+      "status": "planned",
+      "categories": ["backend", "jvm", "mobile"],
+      "detectors": {
+        "manifests": ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"],
+        "extensions": [".java", ".kt", ".kts"]
+      },
+      "runtimes": [
+        {"id": "java", "candidates": ["java"], "version_args": ["--version"]},
+        {"id": "maven", "candidates": ["mvn.cmd", "mvn"], "version_args": ["--version"]},
+        {"id": "gradle", "candidates": ["gradle.bat", "gradle"], "version_args": ["--version"]}
+      ],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [
+          {
+            "id": "maven_package",
+            "runtime_id": "maven",
+            "argv": ["{runtime}", "-B", "package"],
+            "selectors": {"manifests": ["pom.xml"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          },
+          {
+            "id": "gradle_build",
+            "runtime_id": "gradle",
+            "argv": ["{runtime}", "build", "--no-daemon"],
+            "selectors": {"manifests": ["build.gradle", "build.gradle.kts"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "test": [
+          {
+            "id": "maven_test",
+            "runtime_id": "maven",
+            "argv": ["{runtime}", "-B", "test"],
+            "selectors": {"manifests": ["pom.xml"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          },
+          {
+            "id": "gradle_test",
+            "runtime_id": "gradle",
+            "argv": ["{runtime}", "test", "--no-daemon"],
+            "selectors": {"manifests": ["build.gradle", "build.gradle.kts"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": ["target/**", "build/libs/**", "build/reports/**"]
+    },
+    {
+      "id": "go",
+      "label": "Go",
+      "status": "planned",
+      "categories": ["backend", "systems", "cli"],
+      "detectors": {"manifests": ["go.mod", "go.work"], "extensions": [".go"]},
+      "runtimes": [{"id": "go", "candidates": ["go"], "version_args": ["version"]}],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [
+          {
+            "id": "go_build",
+            "runtime_id": "go",
+            "argv": ["{runtime}", "build", "./..."],
+            "selectors": {"manifests": ["go.mod", "go.work"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1"},
+            "timeout_seconds": 600,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "test": [
+          {
+            "id": "go_test",
+            "runtime_id": "go",
+            "argv": ["{runtime}", "test", "./..."],
+            "selectors": {"manifests": ["go.mod", "go.work"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1"},
+            "timeout_seconds": 600,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": ["coverage.out", "bin/**"]
+    },
+    {
+      "id": "rust",
+      "label": "Rust",
+      "status": "planned",
+      "categories": ["backend", "systems", "cli"],
+      "detectors": {"manifests": ["Cargo.toml", "Cargo.lock"], "extensions": [".rs"]},
+      "runtimes": [{"id": "cargo", "candidates": ["cargo"], "version_args": ["--version"]}],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [
+          {
+            "id": "cargo_build",
+            "runtime_id": "cargo",
+            "argv": ["{runtime}", "build", "--locked"],
+            "selectors": {"manifests": ["Cargo.toml"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 900,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "test": [
+          {
+            "id": "cargo_test",
+            "runtime_id": "cargo",
+            "argv": ["{runtime}", "test", "--locked"],
+            "selectors": {"manifests": ["Cargo.toml"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 900,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": ["target/**"]
+    },
+    {
+      "id": "c_cpp",
+      "label": "C / C++",
+      "status": "planned",
+      "categories": ["systems", "native", "embedded"],
+      "detectors": {"manifests": ["CMakeLists.txt", "meson.build", "Makefile"], "extensions": [".c", ".h", ".cc", ".cpp", ".cxx", ".hpp"]},
+      "runtimes": [
+        {"id": "cmake", "candidates": ["cmake"], "version_args": ["--version"]},
+        {"id": "ctest", "candidates": ["ctest"], "version_args": ["--version"]}
+      ],
+      "action_dependencies": [
+        {"action": "build", "requires": ["configure"]},
+        {"action": "test", "requires": ["build"]}
+      ],
+      "commands": {
+        "configure": [
+          {
+            "id": "cmake_configure",
+            "runtime_id": "cmake",
+            "argv": ["{runtime}", "-S", ".", "-B", "build", "-DCMAKE_BUILD_TYPE=Release"],
+            "selectors": {"manifests": ["CMakeLists.txt"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 600,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "build": [
+          {
+            "id": "cmake_build",
+            "runtime_id": "cmake",
+            "argv": ["{runtime}", "--build", "build", "--config", "Release"],
+            "selectors": {"manifests": ["CMakeLists.txt"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "test": [
+          {
+            "id": "ctest",
+            "runtime_id": "ctest",
+            "argv": ["{runtime}", "--test-dir", "build", "--build-config", "Release", "--output-on-failure"],
+            "selectors": {"manifests": ["CMakeLists.txt"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 900,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": ["build/**", "compile_commands.json"]
+    },
+    {
+      "id": "dotnet",
+      "label": ".NET",
+      "status": "planned",
+      "categories": ["backend", "desktop", "web"],
+      "detectors": {"manifests": ["*.sln", "*.csproj", "*.fsproj", "global.json"], "extensions": [".cs", ".fs", ".vb"]},
+      "runtimes": [{"id": "dotnet", "candidates": ["dotnet"], "version_args": ["--version"]}],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [
+          {
+            "id": "dotnet_build",
+            "runtime_id": "dotnet",
+            "argv": ["{runtime}", "build", "--nologo"],
+            "selectors": {"manifests": ["*.sln", "*.csproj", "*.fsproj"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "test": [
+          {
+            "id": "dotnet_test",
+            "runtime_id": "dotnet",
+            "argv": ["{runtime}", "test", "--nologo", "--no-restore"],
+            "selectors": {"manifests": ["*.sln", "*.csproj", "*.fsproj"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": ["bin/**", "obj/**", "TestResults/**"]
+    },
+    {
+      "id": "php",
+      "label": "PHP",
+      "status": "planned",
+      "categories": ["backend", "web"],
+      "detectors": {"manifests": ["composer.json", "phpunit.xml", "phpunit.xml.dist"], "extensions": [".php"]},
+      "runtimes": [
+        {"id": "php", "candidates": ["php"], "version_args": ["--version"]},
+        {"id": "composer", "candidates": ["composer"], "version_args": ["--version"]}
+      ],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [],
+        "test": [
+          {
+            "id": "composer_test",
+            "runtime_id": "composer",
+            "argv": ["{runtime}", "test"],
+            "selectors": {"manifests": ["composer.json"], "globs": [], "json_script": null, "content_markers": {"composer.json": ["test"]}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 900,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": true,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": ["vendor/**", "coverage/**"]
+    },
+    {
+      "id": "ruby",
+      "label": "Ruby",
+      "status": "planned",
+      "categories": ["backend", "web", "automation"],
+      "detectors": {"manifests": ["Gemfile", "Rakefile", "*.gemspec"], "extensions": [".rb"]},
+      "runtimes": [
+        {"id": "ruby", "candidates": ["ruby"], "version_args": ["--version"]},
+        {"id": "bundle", "candidates": ["bundle"], "version_args": ["--version"]}
+      ],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [],
+        "test": [
+          {
+            "id": "bundle_test",
+            "runtime_id": "bundle",
+            "argv": ["{runtime}", "exec", "rake", "test"],
+            "selectors": {"manifests": ["Gemfile", "Rakefile"], "globs": ["test/**/*_test.rb", "spec/**/*_spec.rb"], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 900,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": true,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": ["coverage/**", "pkg/**"]
+    },
+    {
+      "id": "swift",
+      "label": "Swift",
+      "status": "planned",
+      "categories": ["mobile", "backend", "native"],
+      "detectors": {"manifests": ["Package.swift", "*.xcodeproj/project.pbxproj", "*.xcworkspace/contents.xcworkspacedata"], "extensions": [".swift"]},
+      "runtimes": [{"id": "swift", "candidates": ["swift"], "version_args": ["--version"]}],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [
+          {
+            "id": "swift_build",
+            "runtime_id": "swift",
+            "argv": ["{runtime}", "build"],
+            "selectors": {"manifests": ["Package.swift"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "test": [
+          {
+            "id": "swift_test",
+            "runtime_id": "swift",
+            "argv": ["{runtime}", "test"],
+            "selectors": {"manifests": ["Package.swift"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": [".build/**"]
+    },
+    {
+      "id": "web_mobile",
+      "label": "Web / Mobile composite",
+      "status": "planned",
+      "categories": ["web", "mobile", "composite"],
+      "detectors": {
+        "manifests": ["vite.config.js", "vite.config.ts", "next.config.js", "next.config.mjs", "pubspec.yaml", "AndroidManifest.xml", "app.json"],
+        "extensions": [".html", ".css", ".dart"]
+      },
+      "runtimes": [
+        {"id": "flutter", "candidates": ["flutter"], "version_args": ["--version"]}
+      ],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [],
+        "test": [
+          {
+            "id": "flutter_test",
+            "runtime_id": "flutter",
+            "argv": ["{runtime}", "test"],
+            "selectors": {"manifests": ["pubspec.yaml"], "globs": ["test/*_test.dart", "test/**/*_test.dart"], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "lint": [],
+        "typecheck": []
+      },
+      "artifacts": ["build/**", ".dart_tool/**"]
+    },
+    {
+      "id": "containers_devcontainers",
+      "label": "Docker / Dev Containers",
+      "status": "planned",
+      "categories": ["container", "environment"],
+      "detectors": {
+        "manifests": ["Dockerfile", "compose.yaml", "compose.yml", "docker-compose.yml", ".devcontainer/devcontainer.json"],
+        "extensions": []
+      },
+      "runtimes": [{"id": "docker", "candidates": ["docker"], "version_args": ["--version"]}],
+      "action_dependencies": [],
+      "commands": {
+        "configure": [],
+        "build": [
+          {
+            "id": "docker_build",
+            "runtime_id": "docker",
+            "argv": ["{runtime}", "build", "."],
+            "selectors": {"manifests": ["Dockerfile"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 1200,
+            "required_capability": "build_execute",
+            "mutates_workspace": true,
+            "project_script": false,
+            "status": "planned"
+          }
+        ],
+        "test": [],
+        "lint": [],
+        "typecheck": [
+          {
+            "id": "compose_config",
+            "runtime_id": "docker",
+            "argv": ["{runtime}", "compose", "config", "--quiet"],
+            "selectors": {"manifests": ["compose.yaml", "compose.yml", "docker-compose.yml"], "globs": [], "json_script": null, "content_markers": {}},
+            "cwd": "manifest_dir",
+            "env": {"CI": "1", "NO_COLOR": "1"},
+            "timeout_seconds": 300,
+            "required_capability": "test_execute",
+            "mutates_workspace": false,
+            "project_script": false,
+            "status": "planned"
+          }
+        ]
+      },
+      "artifacts": ["image_digest", "compose_rendered_config"]
+    }
+  ],
+  "known_gaps": [
+    "I.6 debe ejecutar fixtures build/test por OS antes de promover cualquier ecosistema a verified.",
+    "Los comandos planned son propuestas descriptor-bound y no se ejecutan hasta recibir evidencia y autorización.",
+    "La detección compuesta web/mobile no sustituye descriptores específicos de Android, Flutter o Xcode futuros."
+  ]
+}

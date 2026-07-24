@@ -41,6 +41,7 @@ from aiteam.run_profiles import FULL_TEAM, LEAD_QUORUM, normalize_run_profile
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES, profile_is_connected
 from aiteam.model_compatibility import compatibility_decision
 from aiteam.model_selection_intent import normalize_owner_explicit_selection
+from aiteam.objective_classification import classify_objective
 from aiteam.db.comments import create_comment
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.tools.catalog import default_capabilities_for_role
@@ -60,6 +61,9 @@ class NewProjectRequest(BaseModel):
     lead_model: str | None = None
     lead_candidate_id: str | None = None
     run_profile: Literal["solo_lead", "lead_quorum", "full_team"] = FULL_TEAM
+    objective_kind: Literal[
+        "auto", "software", "research", "operations", "mixed", "non_code"
+    ] = "auto"
     data_class: Literal["", "public", "internal", "confidential", "restricted"] = ""
 
 class DeleteProjectRequest(BaseModel):
@@ -163,6 +167,11 @@ async def create_project(payload: NewProjectRequest, request: Request):
             detail="El perfil elegido para el Lead debe estar entre las conexiones del proyecto",
         )
     run_profile = normalize_run_profile(payload.run_profile)
+    resolved_objective = classify_objective(
+        str(payload.initial_task or "")[:160],
+        str(payload.initial_task or ""),
+        explicit_kind=payload.objective_kind,
+    )
     lead_profiles = (
         [profile for profile in selected_profiles if str(profile.get("id") or "") == payload.lead_adapter_profile_id]
         if payload.lead_adapter_profile_id
@@ -230,6 +239,7 @@ async def create_project(payload: NewProjectRequest, request: Request):
             lead_model=payload.lead_model,
             lead_candidate_id=payload.lead_candidate_id,
             data_class=payload.data_class,
+            objective_kind=payload.objective_kind,
         )
     except ValueError as exc:
         shutil.rmtree(target, ignore_errors=True)
@@ -281,6 +291,7 @@ async def create_project(payload: NewProjectRequest, request: Request):
         "project_name": target.name,
         "configured": True,
         "run_profile": run_profile,
+        "objective_classification": resolved_objective.to_metadata(),
         "adapter_warning": adapter_warning,
     }
 
@@ -455,6 +466,7 @@ def _initialize_project_runtime(
     lead_model: str | None = None,
     lead_candidate_id: str | None = None,
     data_class: str = "",
+    objective_kind: str = "auto",
 ) -> None:
     run_profile = normalize_run_profile(run_profile)
     runtime_dir = resolve_runtime_dir(project_path, PROJECT_ROOT)
@@ -551,6 +563,11 @@ def _initialize_project_runtime(
             ),
         )
         task = str(initial_task or "").strip()
+        objective_classification = classify_objective(
+            task[:160],
+            task,
+            explicit_kind=objective_kind,
+        )
         # Always create goal:intake + issue:intake so the Lead always has a
         # rooted issue to attach runs, comments, and interactions to.
         # If no initial_task is provided, use a placeholder title — the user
@@ -567,7 +584,14 @@ def _initialize_project_runtime(
                 intake_title,
                 intake_desc,
                 "project_bootstrap",
-                json.dumps({"profile": run_profile}, ensure_ascii=False, sort_keys=True),
+                json.dumps(
+                    {
+                        "profile": run_profile,
+                        "objective_classification": objective_classification.to_metadata(),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
             ),
         )
         conn.execute(
@@ -594,6 +618,7 @@ def _initialize_project_runtime(
                         "source": "project_bootstrap",
                         "wake_reason": "new_project",
                         "data_class": data_class or None,
+                        "objective_classification": objective_classification.to_metadata(),
                     },
                     ensure_ascii=False,
                     sort_keys=True,

@@ -1,6 +1,6 @@
 # Plan y trabajo vigente
 
-Actualizado: `2026-07-23`
+Actualizado: `2026-07-24`
 
 Este archivo contiene solo backlog vivo, bloqueadores, criterios de cierre y
 orden de ejecución. Los cierres detallados viven en `docs/HISTORY.md`; los
@@ -64,8 +64,14 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 6. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próxima unidad ejecutable sin esperar un trigger externo: **I.5**, definir el
-registro versionado de ecosistemas/toolchains y su frontera detectar/ejecutar.
+Próxima unidad: **I.8.4c consolidar un SHA y auditar los receipts del mismo ZIP
+en runners Windows/Linux/macOS; después I.8.4d en una máquina real por
+plataforma**. I.8.4a/b deja preparados harness y gate CI, pero `v0.1.0`
+conserva `publish.enabled=false` hasta que la evidencia independiente permita
+crear el tag.
+PHP/Ruby queda pausado por prioridad explícita del owner.
+I.6.2 espera artifacts reales de la workflow Windows/Linux/macOS antes de
+promover cualquier celda.
 M.8 permanece
 abierto solo por mantenimiento continuo; sus cuatro diagnósticos mono-familia
 no se repiten hasta cambio material.
@@ -324,30 +330,79 @@ no se repiten hasta cambio material.
   - Cierre: segunda ejecución no rompe ni reinstala innecesariamente; todo fallo
     deja diagnóstico accionable y no una instalación parcial silenciosa.
 
-- [ ] **I.5 Construir un registro extensible de ecosistemas/toolchains**.
-  - [ ] Definir descriptor versionado por ecosistema: detectores, manifests,
-    extensiones, binarios/versiones, comandos permitidos de build/test/lint/
-    typecheck, cwd/env, artefactos y capacidades requeridas.
-  - [ ] Priorizar fixtures para Python; JS/TS; Java/Kotlin; Go; Rust; C/C++;
+- [x] **I.5 Construir un registro extensible de ecosistemas/toolchains**.
+  - [x] Definir descriptor versionado por ecosistema: detectores, manifests,
+    extensiones, binarios/versiones, comandos permitidos de configure/build/
+    test/lint/typecheck, dependencias entre acciones, cwd/env, artefactos y
+    capacidades requeridas.
+  - [x] Priorizar fixtures para Python; JS/TS; Java/Kotlin; Go; Rust; C/C++;
     .NET; PHP; Ruby; Swift; web/mobile y repos con Docker/devcontainers. Añadir
     otros lenguajes mediante plugins/descriptores, no condicionales dispersos.
-  - [ ] Separar detectar de ejecutar: la detección es read-only; instalar
+    Los doce descriptores existen en `config/ecosystems.v1.json`; `planned` no
+    equivale a soporte y los fixtures ejecutados siguen perteneciendo a I.6.
+  - [x] Separar detectar de ejecutar: la detección es read-only; instalar
     runtimes/dependencias o ejecutar scripts del proyecto requiere política,
     sandbox, timeout y autorización acordes al riesgo.
-  - [ ] Proyectar el stack detectado al Lead, hiring, prompts, tools y gates para
+    El planner falla cerrado por selector, capability, autorización, estado,
+    runtime, cwd y timeout; nunca instala. Solo pytest/npm conservan el camino
+    legacy ya verificado y los comandos `planned` requieren opt-in explícito.
+  - [x] Proyectar el stack detectado al Lead, hiring, prompts, tools y gates para
     que cada rol reciba únicamente comandos y capacidades compatibles.
-  - Cierre: ningún lenguaje obtiene etiqueta `supported` solo por reconocer una
-    extensión; debe completar fixture de ciclo build/test y recibo por OS.
+    `machine_doctor_v1`, wake payload, hiring y el `test_runner` determinista
+    consumen el mismo registro; una mera extensión no inventa acciones ni hires.
+  - Cierre 2026-07-23: contrato/esquema versionados, escaneo acotado sin
+    symlinks/ruido, CLI read-only y proyección común. Ningún lenguaje obtiene
+    etiqueta `supported`: cada promoción requiere aún fixture build/test y
+    recibo por OS en I.6. Evidencia: 28 pruebas nuevas/doctor, 116 de
+    `RunExecutor` y 1550/1550 backend globales, todas verdes; Ruff crítico y
+    `diff --check` verdes.
 
 - [ ] **I.6 Validar proyectos poliglotas y entornos heterogéneos**.
-  - [ ] Crear fixtures mínimos, monorepo y multi-language con tests de detección,
-    selección de comandos, quoting, timeouts, artefactos y errores esperados.
-  - [ ] Ejecutar matriz CI por OS/toolchain sin credenciales; reservar canarios
-    vivos de adapters para entornos controlados y registrar provenance separada.
-  - [ ] Cuando falte soporte, devolver `capability_gap` con descriptor, owner y
-    acción; nunca improvisar comandos destructivos ni declarar éxito parcial.
+  - [x] **I.6.1 Base reproducible**: fixtures mínimos Python/npm y monorepo
+    multi-language, ejecutados en copia temporal con espacios y Unicode.
+    Validan detección, selector/cwd, comando sin shell, artefactos y errores
+    esperados. `ecosystem_validation_receipt_v1` conserva fecha, OS,
+    arquitectura, SHA, dirty bit y versión de runtime sin rutas absolutas.
+    El canario base Windows local pasa 4/4 celdas. Con Java/.NET, la regresión
+    actual pasa 30/30 tests focalizados, 190/190 de integración con
+    doctor/wake/runner y 1578/1578 globales.
+    Al estar el worktree sucio no autoriza promoción.
+  - [ ] **I.6.2 Ejecutar la matriz CI por OS/toolchain sin credenciales**.
+    `.github/workflows/polyglot-fixtures.yml` ya define Windows/Linux/macOS para
+    nueve casos Python/npm/Java/.NET/Go/Rust/C++. El gate agregado descarga los
+    18 receipts, exige las 27 celdas exactas, worktree limpio, todos los casos
+    `passed`, `support_claim=false` y el mismo SHA; conserva hashes de cada
+    fuente en `ecosystem_ci_evidence_v1`. Falta ejecutar la workflow y auditar
+    el artifact real antes de promover celdas. Reservar canarios vivos de
+    adapters para entornos controlados y registrar provenance separada.
+  - [x] **I.6.3 Fallar de forma explicable**: cuando falta soporte devuelve
+    `capability_gap_v1` con descriptor, owner y acción; nunca instala, improvisa
+    comandos destructivos ni declara éxito parcial. Los comandos `planned`
+    solo se desbloquean dentro del validador autorizado y el receipt mantiene
+    `support_claim=false`.
+  - [ ] **I.6.4 Ampliar fixtures y CI** a Java/Kotlin, Go, Rust, C/C++, .NET,
+    PHP, Ruby, Swift, Web/Mobile y Containers, incluyendo build/test,
+    timeouts, quoting, artefactos y gaps específicos por OS.
+    - [x] Java/Maven: fixture JUnit con package, test y surefire report; Windows
+      local pasa. Workflow Java 17 × tres OS definida y pendiente de artifacts.
+    - [x] .NET: fixture xUnit con build/test; Windows local identifica que el
+      host tiene runtime pero no SDK mediante `runtime_probe_failed:dotnet`.
+      Workflow SDK 8 × tres OS definida y pendiente de artifacts.
+      El receipt redacted no conserva rutas absolutas.
+    - [x] Go: fixture sin dependencias con build/test; Windows local devuelve
+      `runtime_unavailable:go`. Workflow `setup-go@v6` con Go 1.25.9 × tres OS,
+      pendiente de artifacts.
+    - [x] Rust: fixture Cargo `--locked`, test y rlib; Windows local devuelve
+      `runtime_unavailable:cargo`. Workflow usa el Rust preinstalado por cada
+      runner y registra su versión, pendiente de artifacts.
+    - [x] C/C++: el contrato añade la acción `configure` y dependencias
+      descriptor-bound `configure → build → test`. Fixture CMake/CTest y job
+      × tres OS definidos; Windows local bloquea configure por CMake ausente y
+      las fases posteriores por `prerequisite_not_satisfied`, sin ejecutarlas.
+    - [ ] PHP, Ruby, Swift, Web/Mobile y Containers.
   - Cierre: matriz pública de cobertura, recibos fechados y regresión automática
-    para cada celda anunciada como soportada.
+    para cada celda anunciada como soportada. Estado visible en
+    `docs/ECOSYSTEM_SUPPORT_MATRIX.md`.
 
 - [x] **I.7 Crear onboarding canónico para personas y agentes de IA**. `✅✅`
   Doble comprobación completada el 2026-07-22.
@@ -367,36 +422,207 @@ no se repiten hasta cambio material.
     `tests/test_installation_docs.py` protege entrypoints, enlaces y límites.
 
 - [ ] **I.8 Preparar release y aceptación en máquina limpia**.
-  - [ ] Automatizar artefactos, checksums, SBOM/licencias, smoke tests y notas de
-    upgrade; excluir secretos y estado local mediante test del contenido final.
-  - [ ] Definir checklist de aceptación humana/IA: clone/download, doctor,
-    prepare, test mínimo, start/stop, proyecto temporal y desinstalación/rollback.
-  - [ ] Probar al menos Windows, Linux y macOS en runners limpios y después una
-    máquina real por plataforma antes de promover de `preview` a `verified`.
+  - [x] **I.8.1 Contrato y generador reproducible del artefacto**.
+    `release_artifact_v1` empaqueta solo archivos controlados por Git, normaliza
+    orden/timestamp/modos y usa ZIP stored para reproducibilidad transversal.
+    Rechaza worktree sucio, conflictos, symlinks, rutas runtime no allowlisted,
+    dependencias reconstruibles, SQLite, extensiones sensibles y patrones de
+    secretos; dos literales de test quedan allowlisted de forma exacta, no por
+    directorio.
+    - Genera manifiesto con SHA-256 por archivo, `SHA256SUMS` interno, checksum
+      externo, CycloneDX 1.6 y reporte de licencias. npm se deriva del lockfile;
+      Python se deriva del `uv.lock` universal.
+    - La workflow `release-artifact.yml` construye y sube previews auditables en
+      PR/manual. Un tag exige tag exacto y `promotion_allowed=true`; no crea una
+      GitHub Release.
+    - El preview local previo a I.8.2a empaquetó 1032 archivos. Sus blockers de
+      licencia/lock ya están resueltos; el worktree actual continúa no
+      promocionable por suciedad hasta consolidar el commit.
+    - Verificación: 10/10 tests de determinismo, checksums, inventario,
+      tag/worktree y rechazo sensible —incluido UTF-16—; 18/18 pruebas conjuntas
+      de release/documentación, Ruff limpio, preview real construido y suite
+      backend 1588/1588.
+  - [x] **I.8.2 Promoción, notas y rollback**.
+    - [x] **I.8.2a Licencia y lock Python**: Apache-2.0, titular
+      `Max Bonas Fuertes`; el DNI/CIF no se versiona. `LICENSE` coincide con el
+      texto oficial y `NOTICE` conserva copyright 2026. `pyproject.toml` y npm
+      declaran SPDX.
+      - `uv.lock`, generado con uv 0.11.31, fija 58 paquetes mediante resolución
+        universal y exige Windows/Linux/macOS × x86-64/ARM64. Los exports
+        runtime/dev conservan hashes; bootstrap usa `pip --require-hashes` sin
+        hacer `uv` obligatorio en máquinas usuarias.
+      - CI comprueba `uv lock --check`, regenera ambos exports y exige igualdad
+        byte a byte. El SBOM consume versiones/hashes Python bloqueados.
+      - Evidencia: resolución seis entornos y bootstrap canónico verdes,
+        `pip --dry-run` acepta el export, 29/29 pruebas focalizadas y 1588/1588
+        backend; frontend build y audit cero. La advertencia upstream
+        Starlette/httpx2 queda registrada como RUN-020, sin cambio especulativo.
+    - [x] **I.8.2b Notas y publicación**: `release_descriptor_v1` alinea SemVer,
+      `pyproject`, tag anotado, notas y rollback; rechaza rutas inseguras,
+      headings ausentes, worktree sucio, tag ligero y publicación deshabilitada.
+      `v0.1.0` tiene notas versionadas y `publish.enabled=false` hasta I.8.4.
+      - `UPGRADE_AND_ROLLBACK.md` exige instalación side-by-side, checksum
+        externo/interno, dry-run, backup SQLite y restauración antes de volver
+        al código anterior. El verificador recalcula el ZIP, rechaza miembros
+        inseguros/duplicados y cubre exactamente todo el payload.
+      - CI conserva `contents: read` al construir; solo un job `publish` tras
+        todos los gates obtiene `contents: write`, bajo environment
+        `github-release`. Revalida el mismo artifact, crea draft, exige cinco
+        assets y publica sin sobrescribir una Release existente.
+      - Evidencia: 26/26 pruebas focalizadas, 1600/1600 backend, Ruff limpio,
+        YAML parseable y preview integral de 1162 archivos
+        construido/verificado. El preview es correctamente no promocionable por
+        worktree sucio; no se creó tag ni Release.
+  - [x] **I.8.3 Checklist de aceptación humana/IA**: `release_archive_acceptance_v1`
+    valida desde fuera del ZIP 17 pasos canónicos: checksum/extracción, revisión,
+    bootstrap dos veces, audit, tests mínimos, start/health/stop, proyecto
+    temporal, migración dry-run/apply con backup, restauración SQLite byte a
+    byte, puertos libres y retirada externa de fixture/instalación.
+    - La primera run real detectó que Python 3.12 ya no aporta setuptools al
+      venv. `setuptools==83.0.0` y `wheel==0.47.0` quedan ahora en el lock dev
+      con hashes; no se instala build tooling flotante.
+    - La auditoría exacta detectó además que la cabecera de `uv export` incluía
+      la ruta temporal y hacía imposible `cmp`; los exports y CI usan
+      `--no-header`.
+    - El wrapper es quien limpia después de terminar el proceso interno,
+      evitando que una instalación se auto-certifique como eliminada. El job
+      Windows de release precede y bloquea `publish`.
+    - Evidencia local redacted:
+      `release-preview-local-f69f8e7.json`, SHA-256
+      `c965f5c5c54a16eeacf425d613821db471b9f3fc648c59002a0ea5896e5ced74`;
+      17/17 gates verdes sobre ZIP de 1164 archivos. Sigue
+      `promotion_allowed=false` por preview sucio/máquina no independiente.
+      Verificación de código: 50/50 pruebas focalizadas, 1605/1605 backend,
+      Ruff, diff y YAML verdes; persiste únicamente RUN-020.
+  - [ ] **I.8.4 Aceptación multiplataforma**: probar Windows, Linux y macOS en
+    runners limpios y después una máquina real por plataforma antes de promover
+    de `preview` a `verified`.
+    - [x] **I.8.4a Harness portable**: el wrapper selecciona el harness Windows
+      o POSIX. Linux/macOS ejecutan los mismos 17 gates, incluida salud,
+      start/stop, fixture SQLite, migración/backup/rollback, ausencia de CLIs
+      globales introducidos y limpieza externa. El recibo conserva OS,
+      arquitectura, SHA y provenance sin rutas locales.
+    - [x] **I.8.4b Gate CI común**: `release-acceptance` descarga el mismo ZIP
+      una vez por Windows/Linux/macOS, sube un receipt distinto por celda y
+      bloquea `publish` si cualquiera falla. PR/manual admiten preview para
+      probar el pipeline, pero solo un tag promocionable puede publicar.
+      Verificación local: 50/50 pruebas de release/instalación, 17/17 del gate
+      polyglot y 1611/1611 backend; Ruff, YAML y `diff --check` verdes.
+    - [ ] **I.8.4c Evidencia hosted**: consolidar un SHA, ejecutar la matriz y
+      auditar los tres receipts reales. No marcar soporte de plataforma a
+      partir de la mera definición YAML.
+    - [ ] **I.8.4d Evidencia física**: repetir el ZIP aceptado en una máquina
+      real Windows, Linux y macOS, conservar recibos ligados al mismo SHA y
+      solo entonces promover la distribución de `preview` a `verified`.
   - Cierre: una persona o IA sin contexto previo instala siguiendo solo la guía,
     obtiene los mismos checks y deja un recibo auditable de éxito o bloqueo.
 
+- [x] **I.9 Endurecer el stack web principal (React/TypeScript/JavaScript/CSS)**.
+  - [x] **I.9.1 Actualizar y fijar una base compatible y segura**: React 19.2.8,
+    Vite 8.1.5, plugin React 6, ESLint 10 y plugins vigentes sobre Node
+    `>=20.19`; mantener TypeScript 5.9.3 mientras `typescript-eslint` no soporte
+    TypeScript 7. `npm audit` queda en cero.
+  - [x] Añadir gates reproducibles `typecheck`, ESLint, Stylelint recomendado,
+    build y Playwright en `npm run check`; CI limpia con Node 24 y `npm ci`.
+  - [x] Corregir funciones React usadas antes de declararse, CSS deprecado,
+    selectores duplicados y contraste global. Axe WCAG 2.1 AA y viewport móvil
+    quedan integrados en el E2E de orientación; los 8 E2E pasan.
+  - [x] **I.9.2 Reducir riesgo estructural por cortes verificables**.
+    - [x] **I.9.2a Catálogo, selector y quorum**: `ModelCatalog`,
+      `ModelRoleSelector` y `QuorumStepper` poseen hojas propias; quorum usa
+      `useQuorum` keyed por issue, abortable y tipado. `QuorumStepper` y los
+      formatters salen de `App.tsx`. No queda ninguna excepción
+      `react-hooks/set-state-in-effect`; la regla de especificidad vuelve a estar
+      activa en las hojas pequeñas aisladas. `index.css` baja de 2974 a 2552
+      líneas y `App.tsx` de 5298 a 5141. Evidencia: lint, Stylelint, build,
+      8/8 E2E —incluidos retry, Axe AA y móvil— y audit cero.
+    - [x] **I.9.2b Configuración y Bandeja**: extraer vistas, estado y cargas por
+      dominio; objetivo final `App.tsx < 4000` e `index.css < 1800`, sin duplicar
+      fetches ni scoring y con E2E existentes verdes.
+      - [x] **I.9.2b1 Shells y superficies de bajo acoplamiento**:
+        `ConfigurationPanel`, Proyecto, Autonomía, Orientación, `InfoTip` y la
+        lista/selección de `InboxPanel` salen de `App.tsx`. Sus hojas CSS salen
+        de `index.css`, incluido responsive; Bandeja reactiva
+        `no-descending-specificity`. Los formatters de fecha preservan UTC de
+        SQLite en `lib/format.ts`. Resultado: `App.tsx` 5141→4931,
+        `index.css` 2552→2143; lint, Stylelint, build, 8/8 E2E y audit cero.
+      - [x] **I.9.2b2 Skills/MCP + hiring**: `SkillsSettings`, `McpSettings` y
+        `HiringDecisionDetail` son vistas tipadas; sus contratos salen de
+        `App.tsx`. El cálculo de ranking permanece en backend y el bloqueo de
+        hiring, approvals MCP y transiciones permanecen en el contenedor.
+        Resultado acumulado de b: `App.tsx` 4931→4682 líneas; `index.css`
+        permanece en 2143. Evidencia: lint, Stylelint, build, 8/8 E2E y audit
+        cero.
+      - [x] **I.9.2b3 Global y sistema**: `ConfigurationWorkspace` compone las
+        vistas tipadas de credenciales, CLIs, adapters, carpeta/sistema y zona
+        de peligro. `useConfigurationData` posee su estado, cargas y mutaciones;
+        `App.tsx` conserva workspace, navegación y confirmaciones destructivas.
+        CSS de conexiones, `InfoTip` y Equipo sale de la hoja global sin alterar
+        el bundle visual. Resultado: `App.tsx` 4682→3984 e `index.css`
+        2143→1692; lint, Stylelint, build, 8/8 E2E y audit cero.
+    - [x] **I.9.2c Chat, issues y runs**: `ChatPanel`, `IssuePanel`,
+      `IssuePipeline` y `RunsPanel` poseen contratos y CSS propios; tipos de
+      cockpit y markdown salen de `App.tsx`. El ratchet `lint:size` limita
+      módulos TS/TSX a 600 líneas y CSS a 500, con tech-debt caps explícitos
+      `App.tsx=3600`, `index.css=1300` y `ModelCatalog.tsx=750`.
+      `no-descending-specificity` gobierna las nuevas hojas aisladas, pero no
+      `ModelCatalog.css` hasta dividir sus subpaneles. Resultado:
+      `App.tsx` 3984→3546 e `index.css` 1692→1246; lint, Stylelint, tamaño,
+      build, 9/9 E2E —incluido el smoke Chat→Detalle→Runs— y audit cero.
+  - [x] **I.9.3 Ampliar cobertura de UI**: pruebas de componente para estados,
+    errores y navegación por teclado; matriz dedicada Chromium móvil/escritorio
+    y, antes de declarar soporte amplio, Firefox/WebKit.
+    - Vitest 4 + React Testing Library sobre jsdom cubren seis casos en
+      `ChatPanel`, `IssuePanel` y `RunsPanel`: estados vacíos, envío/foco por
+      teclado, decisión pendiente, errores de run y lookup accesible.
+    - Playwright separa proyectos: los nueve recorridos completos permanecen en
+      Chromium escritorio y el smoke crítico Chat→Detalle→Runs se ejecuta
+      también en Pixel 7/Chromium, Firefox y WebKit. Esta matriz prueba
+      compatibilidad representativa; no declara cobertura exhaustiva en los
+      tres navegadores adicionales.
+    - Axe WCAG AA y ausencia de overflow horizontal forman parte del smoke. La
+      primera ejecución móvil detectó que el timeline de eventos desplazable no
+      era alcanzable por teclado; `RunsPanel` expone ahora región etiquetada y
+      `tabIndex=0`.
+    - `lint:bundle` aplica presupuestos agregados fail-closed sobre el build:
+      JS ≤400 KiB raw/120 KiB gzip y CSS ≤120 KiB raw/25 KiB gzip. Medición de
+      cierre: JS 366071/107539 B y CSS 101679/18106 B.
+    - Verificación 2026-07-24: `npm run check` verde —ESLint, Stylelint,
+      ratchet de módulos, 6/6 unitarias, typecheck/build, presupuesto y 12/12
+      ejecuciones E2E—; `npm audit --audit-level=high` devuelve cero.
+  - Cierre: dependencias sin vulnerabilidades conocidas, gates verdes en CI,
+    cero violaciones Axe AA en rutas críticas y límites de bundle registrados.
+
 ## P0.J — Objetivos no programativos y gates proporcionales
 
-- [ ] **J.1 Clasificar el tipo de entregable antes del hiring**.
-  - [ ] Añadir un contrato explícito `software`, `research`, `operations` o
+- [x] **J.1 Clasificar el tipo de entregable antes del hiring**.
+  - [x] Añadir un contrato explícito `software`, `research`, `operations` o
     `mixed` en creación de proyecto/tarea, con recomendación explicable y
     override del owner. No inferir autoridad ni ejecutar por una etiqueta sola.
   - [x] Mitigación inmediata: la skill del Lead prohíbe crear Engineer, Test
     Designer, QA, Test Runner, archivos o tests para estudios empresariales,
     investigación y entregables teóricos sin artefacto ejecutable.
-  - Cierre: el tipo queda persistido en metadata y visible en UI, payload y plan.
+  - Cierre (`2026-07-23`): `objective_classification_v1` se calcula de forma
+    determinista y conservadora, acepta override explícito del owner y queda
+    persistido en metadata. API, creación de proyecto/tarea, cockpit, wake
+    payload y propuesta del Lead consumen el mismo contrato.
 
-- [ ] **J.2 Aplicar workflows y evidencia según el entregable**.
-  - [ ] Research usa scouts/curator y, cuando aporte valor, revisión independiente
+- [x] **J.2 Aplicar workflows y evidencia según el entregable**.
+  - [x] Research usa scouts/curator y, cuando aporte valor, revisión independiente
     de fuentes/método; acepta cobertura, citas fechadas, supuestos, cálculos y
     decisión final, no `pytest` ni un exit code inventado.
-  - [ ] Mixed aísla sub-issues ejecutables; solo estos activan toolchain,
+  - [x] Mixed aísla sub-issues ejecutables; solo estos activan toolchain,
     Test Designer y test runner. Software conserva los gates actuales.
-  - [ ] Reproducir como fixture un estudio de empresa de limpieza sin código:
+  - [x] Reproducir como fixture un estudio de empresa de limpieza sin código:
     debe cerrar sin crear suite, package manifest ni bucle de quality gate.
-  - Cierre: ningún proyecto no programativo se bloquea por tests inexistentes y
-    cada tipo conserva evidencia adecuada y continuación durable.
+  - Cierre (`2026-07-23`): hiring y delegación rechazan roles de programación
+    en `research`/`operations`; `mixed` solo los admite en hijos clasificados
+    `software`; quality/test gates se omiten de forma determinista para trabajo
+    no programativo. El fixture exacto de empresa de limpieza cierra con
+    evidencia documental y continuación durable. Verificación: 228 tests
+    dirigidos, 1561 tests backend globales, lint/diff y typecheck frontend
+    limpios; el bypass de una propuesta owner-edited se revalidó después de la
+    suite global con 10/10 focalizados.
 
 ## P0 — Modelos, catálogos y promociones
 
@@ -1317,9 +1543,7 @@ Frontend, solo si el diff toca `ide-frontend/`:
 
 ```powershell
 Set-Location ide-frontend
-npm run build
-npm run lint
-npm run test:e2e:orientation
+npm run check
 ```
 
 Durante iteración usar gates proporcionales; reservar suite completa y canarios
