@@ -9,6 +9,9 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from aiteam.db.provider_change_workflows import (
+    reconcile_provider_change_cases,
+)
 from aiteam.db.provider_changes import (
     provider_component_key,
     register_provider_change_schedules,
@@ -83,6 +86,10 @@ async def run_provider_change_monitor(
                 components,
                 readers,
                 max_checks=max_checks,
+            )
+            await asyncio.to_thread(
+                reconcile_provider_change_cases,
+                target,
             )
         except Exception:
             logger.exception(

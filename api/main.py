@@ -35,6 +35,7 @@ from api.routers import issues as issues_router
 from api.routers import model_catalog as model_catalog_router
 from api.routers import orientation as orientation_router
 from api.routers import project_state as project_state_router
+from api.routers import provider_changes as provider_changes_router
 from api.routers import runs as runs_router
 from api.routers import settings as settings_router
 from api.routers import timeline as timeline_router
@@ -175,6 +176,7 @@ app.include_router(settings_router.router)
 app.include_router(tool_access_router.router)
 app.include_router(user_adapters_router.router)
 app.include_router(model_catalog_router.router)
+app.include_router(provider_changes_router.router)
 
 
 @app.get("/")

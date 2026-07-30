@@ -8,6 +8,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from aiteam.db.provider_change_workflows import evidence_is_invalidated
 from aiteam.model_calibration import (
     CALIBRATION_MAX_AGE_DAYS,
     audit_promoted_model_calibrations,
@@ -1913,6 +1914,7 @@ def audit_model_evaluation_coverage(
     repo_root: Path | None = None,
     executable_models_by_profile: dict[str, set[str]] | None = None,
     owner_preferences: dict[str, Any] | None = None,
+    provider_change_invalidations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Enumera qué destinos recomendados tienen calibración fresca exacta.
 
@@ -1922,6 +1924,7 @@ def audit_model_evaluation_coverage(
     una propuesta de promoción.
     """
     preference_document = normalize_model_owner_preferences(owner_preferences)
+    active_invalidations = list(provider_change_invalidations or ())
     calibration_kwargs: dict[str, Any] = {
         "observed_at": observed_at,
         "observed_versions": observed_versions,
@@ -2124,6 +2127,19 @@ def audit_model_evaluation_coverage(
                         status = "requires_canary"
                     else:
                         status = "manual_candidate"
+                    invalidations = evidence_is_invalidated(
+                        active_invalidations,
+                        profile_id=profile_id,
+                        model_id=model,
+                        role=role,
+                    )
+                    if invalidations and status == "calibrated":
+                        status = "partial"
+                    elif (
+                        invalidations
+                        and status == DEFERRED_UNTIL_MATERIAL_CHANGE
+                    ):
+                        status = "requires_canary"
                     pair_counts[status] += 1
                     next_action = _owner_maintenance_action(
                         status, owner_preference["state"]
@@ -2139,12 +2155,34 @@ def audit_model_evaluation_coverage(
                                 if supplemental
                                 else []
                             ),
-                            "stale_reasons": (
-                                list(entry["stale_reasons"])
-                                if entry
-                                else list(supplemental["stale_reasons"])
-                                if supplemental
-                                else []
+                            "stale_reasons": [
+                                *(
+                                    list(entry["stale_reasons"])
+                                    if entry
+                                    else list(
+                                        supplemental["stale_reasons"]
+                                    )
+                                    if supplemental
+                                    else []
+                                ),
+                                *(
+                                    ["provider_change_confirmed"]
+                                    if invalidations
+                                    else []
+                                ),
+                            ],
+                            "provider_change_invalidations": [
+                                {
+                                    "id": item["id"],
+                                    "case_id": item["case_id"],
+                                    "reason": item["reason"],
+                                }
+                                for item in invalidations
+                            ],
+                            "provider_change_block_new_selection": any(
+                                item.get("new_selection_policy")
+                                == "block_affected"
+                                for item in invalidations
                             ),
                             "evaluated_at": (
                                 entry.get("calibrated_at")

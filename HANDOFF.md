@@ -1896,3 +1896,31 @@ login, inferencias, update ni routing automáticos. Receipt 9/9:
 `e3ae2f44e288e440217ece58a6b133619fea51621f03f5e7aa23c57fd7ad813d`).
 Pasan 45 tests focalizados y Ruff. Siguiente unidad: P0.N.4, workflow durable
 de gestión y rollback que consume triggers con aprobación explícita.
+
+P0.N.4 queda cerrado con `provider_change_workflow_v1`. Los triggers N.3 crean
+expedientes globales idempotentes en `guided_setup.db`; cada uno conserva diff,
+impacto, alcance exacto, recomendación, comandos guiados, riesgo, rollback,
+revisión optimista e historial append-only. Confirmación, clasificación,
+approval, aplicación registrada, doctor/probe, recalibración, aceptación,
+retry, rechazo y rollback son transiciones deterministas. Aprobar activa un
+overlay por perfil+modelo+rol que vuelve stale solo la evidencia afectada y,
+si la política es `block_affected`, impide nuevas selecciones manuales y
+automáticas. Nunca reescribe assignments. Aceptar restaura el overlay y consume
+el trigger; revertir restaura y lo reabre. La API autenticada expone reconcile,
+listado, detalle y transición. Ningún comando se ejecuta, ningún secreto se
+guarda y no hay inferencia/update/routing automático. Receipt 9/9:
+`benchmarks/results/provider_change_workflow/provider-change-workflow-2026-07-30.json`
+(SHA-256
+`caadefd8a28741ec2712714f1c4f40b91114efd48c3445b45cbd2b2b176cee1a`).
+Pasan 43 tests focalizados y Ruff. Siguiente unidad: P0.N.5, inbox/banner y
+gestión visual sin duplicar autoridad en React.
+
+Regresión base separada: la fotografía histórica de cobertura del 2026-07-24
+espera 15 calibrados, pero el código actual sin overlay N.4 produce 13 porque
+Terra/Reviewer y Gemini Free/Reviewer señalan receipt inválido. No se modificó
+la evidencia ni la expectativa; requiere auditoría propia.
+La ampliación también confirma aislado el fallo previo de
+`test_contextual_selection_endpoint_is_explicitly_shadow_only`: su fixture
+espera cargar capacidades de un issue con SQLite inexistente, mientras el
+contrato productivo hace fail-closed y usa defaults de rol. Debe decidirse el
+contrato API/fixture en una unidad separada; N.4 no atraviesa esa ruta.

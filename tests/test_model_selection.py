@@ -238,6 +238,35 @@ def test_context_gate_precedes_base_score_and_preserves_base_measurement() -> No
     assert read_model == original
 
 
+def test_confirmed_provider_change_blocks_new_owner_selection() -> None:
+    read_model, profiles, options = _fixture()
+    target = next(
+        row
+        for row in read_model["candidates"]
+        if row["candidate_id"] == "lower"
+    )
+    target["roles"][0]["evaluation"] = {
+        "provider_change_block_new_selection": True,
+    }
+
+    result = build_contextual_model_selection(
+        read_model,
+        role="reviewer",
+        profiles=profiles,
+        options_by_profile=options,
+        data_class="public",
+        capacity_by_profile=_available_capacity("restricted", "owner"),
+    )
+    blocked = next(
+        row for row in result["candidates"]
+        if row["candidate_id"] == "lower"
+    )
+
+    assert blocked["provider_change_blocked"] is True
+    assert blocked["owner_selectable"] is False
+    assert "invalidación de proveedor" in blocked["disabled_reason"]
+
+
 def test_unscored_pairs_remain_visible_but_never_become_default() -> None:
     read_model, profiles, options = _fixture()
     for candidate in read_model["candidates"]:

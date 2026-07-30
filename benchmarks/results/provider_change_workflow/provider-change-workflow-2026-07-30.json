@@ -1,0 +1,35 @@
+{
+  "schema_version": "provider_change_workflow_audit_v1",
+  "contract_schema_version": "provider_change_workflow_v1",
+  "counts": {
+    "checks": 9,
+    "accepted_history_events": 8,
+    "materialized_fields": 6
+  },
+  "checks": {
+    "case_materializes_complete_evidence": true,
+    "optimistic_revision_fails_closed": true,
+    "approval_precedes_application": true,
+    "invalidation_scope_is_exact": true,
+    "workflow_never_executes_commands": true,
+    "validation_and_recalibration_are_separate": true,
+    "acceptance_consumes_and_restores": true,
+    "rollback_restores_and_reopens_trigger": true,
+    "history_is_monotonic": true
+  },
+  "summary": {
+    "passed": 9,
+    "total": 9,
+    "workflow_ready": true
+  },
+  "scope": {
+    "temporary_sqlite_only": true,
+    "network_attempted": false,
+    "secrets_read": false,
+    "login_attempted": false,
+    "inference_attempted": false,
+    "commands_executed": false,
+    "updates_executed": false,
+    "routing_mutated": false
+  }
+}

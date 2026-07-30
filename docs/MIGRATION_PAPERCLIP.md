@@ -461,6 +461,13 @@ ejecutarse automáticamente; doctor es estrictamente read-only. Los triggers
 exactos son intención durable para el workflow, no autorización para invalidar
 evidencia ni cambiar routing. Cadencia, lease, jitter y backoff evitan bucles y
 duplicados; indisponibilidad permanece `unknown`.
+Los triggers se consumen mediante expedientes globales owner-gated, no mediante
+issues de un workspace arbitrario. Cada expediente conserva revisión
+optimista, impacto exacto, approval, aplicación externa, validación,
+recalibración y outcome reversible. Su overlay de invalidaciones vuelve stale
+solo perfil+modelo+rol aprobado y puede bloquear nuevas selecciones sin tocar
+assignments. Aceptación o rollback restauran el overlay de forma explícita; el
+control plane nunca ejecuta por sí mismo comandos de update.
 
 P0.g convierte esa evidencia en un recorrido operativo único por
 `(profile_id, model_id, role)`: configuración/auth, catálogo+versión, health,

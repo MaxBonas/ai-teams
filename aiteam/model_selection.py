@@ -169,10 +169,15 @@ def build_contextual_model_selection(
             str(identity.get("channel") or "") == "api"
             and budget.get("status") == "limit_reached"
         )
+        provider_change_blocked = bool(
+            ((base_row or {}).get("evaluation") or {}).get(
+                "provider_change_block_new_selection"
+            )
+        )
         owner_selectable = bool(
             decision.get("allowed") and selectable_state
             and not capacity_blocked and not budget_blocked and not owner_archived
-            and authority_gate["allowed"]
+            and authority_gate["allowed"] and not provider_change_blocked
         )
         disabled_reason = _disabled_reason(
             owner_preference=owner_preference,
@@ -183,6 +188,7 @@ def build_contextual_model_selection(
             capacity_state=capacity_state,
             budget_blocked=budget_blocked,
             authority_gate=authority_gate,
+            provider_change_blocked=provider_change_blocked,
         )
         row = {
             **candidate,
@@ -198,6 +204,7 @@ def build_contextual_model_selection(
             "budget_evidence": budget,
             "owner_preference": owner_preference,
             "owner_selectable": owner_selectable,
+            "provider_change_blocked": provider_change_blocked,
             "requires_configuration": owner_selectable and not (configured and green),
             "disabled_reason": disabled_reason,
         }
@@ -602,6 +609,7 @@ def _disabled_reason(
     selectable: bool, configured: bool,
     green: bool, capacity_state: str, budget_blocked: bool,
     authority_gate: Mapping[str, Any],
+    provider_change_blocked: bool,
 ) -> str | None:
     if owner_preference.get("state") == "archived":
         reason = str(owner_preference.get("reason") or "sin motivo registrado")
@@ -612,6 +620,11 @@ def _disabled_reason(
         return str(
             authority_gate.get("reason")
             or "La autoridad Tier 1 exacta no está habilitada."
+        )
+    if provider_change_blocked:
+        return (
+            "Una invalidación de proveedor confirmada bloquea nuevas "
+            "selecciones de este par hasta validar o revertir el cambio."
         )
     if not selectable:
         return "El modelo no está marcado como seleccionable en este adapter."

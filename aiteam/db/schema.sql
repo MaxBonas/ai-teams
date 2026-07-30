@@ -651,6 +651,71 @@ CREATE TABLE IF NOT EXISTS provider_change_schedules (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS provider_change_cases (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    trigger_id TEXT NOT NULL UNIQUE,
+    event_id TEXT NOT NULL,
+    event_fingerprint TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'awaiting_confirmation', 'awaiting_classification',
+            'awaiting_approval', 'approved', 'awaiting_validation',
+            'validation_failed', 'awaiting_recalibration',
+            'ready_to_accept', 'accepted', 'rejected', 'reverted'
+        )
+    ),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    owner TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    diff_json TEXT NOT NULL,
+    impact_json TEXT NOT NULL,
+    recommendation_json TEXT NOT NULL,
+    guided_commands_json TEXT NOT NULL,
+    risk_json TEXT NOT NULL,
+    rollback_json TEXT NOT NULL,
+    classification_json TEXT,
+    approval_json TEXT,
+    application_json TEXT,
+    validation_json TEXT,
+    outcome_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_change_case_history (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    action TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(case_id) REFERENCES provider_change_cases(id),
+    UNIQUE(case_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS provider_change_evidence_invalidations (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    canonical_role TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    new_selection_policy TEXT NOT NULL CHECK (
+        new_selection_policy IN ('preserve', 'block_affected')
+    ),
+    status TEXT NOT NULL CHECK (status IN ('active', 'restored')),
+    created_at TEXT NOT NULL,
+    restored_at TEXT,
+    FOREIGN KEY(case_id) REFERENCES provider_change_cases(id),
+    UNIQUE(case_id, profile_id, model_id, canonical_role)
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency
     ON wakeup_requests(agent_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
@@ -689,6 +754,14 @@ CREATE INDEX IF NOT EXISTS idx_provider_change_triggers_status
     ON provider_change_triggers(status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_provider_change_schedules_due
     ON provider_change_schedules(next_check_at, lease_until, identity_key);
+CREATE INDEX IF NOT EXISTS idx_provider_change_cases_status
+    ON provider_change_cases(status, severity, updated_at DESC, id);
+CREATE INDEX IF NOT EXISTS idx_provider_change_case_history_case
+    ON provider_change_case_history(case_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_provider_change_invalidations_active
+    ON provider_change_evidence_invalidations(
+        status, profile_id, model_id, canonical_role
+    );
 CREATE INDEX IF NOT EXISTS idx_quorum_sessions_issue ON quorum_sessions(issue_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_quorum_contributions_session ON quorum_contributions(session_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_orientation_events_session ON orientation_events(session_id, created_at);

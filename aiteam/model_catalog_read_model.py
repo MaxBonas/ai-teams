@@ -17,6 +17,9 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+from aiteam.db.provider_change_workflows import (
+    list_active_provider_change_invalidations,
+)
 from aiteam.model_catalog_projection import build_model_catalog_identity_projection
 from aiteam.model_compatibility import compatibility_decision
 from aiteam.model_evaluation_coverage import audit_model_evaluation_coverage
@@ -44,6 +47,7 @@ from aiteam.user_config import (
     model_options,
     observed_profile_cli_version,
     profile_is_connected,
+    user_config_dir,
 )
 
 MODEL_CATALOG_READ_MODEL_VERSION = "model_catalog_read_model_v2"
@@ -690,6 +694,11 @@ def build_current_model_catalog_read_model(
         observed_versions=observed_versions,
         repo_root=repo_root,
         owner_preferences=owner_preferences,
+        provider_change_invalidations=(
+            list_active_provider_change_invalidations(
+                user_config_dir() / "guided_setup.db"
+            )
+        ),
     )
     metric_inputs = normalized_metrics
     if metric_inputs is None:

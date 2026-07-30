@@ -88,10 +88,10 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 8. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próximo bloque ejecutable local: **P0.N.4, workflow de gestión y rollback de
-cambios de proveedor**. P0.N.1–N.3 ya fijan contrato, detectores, persistencia,
-eventos, triggers exactos y scheduler seguro; N.4 debe consumir esos triggers
-sin convertir detección en actualización, routing o calibración automática.
+Próximo bloque ejecutable local: **P0.N.5, avisos al developer y superficie
+UI de cambios de proveedor**. P0.N.1–N.4 ya fijan contrato, detectores,
+persistencia, expedientes owner-gated, invalidación exacta, aceptación y
+rollback; N.5 debe proyectarlos sin recalcular autoridad en React.
 K.8.6.1 ya cierra la matriz hermética, K.8.6.2 deja el
 runner Windows alineado con el commit guiado actual y K.8.6.3a–b prueban en CI
 independiente tanto clon limpio como actualización de checkout, con auditor
@@ -3098,7 +3098,7 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
     (SHA-256
     `e3ae2f44e288e440217ece58a6b133619fea51621f03f5e7aa23c57fd7ad813d`).
     Verificación focal: 45 tests y Ruff verdes.
-  - [ ] **P0.N.4 Workflow de gestión y rollback**: convertir cada cambio
+  - [x] **P0.N.4 Workflow de gestión y rollback**: convertir cada cambio
     accionable en issue/interacción durable con diff, impacto,
     perfiles/modelos/roles afectados, recomendación, comandos guiados, riesgo y
     rollback. Flujo: observar → confirmar → clasificar → aprobar → actualizar
@@ -3106,6 +3106,38 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
     aceptar o revertir. Modelos nuevos quedan visibles como
     `owner_unclassified`; modelos retirados bloquean nuevas selecciones y las
     asignaciones existentes piden sustitución sin mutación silenciosa.
+    Cerrado con `provider_change_workflow_v1`: cada trigger pendiente crea un
+    expediente global idempotente con revisión optimista, diff, impacto,
+    recomendación, comandos guiados, riesgo, rollback e historial append-only.
+    Flujo determinista:
+    `awaiting_confirmation → awaiting_classification → awaiting_approval →
+    approved → awaiting_validation → awaiting_recalibration/ready_to_accept →
+    accepted`, con rechazo, retry y rollback recuperable. Clasificación exige
+    perfiles/modelos/roles exactos o wildcards explícitos; aprobación activa el
+    overlay SQLite de invalidaciones. El Catálogo consume ese overlay read-only:
+    solo la celda afectada pasa stale y `block_affected` impide nuevas
+    selecciones manuales/automáticas sin reescribir assignments existentes.
+    Aceptar tras doctor/probe y calibración proporcional restaura la
+    invalidación y consume el trigger; revertir restaura evidencia, mantiene el
+    evento reconocido y reabre el trigger. API autenticada permite reconciliar,
+    listar, leer y transicionar con revisión esperada. El workflow nunca
+    ejecuta comandos, updates, inferencias o routing; registra aplicaciones
+    externas con `executed_by_workflow=false` y rechaza secretos recursivamente.
+    Receipt 9/9:
+    `benchmarks/results/provider_change_workflow/provider-change-workflow-2026-07-30.json`
+    (SHA-256
+    `caadefd8a28741ec2712714f1c4f40b91114efd48c3445b45cbd2b2b176cee1a`).
+    Verificación focal: 43 tests y Ruff verdes.
+    Deuda separada observada al ampliar regresión: la fotografía histórica
+    `test_coverage_inventory_is_conservative_and_tracks_exact_promotions`
+    espera 15 calibrados, pero el baseline actual sin invalidaciones proyecta
+    13 porque Terra/Reviewer y Gemini Free/Reviewer reportan receipt inválido.
+    Auditar esos receipts antes de cambiar evidencia o expectativa.
+    La regresión ampliada conserva además un fallo previo en
+    `test_contextual_selection_endpoint_is_explicitly_shadow_only`: el fixture
+    espera capacidades del issue aunque su SQLite no existe y el contrato
+    productivo evita consultarlas en ese caso. Resolver como deuda de contrato
+    API/fixture, sin acoplarla ni maquillar el cierre focal de N.4.
   - [ ] **P0.N.5 Avisos al developer y superficie UI**: añadir inbox/banner en
     Config y Modelos con contador, severidad, proveedor/canal, resumen del diff,
     edad, evidencia, acción recomendada y botones acknowledge/snooze/gestionar.

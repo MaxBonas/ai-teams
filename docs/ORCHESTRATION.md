@@ -414,6 +414,30 @@ payload. El doctor lee el resumen sin crear ni migrar la DB ausente.
 `provider-change-persistence-2026-07-30.json` pasa 9/9 invariantes y sella cero
 red, secretos, login, inferencia, updates o routing.
 
+P0.N.4 añade `provider_change_workflow_v1` como expediente global sobre la
+misma SQLite de máquina. Un trigger pendiente se materializa una sola vez con
+diff, impacto, perfiles/modelos/roles, recomendación, comandos guiados, riesgo,
+rollback y un historial append-only. Todas las transiciones usan revisión
+optimista. Confirmar no aplica nada; clasificar exige alcance exacto o wildcards
+explícitos; aprobar es la primera transición que activa una invalidación de
+evidencia. Aplicación, doctor/probe y recalibración se registran como fases
+separadas. El workflow no ejecuta comandos ni proveedores: una aplicación
+siempre conserva `executed_by_workflow=false`.
+
+Las invalidaciones son un overlay read-only por
+`(profile_id, model_id, canonical_role)`. Una celda confirmada pierde frescura
+sin contaminar hermanos; `block_affected` cierra también nuevas selecciones
+manuales y automáticas. Ninguna asignación existente se modifica: retirada o
+incompatibilidad deben pedir sustitución al owner en la superficie N.5. Tras
+validación y, cuando corresponda, calibración proporcional, aceptar restaura
+el overlay, resuelve el evento y consume el trigger. Fallo permite retry;
+rollback restaura la evidencia previa y deja el trigger pendiente para una
+nueva clasificación. Rechazo explícito descarta el trigger. La API autenticada
+expone reconciliación, listado, detalle y transición, pero React no debe
+reimplementar estados o autoridad. El auditor
+`provider-change-workflow-2026-07-30.json` pasa 9/9 sin red, secretos, login,
+inferencia, comandos, updates o routing.
+
 El workflow es observar → confirmar → clasificar → avisar → aprobar →
 actualizar → doctor/probe → recalibrar solo el alcance afectado → aceptar o
 revertir. Modelos nuevos quedan visibles como `owner_unclassified`; una
