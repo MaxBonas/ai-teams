@@ -1,0 +1,31 @@
+{
+  "schema_version": "provider_change_notification_audit_v1",
+  "observed_at": "2026-07-30T12:00:00+00:00",
+  "ok": true,
+  "checks": {
+    "local_scope_without_external_delivery": true,
+    "banner_and_count_match_attention": true,
+    "provider_group_is_deduplicated": true,
+    "notification_exposes_operational_context": true,
+    "acknowledge_is_revisioned_activity": true,
+    "snooze_is_revisioned_activity": true,
+    "snoozed_is_hidden_by_default": true,
+    "snoozed_remains_explicitly_inspectable": true,
+    "expired_snooze_reopens_projection": true,
+    "stale_revision_fails_closed": true
+  },
+  "counts": {
+    "passed": 10,
+    "total": 10
+  },
+  "scope": {
+    "temporary_sqlite": true,
+    "network_used": false,
+    "secrets_read": false,
+    "login_used": false,
+    "inference_used": false,
+    "commands_executed": false,
+    "external_notifications_sent": false,
+    "routing_changed": false
+  }
+}

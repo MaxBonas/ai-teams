@@ -1932,7 +1932,11 @@ evidencia, siguiente acción y agrupación. El caso N.4 sigue siendo la
 interacción y su history la actividad. Acknowledge, snooze y gestionar usan
 revisión optimista y una sola transacción; stale devuelve 409. Configuración
 incluye el centro completo y Modelos el banner compacto, sin recalcular
-autoridad ni ejecutar remediaciones. Pasan 46 tests backend y 34 unitarios
+autoridad ni ejecutar remediaciones. El auditor hermético 10/10 queda en
+`benchmarks/results/provider_change_notifications/provider-change-notifications-2026-07-30.json`
+(SHA-256
+`24e97d64036762b7a1800fe84f4480898714bdb657bfdb9f0760354df119b10c`).
+Pasan 47 tests backend y 34 unitarios
 frontend, tipos, linters, límites, build y bundle. Bundle final:
 409.595/118.309 B JS raw/gzip y 126.949/22.925 B CSS. Quedan N.5.4
 (entrega externa opt-in real, redacted y anti-spam) y N.5.5

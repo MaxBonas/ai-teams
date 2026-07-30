@@ -3162,7 +3162,11 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
       proveedores y compacto sobre Modelos. Consume solo la proyección backend,
       conserva bloqueos/causas y permite reconocer, posponer y abrir el detalle.
       La remediación se explica como manual y la entrega externa aparece
-      desactivada. Verificación: 46 tests backend y 34 unitarios frontend,
+      desactivada. Auditor hermético 10/10:
+      `benchmarks/results/provider_change_notifications/provider-change-notifications-2026-07-30.json`
+      (SHA-256
+      `24e97d64036762b7a1800fe84f4480898714bdb657bfdb9f0760354df119b10c`).
+      Verificación: 47 tests backend y 34 unitarios frontend,
       TypeScript, ESLint, Stylelint, límites, build y bundle verdes. Bundle:
       JS 409.595 B raw/118.309 B gzip; CSS 126.949 B raw/22.925 B gzip.
     - [ ] **P0.N.5.4 Entrega externa opt-in**: definir destinos y política

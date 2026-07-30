@@ -462,6 +462,10 @@ ningún canal externo está activo. La entrega externa sigue abierta en N.5.4:
 deberá ser opt-in, redacted, deduplicada y health-gated antes de que la UI
 permita activarla. Hasta entonces `external_delivery_enabled` permanece falso
 y no se simula una notificación que nadie recibirá.
+El auditor `provider-change-notifications-2026-07-30.json` pasa 10/10 sobre
+SQLite temporal: proyección, agrupación, actividad, acknowledge, snooze,
+expiración y conflicto stale, con cero red, secretos, comandos, inferencia,
+entrega externa o cambio de routing.
 
 La cobertura conductual se audita por separado mediante
 `scripts/audit_model_evaluation_coverage.py`. Deduplica aliases a roles
