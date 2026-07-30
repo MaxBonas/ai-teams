@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -171,3 +173,24 @@ def test_installation_state_separates_clean_clone_from_real_update() -> None:
             revision=revision,
             pre_update_revision=revision,
         )
+
+
+def test_clean_room_script_bootstraps_import_path_from_arbitrary_cwd(
+    tmp_path: Path,
+) -> None:
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "accept_windows_clean_room.py"
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--installation-state" in result.stdout

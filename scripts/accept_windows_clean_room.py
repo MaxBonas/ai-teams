@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import argparse
 import hashlib
 import json
@@ -10,11 +12,16 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import sys
 import time
 import uuid
 from contextlib import closing
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.guided_setup_project_commit import materialize_project_proposal
@@ -26,7 +33,6 @@ from aiteam.provider_cli_acceptance_fixture import (
     build_provider_cli_acceptance_fixture,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
 BACKEND_PORT = 8010
 FRONTEND_PORT = 9490
 CLI_COMMANDS = {
