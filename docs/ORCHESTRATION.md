@@ -349,6 +349,28 @@ comprobación. Offline, rate limit y auth ausente permanecen `unknown`.
 Doctor/startup y el scheduler pueden detectar, pero nunca instalan globales,
 aceptan términos, cambian credenciales ni ejecutan canarios sin aprobación.
 
+P0.N.1 materializa la frontera previa a esos detectores mediante
+`provider_change_intelligence_v1`. El contrato vive en
+`config/provider_change_intelligence.v1.json` y la proyección neutral en
+`aiteam/provider_change_intelligence.py`. Enumera por perfil y canal cinco
+superficies distintas —paquete CLI, servidor MCP, SDK/API, adapter interno y
+catálogo de modelos— y tres hechos que nunca se colapsan: versión instalada,
+versión soportada/pin y última versión conocida. Cada hecho declara
+`known`, `unknown` o `not_applicable`, fuente admisible y timestamp; un unknown
+no puede llevar valor ni fingir observación. `repo_contract` es la única
+autoridad del pin, `local_resolution` de la instalación, y solo registry,
+release oficial o discovery autenticado pueden establecer la última versión.
+Cada superficie conserva además dimensiones propias: API separa SDK, versión,
+endpoint, auth y schemas de request/response; MCP separa distribución,
+protocolo, `serverInfo`, capabilities y tools; catálogo separa IDs/aliases,
+contexto, tools, structured output, precio, cuota y lifecycle.
+Una web o un nombre comercial sin provenance quedan fuera del vocabulario.
+El inventario inicial cubre los 12 perfiles, 42 componentes y los tres MCP
+curados, pero deja instalación y release como unknown hasta P0.N.2: definir la
+fuente no equivale a haberla consultado. Su scope sella cero red, secretos,
+login, inferencia o autoridad de routing. El receipt reproducible
+`provider-change-contract-2026-07-30.json` pasa 7/7 invariantes.
+
 El workflow es observar → confirmar → clasificar → avisar → aprobar →
 actualizar → doctor/probe → recalibrar solo el alcance afectado → aceptar o
 revertir. Modelos nuevos quedan visibles como `owner_unclassified`; una

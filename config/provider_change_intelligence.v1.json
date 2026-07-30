@@ -1,0 +1,113 @@
+{
+  "schema_version": "provider_change_intelligence_v1",
+  "updated_at": "2026-07-30",
+  "fact_states": [
+    "known",
+    "unknown",
+    "not_applicable"
+  ],
+  "surfaces": [
+    "cli_package",
+    "mcp_server",
+    "sdk_api",
+    "internal_adapter",
+    "model_catalog"
+  ],
+  "surface_dimensions": {
+    "cli_package": [
+      "distribution",
+      "version",
+      "executable_contract"
+    ],
+    "mcp_server": [
+      "distribution",
+      "protocol_version",
+      "server_info",
+      "capabilities",
+      "tools"
+    ],
+    "sdk_api": [
+      "sdk_package",
+      "api_version",
+      "endpoint",
+      "auth_schema",
+      "request_schema",
+      "response_schema"
+    ],
+    "internal_adapter": [
+      "adapter_contract",
+      "config_schema",
+      "translation_contract"
+    ],
+    "model_catalog": [
+      "model_id",
+      "alias",
+      "context",
+      "tools",
+      "structured_output",
+      "price",
+      "quota",
+      "lifecycle"
+    ]
+  },
+  "source_kinds": {
+    "repo_contract": {
+      "authoritative_for": [
+        "supported_version"
+      ],
+      "requires_official": false
+    },
+    "local_resolution": {
+      "authoritative_for": [
+        "installed_version"
+      ],
+      "requires_official": false
+    },
+    "official_registry": {
+      "authoritative_for": [
+        "latest_known_version"
+      ],
+      "requires_official": true
+    },
+    "official_release": {
+      "authoritative_for": [
+        "latest_known_version"
+      ],
+      "requires_official": true
+    },
+    "authenticated_discovery": {
+      "authoritative_for": [
+        "installed_version",
+        "latest_known_version"
+      ],
+      "requires_official": true
+    }
+  },
+  "facts": {
+    "installed_version": {
+      "allowed_sources": [
+        "local_resolution",
+        "authenticated_discovery"
+      ]
+    },
+    "supported_version": {
+      "allowed_sources": [
+        "repo_contract"
+      ]
+    },
+    "latest_known_version": {
+      "allowed_sources": [
+        "official_registry",
+        "official_release",
+        "authenticated_discovery"
+      ]
+    }
+  },
+  "authority_rules": [
+    "Una observación web o un nombre comercial sin provenance no modifica ningún hecho.",
+    "Discovery solo describe disponibilidad o metadata; nunca concede routing, calidad, roles ni promoción.",
+    "API y suscripción son canales independientes aunque compartan proveedor o familia de modelo.",
+    "Unknown permanece unknown ante offline, rate limit, autenticación ausente o fuente no consultada.",
+    "Este contrato es read-only: no instala, actualiza, autentica, rota secretos ni ejecuta inferencias."
+  ]
+}

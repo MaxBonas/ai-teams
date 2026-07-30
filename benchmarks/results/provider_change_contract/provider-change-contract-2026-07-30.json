@@ -1,0 +1,33 @@
+{
+  "schema_version": "provider_change_contract_audit_v1",
+  "contract_schema_version": "provider_change_intelligence_v1",
+  "inventory_sha256": "8efbe929662c159dce37cb6bb7ccd6d8385af7b788a26b15daf75c3c8dc7acd2",
+  "counts": {
+    "profiles": 12,
+    "components": 42,
+    "mcp_servers": 3,
+    "surfaces": 5
+  },
+  "checks": {
+    "all_builtin_profiles_covered": true,
+    "all_surfaces_covered": true,
+    "all_facts_have_provenance": true,
+    "unknown_is_explicit": true,
+    "unknown_does_not_claim_observation": true,
+    "discovery_grants_no_routing_authority": true,
+    "read_only_and_secret_free": true
+  },
+  "summary": {
+    "passed": 7,
+    "total": 7,
+    "contract_ready": true
+  },
+  "scope": {
+    "read_only": true,
+    "secrets_read": false,
+    "login_attempted": false,
+    "inference_attempted": false,
+    "network_attempted": false,
+    "routing_authority_granted": false
+  }
+}

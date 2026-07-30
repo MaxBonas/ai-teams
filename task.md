@@ -88,8 +88,10 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 8. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próximo bloque ejecutable local: **P0.N.1, contrato canónico y fuentes de
-cambios de proveedor**. K.8.6.1 ya cierra la matriz hermética, K.8.6.2 deja el
+Próximo bloque ejecutable local: **P0.N.2, detectores y diffs semánticos de
+cambios de proveedor**. P0.N.1 ya fija el vocabulario, las fuentes admisibles y
+la separación de cinco superficies sin ejecutar red ni conceder routing.
+K.8.6.1 ya cierra la matriz hermética, K.8.6.2 deja el
 runner Windows alineado con el commit guiado actual y K.8.6.3a–b prueban en CI
 independiente tanto clon limpio como actualización de checkout, con auditor
 agregado 9/9. K.8.6.3c queda pendiente de una instalación física de otro
@@ -3031,13 +3033,25 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
   developer con evidencia y remediación. Nunca actualizar globales, aceptar
   términos, rotar credenciales, promocionar modelos ni consumir canarios sin
   autorización.
-  - [ ] **P0.N.1 Contrato canónico y fuentes**: definir
+  - [x] **P0.N.1 Contrato canónico y fuentes**: definir
     `provider_change_intelligence_v1` por perfil/canal con versión instalada,
     versión soportada/pin, última versión conocida, fuente y timestamp. Separar
     CLI/package, servidor MCP, SDK/API/endpoint/auth/schema, adapter interno y
     catálogo/model metadata. Fuentes admisibles: contrato del repo, resolución
     local compartida, registry/release oficial y discovery autenticado; una
     web o nombre comercial sin provenance no cambia estado.
+    Cerrado con contrato JSON y proyección neutral fail-closed: cubre los 12
+    perfiles built-in, 42 componentes, cinco superficies y tres MCP curados.
+    Cada hecho usa `known/unknown/not_applicable`; unknown no puede contener
+    valor ni timestamp. Solo `repo_contract` establece el pin,
+    `local_resolution` la instalación y registry/release oficial o discovery
+    autenticado la última versión. API, suscripción y local permanecen scopes
+    distintos; discovery no concede calidad, rol, routing ni actualización.
+    Receipt 7/7:
+    `benchmarks/results/provider_change_contract/provider-change-contract-2026-07-30.json`
+    con inventario SHA-256
+    `8efbe929662c159dce37cb6bb7ccd6d8385af7b788a26b15daf75c3c8dc7acd2`.
+    Verificación: 10 tests focalizados y Ruff verdes.
   - [ ] **P0.N.2 Detectores y diffs semánticos**: implementar probes
     provider-neutral, read-only e idempotentes para release nueva, instalación
     atrasada, prerelease, retirada/deprecación, incompatibilidad con el rango

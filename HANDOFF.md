@@ -1848,3 +1848,17 @@ matriz pasa 9/9 gates. Se versionó el receipt agregado en
 K.8.6.3 permanece abierto solo por 3c: actualización redacted en la instalación
 física de otro usuario con su consentimiento. El siguiente bloque local es
 P0.N.1, contrato canónico y fuentes de cambios de proveedor.
+
+P0.N.1 queda cerrado con `provider_change_intelligence_v1`. El contrato
+canónico separa `cli_package`, `mcp_server`, `sdk_api`, `internal_adapter` y
+`model_catalog`; cada componente conserva como hechos independientes versión
+instalada, pin soportado y última versión conocida con estado y provenance.
+El inventario derivado cubre 12 perfiles, 42 componentes y tres MCP. Todo dato
+no sondeado permanece `unknown` sin valor ni timestamp; discovery autenticado
+no puede fijar soporte ni conceder routing. El receipt
+`benchmarks/results/provider_change_contract/provider-change-contract-2026-07-30.json`
+pasa 7/7 y sella el inventario
+`8efbe929662c159dce37cb6bb7ccd6d8385af7b788a26b15daf75c3c8dc7acd2`.
+Pasan 10 tests focalizados. Siguiente unidad: P0.N.2, probes read-only y diff
+semántico sobre este contrato; no implementar todavía persistencia/scheduling
+de N.3 ni actualizaciones automáticas.
