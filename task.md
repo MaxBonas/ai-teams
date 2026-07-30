@@ -88,12 +88,13 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 8. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próximo bloque ejecutable: **P0.K.8.6.3b, publicar un SHA limpio y recoger
-evidencia CI**. K.8.6.1 ya cierra la matriz hermética, K.8.6.2 deja el runner
-Windows alineado con el commit guiado actual y K.8.6.3a prepara dos celdas
-independientes más su auditor 9/9. Falta publicar el estado coherente completo
-y recoger los receipts reales; después, K.8.6.3c valida una instalación de otro
-usuario con consentimiento. K.8.1 ya atribuye el histórico, K.8.2
+Próximo bloque ejecutable local: **P0.N.1, contrato canónico y fuentes de
+cambios de proveedor**. K.8.6.1 ya cierra la matriz hermética, K.8.6.2 deja el
+runner Windows alineado con el commit guiado actual y K.8.6.3a–b prueban en CI
+independiente tanto clon limpio como actualización de checkout, con auditor
+agregado 9/9. K.8.6.3c queda pendiente de una instalación física de otro
+usuario y exige su consentimiento; no bloquea el trabajo local de P0.N.
+K.8.1 ya atribuye el histórico, K.8.2
 impide contaminación nueva, K.8.3 produce una lista exacta sellada y K.8.5
 guía/avisa sin mutar. K.8.4.2 continúa bloqueado hasta una aprobación owner
 exacta; no se autoriza todavía mover ni borrar el histórico. P0.K.1–K.7,
@@ -1559,11 +1560,25 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
           satisfacerlo. Verificación local: 25 tests, parse YAML, Ruff E/F/I y
           diff check verdes. Esto prepara la evidencia; no afirma que los jobs
           ya hayan corrido.
-        - [ ] **K.8.6.3b Publicar un SHA limpio y recoger evidencia CI**:
+        - [x] **K.8.6.3b Publicar un SHA limpio y recoger evidencia CI**:
           commit/push del estado coherente completo, esperar las dos celdas y el
           auditor agregado, descargar los tres receipts, verificar SHA/harness
-          y versionar el agregado. No usar un commit parcial que omita
-          dependencias hoy untracked del wizard.
+          y versionar el agregado. Cerrado con el
+          [run 30563841249](https://github.com/MaxBonas/ai-teams/actions/runs/30563841249)
+          sobre `6145567c8fb7393dce7479d6fdbf3180a2826533`: `clean-clone` y
+          `existing-checkout-updated` pasan 24/24 pasos, quedan clean,
+          independientes y promocionables; la actualización parte de
+          `6fd5e421d9ad9da6ec31314604cf6358422004c8`. Ambos receipts comparten
+          harness
+          `5c2c183c48f9b3341b59db542f09b233796d9a10eedd3bba61d8238265b669cc`;
+          el auditor agregado pasa 9/9. Receipt durable:
+          `benchmarks/results/installation_acceptance/windows-clean-room-matrix-6145567.json`
+          (SHA-256
+          `444d55db1a55176b6b9a1ee451cd140c486893cdd4a68a3f7900c2984813b156`).
+          Los artefactos originales de clone/update tienen SHA-256 de archivo
+          `5ccdc1188ca0416ec0e569bbf913285899a991e5a30ee02ed7a25864dd74454d`
+          y
+          `1f75d49e8680d156fde67c6cb76c8e112f8cdfd7ca36c3f27794e198b36078f5`.
         - [ ] **K.8.6.3c Actualización en otra instalación real**: ejecutar la
           guía de update y el runner no promocionable en la máquina de un
           usuario que ya tenga AI Teams, con su consentimiento; conservar solo

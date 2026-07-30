@@ -1,0 +1,42 @@
+{
+  "checks": {
+    "both_checkouts_clean": true,
+    "both_independent_and_promotable": true,
+    "both_receipts_green": true,
+    "guided_commit_and_retry_green": true,
+    "no_persistent_cleanup_lifecycle": true,
+    "restart_update_and_rollback_green": true,
+    "same_exact_harness": true,
+    "same_exact_revision": true,
+    "update_started_from_distinct_revision": true
+  },
+  "evidence_hash": "7344069aafc4846744cb0ac0944ae8497078905a484cc284547b2d89319a184f",
+  "schema_version": "windows_clean_room_matrix_acceptance_v1",
+  "scope": {
+    "inference_attempted": false,
+    "installations_mutated": false,
+    "paths_emitted": false,
+    "receipts_only": true,
+    "remote_quota_consumed": false,
+    "secrets_read": false
+  },
+  "sources": {
+    "clean_clone": {
+      "harness_sha256": "5c2c183c48f9b3341b59db542f09b233796d9a10eedd3bba61d8238265b669cc",
+      "receipt_sha256": "00045ea5ec4934a6541c69d247b075e9688f6c7ef5e6c521efde9eae07f77ab1",
+      "revision": "6145567c8fb7393dce7479d6fdbf3180a2826533",
+      "step_count": 24
+    },
+    "existing_checkout_updated": {
+      "harness_sha256": "5c2c183c48f9b3341b59db542f09b233796d9a10eedd3bba61d8238265b669cc",
+      "receipt_sha256": "d9ec7d4e985fd46e49adcb9207dafcc3c4a93341828f439fe54ca0977febc88c",
+      "revision": "6145567c8fb7393dce7479d6fdbf3180a2826533",
+      "step_count": 24
+    }
+  },
+  "summary": {
+    "check_count": 9,
+    "matrix_ready": true,
+    "passed_count": 9
+  }
+}

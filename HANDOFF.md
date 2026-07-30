@@ -1831,3 +1831,20 @@ actual contiene muchas dependencias nuevas aún untracked, por lo que un commit
 parcial sería inválido— y recoger los tres artefactos reales de Actions. 3c
 requiere consentimiento y ejecución redacted en otra instalación ya existente.
 No se hizo commit, push ni se inventó evidencia CI en esta unidad.
+
+K.8.6.3b queda cerrado. El estado coherente se publicó en
+`6145567c8fb7393dce7479d6fdbf3180a2826533` y el
+[run 30563841249](https://github.com/MaxBonas/ai-teams/actions/runs/30563841249)
+terminó verde con las celdas `clean-clone` y `existing-checkout-updated` más el
+auditor agregado. Cada celda completó 24/24 pasos y quedó
+`independent_machine=true`, `promotion_allowed=true` y
+`working_tree_dirty=false`; la actualización comenzó en
+`6fd5e421d9ad9da6ec31314604cf6358422004c8`. Ambas comparten el harness
+`5c2c183c48f9b3341b59db542f09b233796d9a10eedd3bba61d8238265b669cc` y la
+matriz pasa 9/9 gates. Se versionó el receipt agregado en
+`benchmarks/results/installation_acceptance/windows-clean-room-matrix-6145567.json`
+(SHA-256
+`444d55db1a55176b6b9a1ee451cd140c486893cdd4a68a3f7900c2984813b156`).
+K.8.6.3 permanece abierto solo por 3c: actualización redacted en la instalación
+física de otro usuario con su consentimiento. El siguiente bloque local es
+P0.N.1, contrato canónico y fuentes de cambios de proveedor.
