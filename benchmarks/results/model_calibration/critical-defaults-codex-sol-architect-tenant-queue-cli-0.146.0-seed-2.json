@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v1",
+  "status": "completed",
+  "wall_seconds": 28.188,
+  "usage": {
+    "input_tokens": 16599,
+    "cached_input_tokens": 0,
+    "output_tokens": 1513
+  },
+  "response": {
+    "decision": {
+      "hechos": [
+        "SQLite será la única fuente durable.",
+        "Cada issue contiene tenant_id.",
+        "El checkout actual separa SELECT y UPDATE, permitiendo que dos workers ganen la misma issue.",
+        "La migración debe preservar las runs activas.",
+        "Existe un flag para volver al camino anterior."
+      ],
+      "supuestos": [
+        "La versión desplegada de SQLite admite transacciones que serializan la adjudicación.",
+        "Las runs activas conservan un identificador estable y estado durable."
+      ],
+      "arquitectura": "Introducir un camino de checkout tenant-aware que adjudique exactamente una issue mediante una única transacción SQLite. La selección elegible y el cambio de estado deben compartir el mismo límite transaccional; el ganador queda identificado por un lease_owner y lease_epoch persistidos. Las runs ya iniciadas mantienen su camino y contrato actuales hasta finalizar; solo los nuevos checkouts usan el camino nuevo cuando el flag está activo.",
+      "limites": [
+        "SQLite delimita toda autoridad sobre elegibilidad, propiedad y estado de una issue.",
+        "El scheduler puede despertar workers, pero no concede propiedad.",
+        "tenant_id delimita selección y aislamiento lógico; ninguna consulta de checkout puede omitirlo.",
+        "La compatibilidad con runs activas termina cuando desaparece la última run iniciada por el camino anterior."
+      ]
+    },
+    "constraints": {
+      "hechos": [
+        "No se permite otra fuente durable.",
+        "No se pueden detener runs activas.",
+        "El gate exige 100 reinicios y cero wakeups perdidos durante 24 horas."
+      ],
+      "invariantes": [
+        "Una issue no puede tener dos propietarios vigentes para el mismo lease_epoch.",
+        "Un checkout exitoso debe devolver únicamente estado confirmado en SQLite.",
+        "Un fallo o reinicio antes del commit no adjudica la issue.",
+        "Un fallo después del commit conserva una adjudicación recuperable.",
+        "La activación del camino nuevo no modifica la propiedad de runs activas.",
+        "Toda adjudicación queda asociada al tenant_id de la issue."
+      ]
+    },
+    "interfaces": {
+      "checkout": {
+        "entrada": {
+          "tenant_id": "identificador obligatorio del tenant",
+          "worker_id": "identificador estable del worker",
+          "lease_until": "instante de expiración solicitado"
+        },
+        "salida": {
+          "resultado": "acquired|empty|retry",
+          "issue_id": "presente solo en acquired",
+          "lease_epoch": "presente solo en acquired",
+          "lease_until": "presente solo en acquired"
+        },
+        "contrato": "Dentro de una única transacción SQLite, selecciona una issue elegible del tenant y actualiza condicionalmente su propiedad. acquired solo se emite tras commit; una actualización de cero filas produce retry, no acquired."
+      },
+      "renew": {
+        "entrada": {
+          "tenant_id": "obligatorio",
+          "issue_id": "obligatorio",
+          "worker_id": "propietario esperado",
+          "lease_epoch": "época esperada",
+          "lease_until": "nueva expiración"
+        },
+        "salida": {
+          "resultado": "renewed|stale"
+        },
+        "contrato": "Solo renueva si tenant_id, issue_id, worker_id y lease_epoch coinciden con el estado durable."
+      },
+      "complete": {
+        "entrada": {
+          "tenant_id": "obligatorio",
+          "issue_id": "obligatorio",
+          "worker_id": "propietario esperado",
+          "lease_epoch": "época esperada",
+          "outcome": "resultado terminal"
+        },
+        "salida": {
+          "resultado": "completed|stale"
+        },
+        "contrato": "La transición terminal es condicional a la propiedad durable vigente y es idempotente para el mismo outcome."
+      },
+      "wake": {
+        "entrada": {
+          "tenant_id": "obligatorio",
+          "reason": "causa observable",
+          "cursor": "posición durable asociada"
+        },
+        "salida": {
+          "resultado": "observed|already_observed"
+        },
+        "contrato": "El wakeup es una optimización; tras despertar o reiniciar, el worker consulta SQLite usando el cursor durable. La corrección no depende de memoria ni de entrega única."
+      },
+      "feature_flag": {
+        "estados": [
+          "legacy",
+          "new_checkout"
+        ],
+        "alcance": "Configura nuevos checkouts; no cambia el contrato ni la propiedad de runs ya activas."
+      }
+    },
+    "risks": [
+      {
+        "riesgo": "Contención o SQLITE_BUSY bajo concurrencia.",
+        "mitigacion_arquitectonica": "Resultado retry explícito, transacciones acotadas y ninguna propiedad asumida fuera del commit."
+      },
+      {
+        "riesgo": "Wakeup perdido entre persistencia y notificación.",
+        "mitigacion_arquitectonica": "El cursor y el estado elegible son durables en SQLite; cada arranque reconcilia desde SQLite."
+      },
+      {
+        "riesgo": "Cruce accidental entre tenants.",
+        "mitigacion_arquitectonica": "tenant_id es obligatorio en selección, actualización, renovación y finalización, y forma parte de todas las precondiciones."
+      },
+      {
+        "riesgo": "Rollback con leases creados por el camino nuevo.",
+        "mitigacion_arquitectonica": "El camino anterior debe reconocer y respetar leases durables vigentes; el flag no revoca propietarios."
+      },
+      {
+        "riesgo": "Doble ejecución por expiración de lease.",
+        "mitigacion_arquitectonica": "lease_epoch actúa como fencing token; renew y complete rechazan épocas obsoletas."
+      }
+    ],
+    "verification": {
+      "evidencia_verificable": [
+        "Registro durable por intento con tenant_id, issue_id, worker_id, lease_epoch, resultado y frontera de commit.",
+        "Consulta que demuestre ausencia de más de un propietario vigente por issue y lease_epoch.",
+        "Trazas de reinicio que relacionen cursor previo, cursor recuperado, wakeups observados y issues finalmente reclamadas.",
+        "Inventario de runs activas clasificadas por camino de origen antes y después de activar el flag."
+      ],
+      "pruebas": [
+        "Carrera controlada de dos workers sobre una issue: exactamente un acquired y el otro retry o empty.",
+        "Fallo antes del commit: ninguna adjudicación durable.",
+        "Fallo inmediatamente después del commit y antes de responder: la recuperación observa un único lease durable.",
+        "Activación del flag con runs activas: estas continúan sin cambio de propietario ni contrato.",
+        "Aislamiento: un worker de un tenant nunca obtiene, renueva ni completa issues de otro tenant."
+      ],
+      "gate": {
+        "reinicios": 100,
+        "ventana_horas": 24,
+        "wakeups_perdidos_maximos": 0,
+        "criterio": "Promover el camino nuevo únicamente si los 100 reinicios completan la ventana de 24 horas sin wakeups perdidos, sin doble adjudicación y con evidencia durable correlacionable."
+      }
+    },
+    "rollback": {
+      "disparadores": [
+        "Wakeup perdido.",
+        "Doble adjudicación confirmada.",
+        "Violación de aislamiento entre tenants.",
+        "Incapacidad de recuperar una adjudicación tras reinicio.",
+        "Contención sostenida que impida cumplir el gate."
+      ],
+      "procedimiento": [
+        "Cambiar el flag a legacy para impedir nuevos checkouts por el camino nuevo.",
+        "Mantener runs activas y leases ya concedidos hasta finalización o expiración; no revocarlos.",
+        "Conservar esquema, lease_epoch, cursores y registros durables para que ambos caminos respeten propiedad y permitan análisis.",
+        "Verificar que no se crean nuevos lease_epoch por el camino nuevo después del cambio del flag.",
+        "Reanudar la migración solo tras corregir la causa y repetir íntegramente el gate de 100 reinicios durante 24 horas."
+      ],
+      "evidencia_de_rollback": [
+        "Marca temporal y valor efectivo del flag.",
+        "Conteo de runs activas por camino antes y después del rollback.",
+        "Ausencia de nuevas adjudicaciones del camino nuevo tras la marca temporal.",
+        "Continuidad y resultado terminal de las runs que estaban activas."
+      ]
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:39:48.796328Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:48.796402Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:48.797374Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:48.800092Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:48.805903Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:39:49.986094Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:49.986147Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:49.986802Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:49.989243Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

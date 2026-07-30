@@ -12,7 +12,10 @@ from aiteam.compatibility_service import (
     issue_compatibility_context,
     require_compatible_assignment,
 )
-from aiteam.db.dependencies import add_dependency_if_missing, sync_default_child_dependencies
+from aiteam.db.dependencies import (
+    add_dependency_if_missing,
+    sync_default_child_dependencies,
+)
 from aiteam.db.issues import get_issue
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.hiring_economics import log_hiring_decision
@@ -29,18 +32,18 @@ from aiteam.objective_classification import (
     inherited_classification,
     objective_kind_from_issue,
 )
-from aiteam.project_adapters import apply_adapter_policy_to_member, project_profiles
-from aiteam.user_config import ROLE_CAPABILITY_PROFILES
-from aiteam.provider_identity import profile_perspective_key
 from aiteam.policies import canonical_role
+from aiteam.project_adapters import apply_adapter_policy_to_member, project_profiles
+from aiteam.provider_identity import profile_perspective_key
 from aiteam.run_profiles import (
     LEAD_QUORUM,
     SOLO_LEAD,
     AgentBlueprint,
+    build_default_team_blueprint,
     normalize_run_profile,
     profile_config,
-    build_default_team_blueprint,
 )
+from aiteam.user_config import ROLE_CAPABILITY_PROFILES
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,7 @@ def build_team_proposal(
     *,
     profile: str | None = None,
     adapter_profiles: list[dict[str, Any]] | None = None,
+    db_path: Path | None = None,
 ) -> dict[str, Any]:
     """Build the first structured Lead proposal for a fresh project.
 
@@ -126,6 +130,8 @@ def build_team_proposal(
             candidates = diverse or candidates
         member = _blueprint_to_member(
             agent,
+            db_path=db_path,
+            issue_id=parent_issue_id,
             adapter_profiles=candidates,
             run_profile=effective_profile,
             criticality=str(issue.get("criticality") or "medium"),
@@ -205,6 +211,8 @@ def _normalize_lead_id(agent_id: str | None) -> str | None:
 def _blueprint_to_member(
     agent: AgentBlueprint,
     *,
+    db_path: Path | None,
+    issue_id: str,
     adapter_profiles: list[dict[str, Any]],
     run_profile: str = "",
     criticality: str = "medium",
@@ -230,6 +238,8 @@ def _blueprint_to_member(
         criticality=criticality,
         data_class=data_class,
         required_capabilities=required_capabilities or [],
+        db_path=db_path,
+        issue_id=issue_id,
     )
 
 

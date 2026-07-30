@@ -9,11 +9,16 @@ from aiteam.db.model_score_snapshots import (
 )
 
 
-def _candidate(candidate_id: str = "candidate:a", *, eligible: bool = True) -> dict:
+def _candidate(
+    candidate_id: str = "candidate:a",
+    *,
+    eligible: bool = True,
+    role: str = "engineer",
+) -> dict:
     return {
         "candidate_id": candidate_id,
         "score_version": "model_role_score_v1",
-        "canonical_role": "engineer",
+        "canonical_role": role,
         "score": 88,
         "auto_eligible": eligible,
         "breakdown": {"quality": {"value": 90}},
@@ -123,3 +128,36 @@ def test_snapshot_rejects_candidate_version_or_role_mismatch(tmp_path: Path) -> 
             **kwargs,
             candidates=[{**_candidate(), "canonical_role": "reviewer"}],
         )
+
+
+def test_tier1_auto_snapshot_requires_exact_authority_and_legacy_fails_closed(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "scores.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(Path("aiteam/db/schema.sql").read_text(encoding="utf-8"))
+    kwargs = {
+        "db_path": db_path,
+        "selection_scope": "lead-default",
+        "canonical_role": "lead",
+        "score_version": "model_role_score_v1",
+        "read_model_version": "model_catalog_read_model_v2",
+        "winner_candidate_id": "candidate:a",
+        "auto_applied": True,
+    }
+    legacy = _candidate(role="lead")
+    with pytest.raises(ValueError, match="exact enabled authority"):
+        persist_model_role_score_snapshot(**kwargs, candidates=[legacy])
+
+    enabled = {
+        **legacy,
+        "tier1_authority": {
+            "policy_version": "tier_role_coverage_v1",
+            "lane": "lead_ready",
+            "enabled": True,
+        },
+    }
+    snapshot = persist_model_role_score_snapshot(**kwargs, candidates=[enabled])
+
+    assert snapshot["auto_applied"] is True
+    assert snapshot["candidates"][0]["tier1_authority"]["lane"] == "lead_ready"

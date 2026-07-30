@@ -76,6 +76,38 @@ function roleEvaluation(
   const blocked = Boolean(options.blocked);
   const score = options.score ?? null;
   const confidence = options.confidence;
+  const calibrationGate = options.eligible
+    ? {
+      gates: [
+        'configuration_auth', 'catalog_version', 'adapter_health', 'contract_probe',
+        'role_canary', 'multi_family_calibration', 'promotion',
+      ].map((stage) => ({ stage, status: 'passed', reason_code: `${stage}_verified`, owner: 'AI Teams maintainer' })),
+      blocker: null,
+      owner: 'AI Teams maintainer',
+      next_action: 'none',
+      actionable: false,
+      promotion_ready: true,
+    }
+    : {
+      gates: [
+        { stage: 'configuration_auth', status: 'passed', reason_code: 'configured_reference_present', owner: 'machine_owner' },
+        { stage: 'catalog_version', status: blocked ? 'blocked' : 'passed', reason_code: blocked ? 'catalog_or_exact_version_not_verified' : 'exact_catalog_and_version_verified', owner: 'AI Teams maintainer' },
+        { stage: 'adapter_health', status: blocked ? 'waiting' : 'passed', reason_code: blocked ? 'waiting_for_prior_gate' : 'adapter_health_green', owner: 'machine_owner' },
+        { stage: 'contract_probe', status: blocked ? 'waiting' : 'pending', reason_code: blocked ? 'waiting_for_prior_gate' : 'exact_structured_output_or_tool_probe_required', owner: 'AI Teams maintainer' },
+        { stage: 'role_canary', status: 'waiting', reason_code: 'waiting_for_prior_gate', owner: 'AI Teams maintainer' },
+        { stage: 'multi_family_calibration', status: 'waiting', reason_code: 'waiting_for_prior_gate', owner: 'AI Teams maintainer' },
+        { stage: 'promotion', status: 'waiting', reason_code: 'waiting_for_prior_gate', owner: 'AI Teams maintainer' },
+      ],
+      blocker: {
+        stage: blocked ? 'catalog_version' : 'contract_probe',
+        code: blocked ? 'catalog_or_exact_version_not_verified' : 'exact_structured_output_or_tool_probe_required',
+        owner: 'AI Teams maintainer',
+      },
+      owner: 'AI Teams maintainer',
+      next_action: blocked ? 'refresh_exact_catalog_and_version' : 'run_exact_contract_probe',
+      actionable: true,
+      promotion_ready: false,
+    };
   return {
     canonical_role: role,
     compatibility: {
@@ -91,6 +123,7 @@ function roleEvaluation(
       diagnostic_receipts: blocked ? ['benchmarks/probe-failed.json'] : [],
       stale_reasons: [],
     },
+    tier1_authority: null,
     runtime_metrics: { run_count: 3, completed_count: blocked ? 0 : 3, median_duration_ms: blocked ? null : 42000 },
     provenance: {
       evaluation_receipts: options.eligible ? ['benchmarks/reviewer-aggregate.json'] : [],
@@ -131,6 +164,7 @@ function roleEvaluation(
       rollout: 'shadow_only',
       candidate_id: id,
     },
+    calibration_gate: calibrationGate,
     input_hash: `hash-${id}`,
   };
 }
@@ -152,9 +186,36 @@ const engineer = candidate('candidate-engineer', 'model-engineer', 'Model Engine
   confidence: 35,
 });
 
+function authorityRole(id: string, role: 'lead' | 'quorum_auditor', lane: 'lead_ready' | 'quorum_ready', enabled: boolean) {
+  const evaluation = roleEvaluation(id, role, { score: 91, confidence: 90, eligible: enabled });
+  evaluation.tier1_authority = {
+    policy_version: 'tier_role_coverage_v1',
+    lane,
+    status: enabled ? 'enabled' : 'blocked',
+    enabled,
+    reason_code: enabled ? 'exact_role_calibration_verified' : 'exact_role_calibration_required',
+    provider_version: 'fixture-2.0',
+    evidence_receipts: enabled ? [`benchmarks/${role}-aggregate.json`] : [],
+    calibration_contract: {
+      version: lane === 'lead_ready' ? 'tier1_lead_authority_v1' : 'tier1_quorum_authority_v1',
+      required_constructs: lane === 'lead_ready'
+        ? ['durable_planning', 'hiring', 'delegation']
+        : ['independent_critique', 'go_no_go_judgment'],
+    },
+  };
+  return evaluation;
+}
+
+good.model_metadata.tier = 'premium';
+good.roles.push(authorityRole('candidate-good', 'lead', 'lead_ready', true));
+good.roles.push(authorityRole('candidate-good', 'quorum_auditor', 'quorum_ready', true));
+engineer.model_metadata.tier = 'premium';
+engineer.roles.push(authorityRole('candidate-engineer', 'quorum_auditor', 'quorum_ready', true));
+blocked.roles.push(authorityRole('candidate-blocked', 'lead', 'lead_ready', false));
+
 const catalog = {
   success: true,
-  schema_version: 'model_catalog_read_model_v1',
+  schema_version: 'model_catalog_read_model_v2',
   score_version: 'model_role_score_v1',
   content_hash: '0123456789abcdef',
   observed_at: observedAt,
@@ -173,6 +234,20 @@ const catalog = {
     },
   ],
   runtime: { database_sources: [], diagnostics: [] },
+  tier1_coverage: {
+    policy_version: 'tier_role_coverage_v1',
+    target_per_role: 2,
+    roles: [
+      {
+        canonical_role: 'lead', lane: 'lead_ready', target: 2, enabled_count: 1,
+        perspective_count: 1, capacity_pool_count: 1, status: 'single_point',
+      },
+      {
+        canonical_role: 'quorum_auditor', lane: 'quorum_ready', target: 2, enabled_count: 2,
+        perspective_count: 2, capacity_pool_count: 2, status: 'covered',
+      },
+    ],
+  },
   candidates: [blocked, engineer, good],
 };
 
@@ -271,6 +346,20 @@ test('Modelos: filtros, orden backend, adapter verde y detalle bloqueado son vis
   await expect(page.getByTestId('provider-profile-blocked')).toContainText('1 bloqueados');
   await expect(page.getByText('elige un rol')).toBeVisible();
   await expect(page.getByTestId('model-matrix')).toContainText('Model Blocked');
+  const authorityBoard = page.getByTestId('tier1-coverage');
+  await expect(authorityBoard).toContainText('Lead-ready');
+  await expect(authorityBoard).toContainText('Quorum-ready');
+  await expect(authorityBoard).toContainText('1/2');
+  await expect(authorityBoard).toContainText('2/2');
+  await page.getByTestId('model-authority-filter').selectOption('lead_ready');
+  await expect(page.getByTestId('model-row-model-good')).toBeVisible();
+  await expect(page.getByTestId('model-row-model-engineer')).toHaveCount(0);
+  await page.getByTestId('model-cell-model-good-lead').click();
+  await expect(page.getByTestId('tier1-authority-detail')).toContainText('Lead-ready');
+  await expect(page.getByTestId('tier1-authority-detail')).toContainText('tier1_lead_authority_v1');
+  await page.screenshot({ path: testInfo.outputPath('model-catalog-authority.png'), fullPage: true });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: /Limpiar/ }).click();
 
   await expect(page.getByTestId('model-state-filter').locator('option')).toHaveCount(12);
 
@@ -296,6 +385,9 @@ test('Modelos: filtros, orden backend, adapter verde y detalle bloqueado son vis
   await expect(detail).toContainText('Calidad');
   await expect(detail).toContainText('model_health');
   await expect(detail).toContainText('Gate · Model verified');
+  await expect(page.getByTestId('calibration-gate-board')).toContainText('Ruta adapter → calibración');
+  await expect(page.getByTestId('calibration-gate-board')).toContainText('Catálogo y versión');
+  await expect(page.getByTestId('calibration-gate-board')).toContainText('Refresh exact catalog and version');
   await expect(detail).toContainText('benchmarks/probe-failed.json');
   await page.screenshot({ path: testInfo.outputPath('model-catalog-detail.png'), fullPage: true });
 

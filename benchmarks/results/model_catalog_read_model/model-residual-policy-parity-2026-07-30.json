@@ -1,0 +1,41 @@
+{
+  "automation": {
+    "candidate_checks": 1568,
+    "default_checks": 0,
+    "failure_count": 0,
+    "fallback_checks": 0
+  },
+  "checks": {
+    "api_exposes_preference_and_gate_contracts": true,
+    "audit_is_read_only": true,
+    "backlog_requires_explicit_owner_source": true,
+    "existing_assignments_pause_without_silent_replacement": true,
+    "explicit_reactivation_is_normal_and_local": true,
+    "hiring_defaults_fallback_enforcement": true,
+    "inventory_policy_complete": true,
+    "low_archived_absent_from_backlog": true,
+    "read_model_board_api_parity": true,
+    "ui_exposes_preference_and_gate_contracts": true
+  },
+  "inventory": {
+    "backlog_count": 0,
+    "candidate_count": 98,
+    "explicit_candidate_count": 98,
+    "pending_candidate_count": 0,
+    "role_row_count": 1666
+  },
+  "schema_version": "model_residual_policy_parity_audit_v1",
+  "scope": {
+    "assignments_mutated": false,
+    "inference_attempted": false,
+    "model_ids_emitted": false,
+    "paths_emitted": false,
+    "preferences_mutated": false,
+    "secrets_read": false
+  },
+  "summary": {
+    "check_count": 10,
+    "parity_ready": true,
+    "passed_count": 10
+  }
+}

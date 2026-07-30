@@ -422,6 +422,102 @@ CREATE TABLE IF NOT EXISTS orientation_events (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Estado durable del asistente de primer uso, proyecto y reparación.
+CREATE TABLE IF NOT EXISTS guided_setup_sessions (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    scope TEXT NOT NULL
+        CHECK (scope IN ('machine_onboarding', 'project_setup', 'installation_repair')),
+    subject_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'in_progress'
+        CHECK (status IN ('in_progress', 'blocked', 'passed')),
+    current_step TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT,
+    UNIQUE(schema_version, scope, subject_key)
+);
+
+CREATE TABLE IF NOT EXISTS guided_setup_steps (
+    session_id TEXT NOT NULL REFERENCES guided_setup_sessions(id) ON DELETE CASCADE,
+    step_key TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+    required INTEGER NOT NULL CHECK (required IN (0, 1)),
+    status TEXT NOT NULL DEFAULT 'not_started'
+        CHECK (status IN ('not_started', 'in_progress', 'blocked', 'skipped', 'passed')),
+    response_json TEXT NOT NULL DEFAULT '{}',
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    blocker_code TEXT,
+    skip_reason TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id, step_key),
+    UNIQUE(session_id, ordinal)
+);
+
+CREATE TABLE IF NOT EXISTS guided_setup_preparation_receipts (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    step_key TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    needs_hash TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    doctor_hash TEXT NOT NULL,
+    ready INTEGER NOT NULL CHECK (ready IN (0, 1)),
+    blockers_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id, step_key)
+        REFERENCES guided_setup_steps(session_id, step_key) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS guided_setup_project_commit_receipts (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL UNIQUE
+        REFERENCES guided_setup_sessions(id) ON DELETE CASCADE,
+    schema_version TEXT NOT NULL,
+    proposal_hash TEXT NOT NULL,
+    project_target TEXT NOT NULL,
+    result_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Evidencia content-addressed y autorización durable del preflight de proyecto.
+-- Las referencias se confinan a la sesión: el navegador nunca aporta contenido
+-- ni puede reutilizar evidencia obtenida por otra sesión.
+CREATE TABLE IF NOT EXISTS guided_setup_project_preflight_artifacts (
+    session_id TEXT NOT NULL
+        REFERENCES guided_setup_sessions(id) ON DELETE CASCADE,
+    reference TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    content_json TEXT NOT NULL,
+    fixture_evidence_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id, reference)
+);
+
+CREATE TABLE IF NOT EXISTS guided_setup_project_preflight_receipts (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL
+        REFERENCES guided_setup_sessions(id) ON DELETE CASCADE,
+    schema_version TEXT NOT NULL,
+    proposal_hash TEXT NOT NULL,
+    preflight_hash TEXT NOT NULL,
+    execution_plan_hash TEXT NOT NULL,
+    execution_receipt_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('go', 'no_go')),
+    fixture_evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    preflight_json TEXT NOT NULL,
+    execution_receipt_json TEXT NOT NULL,
+    receipt_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(session_id, receipt_hash)
+);
+
 -- Snapshot inmutable de una decisión shadow/automática de modelo por rol.
 -- Conserva el conjunto completo; no hace de la tabla una segunda fuente de
 -- métricas. El hash permite reproducir exactamente la entrada al selector.
@@ -440,6 +536,22 @@ CREATE TABLE IF NOT EXISTS model_role_score_snapshots (
     auto_applied INTEGER NOT NULL DEFAULT 0 CHECK (auto_applied IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(selection_scope, input_hash)
+);
+
+-- Histórico de recálculo del catálogo. Solo añade una fila ante cambios
+-- materiales o al comenzar un mes; nunca elimina evidencia por antigüedad.
+CREATE TABLE IF NOT EXISTS model_catalog_maintenance_snapshots (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    period TEXT NOT NULL,
+    source_observed_at TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    dimension_hashes_json TEXT NOT NULL,
+    trigger_reasons_json TEXT NOT NULL,
+    metrics_json TEXT NOT NULL,
+    trend_json TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency
@@ -464,6 +576,10 @@ CREATE INDEX IF NOT EXISTS idx_cost_events_run ON cost_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_cost_events_agent_period ON cost_events(agent_id, period);
 CREATE INDEX IF NOT EXISTS idx_model_score_snapshots_role
     ON model_role_score_snapshots(canonical_role, created_at);
+CREATE INDEX IF NOT EXISTS idx_model_catalog_maintenance_created
+    ON model_catalog_maintenance_snapshots(created_at, id);
+CREATE INDEX IF NOT EXISTS idx_model_catalog_maintenance_period
+    ON model_catalog_maintenance_snapshots(period, created_at);
 CREATE INDEX IF NOT EXISTS idx_quorum_sessions_issue ON quorum_sessions(issue_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_quorum_contributions_session ON quorum_contributions(session_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_orientation_events_session ON orientation_events(session_id, created_at);

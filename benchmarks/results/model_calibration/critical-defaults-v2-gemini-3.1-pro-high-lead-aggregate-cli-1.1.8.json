@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary_aggregate",
+  "contract_version": "critical_role_aggregate_v2",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "prompt_version": "v2",
+  "cli_version": "1.1.8",
+  "required_cases": [
+    "tenant_queue_migration",
+    "auth_rollout_incident"
+  ],
+  "required_seeds": [
+    1,
+    2,
+    3
+  ],
+  "samples_observed": 6,
+  "samples_passed": 6,
+  "matrix_complete": true,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-auth-rollout-cli-1.1.8-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-auth-rollout-cli-1.1.8-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-auth-rollout-cli-1.1.8-seed-3.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-tenant-queue-cli-1.1.8-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-tenant-queue-cli-1.1.8-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-tenant-queue-cli-1.1.8-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-auth-rollout-cli-1.1.8-seed-1.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "99a9069d63922e6e748ddadb4e3d0ce7b62313b1a99af5b0db307ed0975a4f91"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-auth-rollout-cli-1.1.8-seed-2.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "ca03fb16ba05e473a995da48330081745339e719c27a309b5f3178b7f5c280e9"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-auth-rollout-cli-1.1.8-seed-3.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "492f3cb96ef559133e6a911cb51fc029516bbe99dbe77e8dd25aee6d2596191d"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-tenant-queue-cli-1.1.8-seed-1.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "c62c95d05e862cfef6bef42920d18f1bbea8f4241368aa7061f7f0a61c12526b"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-tenant-queue-cli-1.1.8-seed-2.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "e4b55cd828fccc0372edfb99f1c324e55a978124d29462296713813f0c368b0e"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-v2-gemini-3.1-pro-high-lead-tenant-queue-cli-1.1.8-seed-3.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "775a891a5c0d645374f143bbb82fafaa8bc72222e561e1e96fe58a412f8885f0"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "responses_hashed": true,
+    "single_prompt_version": true,
+    "single_cli_version": true
+  },
+  "wall_seconds_median": 8.5,
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "reason": "eligible_for_registry_review",
+    "next_gate": "M.7.4 snapshot vivo y promoción gobernada"
+  }
+}

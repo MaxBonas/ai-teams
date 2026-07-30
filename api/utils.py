@@ -237,14 +237,3 @@ def _sanitize_project_name(name: str) -> str:
     if not cleaned:
         raise HTTPException(status_code=400, detail="Project name is required")
     return cleaned
-
-
-def _allocate_project_path(projects_root: Path, name: str) -> Path:
-    base = projects_root / name
-    if not base.exists():
-        return base
-    for index in range(2, 1000):
-        candidate = projects_root / f"{name} {index}"
-        if not candidate.exists():
-            return candidate
-    raise HTTPException(status_code=409, detail="Could not allocate a unique project path")

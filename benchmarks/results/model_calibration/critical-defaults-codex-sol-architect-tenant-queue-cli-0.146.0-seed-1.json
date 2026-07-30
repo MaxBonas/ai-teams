@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v1",
+  "status": "completed",
+  "wall_seconds": 40.031,
+  "usage": {
+    "input_tokens": 16599,
+    "cached_input_tokens": 0,
+    "output_tokens": 2123
+  },
+  "response": {
+    "decision": {
+      "hechos": [
+        "SQLite será la única fuente durable.",
+        "Cada issue tiene tenant_id.",
+        "El checkout actual separa SELECT y UPDATE, permitiendo que dos workers obtengan la misma issue.",
+        "La migración no puede detener runs activas.",
+        "Existe un flag para volver al camino anterior.",
+        "El gate exige 100 reinicios y cero wakeups perdidos durante 24 horas."
+      ],
+      "supuestos": [
+        "SQLite admite una transacción que serialice la selección y reclamación de una issue; la sintaxis exacta dependerá de la versión disponible.",
+        "Los workers pueden conservar compatibilidad temporal con registros creados antes del cambio."
+      ],
+      "arquitectura": [
+        "Reemplazar el checkout separado por una única operación transaccional en SQLite: seleccionar una issue elegible del tenant y cambiarla de disponible a reclamada mediante una escritura condicional.",
+        "La reclamación queda identificada por issue_id, tenant_id, worker_id y un claim_token único; solo el poseedor del token puede iniciar, renovar o finalizar el trabajo.",
+        "Persistir en la misma transacción el estado que obliga a emitir el wakeup. El wakeup no se considera completado hasta registrar durablemente su confirmación en SQLite.",
+        "Mantener esquema e interfaces compatibles con runs activas; los campos nuevos serán inicialmente opcionales y se poblarán al tocar cada issue, sin detener ni invalidar ejecuciones existentes.",
+        "El flag seleccionará exclusivamente el algoritmo de checkout. El formato durable permanecerá legible por ambos caminos para permitir reversión inmediata."
+      ],
+      "limites": [
+        "SQLite contiene todo estado necesario para recuperar claims y wakeups tras un reinicio.",
+        "Los mecanismos en memoria solo pueden acelerar procesamiento; nunca determinar propiedad, entrega o recuperación.",
+        "La atomicidad termina en la transacción SQLite. Cualquier efecto posterior debe poder repetirse usando claim_token sin duplicar propiedad.",
+        "El checkout queda aislado por tenant_id: una solicitud de un tenant no puede reclamar issues de otro."
+      ]
+    },
+    "constraints": {
+      "invariantes": [
+        "Como máximo existe un claim vigente por issue.",
+        "Una issue solo puede pasar a reclamada si continúa elegible dentro de la misma transacción.",
+        "Todo wakeup requerido tiene un registro durable antes de intentar emitirlo.",
+        "Tras reinicio, todo wakeup no confirmado vuelve a ser elegible para emisión.",
+        "Las runs ya activas continúan con su identidad y estado durable actuales.",
+        "Ningún componente distinto de SQLite se trata como fuente de verdad."
+      ],
+      "compatibilidad": [
+        "Lectura compatible con filas anteriores sin claim_token ni estado de wakeup nuevo.",
+        "Escrituras nuevas no deben impedir que el camino anterior procese filas durante rollback.",
+        "El cambio de flag no requiere migración inversa ni pausa global."
+      ],
+      "fuera_de_alcance": [
+        "Cambiar SQLite por otro almacén durable.",
+        "Rediseñar la lógica interna de las runs.",
+        "Garantizar orden global entre tenants salvo que se añada como requisito independiente."
+      ]
+    },
+    "interfaces": {
+      "checkout": {
+        "entrada": {
+          "tenant_id": "Identificador obligatorio del tenant.",
+          "worker_id": "Identificador del worker.",
+          "now": "Instante usado para evaluar elegibilidad y expiración."
+        },
+        "salida": {
+          "resultado": "claimed o empty.",
+          "issue_id": "Presente cuando resultado sea claimed.",
+          "claim_token": "Token de propiedad presente cuando resultado sea claimed.",
+          "payload_ref": "Referencia durable necesaria para continuar la run."
+        },
+        "contrato": [
+          "La selección y la escritura condicional del claim ocurren en una sola transacción.",
+          "Nunca devuelve una issue cuyo tenant_id difiera del solicitado.",
+          "Un conflicto de reclamación se resuelve dentro de checkout y no produce dos respuestas claimed para la misma issue."
+        ]
+      },
+      "claim_lifecycle": {
+        "operaciones": [
+          "renew(issue_id, tenant_id, claim_token, now)",
+          "complete(issue_id, tenant_id, claim_token, outcome)",
+          "release(issue_id, tenant_id, claim_token, reason)"
+        ],
+        "contrato": [
+          "Cada operación valida tenant_id y claim_token.",
+          "Un token inválido o antiguo no modifica la issue.",
+          "Las operaciones repetidas deben devolver el estado durable actual sin transferir propiedad."
+        ]
+      },
+      "wakeup": {
+        "registro": {
+          "issue_id": "Issue asociada.",
+          "tenant_id": "Tenant propietario.",
+          "wakeup_id": "Identificador estable.",
+          "claim_token": "Claim que originó el wakeup.",
+          "status": "pending o confirmed."
+        },
+        "operaciones": [
+          "next_pending_wakeup(tenant_id)",
+          "confirm_wakeup(wakeup_id, claim_token)"
+        ],
+        "contrato": [
+          "La creación del wakeup y el cambio de estado que lo requiere son atómicos.",
+          "Un reinicio conserva pending.",
+          "La confirmación solo afecta al wakeup y token indicados."
+        ]
+      },
+      "feature_flag": {
+        "valores": [
+          "legacy",
+          "atomic"
+        ],
+        "contrato": [
+          "Controla nuevas llamadas a checkout.",
+          "No altera runs activas ni elimina estado.",
+          "Su lectura debe quedar registrada junto con cada intento de checkout para producir evidencia verificable."
+        ]
+      }
+    },
+    "risks": [
+      {
+        "riesgo": "Contención de escritura en SQLite durante checkout.",
+        "mitigacion": "Mantener la transacción limitada a selección, claim y registro durable del wakeup; medir latencia y conflictos durante el gate.",
+        "evidencia": "Tiempos de transacción, número de reintentos y resultados claimed/empty por reinicio."
+      },
+      {
+        "riesgo": "Compatibilidad incompleta con filas o runs anteriores.",
+        "mitigacion": "Tratar campos nuevos ausentes como estado legado válido y probar reinicios con runs creadas antes y después de activar el flag.",
+        "evidencia": "Inventario de runs activas antes del cambio y comparación de sus estados finales."
+      },
+      {
+        "riesgo": "Wakeup emitido pero no confirmado antes de un reinicio, causando repetición.",
+        "mitigacion": "Usar wakeup_id estable y confirmación durable; aceptar reemisión sin pérdida y exigir consumidores idempotentes respecto a wakeup_id.",
+        "evidencia": "Historial por wakeup_id que muestre uno o más intentos y una confirmación final."
+      },
+      {
+        "riesgo": "Rollback mientras existen claims creados por el camino atómico.",
+        "mitigacion": "Mantenerlos interpretables por el camino legado y no borrar claim_token ni wakeups pendientes al cambiar el flag.",
+        "evidencia": "Prueba de cambio atomic a legacy con claims y wakeups pendientes recuperados."
+      },
+      {
+        "riesgo": "Reclamación cruzada entre tenants.",
+        "mitigacion": "Incluir tenant_id en selección, condición de escritura y validación de todas las operaciones del ciclo de claim.",
+        "evidencia": "Consultas de auditoría sin discrepancias entre tenant solicitado, issue y claim."
+      }
+    ],
+    "verification": {
+      "criterios": [
+        "100 reinicios completados.",
+        "Cero wakeups perdidos durante una ventana continua de 24 horas.",
+        "Cero issues reclamadas simultáneamente por más de un claim_token vigente.",
+        "Cero operaciones que crucen tenant_id.",
+        "Las runs activas al iniciar la migración terminan o permanecen recuperables.",
+        "Rollback probado sin pérdida de claims ni wakeups pendientes."
+      ],
+      "definicion_de_wakeup_perdido": "Existe una transición durable que exige wakeup, pero no existe un registro pending o confirmed recuperable para ella, o el registro pending deja de ser elegible después de reiniciar sin haber sido confirmado.",
+      "pruebas": [
+        "Ejecutar dos o más workers intentando reclamar la misma issue y verificar un único claim_token ganador.",
+        "Reiniciar después de crear el wakeup y antes de emitirlo; verificar recuperación como pending.",
+        "Reiniciar después de emitirlo y antes de confirmarlo; verificar reemisión con el mismo wakeup_id.",
+        "Mantener runs activas mientras se alterna el flag y verificar continuidad.",
+        "Intentar operaciones con tenant_id o claim_token incorrectos y verificar que no cambian estado.",
+        "Durante la ventana de 24 horas, realizar 100 reinicios y reconciliar todas las transiciones que requieren wakeup contra registros pending o confirmed."
+      ],
+      "evidencia_verificable": [
+        "Snapshot inicial y final de issues, claims, runs y wakeups en SQLite.",
+        "Registro por reinicio con identificador, hora de inicio, hora de recuperación y flag efectivo.",
+        "Tabla de auditoría con tenant_id, issue_id, worker_id, claim_token, wakeup_id, transición y resultado.",
+        "Consulta de reconciliación cuyo resultado sea cero wakeups perdidos.",
+        "Consulta de unicidad lógica cuyo resultado sea cero issues con múltiples claims vigentes.",
+        "Informe que enumere exactamente 100 reinicios dentro de la ventana continua de 24 horas."
+      ]
+    },
+    "rollback": {
+      "disparadores": [
+        "Se detecta un wakeup perdido.",
+        "Se detecta una doble reclamación.",
+        "Se detecta acceso cruzado entre tenants.",
+        "Una run activa deja de ser recuperable.",
+        "La contención impide operar dentro de los límites aceptados por el sistema."
+      ],
+      "procedimiento": [
+        "Cambiar el flag de atomic a legacy para detener nuevos checkouts atómicos.",
+        "No revertir el esquema ni eliminar claim_token, auditoría o wakeups.",
+        "Permitir que runs activas continúen usando su estado durable.",
+        "Reconciliar claims vigentes y wakeups pending desde SQLite antes de declarar estable el camino legado.",
+        "Conservar la evidencia del fallo y el snapshot durable para diagnóstico."
+      ],
+      "condiciones_de_exito": [
+        "Ninguna run activa fue cancelada por el rollback.",
+        "Todos los wakeups pending siguen recuperables.",
+        "No se crearon nuevas dobles reclamaciones durante la reversión.",
+        "El camino legacy puede leer y procesar el estado durable existente."
+      ],
+      "reentrada": "El flag solo puede volver a atomic después de corregir la causa, repetir las pruebas de conflicto y recuperación, y reiniciar desde cero el gate de 100 reinicios con 24 horas continuas sin wakeups perdidos."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:38:57.216506Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:38:57.216541Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:38:57.217087Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:38:57.219649Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:38:57.224244Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:38:58.199864Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:38:58.199889Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:38:58.200444Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:38:58.203249Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

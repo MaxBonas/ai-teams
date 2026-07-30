@@ -8,22 +8,22 @@ import re
 import shutil
 import stat
 import subprocess
-import tomllib
 from ctypes import wintypes
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import tomllib
+
 from aiteam.configuration_layers import deep_merge, resolve_configuration
+from aiteam.model_compatibility import compatibility_decision
+from aiteam.model_tiers import annotate_model_tier
 from aiteam.platform_runtime import (
     executable_candidates,
     is_usable_executable_path,
 )
 from aiteam.policies import canonical_role
-from aiteam.model_compatibility import compatibility_decision
-from aiteam.model_tiers import annotate_model_tier
-
 
 DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
     {
@@ -107,7 +107,11 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "adapter_type": "gemini_api",
         "channel": "api",
         "provider": "google",
-        "config": {"model": "gemini-3.6-flash", "api_key_ref": "secret:google:default"},
+        "config": {
+            "model": "gemini-3.6-flash",
+            "api_version": "v1beta",
+            "api_key_ref": "secret:google:default",
+        },
     },
     {
         "id": "gemini_api_free",
@@ -123,6 +127,7 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "privacy_note": "El free tier puede usar prompts y respuestas para mejorar productos de Google.",
         "config": {
             "model": "gemini-3.6-flash",
+            "api_version": "v1beta",
             "api_key_ref": "secret:google-free:default",
             "api_key_env": "GEMINI_API_KEY",
             "free_tier": True,
@@ -143,11 +148,12 @@ DEFAULT_ADAPTER_PROFILES: list[dict[str, Any]] = [
         "config": {
             "provider": "groq",
             "base_url": "https://api.groq.com/openai/v1",
-            "model": "openai/gpt-oss-120b",
+            "model": "qwen/qwen3.6-27b",
             "api_key_ref": "secret:groq:default",
             "api_key_env": "GROQ_API_KEY",
             "free_tier": True,
             "strict_models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+            "reasoning_format": "hidden",
             "quota_tracking": True,
             "api_quota_source": "provider_response_headers",
         },
@@ -446,19 +452,43 @@ MODEL_OPTIONS_BY_PROFILE: dict[str, list[dict[str, Any]]] = {
             "value": "gemini-3.6-flash-high", "label": "Gemini 3.6 Flash (High)",
             "tier": "standard", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": [], "automatic": False, "requires_probe": True,
-            "price_note": "Antigravity · catálogo vivo; submit rechazado en 1.1.5",
+            "probe_status": "completed",
+            "probe_reason": "exact_submit_completed_lead_and_coding",
+            "probe_version": "1.1.6",
+            "probe_evaluated_at": "2026-07-24",
+            "probe_receipts": [
+                "benchmarks/results/model_calibration/"
+                "antigravity-1.1.6-gemini-3.6-high-probe-seed-1.json",
+            ],
+            "price_note": "Antigravity · submit 1.1.6 verificado; pendiente calibración por rol",
         },
         {
             "value": "gemini-3.6-flash-medium", "label": "Gemini 3.6 Flash (Medium)",
             "tier": "standard", "caps": ["reasoning", "synthesis", "coding", "long_ctx"],
             "best_for": [], "automatic": False, "requires_probe": True,
-            "price_note": "Antigravity · review durable 3/3; sin señal económica para desplazar baseline",
+            "probe_status": "completed",
+            "probe_reason": "exact_submit_completed_review",
+            "probe_version": "1.1.6",
+            "probe_evaluated_at": "2026-07-24",
+            "probe_receipts": [
+                "benchmarks/results/model_calibration/"
+                "antigravity-1.1.6-gemini-3.6-medium-review-probe-seed-1.json",
+            ],
+            "price_note": "Antigravity · submit 1.1.6 verificado; review histórico no desplaza baseline",
         },
         {
             "value": "gemini-3.6-flash-low", "label": "Gemini 3.6 Flash (Low)",
             "tier": "budget", "caps": ["synthesis", "coding", "long_ctx"],
             "best_for": [], "automatic": False, "requires_probe": True,
-            "price_note": "Antigravity · catálogo vivo; submit rechazado en 1.1.5",
+            "probe_status": "completed",
+            "probe_reason": "exact_submit_completed_scout",
+            "probe_version": "1.1.6",
+            "probe_evaluated_at": "2026-07-24",
+            "probe_receipts": [
+                "benchmarks/results/model_calibration/"
+                "antigravity-1.1.6-gemini-3.6-low-scout-probe-seed-1.json",
+            ],
+            "price_note": "Antigravity · submit 1.1.6 verificado; pendiente calibración por rol",
         },
         {
             "value": "gemini-3.1-pro-high", "label": "Gemini 3.1 Pro (High)",

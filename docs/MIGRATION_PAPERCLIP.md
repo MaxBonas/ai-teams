@@ -95,6 +95,11 @@ El sistema debe medir si delegar ahorra tokens/coste sin degradar calidad. La an
 - El Lead contrata/asigna agentes adecuados al proyecto.
 - Las tareas simples o bien delimitadas se derivan a modelos baratos.
 - Las tareas de alto riesgo vuelven al Lead/quorum/senior.
+- Tier 1 es una sola banda de máxima calidad con gates de rol independientes:
+  `lead_ready` para gobernar el ciclo completo y `quorum_ready` para auditoría
+  crítica estructurada, potencialmente read-only. Aprobar quorum no concede
+  autoridad de Lead. Catálogo, hiring y defaults deben conservar esta
+  separación y mostrar cobertura/diversidad real por perspectiva y pool.
 - Las runs deben registrar coste estimado, coste real, ahorro estimado, motivo de delegacion y resultado.
 
 Esta economia no es un nice-to-have: es parte central del producto.
@@ -254,6 +259,17 @@ restauración SQLite exacta y retirada completa. La run local detecta y corrige
 la ausencia de setuptools en venv Python 3.12 y una cabecera no reproducible de
 `uv export`. `v0.1.0` permanece deshabilitada hasta la aceptación independiente
 y multiplataforma I.8.4.
+I.10.4 amplía ese contrato sin reescribir su evidencia histórica: la aceptación
+actual exige un gate 18 que verifica de forma redacted identidad, versión y
+evidencia de catálogo de los CLIs de proveedor. `machine_doctor_v1` proyecta su
+estado y el SHA-256 del informe, y el modo estricto bloquea promoción con
+`provider_cli_version_gate_failed`. Los harnesses de release lo ejercitan con
+shims efímeros dentro del fixture, sin instalar CLIs globales ni requerir login.
+I.10.5 añade una aceptación de actualización separada: clone limpio y checkout
+tras fast-forward deben converger al mismo hash de matriz. El recibo conserva
+el preflight bloqueado de una versión antigua con binario duplicado y canarios
+fail-closed de prerelease, documentación y catálogo; una ausencia opcional no
+se convierte artificialmente en fallo.
 I.2.1 fija el contrato
 `configuration_layers_v1`, provenance, merge
 conservador de defaults y actualización Windows `pull --ff-only` para
@@ -289,7 +305,9 @@ Objetivo: fijar pronto el contrato funcional diferencial de AI Teams antes de im
 - Mantener compatibilidad con los 6 roles actuales, pero permitir equipos dinamicos por proyecto.
 - Tests: un run `full_team` empieza con Lead, genera blueprint y crea/asigna agentes adaptados al objetivo.
 
-Estado: implementado. `aiteam/run_profiles.py` define perfiles canónicos, blueprints y política de delegación; el scheduler/executor los transporta y gobierna. `POST /api/projects/new` acepta un override canónico, lo persiste en goal/issue/wakeup y aprovisiona auditores al iniciar `lead_quorum`.
+Estado histórico: los perfiles y el lifecycle durable continúan activos, pero
+la materialización mediante `POST /api/projects/new` fue retirada en P0.K.8.2.
+El único writer de proyectos es ahora el commit sellado del asistente.
 
 ### Fase 2 — Checkout atomico
 
@@ -420,6 +438,33 @@ un modelo retirado. No
 convierte por sí solo un default sano en `manual-only`: esa transición exige
 evidencia separada de catálogo, health o calidad.
 
+El mantenimiento M.8 usa SQLite como histórico único: cada reconstrucción del
+catálogo compara dimensiones versionadas de modelo, CLI, precio, cuota, prompt,
+tools y contrato. Un cambio o el primer cálculo del mes añade un snapshot
+append-only con métricas, tendencia, causas y hash; el mismo input dentro del
+mes no duplica filas. La antigüedad abre deuda o recalibración mediante los
+gates existentes, pero nunca borra por sí sola modelos o evidencia. La API
+publica únicamente este resumen redacted.
+
+P0.N extiende este mantenimiento con detección activa de cambios del proveedor.
+Compara instalación CLI/MCP, pins o rangos soportados, releases oficiales,
+contratos API/adapter y discovery autenticado de modelos. Persiste snapshots,
+diffs y alertas deduplicadas en SQLite, clasifica novedad frente a
+incompatibilidad y avisa al developer mediante actividad, interacción e inbox.
+La remediación requiere aprobación y rollback: nunca actualiza herramientas,
+credenciales, modelos o defaults automáticamente. Un cambio confirmado vuelve
+stale únicamente el alcance afectado y reabre sus gates M.8/P0.g.
+
+P0.g convierte esa evidencia en un recorrido operativo único por
+`(profile_id, model_id, role)`: configuración/auth, catálogo+versión, health,
+probe de contrato, canario de rol, calibración multi-familia y promoción. El
+primer gate no superado determina bloqueador, owner y próxima acción. El
+tablero es derivado y fail-closed: no sustituye SQLite/read model ni ejecuta
+inferencias; un estado posterior solo puede quedar `historical` o `waiting` si
+un gate anterior falla. La API y Catálogo consumen la misma proyección, y
+`scripts/audit_model_calibration_gate_board.py` verifica cobertura exacta,
+secuencia, paridad y ausencia de bypass antes de aceptar cambios.
+
 ### Fase 5.7 — Catálogo universal y selección explicable de modelos
 
 Objetivo: hacer del catálogo multi-proveedor una capacidad de producto y la
@@ -432,6 +477,11 @@ router multifactor opaco retirado.
   organización proveedora, adapter profile, canal/pool y slug ejecutable.
 - Derivar estados ortogonales de catálogo, configuración, health, verificación,
   compatibilidad, calibración, frescura y elegibilidad automática.
+- Completar como P0 la separación Tier 1 de extremo a extremo. `lead_ready`,
+  `quorum_ready` y las aptitudes Tier 1 de soporte se derivan por par exacto de
+  calibraciones frescas y recibos verificables. Son hard gates independientes
+  del score: ni tier, `best_for`, discovery, health verde o una nota alta
+  conceden autoridad.
 - Sustituir el `role_score` heurístico por `model_role_score_v2`, versionado y
   explicable, alimentado por calidad del rol, capacidad, fiabilidad, economía y
   velocidad; publicar confianza/provenance aparte y aplicar hard gates antes.
@@ -441,14 +491,223 @@ router multifactor opaco retirado.
   filtros, comparación, estados y drilldown de recibos/estadísticas.
 - Reutilizar esa API en onboarding, Equipo, hiring, edición, Lead/quorum y
   lifecycle. Los modelos no elegibles se muestran con causa, no desaparecen.
+- P0.K sustituye las vistas monolíticas de primer uso/Nuevo proyecto por
+  `guided_setup_v1`, un wizard persistido y reanudable. Separa preparación de
+  máquina, entrevista adaptativa, adapters, proyecto/equipo y preflight final.
+  Recomienda máxima cobertura útil con consentimiento, no máxima instalación:
+  runtimes locales y CLIs no elegidos siguen opcionales. Reutiliza doctor,
+  discovery, health, probe y selección canónicos; conserva secretos fuera del
+  flujo, adapta fixtures a objetivos no programativos y funciona también para
+  reparar o ampliar instalaciones existentes.
+  P0.K.1 queda implementado con `guided_setup_v1`: sesiones y pasos SQLite,
+  tres scopes, dependencias, revisión optimista, drafts, bloqueo/reanudación y
+  reset explícito. La DB de configuración de máquina permite reanudar antes de
+  seleccionar workspace; API y schema comparten el contrato y los payloads
+  prohíben valores secretos. P0.K.2 queda implementado con
+  `guided_setup_needs_v1`: entrevista adaptativa determinista, borradores
+  reanudables, clasificación sugerida que exige confirmación, recomendación de
+  equipo/canales y sello recalculado por backend contra bypass. Local
+  permanece estrictamente opt-in. P0.K.3.1 añade una proyección read-only que
+  separa instalación, versión, autenticación, catálogo, health y contrato:
+  ningún gate se infiere de otro y Lead requiere evidencia completa. P0.K.3.2
+  la expone por API server-side y persiste solo un recibo SQLite compacto
+  ligado al paso; un cliente no puede aportar evidencia verde ni completar
+  `adapter_setup` sin un recibo listo. P0.K.3.3 proyecta guías manuales por
+  proveedor con consentimiento, riesgo y evidencia esperada; ninguna acción
+  instala, autentica, acepta términos o concede readiness por sí misma.
+  P0.K.3.4 consume catálogo, health y probe como gates independientes y
+  frescos; contrato estructurado requiere recibo seguro y versión de transporte
+  exacta. P0.K.3.5 acepta 10 escenarios de reparación, incluida API concreta
+  seleccionada por ID y reanudación sin reinstalar, y cierra P0.K.3.
+  P0.K.4.1 inicia cobertura progresiva con una matriz derivada del selector
+  canónico: Lead, quorum diverso y equipo base solo cuentan pares
+  auto-elegibles sobre adapters preparados. P0.K.6.1–K.6.3 separan composición
+  pura, observación server-side y ejecución consentida del fixture/probe.
+  P0.K.6.4 completa la frontera durable: SQLite conserva receipts y artifacts
+  SHA-256 por sesión, el replay exacto nunca repite ejecución y
+  `/project-commit` recompone todos los inputs contra el último preflight `go`.
+  Un receipt ausente/no-go/stale/corrupto bloquea antes de crear proyecto,
+  agentes o wakeup. K.6.5 proyecta ese contrato mediante un panel server-driven:
+  consentimiento local, remoto y cuota permanecen separados, research no
+  inventa tests y “Entrar al proyecto” solo existe para el receipt durable `go`
+  cuyo hash coincide con el preflight posterior. 409 invalida el preview;
+  offline/429 conservan diagnóstico. Su auditor 10/10 y E2E Chromium cierran
+  P0.K.6 sin inferencias ni consumo de proveedor. P0.K.7.1 añade progreso
+  textual/semántico, foco de región después de cada transición y readiness
+  relacionado con la acción sin robar el autofocus inicial. K.7.2 conserva la
+  acción primaria en el teclado, muestra errores adyacentes y enfoca la primera
+  corrección; 409/no-go regresan a Recursos sin perder el contexto. K.7.3
+  retira del render/bundle el configurador legacy duplicado, valida reflow en
+  768/390/320 CSS px sin overflow ni acciones ocultas, corrige contraste AA y
+  demuestra reduced motion computado. La fuente legacy queda señalada para
+  extirpación física en K.8. K.7.4 audita seis estados WCAG 2 A/AA con cero
+  violaciones, orden de headings y landmarks explícitos; limita la live region
+  al sello durable atómico, convierte el protocolo en lista y corrige un hover
+  de 2,62:1. K.7.5 cierra el bloque con seis capturas SHA-256 y una secuencia
+  durable pending→NO-GO→reparación→GO. El panel proyecta el preflight posterior
+  y un guard compartido exige coincidencia de preflight, plan y execution
+  receipt antes de mostrar o ejecutar entrada. El auditor 10/10 reabre los PNG
+  y rechaza matriz, autoridad, binarios o informe manipulados. P0.K.7 queda
+  cerrado; K.8 continúa con integración, actualización e higiene portable.
+  RUN-024 y el inventario local del `2026-07-30` demostraron una contaminación
+  histórica material de la raíz de proyectos: 2.366 carpetas numeradas contienen
+  `.aiteam/aiteam.db`, de las cuales 2.029 contienen también `.git`. El hallazgo
+  se atribuye a AI Teams, pero no autoriza borrado: un repositorio, archivos
+  personales o trabajo no publicado pueden vivir dentro de una carpeta creada
+  por el producto. K.8 se divide por ello en inventario/atribución read-only,
+  prevención de nuevos siblings, remediación legacy manual, cuarentena
+  reversible, UX/doctor y aceptación hermética. La arquitectura objetivo no
+  necesita limpiar lo que crea: no admite daemon, tarea programada, hook de
+  startup, TTL destructivo ni doctor con escritura. Clone, bootstrap, creación,
+  retry, restart y actualización deben conservar un footprint exacto y
+  declarado en cualquier máquina soportada. La limpieza histórica solo puede
+  seguir a aprobaciones humanas sobre paths exactos y queda fuera del lifecycle
+  normal del producto.
+  K.8.2 cierra ya la prevención: allocator por sufijo, endpoint API, comando CLI,
+  panel/estado React y fallback de tombstone fueron retirados. API/CLI no
+  inicializan una carpeta elegida; el commit guiado exige parent existente y
+  comprueba un footprint exacto tras publish o rollback. La aceptación portable
+  completa permanece en K.8.6.
+  K.8.1 cierra después el inventario read-only con un contrato portable que
+  exige raíz absoluta, no sigue symlinks/reparse points, abre SQLite immutable,
+  observa Git y handles sin exponer paths/credenciales y escribe el receipt
+  fuera del árbol auditado. La pasada real del `2026-07-30` clasificó 2.716
+  carpetas: 2.359 candidatas legacy de seis familias conocidas, 342 a
+  preservar/migrar y 15 personales protegidas. Cero acciones quedaron
+  autorizadas o ejecutadas. K.8.3 será un dry-run separado, manual e inmutable;
+  no puede convertir estas cifras agregadas en targets.
+  K.8.3 materializa después un dry-run separado: reaudita el estado vivo, no
+  acepta globs/prefijos/raíces, genera solo paths hijos directos exactos y
+  deniega personal, ambiguo, activo, referenciado, Git con trabajo/remoto,
+  DB inválida, reparse, inventario incompleto o handles abiertos. El manifiesto
+  local se crea sin overwrite y sella documento y batch por separado. La pasada
+  real propone 2.359 paths/766.901.650 bytes con cero operaciones; K.8.4 sigue
+  no disponible hasta revisión humana explícita y deberá revalidar de nuevo.
+  El motor hermético K.8.4.1 ya está implementado y probado solo en fixtures:
+  exige aprobación de los dos sellos, reaudita con handles, valida filesystem y
+  checksums, usa rename atómico y journal durable, y revierte cuarentena o
+  restore parciales. No contiene purge ni cleanup automático. Durante su
+  aceptación se corrigió el cierre no garantizado de la conexión SQLite
+  read-only, que en Windows podía retener un lock de directorio. K.8.4.2, el
+  batch real, permanece bloqueado hasta aprobación owner explícita.
+  K.8.5 cierra la capa de guía sin abrir ese bloqueo: primer uso, Nuevo proyecto
+  y Configuración comparten una tarjeta de higiene y exigen que el preview
+  corresponda a la ruta visible antes de guardarla. `project_hygiene_v1`
+  devuelve solo fingerprint, estado y contadores; no abre DB, no invoca Git,
+  no sigue enlaces y no muta. Machine doctor incorpora la misma proyección y
+  solo emite warnings con acciones no mutantes. La configuración por
+  `AITEAM_PROJECTS_ROOT` cuenta como efectiva y cambiar la raíz conserva las
+  demás preferencias y archivos de adapters. El protocolo humano/IA vive en
+  `PROJECT_ROOT_HYGIENE.md`. K.8.6 conserva la aceptación hermética y de
+  máquina soportada.
+- La automatización usa un gate más estricto que la selección manual:
+  `candidate_is_automation_eligible` exige `selection_score.auto_eligible` y,
+  por tanto, calibración y frescura además de los demás hard gates. Defaults,
+  hiring/reconcile, fallback, escalado y recovery lo comparten. Un override
+  explícito del owner puede seguir escogiendo un par compatible y seleccionable,
+  pero nunca lo convierte en default ni en cobertura calibrada. El fallback
+  legacy por `adapter_type` aislado falla cerrado porque no identifica el par
+  perfil+modelo+rol.
+- La cobertura Tier 1 alcanzó 2/2 en Antigravity 1.1.6, quedó temporalmente
+  1/2 por el drift a 1.1.8 y vuelve a 2/2 tras revalidar Gemini Pro High por
+  separado como Lead y quorum en la versión nueva: dos familias por tres
+  semillas en cada carril. No se hereda autoridad desde inventario, QA ni el
+  otro carril. El agregado versionado rechaza CLI ausente o mezclado y no
+  permite por sí solo cambiar defaults.
+- Propagar las habilitaciones Tier 1 por el read model, snapshots/migración,
+  API, pestaña Modelos, selector de Equipo, hiring, defaults, quorum, fallback,
+  reconcile, dispatch, recovery y liveness. La UI muestra score/confianza y
+  habilitación como conceptos distintos. Tests negativos deben impedir que
+  `quorum_ready` escale a Lead o que `lead_ready` se use como auditor sin su
+  calibración exacta.
+  P0.h.4a queda implementado en `model_catalog_read_model_v2`: la autoridad por
+  rol se deriva y se sella en cada celda; snapshots v1 permanecen auditables
+  pero fallan cerrados para autoaplicación Tier 1. P0.h.4c queda también
+  implementado: API y pestaña Modelos exponen filtros, badges, contratos,
+  bloqueos y cobertura/diversidad desde esa misma proyección, sin inferencias
+  en React. P0.h.4d aplica después el gate canónico en selección, onboarding,
+  Equipo/hiring, defaults, quorum, fallback y reconcile. El executor lo
+  revalida antes de toda inferencia y persiste bloqueo+interacción cuando una
+  asignación legacy, stale o manipulada carece de la autoridad exacta; así
+  dispatch, recovery y liveness fallan cerrados. P0.h.4e cierra la integración
+  con un auditor durable de read model, API, UI, snapshots y decisiones reales:
+  compara 490 celdas canónicas, 235 decisiones activas y 20 decisiones de
+  snapshot, además de los casos score alto/carril incorrecto, stale, archivado
+  y adapter rojo. El recibo `tier1-authority-parity-2026-07-24.json` queda
+  verde y sin divergencias.
+- Añadir preferencias locales del owner por identidad perfil+modelo:
+  alta/normal/baja/archivada. La prioridad ordena trabajo, no altera score; un
+  archivado conserva historia pero queda fuera de selección, hiring, fallback,
+  defaults y recalibración hasta reactivación explícita.
+  M.9.1 aporta contrato validado y persistencia local atómica/fail-closed;
+  M.9.2 ya aplica el gate único en read model, selección contextual y backlog
+  de mantenimiento sin reimplementar ni contaminar el scoring técnico. M.9.3
+  pausa asignaciones existentes antes de inferencia y exige una interacción
+  owner-confirmed revalidada para sustituirlas o reanudarlas. M.9.4 expone
+  lectura/escritura local validada y controles en Modelos; Equipo mantiene las
+  opciones archivadas visibles con su causa, pero no seleccionables. M.9.5
+  demuestra portabilidad entre procesos y máquina limpia y cierra las fronteras
+  de onboarding, Equipo, hiring, quorum, fallback y defaults, incluido el
+  selector legacy de rollout `shadow`. M.9.6 aplica en la máquina del owner las
+  47 preferencias exactas —6 archivadas, 13 altas y 28 bajas— sin incorporarlas
+  a los defaults del repositorio. El read model queda auditado con 47
+  candidatos/799 filas de rol y cero fallos; 17 roles confirman cero selección
+  o default archivado y la cobertura de 124 pares no genera mantenimiento para
+  las seis identidades archivadas.
+  P0.b desbloquea después Sol Tier 1 con Codex CLI oficial
+  `0.146.0-alpha.6` frente a caché `0.146.0`: auth y catálogo quedan verdes,
+  el modelo exacto es seleccionable y sus cinco roles críticos completan
+  30/30 muestras en matrices 2×3 versionadas. Los agregados no autorizan un
+  default por sí solos. Terra/Reviewer se renueva después en
+  `0.146.0-alpha.6`. Terra/Engineer se revalida en esa versión: pasa 9/9 gates
+  ocultos de la primera familia, falla Ruff con dos incidencias y activa
+  fail-fast sin ejecutar las otras cinco celdas. Su diagnóstico y el de
+  Sonnet/Engineer 1.1.6 se difieren hasta cambio material y prevalecen sobre la
+  evidencia histórica; los demás pares Terra y Luna conservan la evidencia
+  `0.145.0` como stale.
+  P0.c confirma después en Antigravity 1.1.6 que
+  `gemini-3.6-flash-{high,medium,low}` ejecutan sus submits exactos. Los tres
+  quedan verificados y seleccionables solo de forma manual; no se nominan ni
+  puntúan automáticamente hasta completar calibración comparable.
+  P0.h.2d.3 renueva después QA en las versiones vivas: Terra sobre Codex
+  `0.146.0-alpha.6` y Flash High sobre Antigravity `1.1.8` completan cada uno
+  6/6 muestras de dos familias y 66/66 gates. El contrato v4 corrige el campo
+  causal `tenant_id` y delega la ejecución post-fix a un test runner
+  determinista, sin dar al modelo autoridad fuera de su rol. El agregado v5
+  liga versión y hashes de las seis muestras. QA queda 2/2 con dos
+  perspectivas y pools; no cambia defaults.
+  P0.h.2d.4 renueva después Test Designer en las mismas versiones vivas.
+  Terra y Flash High completan cada uno dos familias por tres semillas:
+  6/6 muestras, 48/48 gates y 30/30 mutantes. El juez determinista ejecuta
+  baseline y mutantes fuera del proveedor; el agregado liga versión y hashes
+  hasta cada muestra. El executor rechaza ahora el cierre `done` de
+  `test_designer` sin `AGENT-REPORT` válido. La cobertura queda 2/2 con
+  perspectivas OpenAI/Google y pools Codex/Antigravity, sin cambiar defaults.
+  P0.h.2d.5 renueva después Terra/MCP Operator en Codex
+  `0.146.0-alpha.6`: dos familias por tres semillas, 6/6 muestras y 72/72
+  gates de recovery y gobernanza MCP real. La cobertura queda
+  `single_point` 1/2, perspectiva OpenAI y pool Codex. Sol no aporta
+  diversidad por compartir ambos. El segundo cupo permanece condicionado a
+  un canal materialmente nuevo y ejecutable con loop MCP gobernado; no cuentan
+  APIs sin tools, Antigravity sin ese transporte, OpenCode 1.18.4 incompatible,
+  Ollama ausente ni los modelos LM Studio archivados.
+- Separar obligatoriamente readiness de evaluación: configuración/auth →
+  catálogo+versión exactos → adapter verde → probe de structured output/tools
+  → canario del rol → calibración multi-familia → promoción. Un fallo anterior
+  bloquea los pasos posteriores y se registra como deuda de integración, no
+  como evidencia negativa de capacidad del modelo.
 - Desplegar shadow → recomendación → default solo para plazas nuevas sin pin;
   no migrar agentes existentes ni cruzar adapters silenciosamente.
+- Cerrar portabilidad con un gate final read-only que compare las versiones
+  aceptadas en la guía de instalación, los ejecutables resueltos por adapters y
+  el inventario de `machine_doctor_v1`; cualquier drift o prerelease no
+  declarada bloquea la aceptación del release.
 
 Criterio de cierre: 100 % del inventario conocido es visible o está excluido con
 causa; cada ruta automática usa un candidato verde, compatible y con evidencia
 fresca, y su decisión se puede reproducir desde SQLite/recibos. La fórmula,
 desglose, confianza y unidades de economía son idénticos en backend, API,
-catálogo visual y Equipo. El backlog ejecutable M.1–M.8 vive en `task.md`.
+catálogo visual y Equipo. El backlog ejecutable M.1–M.9 vive en `task.md`.
 
 Estado intermedio `2026-07-22`: M.1–M.5 están implementados en shadow. La
 identidad, scorer, read model, snapshots hasheados, API canónica y pestaña

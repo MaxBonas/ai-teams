@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -19,6 +20,7 @@ from aiteam.adapters.registry import AdapterDescriptor, AdapterRegistry, Executi
 from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.heartbeat.executor import RunExecutor
 from aiteam.heartbeat.scheduler import HeartbeatScheduler
+from aiteam.model_tier_coverage import TIER_COVERAGE_POLICY_VERSION
 from aiteam.project_adapters import write_project_adapter_policy
 from aiteam.user_config import record_model_health, store_secret
 
@@ -70,12 +72,49 @@ def _run_canary(workdir: Path) -> dict[str, Any]:
     runtime_dir = workspace / ".aiteam"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     write_project_adapter_policy(runtime_dir, profile_ids=["openai_api"])
-    _initialize_project_runtime(
-        workspace,
-        initial_task="Crea solo_result.txt y cierra la tarea.",
-        run_profile="solo_lead",
-        data_class="internal",
-    )
+    # Este canario valida la semántica durable de `solo_lead`, no vuelve a
+    # calibrar el catálogo. La proyección hermética declara explícitamente la
+    # autoridad exacta que el selector Tier 1 exige también en producción.
+    with patch(
+        "aiteam.model_selection_context.contextual_model_selection",
+        return_value={
+            "candidates": [
+                {
+                    "candidate_id": "openai_api:gpt-5.6-sol:lead",
+                    "identity": {
+                        "profile_id": "openai_api",
+                        "model_id": "gpt-5.6-sol",
+                    },
+                    "owner_selectable": True,
+                    "selection_score": {
+                        "auto_eligible": True,
+                        "hard_gates": {
+                            "calibrated": {
+                                "passed": True,
+                                "reason": "deterministic_canary_fixture",
+                            },
+                            "freshness": {
+                                "passed": True,
+                                "reason": "deterministic_canary_fixture",
+                            },
+                        },
+                    },
+                    "tier1_authority": {
+                        "policy_version": TIER_COVERAGE_POLICY_VERSION,
+                        "lane": "lead_ready",
+                        "enabled": True,
+                        "status": "enabled",
+                    },
+                }
+            ]
+        },
+    ):
+        _initialize_project_runtime(
+            workspace,
+            initial_task="Crea solo_result.txt y cierra la tarea.",
+            run_profile="solo_lead",
+            data_class="internal",
+        )
     # El adapter determinista del canario no es un perfil de producto. Retirar
     # la policy temporal evita que el preflight LLM intente resolverlo como tal;
     # este canario cubre semántica solo_lead, no catálogo de proveedores.

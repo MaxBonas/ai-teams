@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "auth_rollout_incident",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 7.578,
+  "usage": {},
+  "response": {
+    "objective": "Gestionar el incidente del rollout de auth v2 (actualmente al 5 %) reduciendo la tasa de error observada del 2,4 % por debajo del límite del 1,0 % sostenido durante 10 minutos, o ejecutar rollback a auth v1.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "description": "Completar la rotación de secrets pendiente y evaluar la salud del rollout de auth v2 al 5 % o retrotraer a auth v1.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Rotación de secrets"
+        ],
+        "rollback_path": "Rollback a auth v1 (disponible)"
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Tasa de error observada del 2,4 % superando el límite de 1,0 % durante 10 minutos en la cohorte del 5 % del rollout de auth v2.",
+        "impact": "Degradación en el servicio de autenticación.",
+        "mitigation": "Ejecutar rollback inmediato a auth v1 si la rotación de secrets no solventa el error."
+      }
+    ],
+    "verification": {
+      "gate": "Verificación de recuperación de auth v2 tras rotación de secrets.",
+      "acceptance_criteria": "Reviewer acepta la entrega solo cuando los logs y métricas confirmen explícitamente la recuperación y el restablecimiento de la tasa de error por debajo del 1,0 %."
+    },
+    "escalation": {
+      "trigger_condition": "Persistencia de la tasa de error en 2,4 % (por encima del límite de 1,0 % durante 10 minutos) o fallo en la rotación de secrets.",
+      "action": "Escalar inmediatamente para ejecutar el rollback total del tráfico (5 %) hacia auth v1."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": true,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

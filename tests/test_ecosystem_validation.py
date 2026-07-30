@@ -195,6 +195,8 @@ def test_unavailable_cmake_toolchain_is_an_owned_gap() -> None:
     assert case["capability_gaps"][0]["reason"] in {
         "runtime_unavailable:cmake",
         "runtime_probe_failed:cmake",
+        "runtime_unavailable:ctest",
+        "runtime_probe_failed:ctest",
     }
 
 

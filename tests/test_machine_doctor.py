@@ -15,7 +15,6 @@ from aiteam.machine_doctor import (
     validate_machine_inventory,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -37,6 +36,13 @@ def test_schema_is_fail_closed_and_versioned() -> None:
     assert schema["title"] == SCHEMA_VERSION
     assert schema["additionalProperties"] is False
     assert schema["properties"]["scope"]["properties"]["secrets_read"]["const"] is False
+    assert schema["$defs"]["project_hygiene"]["additionalProperties"] is False
+    assert (
+        schema["$defs"]["project_hygiene"]["properties"]["lifecycle"][
+            "additionalProperties"
+        ]
+        is False
+    )
     assert {"toolchains", "adapters"} <= set(schema["required"])
 
 
@@ -146,6 +152,31 @@ def test_validation_rejects_diagnostic_summary_drift(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="strict status drift"):
         validate_machine_inventory(report)
+
+
+def test_provider_cli_gate_failure_is_a_strict_blocker(tmp_path: Path) -> None:
+    report = build_machine_inventory(
+        root=tmp_path,
+        command_probe=lambda command: (False, None),
+        port_probe=lambda port: "not_listening",
+        host=("linux", "x86_64", "test-release"),
+        adapter_profiles=[],
+        provider_cli_version_gate={
+            "schema_version": "provider_cli_version_audit_v1",
+            "status": "blocked",
+            "identity_version_ok": False,
+            "catalog_ready": False,
+            "documentation_ready": True,
+            "promotion_ready": False,
+            "report_sha256": "b" * 64,
+            "failure_code": "provider_cli_version_gate_failed",
+        },
+    )
+
+    assert report["summary"]["strict_pass"] is False
+    assert "provider_cli_version_gate_failed" in {
+        item["code"] for item in report["diagnostics"]
+    }
 
 
 def test_version_probe_timeout_degrades_without_traceback(
@@ -275,6 +306,78 @@ def test_adapter_states_are_exact_and_do_not_infer_auth_from_installation(
     assert "never-emit-me" not in json.dumps(report)
 
 
+def test_adapter_cli_observation_emits_redacted_binary_fingerprint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binary = tmp_path / "private-user-folder" / "codex.cmd"
+    binary.parent.mkdir()
+    binary.write_bytes(b"@echo codex-cli 0.146.0-alpha.6")
+    monkeypatch.setattr(
+        "aiteam.machine_doctor.resolve_provider_cli",
+        lambda cli_id, candidates, os_id: str(binary),
+    )
+
+    report = build_machine_inventory(
+        root=tmp_path,
+        command_probe=lambda command: (True, "codex-cli 0.146.0-alpha.6"),
+        port_probe=lambda port: "not_listening",
+        host=("windows", "x86_64", "test-release"),
+        adapter_profiles=[
+            {
+                "id": "codex_subscription",
+                "provider": "openai-codex",
+                "channel": "subscription",
+                "adapter_type": "subscription_cli",
+                "config": {"command": ["codex"]},
+                "health": {"status": "installed"},
+            }
+        ],
+    )
+    observation = report["adapters"][0]["cli"]
+    serialized = json.dumps(report)
+
+    assert observation["executable"] == "codex.cmd"
+    assert len(observation["fingerprint"]) == 64
+    assert str(binary.parent) not in serialized
+    validate_machine_inventory(report)
+
+
+def test_adapter_doctor_preserves_runtime_configured_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[str, list[str]]] = []
+
+    def resolve(cli_id: str, candidates: list[str], os_id: str) -> None:
+        observed.append((cli_id, candidates))
+        return None
+
+    monkeypatch.setattr(
+        "aiteam.machine_doctor.resolve_provider_cli",
+        resolve,
+    )
+    build_machine_inventory(
+        root=tmp_path,
+        command_probe=lambda command: (False, None),
+        port_probe=lambda port: "not_listening",
+        host=("windows", "x86_64", "test-release"),
+        adapter_profiles=[
+            {
+                "id": "antigravity_subscription",
+                "provider": "google-antigravity",
+                "channel": "subscription",
+                "adapter_type": "subscription_cli",
+                "config": {"command": ["agy"]},
+                "health": {"status": "untested"},
+            }
+        ],
+    )
+
+    assert ("agy", ["agy"]) in observed
+    assert ("agy", ["agy.exe", "agy"]) not in observed
+
+
 def test_adapter_explicit_durable_auth_evidence_is_preserved(
     tmp_path: Path,
 ) -> None:
@@ -376,6 +479,16 @@ def test_diagnostics_distinguish_adapter_states_and_primary_readiness(
         port_probe=lambda port: "not_listening",
         host=("linux", "x86_64", "test-release"),
         adapter_profiles=profiles,
+        provider_cli_version_gate={
+            "schema_version": "provider_cli_version_audit_v1",
+            "status": "ready",
+            "identity_version_ok": True,
+            "catalog_ready": True,
+            "documentation_ready": True,
+            "promotion_ready": True,
+            "report_sha256": "a" * 64,
+            "failure_code": None,
+        },
     )
     states = {item["id"]: item["diagnostic_state"] for item in report["adapters"]}
 
@@ -413,3 +526,79 @@ def test_no_verified_primary_adapter_is_a_blocker(tmp_path: Path) -> None:
     assert blocker["state"] == "unverified"
     assert blocker["next_action"]["requires_human"] is True
     assert blocker["next_action"]["mutates_state"] is False
+
+
+def test_project_hygiene_warns_without_mutating_or_exposing_paths(
+    tmp_path: Path,
+) -> None:
+    projects_root = tmp_path / "projects"
+    legacy = projects_root / "Solo 17"
+    (legacy / ".aiteam").mkdir(parents=True)
+    (legacy / ".aiteam" / "aiteam.db").touch()
+
+    report = build_machine_inventory(
+        root=tmp_path,
+        projects_root=projects_root,
+        command_probe=_fake_command,
+        port_probe=lambda port: "not_listening",
+        host=("linux", "x86_64", "test-release"),
+        adapter_profiles=[],
+    )
+
+    hygiene = report["project_hygiene"]
+    assert hygiene["status"] == "legacy_artifacts_detected"
+    assert hygiene["scope"]["read_only"] is True
+    assert hygiene["lifecycle"]["doctor_can_mutate"] is False
+    serialized = json.dumps(report)
+    assert str(projects_root) not in serialized
+    diagnostic = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "project_root_hygiene_requires_attention"
+    )
+    assert diagnostic["severity"] == "warning"
+    assert diagnostic["next_action"] == {
+        "code": "run_project_artifact_audit",
+        "description": (
+            "Ejecuta K.8.1 para clasificar; el doctor no mueve ni borra carpetas."
+        ),
+        "requires_human": True,
+        "mutates_state": False,
+    }
+
+
+def test_project_hygiene_clean_root_has_no_hygiene_diagnostic(
+    tmp_path: Path,
+) -> None:
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+
+    report = build_machine_inventory(
+        root=tmp_path,
+        projects_root=projects_root,
+        command_probe=_fake_command,
+        port_probe=lambda port: "not_listening",
+        host=("linux", "x86_64", "test-release"),
+        adapter_profiles=[],
+    )
+
+    assert report["project_hygiene"]["status"] == "clean"
+    assert "project_root_hygiene_requires_attention" not in {
+        item["code"] for item in report["diagnostics"]
+    }
+
+
+def test_legacy_machine_doctor_receipt_without_project_hygiene_still_validates(
+    tmp_path: Path,
+) -> None:
+    report = build_machine_inventory(
+        root=tmp_path,
+        projects_root=tmp_path,
+        command_probe=_fake_command,
+        port_probe=lambda port: "not_listening",
+        host=("linux", "x86_64", "test-release"),
+        adapter_profiles=[],
+    )
+    report.pop("project_hygiene")
+
+    validate_machine_inventory(report)

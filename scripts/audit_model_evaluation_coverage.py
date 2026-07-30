@@ -1,4 +1,6 @@
 """Genera el backlog durable de calibración por perfil+modelo+rol."""
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -7,13 +9,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from aiteam.model_evaluation_coverage import audit_model_evaluation_coverage  # noqa: E402
-from aiteam.user_config import (  # noqa: E402
+from aiteam.model_evaluation_coverage import (
+    audit_model_evaluation_coverage,
+)
+from aiteam.model_owner_preferences import load_model_owner_preferences
+from aiteam.user_config import (
     DEFAULT_ADAPTER_PROFILES,
     executable_model_options,
     model_is_selectable,
@@ -33,6 +37,14 @@ def _versions_from_drift(path: Path) -> dict[str, str | None]:
         live_version = observed_profile_cli_version(profile)
         if live_version:
             versions[str(profile.get("id") or "")] = live_version
+            continue
+        config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+        api_version = str(config.get("api_version") or "").strip()
+        provider = str(profile.get("provider") or "").strip()
+        if profile.get("channel") == "api" and api_version and provider:
+            versions[str(profile.get("id") or "")] = (
+                f"api:{provider}:{api_version}"
+            )
     return versions
 
 
@@ -62,6 +74,7 @@ def main() -> int:
         observed_at=datetime.now().astimezone(),
         observed_versions=_versions_from_drift(args.drift_receipt),
         executable_models_by_profile=executable,
+        owner_preferences=load_model_owner_preferences(),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

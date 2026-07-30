@@ -19,14 +19,23 @@ from typing import Any
 
 from aiteam.model_catalog_projection import build_model_catalog_identity_projection
 from aiteam.model_compatibility import compatibility_decision
+from aiteam.model_evaluation_coverage import audit_model_evaluation_coverage
 from aiteam.model_evidence_taxonomy import (
     GENERAL_CAPABILITY_BENCHMARK,
     evidence_taxonomy_contract,
     exact_evidence_kind,
 )
-from aiteam.model_evaluation_coverage import audit_model_evaluation_coverage
 from aiteam.model_normalized_metrics import normalized_metrics_from_evaluation
+from aiteam.model_owner_preferences import (
+    load_model_owner_preferences,
+    model_owner_preference_from_document,
+    normalize_model_owner_preferences,
+)
 from aiteam.model_role_scoring import MODEL_ROLE_SCORE_VERSION, score_model_role
+from aiteam.model_tier_coverage import (
+    TIER_COVERAGE_POLICY_VERSION,
+    tier1_authority_for_role,
+)
 from aiteam.policies import CANONICAL_ROLES, canonical_role, role_status, role_tier
 from aiteam.tools.catalog import default_capabilities_for_role
 from aiteam.user_config import (
@@ -37,8 +46,7 @@ from aiteam.user_config import (
     profile_is_connected,
 )
 
-
-MODEL_CATALOG_READ_MODEL_VERSION = "model_catalog_read_model_v1"
+MODEL_CATALOG_READ_MODEL_VERSION = "model_catalog_read_model_v2"
 
 
 def collect_model_runtime_observations(db_paths: Iterable[Path]) -> dict[str, Any]:
@@ -287,10 +295,12 @@ def build_model_catalog_read_model(
     evaluation_version_evidence: Mapping[str, Mapping[str, Any]] | None = None,
     discovered_models: Iterable[Mapping[str, Any]] = (),
     excluded_profile_ids: Iterable[str] = (),
+    owner_preferences: Mapping[str, Any] | None = None,
     observed_at: datetime | str | None = None,
 ) -> dict[str, Any]:
     """Compone candidatos y filas por rol; solo usa scores explícitamente normalizados."""
     timestamp = _iso_timestamp(observed_at)
+    preference_document = normalize_model_owner_preferences(owner_preferences)
     runtime = dict(runtime_report or {})
     identity_projection = build_model_catalog_identity_projection(
         profiles=profiles,
@@ -367,6 +377,12 @@ def build_model_catalog_read_model(
                 automatic_policy=automatic_role_policy,
                 role=role,
             )
+            tier1_authority = tier1_authority_for_role(
+                role=role,
+                model_tier=str(option.get("tier") or ""),
+                evaluation=evaluation_row,
+                compatibility=compatibility,
+            )
             evidence = _evidence_input(evaluation_row, supplied.get("evidence"))
             components = _component_inputs(
                 runtime_row=runtime_row,
@@ -424,6 +440,7 @@ def build_model_catalog_read_model(
                     "canonical_role": role,
                     "compatibility": compatibility,
                     "evaluation": evaluation_row,
+                    "tier1_authority": tier1_authority,
                     "automatic_selection": {
                         "model_policy_enabled": model_automatic_policy,
                         "role_nominated": role_nominated,
@@ -438,6 +455,7 @@ def build_model_catalog_read_model(
                         {
                             "candidate_id": candidate["candidate_id"],
                             "role": role,
+                            "tier1_authority": tier1_authority,
                             **score_inputs,
                         }
                     ),
@@ -446,6 +464,11 @@ def build_model_catalog_read_model(
         candidates.append(
             {
                 **candidate,
+                "owner_preference": model_owner_preference_from_document(
+                    preference_document,
+                    profile_id,
+                    model,
+                ),
                 "provider_metadata": {
                     "label": profile.get("label"),
                     "adapter_type": profile.get("adapter_type"),
@@ -515,6 +538,12 @@ def build_model_catalog_read_model(
     payload = {
         "schema_version": MODEL_CATALOG_READ_MODEL_VERSION,
         "score_version": MODEL_ROLE_SCORE_VERSION,
+        "tier1_authority_contract": {
+            "policy_version": TIER_COVERAGE_POLICY_VERSION,
+            "scope": "exact_profile_model_role",
+            "legacy_missing_policy": "fail_closed",
+            "score_relationship": "independent_hard_gate",
+        },
         "rollout": "shadow_only",
         "observed_at": timestamp,
         "evidence_taxonomy": evidence_taxonomy_contract(),
@@ -595,6 +624,7 @@ def build_current_model_catalog_read_model(
 ) -> dict[str, Any]:
     """Entry point local; no red y ningún canario vivo."""
     timestamp = _iso_timestamp(observed_at)
+    owner_preferences = load_model_owner_preferences()
     profiles = []
     discoveries: list[dict[str, Any]] = []
     observed_versions: dict[str, str | None] = {}
@@ -608,13 +638,34 @@ def build_current_model_catalog_read_model(
             profile.get("health") if isinstance(profile.get("health"), Mapping) else {}
         )
         live_version = observed_profile_cli_version(profile)
+        config = (
+            profile.get("config")
+            if isinstance(profile.get("config"), Mapping)
+            else {}
+        )
+        api_version = str(config.get("api_version") or "").strip()
+        provider = str(profile.get("provider") or "").strip()
+        contract_version = (
+            f"api:{provider}:{api_version}"
+            if profile.get("channel") == "api" and provider and api_version
+            else None
+        )
         observed_versions[profile_id] = (
-            live_version or str(health.get("version") or "") or None
+            live_version
+            or str(health.get("version") or "")
+            or contract_version
+            or None
         )
         if observed_versions[profile_id]:
             version_evidence[profile_id] = {
                 "version": observed_versions[profile_id],
-                "source": "live_cli_version" if live_version else "adapter_health",
+                "source": (
+                    "live_cli_version"
+                    if live_version
+                    else "adapter_health"
+                    if health.get("version")
+                    else "adapter_api_contract"
+                ),
             }
         for model in health.get("catalog_models") or ():
             discoveries.append(
@@ -638,6 +689,7 @@ def build_current_model_catalog_read_model(
         observed_at=datetime.fromisoformat(timestamp),
         observed_versions=observed_versions,
         repo_root=repo_root,
+        owner_preferences=owner_preferences,
     )
     metric_inputs = normalized_metrics
     if metric_inputs is None:
@@ -650,6 +702,7 @@ def build_current_model_catalog_read_model(
         normalized_metrics=metric_inputs,
         evaluation_version_evidence=version_evidence,
         discovered_models=discoveries,
+        owner_preferences=owner_preferences,
         observed_at=timestamp,
     )
 
@@ -749,6 +802,14 @@ def audit_model_catalog_read_model(
         failures.append({"code": "read_model_version_mismatch"})
     if read_model.get("evidence_taxonomy") != evidence_taxonomy_contract():
         failures.append({"code": "evidence_taxonomy_contract_mismatch"})
+    authority_contract = read_model.get("tier1_authority_contract") or {}
+    if authority_contract != {
+        "policy_version": TIER_COVERAGE_POLICY_VERSION,
+        "scope": "exact_profile_model_role",
+        "legacy_missing_policy": "fail_closed",
+        "score_relationship": "independent_hard_gate",
+    }:
+        failures.append({"code": "tier1_authority_contract_mismatch"})
     expected_hash = _sha256(
         {k: v for k, v in read_model.items() if k != "content_hash"}
     )
@@ -874,6 +935,22 @@ def audit_model_catalog_read_model(
             score = role_row.get("score") or {}
             compatibility = role_row.get("compatibility") or {}
             evaluation = role_row.get("evaluation") or {}
+            expected_authority = tier1_authority_for_role(
+                role=str(role_row.get("canonical_role") or ""),
+                model_tier=str(
+                    (candidate.get("model_metadata") or {}).get("tier") or ""
+                ),
+                evaluation=dict(evaluation),
+                compatibility=dict(compatibility),
+            )
+            if role_row.get("tier1_authority") != expected_authority:
+                failures.append(
+                    {
+                        "code": "tier1_authority_mismatch",
+                        "candidate_id": candidate.get("candidate_id"),
+                        "canonical_role": role_row.get("canonical_role"),
+                    }
+                )
             score_inputs = role_row.get("score_inputs")
             if compatibility.get("allowed") is not True and score.get("score") is not None:
                 failures.append(
@@ -907,6 +984,11 @@ def audit_model_catalog_read_model(
             if (
                 compatibility.get("allowed") is True
                 and automatic_policy is True
+                and str(
+                    (candidate.get("owner_preference") or {}).get("state")
+                    or "normal"
+                )
+                in {"high", "normal"}
                 and str(evaluation.get("status") or "") != "calibrated"
                 and str(evaluation.get("next_action") or "")
                 not in {
@@ -940,7 +1022,10 @@ def audit_model_catalog_read_model(
             if (
                 operational_pre_evidence
                 and str(evaluation.get("status") or "") != "calibrated"
-                and not evaluation.get("evidence_receipts")
+                and not (
+                    evaluation.get("evidence_receipts")
+                    or evaluation.get("diagnostic_receipts")
+                )
             ):
                 failures.append(
                     {
@@ -957,6 +1042,14 @@ def audit_model_catalog_read_model(
                     }
                 )
             else:
+                if _contains_key(score_inputs, "tier1_authority"):
+                    failures.append(
+                        {
+                            "code": "tier1_authority_leaked_into_score",
+                            "candidate_id": candidate.get("candidate_id"),
+                            "canonical_role": role_row.get("canonical_role"),
+                        }
+                    )
                 expected_kind = exact_evidence_kind(
                     str(role_row.get("canonical_role") or "")
                 )
@@ -1004,6 +1097,7 @@ def audit_model_catalog_read_model(
                 role_input = {
                     "candidate_id": candidate.get("candidate_id"),
                     "role": role_row.get("canonical_role"),
+                    "tier1_authority": role_row.get("tier1_authority"),
                     "components": score_inputs.get("components") or {},
                     "evidence": score_inputs.get("evidence") or {},
                     "hard_gates": score_inputs.get("hard_gates") or {},
@@ -1145,6 +1239,16 @@ def _evaluation_lookup(
         row.setdefault("evaluated_at", diagnostic.get("evaluated_at"))
         row.setdefault("provider_version", diagnostic.get("provider_version"))
     return result
+
+
+def _contains_key(value: Any, needle: str) -> bool:
+    if isinstance(value, Mapping):
+        return needle in value or any(
+            _contains_key(item, needle) for item in value.values()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_key(item, needle) for item in value)
+    return False
 
 
 def _project_evaluation_cell(

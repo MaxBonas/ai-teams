@@ -5,15 +5,14 @@ import { IssuePanel, IssuePipeline } from './components/IssuePanel';
 import { ChatPanel } from './components/ChatPanel';
 import { ModelCatalog } from './components/ModelCatalog';
 import { ModelRoleSelector } from './components/ModelRoleSelector';
+import { ProjectSetupWizard } from './components/ProjectSetupWizard';
 import { QuorumStepper } from './components/QuorumStepper';
 import {
   type ConfigSection,
 } from './components/ConfigurationPanel';
-import {
-  CliSetupGuide,
-} from './components/ConfigurationPanel/CliSettings';
 import type { OrientationMeasurement } from './components/ConfigurationPanel/OrientationSettings';
 import { ConfigurationWorkspace } from './components/ConfigurationPanel/ConfigurationWorkspace';
+import { ProjectHygieneCard } from './components/ConfigurationPanel/ProjectHygieneCard';
 import type {
   ModelCompatibility,
 } from './components/ConfigurationPanel/types';
@@ -36,7 +35,6 @@ import {
   Code2,
   FileText,
   FolderOpen,
-  FolderPlus,
   GitBranch,
   KeyRound,
   ListChecks,
@@ -487,14 +485,13 @@ function clip(text: string, max = 220): string {
 
 export default function App() {
   const [health, setHealth] = useState<HealthPayload | null>(null);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   // El backend local no responde (proceso muerto o puerto equivocado) — pantalla
   // dedicada en lugar del onboarding: el proyecto sigue en disco.
   const [backendDown, setBackendDown] = useState(false);
   const [workspace, setWorkspace] = useState(getWorkspacePath());
   const [workspaceConfigured, setWorkspaceConfigured] = useState(false);
   const [workspaceDraft, setWorkspaceDraft] = useState(getWorkspacePath());
-  const [projectName, setProjectName] = useState('Nuevo Proyecto AI Teams');
-  const [initialTask, setInitialTask] = useState('');
   const [issues, setIssues] = useState<Issue[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [budgets, setBudgets] = useState<BudgetInfo[]>([]);
@@ -520,9 +517,6 @@ export default function App() {
   const [newTaskProfile, setNewTaskProfile] = useState<string>('full_team');
   const [newTaskObjectiveKind, setNewTaskObjectiveKind] = useState<ObjectiveKind>('auto');
   // Perfil inicial conservador; quorum se elige explícitamente cuando el riesgo lo justifica.
-  const [newProjectRunProfile, setNewProjectRunProfile] = useState<string>('full_team');
-  const [newProjectObjectiveKind, setNewProjectObjectiveKind] = useState<ObjectiveKind>('auto');
-  const [newProjectDataClass, setNewProjectDataClass] = useState<string>('internal');
   // Plan aceptado adjunto a la próxima tarea (recibo por revisión, no texto copiado)
   const [pendingPlanRef, setPendingPlanRef] = useState<{ revisionId: string; sourceIssueId: string } | null>(null);
   // Agent config inline edit (sidebar)
@@ -550,9 +544,6 @@ export default function App() {
   const [capabilityCatalog, setCapabilityCatalog] = useState<Record<string, CapabilityEntry>>({});
   const [roleModelOptions, setRoleModelOptions] = useState<Record<string, RoleModelOption[]>>({});
   const [selectedProjectAdapterIds, setSelectedProjectAdapterIds] = useState<string[]>([]);
-  const [leadAdapterProfileId, setLeadAdapterProfileId] = useState('');
-  const [leadModel, setLeadModel] = useState('');
-  const [leadCandidateId, setLeadCandidateId] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState('');
   // Project initialization loading state
   const [projectInitializing, setProjectInitializing] = useState(false);
@@ -604,51 +595,34 @@ export default function App() {
     settingsConfigured,
     settingsDraft,
     setSettingsDraft,
+    projectHygiene,
+    projectHygieneRoot,
+    projectHygieneBusy,
     adapterProfiles,
-    adapterTestModels,
-    setAdapterTestModels,
-    cliStatus,
-    secretProvider,
-    setSecretProvider,
-    secretValue,
-    setSecretValue,
     autonomyMode,
     setAutonomyMode,
     autonomySaving,
     profileState,
     loadAppSettings,
     saveAppSettings,
+    previewProjectHygiene,
     loadUserAdapters,
     saveAutonomy,
     loadProjectSkills,
     loadMcpServers,
-    saveSecret,
-    launchCliLogin,
     testAdapterProfile,
   } = configurationData;
+  const draftedProjectsRoot = settingsDraft.trim();
+  const draftedRootWasInspected = Boolean(
+    draftedProjectsRoot
+    && projectHygiene
+    && projectHygieneRoot === draftedProjectsRoot,
+  );
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedIssueId) || issues[0] || null,
     [issues, selectedIssueId],
   );
-  const onboardingCompatibilityIssue = useMemo<Issue>(() => ({
-    id: 'new-project',
-    title: projectName,
-    status: 'todo',
-    role: 'lead',
-    criticality: 'medium',
-    metadata_json: JSON.stringify({ profile: newProjectRunProfile, data_class: newProjectDataClass }),
-  }), [projectName, newProjectRunProfile, newProjectDataClass]);
-  const onboardingLeadOptions = roleModelOptions[
-    modelOptionCacheKey(leadAdapterProfileId, 'lead', onboardingCompatibilityIssue)
-  ] || [];
-  const onboardingLeadBlockReason = onboardingLeadOptions.length > 0
-    && onboardingLeadOptions.every((option) => option.selectable === false || option.available === false || option.compatibility?.allowed === false)
-    ? onboardingLeadOptions.find((option) => option.compatibility?.allowed === false)?.compatibility?.reason
-      || onboardingLeadOptions.find((option) => option.available === false)?.availability_reason
-      || 'El perfil no tiene un modelo Lead compatible.'
-    : '';
-
   const selectedComments = comments.filter((comment) => comment.issue_id === selectedIssue?.id);
   const selectedInteractions = interactions.filter((interaction) => interaction.issue_id === selectedIssue?.id);
   const pendingInteractions = interactions.filter((interaction) => interaction.status === 'pending');
@@ -678,7 +652,7 @@ export default function App() {
     setWorkspace(confirmedWorkspace);
     setWorkspaceDraft(confirmedWorkspace);
     setWorkspaceConfigured(configured);
-    setProjectsRoot(payload.projects_root || projectsRoot);
+    if (payload.projects_root) setProjectsRoot(payload.projects_root);
     setWorkspacePath(configured ? confirmedWorkspace : '');
   };
 
@@ -919,6 +893,7 @@ export default function App() {
       setError(refreshError instanceof Error ? refreshError.message : 'refresh_failed');
     } finally {
       setLoading(false);
+      setInitialLoadComplete(true);
     }
   };
 
@@ -1224,47 +1199,6 @@ export default function App() {
     if (profileId) void fetchRoleModelOptions(profileId, configModalAgent.role, selectedIssue);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configModalAgent?.id, adapterProfiles, selectedIssue]);
-
-  useEffect(() => {
-    if (leadAdapterProfileId) {
-      void fetchRoleModelOptions(leadAdapterProfileId, 'lead', onboardingCompatibilityIssue);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadAdapterProfileId, newProjectRunProfile, newProjectDataClass]);
-
-  const createProject = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await apiFetch('/api/projects/new', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: projectName,
-          initial_task: initialTask,
-          objective_kind: newProjectObjectiveKind,
-          adapter_profile_ids: selectedProjectAdapterIds,
-          lead_adapter_profile_id: leadAdapterProfileId,
-          lead_model: leadModel,
-          lead_candidate_id: leadCandidateId,
-          run_profile: newProjectRunProfile,
-          data_class: newProjectDataClass,
-        }),
-      });
-      const json = (await response.json()) as WorkspacePayload;
-      if (!response.ok) throw new Error(json.detail || `project:${response.status}`);
-      applyWorkspace(json);
-      setLastResult(json);
-      await loadProjectData('issue:intake');
-      // Show loading overlay until the Lead's first run starts (≤30 s with the
-      // workspace-aware HeartbeatLoop; falls back gracefully after 90 s).
-      void waitForLeadInit();
-    } catch (projectError) {
-      setError(projectError instanceof Error ? projectError.message : 'project_create_failed');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const deleteProject = async () => {
     setLoading(true);
@@ -1880,11 +1814,6 @@ export default function App() {
     setSelectedProjectAdapterIds((current) => {
       if (current.includes(profileId)) {
         const next = current.filter((id) => id !== profileId);
-        if (leadAdapterProfileId === profileId) {
-          setLeadAdapterProfileId('');
-          setLeadModel('');
-          setLeadCandidateId('');
-        }
         return next;
       }
       const next = [...current, profileId];
@@ -2004,6 +1933,26 @@ export default function App() {
     }
   };
 
+  if (!initialLoadComplete && !backendDown) {
+    return (
+      <main className="shell start-shell">
+        <header className="topbar">
+          <div className="topbar-brand">
+            <span className="brand-mark">▸</span>
+            <span className="brand-name">AI Teams</span>
+          </div>
+        </header>
+        <section className="panel start-panel boot-panel" aria-live="polite">
+          <RefreshCcw size={22} className="spin" />
+          <div>
+            <h2>Comprobando esta máquina</h2>
+            <p className="hint">Leyendo configuración, adapters y proyecto activo…</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   // Backend unreachable: honest state instead of the onboarding screen.
   if (backendDown) {
     return (
@@ -2054,11 +2003,11 @@ export default function App() {
         <section className="panel start-panel">
           <div className="panel-title">
             <FolderOpen size={18} />
-            Carpeta de proyectos
+            Preparación · ubicación global
           </div>
           <p className="hint">
             AI Teams guarda cada proyecto como una subcarpeta. Elige la carpeta raíz donde se crearán.
-            Puedes cambiarlo más adelante en la pestaña Configuración.
+            Esta comprobación no crea, mueve ni borra nada; podrás cambiar la ruta en Configuración.
           </p>
           <label>
             Ruta de la carpeta
@@ -2068,13 +2017,23 @@ export default function App() {
               onChange={(ev) => setSettingsDraft(ev.target.value)}
             />
           </label>
+          <ProjectHygieneCard
+            root={settingsDraft}
+            hygiene={projectHygiene}
+            previewRoot={projectHygieneRoot}
+            busy={projectHygieneBusy}
+            onInspect={() => void previewProjectHygiene()}
+          />
           <div className="actions">
             <button
               onClick={() => void saveAppSettings().then(() => void refresh())}
-              disabled={loading || !settingsDraft.trim()}
+              disabled={loading || !draftedProjectsRoot || !draftedRootWasInspected}
             >
               Guardar y continuar
             </button>
+            {!draftedRootWasInspected && draftedProjectsRoot ? (
+              <span className="hygiene-save-gate">Comprueba la ruta para continuar.</span>
+            ) : null}
           </div>
         </section>
       </main>
@@ -2083,7 +2042,7 @@ export default function App() {
 
   if (!workspaceConfigured) {
     return (
-      <main className="shell start-shell">
+      <main className="shell start-shell project-setup-shell">
         <header className="topbar">
           <div className="topbar-brand">
             <span className="brand-mark">▸</span>
@@ -2096,264 +2055,34 @@ export default function App() {
 
         {error ? <div className="banner error">{error}</div> : null}
 
-        <section className="panel start-panel">
-          <div className="panel-title">
-            <FolderPlus size={18} />
-            Primera apertura
-          </div>
-          <label>
-            Nombre del proyecto
-            <input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
-          </label>
-          <label>
-            Tarea inicial para el Lead
-            <textarea
-              placeholder="Ej: Construye una app de reporting para..."
-              value={initialTask}
-              onChange={(event) => setInitialTask(event.target.value)}
-            />
-          </label>
-          <label>
-            Tipo de objetivo
-            <select
-              value={newProjectObjectiveKind}
-              onChange={(event) => setNewProjectObjectiveKind(event.target.value as ObjectiveKind)}
-            >
-              {OBJECTIVE_KIND_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <span className="hint">Controla el equipo, la evidencia y si corresponde ejecutar tests. Puedes dejar que AI Teams lo detecte.</span>
-          </label>
+        <ProjectHygieneCard
+          root={projectsRoot}
+          hygiene={projectHygiene}
+          previewRoot={projectHygieneRoot}
+          busy={projectHygieneBusy}
+          onInspect={() => void previewProjectHygiene(projectsRoot)}
+        />
 
-          {/* ── Cómo empezar: el plan es la base ── */}
-          <div className="start-profile-picker">
-            <div className="hiring-header">Cómo empezar</div>
-            <div className="profile-selector">
-              {[
-                PROFILE_OPTIONS.find((p) => p.value === 'lead_quorum')!,
-                PROFILE_OPTIONS.find((p) => p.value === 'full_team')!,
-                PROFILE_OPTIONS.find((p) => p.value === 'solo_lead')!,
-              ].map((p) => (
-                <button
-                  key={p.value}
-                  type="button"
-                  className={`profile-chip${newProjectRunProfile === p.value ? ' active' : ''}`}
-                  onClick={() => setNewProjectRunProfile(p.value)}
-                  title={p.desc}
-                >
-                  {p.label}
-                  {p.value === 'lead_quorum' && <span className="chip-reco">Plan profundo</span>}
-                </button>
-              ))}
-            </div>
-            <p className="hint">
-              Para objetivos ambiguos o críticos, <strong>Lead + Quorum</strong> hace que seniors independientes
-              (idealmente de otro proveedor) auditen el plan del Lead antes de ejecutar nada:
-              el proyecto arranca planificando, no improvisando.
-            </p>
-          </div>
-          <label>
-            Clasificación de los datos
-            <select value={newProjectDataClass} onChange={(event) => setNewProjectDataClass(event.target.value)}>
-              <option value="public">Públicos</option>
-              <option value="internal">Internos</option>
-              <option value="confidential">Confidenciales</option>
-              <option value="restricted">Restringidos</option>
-            </select>
-          </label>
-          <p className="hint">
-            Los canales gratuitos externos solo se habilitan con una clasificación explícita y nunca para datos confidenciales o restringidos.
-          </p>
-          <div className="project-adapter-picker">
-            <div className="panel-title compact-title">
-              <KeyRound size={16} />
-              Conexiones del proyecto
-            </div>
-            <p className="hint">
-              Primero conecta al menos un canal. Despues selecciona cuales puede usar este proyecto; el hiring repartira modelos fuertes a seniors y baratos/locales a workers.
-            </p>
-            <div className="connection-summary">
-              <strong>{adapterProfiles.filter((profile) => profileState(profile).connected).length}</strong>
-              <span>conectados</span>
-              <strong>{selectedProjectAdapterIds.length}</strong>
-              <span>seleccionados</span>
-            </div>
-            {(() => {
-              // Diversidad real de proveedor entre las conexiones YA seleccionadas:
-              // es lo que determina si el quorum tendrá perspectivas independientes.
-              const providers = new Set(
-                adapterProfiles
-                  .filter((p) => selectedProjectAdapterIds.includes(p.id) && profileState(p).connected)
-                  .map((p) => profileState(p).secretProvider || String(p.provider || '').toLowerCase())
-                  .filter(Boolean),
-              );
-              return providers.size >= 2 ? (
-                <div className="quorum-ready-note ok">
-                  ✓ Quorum multi-proveedor listo — {providers.size} proveedores distintos seleccionados.
-                  Los auditores del plan tendrán perspectivas realmente independientes.
-                </div>
-              ) : (
-                <div className="quorum-ready-note">
-                  Selecciona conexiones de <strong>al menos 2 proveedores distintos</strong>: el quorum
-                  audita el plan con seniors de otro proveedor y evita el sesgo de un solo modelo.
-                  Con uno solo funcionará, pero en modo reducido.
-                </div>
-              );
-            })()}
-            <label>
-              Lead del proyecto
-              <ModelRoleSelector
-                role="lead"
-                profileId={leadAdapterProfileId}
-                model={leadModel}
-                runProfile={newProjectRunProfile}
-                criticality="medium"
-                dataClass={newProjectDataClass || 'public'}
-                onChange={({ profileId, model, candidateId }) => {
-                  setLeadAdapterProfileId(profileId);
-                  setLeadModel(model);
-                  setLeadCandidateId(candidateId);
-                  setSelectedProjectAdapterIds((current) => current.includes(profileId)
-                    ? current
-                    : [...current, profileId]);
-                }}
-              />
-            </label>
-            <p className="hint">
-              Este agente será la autoridad Lead y redactará Plan A y Plan B. Podrás cambiar su adapter y modelo después en Equipo; Codex también puede actuar como senior del quorum.
-            </p>
-            {onboardingLeadBlockReason && (
-              <p className="field-warning">Lead bloqueado: {onboardingLeadBlockReason}</p>
-            )}
-            <div className="adapter-choice-list">
-              {adapterProfiles.filter((profile) => profile.status !== 'blocked_by_provider').map((profile) => {
-                const state = profileState(profile);
-                return (
-                  <button
-                    key={profile.id}
-                    type="button"
-                    className={`adapter-choice${selectedProjectAdapterIds.includes(profile.id) ? ' active' : ''}${!state.selectable ? ' disabled' : ''}`}
-                    onClick={() => toggleProjectAdapter(profile.id)}
-                    title={profile.health?.detail || profile.health?.hint || profile.label}
-                    disabled={!state.selectable}
-                  >
-                    <strong>{profile.label}</strong>
-                    <span>{state.label}</span>
-                  </button>
-                );
-              })}
-              {!adapterProfiles.length ? <p className="muted">Cargando perfiles de adapter...</p> : null}
-            </div>
+        <ProjectSetupWizard
+          projectsRoot={projectsRoot}
+          adapters={adapterProfiles}
+          preparedAdapterIds={adapterProfiles
+            .filter((adapter) => profileState(adapter).connected)
+            .map((adapter) => adapter.id)}
+          selectedAdapterIds={selectedProjectAdapterIds}
+          onToggleAdapter={toggleProjectAdapter}
+          onCommitted={async (result) => {
+            applyWorkspace({
+              ...result,
+              configured: true,
+              projects_root: projectsRoot,
+            });
+            setLastResult(result);
+            await loadProjectData('issue:intake');
+            void waitForLeadInit();
+          }}
+        />
 
-            {/* ── Test each adapter in setup ── */}
-            {adapterProfiles.filter((p) => p.status !== 'blocked_by_provider').length > 0 && (
-              <div className="adapter-test-grid">
-                <div className="hiring-header" style={{ marginBottom: '0.3rem' }}>Probar conexión</div>
-                {adapterProfiles.filter((p) => p.status !== 'blocked_by_provider').map((profile) => {
-                  const h = profile.health;
-                  const hStatus = h?.status || 'untested';
-                  const testModel = adapterTestModels[profile.id]
-                    || String(profile.config?.model || profile.model_options?.[0]?.value || '');
-                  return (
-                    <div key={profile.id} className={`adapter-test-row health-${hStatus}`}>
-                      <span className={`adapter-health-dot dot-${hStatus}`} />
-                      <span className="adapter-test-label">{profile.label}</span>
-                      <small className="adapter-test-detail">
-                        {hStatus === 'ok' ? (h?.reason || 'OK') : hStatus === 'installed' ? 'CLI encontrado, sin auth' : hStatus === 'failed' ? (h?.reason || 'error') : 'sin test'}
-                      </small>
-                      {h?.hint && <small className="adapter-test-hint">{h.hint}</small>}
-                      {profile.model_options?.length ? (
-                        <select
-                          value={testModel}
-                          onChange={(event) => setAdapterTestModels((current) => ({
-                            ...current,
-                            [profile.id]: event.target.value,
-                          }))}
-                        >
-                          {profile.model_options.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        style={{ fontSize: '0.7rem', minHeight: '28px', padding: '0 8px' }}
-                        disabled={loading}
-                        onClick={() => void testAdapterProfile(profile.id, testModel)}
-                      >
-                        Probar
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ── Subscription CLI login ── */}
-            {cliStatus.filter((item) => item.login_supported).length > 0 && (
-              <div className="connect-more">
-                <div className="hiring-header">Conectar suscripcion CLI</div>
-                <div className="cli-status-grid">
-                  {cliStatus.filter((item) => item.login_supported).map((item) => {
-                    // Find matching adapter profile to show auth status
-                    const matchedProfile = adapterProfiles.find((p) => p.id.includes(item.id.replace('_subscription','')) || item.id.includes(p.id.replace('_subscription','')));
-                    const authOk = matchedProfile?.health?.status === 'ok';
-                    return (
-                      <div key={item.id} className={`cli-card${item.available ? (authOk ? ' ok authenticated' : ' ok') : ''}`} title={item.login_hint || item.command}>
-                        <span>{item.label}</span>
-                        <small className="cli-command">
-                          {item.available ? (authOk ? 'auth verificada ✓' : (item.login_command || item.command)) : 'CLI no encontrado'}
-                        </small>
-                        <button
-                          type="button"
-                          onClick={() => void launchCliLogin(item.id)}
-                          disabled={loading || !item.available}
-                        >
-                          {authOk ? 'Reconectar' : (item.id === 'opencode' ? 'Conectar OpenCode Zen' : 'Login')}
-                        </button>
-                        <CliSetupGuide item={item} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* ── Info: all adapters can write files via structured ops ── */}
-            {selectedProjectAdapterIds.length > 0 &&
-              !adapterProfiles.some((p) => selectedProjectAdapterIds.includes(p.id) && p.adapter_type === 'subscription_cli') && (
-              <div className="banner info" style={{ margin: '0.5rem 0 0' }}>
-                Todos los adapters (API incluida) pueden escribir archivos. CLI de suscripción añade modelos de tarifa plana sin coste por token.
-              </div>
-            )}
-
-            <p className="adapter-security-note">
-              Las API keys se guardan en el backend local cifradas con DPAPI en Windows; no quedan persistidas en el navegador.
-            </p>
-            <div className="secret-row">
-              <select value={secretProvider} onChange={(event) => setSecretProvider(event.target.value)}>
-                <option value="openai">OpenAI</option>
-                <option value="google">Google Gemini</option>
-                <option value="anthropic">Anthropic</option>
-              </select>
-              <input
-                type="password"
-                placeholder="API key"
-                value={secretValue}
-                onChange={(event) => setSecretValue(event.target.value)}
-              />
-              <button onClick={() => void saveSecret()} disabled={loading || !secretValue.trim()}>Guardar</button>
-            </div>
-          </div>
-          <div className="actions">
-            <button onClick={() => void createProject()} disabled={loading || !projectName.trim() || selectedProjectAdapterIds.length === 0 || !leadAdapterProfileId || !leadModel || Boolean(onboardingLeadBlockReason)}>
-              Crear proyecto
-            </button>
-          </div>
-          <p className="hint">Raiz de proyectos: {projectsRoot || '...'}</p>
-        </section>
       </main>
     );
   }

@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import os
+from collections.abc import Mapping
+from copy import deepcopy
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from aiteam.db.model_score_snapshots import (
     model_role_score_snapshot_hash_valid,
     persist_model_role_score_snapshot,
 )
 from aiteam.model_selection_context import contextual_model_selection
-
 
 DEFAULT_ROLLOUT_VERSION = "model_default_rollout_v1"
 MODEL_DEFAULT_ROLLOUT_ENV = "AITEAM_MODEL_DEFAULT_ROLLOUT"
@@ -84,6 +84,14 @@ def evaluate_model_default(
     for raw in result.get("candidates") or ():
         candidate = deepcopy(dict(raw))
         identity = candidate.get("identity") or {}
+        owner_preference = candidate.get("owner_preference") or {}
+        owner_allows_default = (
+            owner_preference.get("state") != "archived"
+            and (
+                "owner_selectable" not in candidate
+                or candidate.get("owner_selectable") is True
+            )
+        )
         is_current = (
             bool(current_profile_id and current_model)
             and str(identity.get("profile_id") or "") == current_profile_id
@@ -91,6 +99,7 @@ def evaluate_model_default(
         )
         candidate["auto_eligible"] = (
             (candidate.get("selection_score") or {}).get("auto_eligible") is True
+            and owner_allows_default
         )
         candidate["is_current_assignment"] = is_current
         if is_current:
@@ -119,7 +128,7 @@ def evaluate_model_default(
         selection_scope=selection_scope,
         canonical_role=str(result.get("canonical_role") or role),
         score_version=str(result.get("score_version") or "model_role_score_v2"),
-        read_model_version=str(result.get("schema_version") or "model_catalog_read_model_v1"),
+        read_model_version=str(result.get("schema_version") or "model_catalog_read_model_v2"),
         candidates=candidates,
         winner_candidate_id=winner_candidate_id,
         winner_reason=reason,

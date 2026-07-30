@@ -1,0 +1,29 @@
+{
+  "checks": {
+    "api_cost_remains_metered": true,
+    "canonical_profile_requirements": true,
+    "canonical_selector_policy_is_explicit": true,
+    "complete_fixture_covers_three_profiles": true,
+    "local_marginal_cost_is_zero": true,
+    "manual_or_uncalibrated_never_covers": true,
+    "missing_roles_are_explicit_blockers": true,
+    "quorum_requires_real_diversity": true,
+    "subscription_marginal_cost_is_zero": true,
+    "unprepared_adapters_do_not_cover": true
+  },
+  "contract_version": "guided_setup_coverage_v1",
+  "schema_version": "guided_setup_coverage_audit_v1",
+  "scope": {
+    "defaults_mutated": false,
+    "fixture_only": true,
+    "inference_attempted": false,
+    "remote_quota_consumed": false,
+    "secrets_read": false,
+    "user_configuration_mutated": false
+  },
+  "summary": {
+    "check_count": 10,
+    "coverage_contract_ready": true,
+    "passed_count": 10
+  }
+}

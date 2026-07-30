@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 7.297,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO",
+    "challenges": [
+      "El checkout actual separa SELECT y UPDATE, lo que genera una condición de carrera atómica donde dos workers pueden adjudicarse y procesar concurrentemente la misma issue asociada a un tenant_id.",
+      "Realizar la migración a SQLite como única fuente durable sin poder detener runs activas genera un riesgo de inconsistencia de estado al alternar mediante el flag hacia el camino anterior."
+    ],
+    "missing_evidence": [
+      "Pruebas de estrés y concurrencia que demuestren transacciones atómicas en el checkout de SQLite para evitar que dos workers ganen la misma issue.",
+      "Verificación empírica de la conmutación mediante el flag de rollback sin corrupción ni duplicación de estado en runs activas.",
+      "Resultados validados del gate requerido: ejecución de 100 reinicios con cero wakeups perdidos durante una ventana de 24 horas."
+    ],
+    "failure_modes": [
+      "Doble adjudicación y ejecución duplicada de una misma issue por falta de atomicidad en el paso SELECT y UPDATE.",
+      "Bloqueos o errores de concurrencia (SQLITE_BUSY) en SQLite cuando múltiples workers operan sobre issues de distintos o mismos tenant_id.",
+      "Desincronización de estado o pérdida de ejecuciones durante la conmutación dinámica con el flag hacia el camino anterior mientras existen runs activas."
+    ],
+    "recommendation": "NO-GO. Se debe reestructurar primero el checkout para que SELECT y UPDATE se ejecuten de forma atómica en SQLite, garantizando el aislamiento por tenant_id, probar la conmutación segura del flag de rollback con runs activas, y cumplir estrictamente el gate de 100 reinicios con cero wakeups perdidos durante 24 horas antes del despliegue."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

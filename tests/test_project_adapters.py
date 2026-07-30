@@ -8,6 +8,7 @@ import pytest
 
 import aiteam.project_adapters as project_adapters
 from aiteam.db.migration import SCHEMA_PATH
+from aiteam.model_owner_preferences import set_model_owner_preference
 from aiteam.project_adapters import (
     _profile_score, choose_adapter_for_role,
     choose_adapter_for_new_slot,
@@ -35,6 +36,22 @@ def _init_db(db_path: Path) -> None:
         conn.commit()
 
 
+def _automation_projection(profile_id: str, model: str) -> dict:
+    return {
+        "candidates": [
+            {
+                "candidate_id": f"{profile_id}:{model}",
+                "identity": {
+                    "profile_id": profile_id,
+                    "model_id": model,
+                },
+                "owner_selectable": True,
+                "selection_score": {"auto_eligible": True},
+            }
+        ]
+    }
+
+
 def test_reconcile_project_agent_policy_repairs_builtin_agents_only(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
     for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
@@ -44,6 +61,14 @@ def test_reconcile_project_agent_policy_repairs_builtin_agents_only(tmp_path: Pa
     (tmp_path / "project_config.json").write_text(
         json.dumps({"version": 1, "adapter_profile_ids": ["openai_api"]}),
         encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        lambda *args, **kwargs: (
+            _automation_projection("openai_api", "gpt-5.6-terra")
+            if kwargs.get("role") == "engineer"
+            else {"candidates": []}
+        ),
     )
 
     repaired = reconcile_project_agent_policy(db_path)
@@ -58,12 +83,10 @@ def test_reconcile_project_agent_policy_repairs_builtin_agents_only(tmp_path: Pa
         }
 
     assert set(repaired) == {
-        "role:lead", "role:engineer", "role:reviewer",
+        "role:engineer", "role:reviewer",
         "role:file_scout", "role:web_scout", "role:context_curator",
     }
-    assert rows["role:lead"]["adapter_type"] == "openai_api"
-    assert json.loads(rows["role:lead"]["adapter_config_json"])["model"] == "gpt-5.6-sol"
-    assert "skill_run" in json.loads(rows["role:lead"]["capabilities_json"])
+    assert rows["role:lead"]["adapter_type"] == "lead_builtin"
     assert rows["role:engineer"]["adapter_type"] == "openai_api"
     assert json.loads(rows["role:engineer"]["adapter_config_json"])["model"] == "gpt-5.6-terra"
     assert rows["role:engineer"]["supervisor_agent_id"] == "role:lead"
@@ -417,6 +440,35 @@ class TestProfileScore:
 
         assert choose_adapter_for_role("engineer", "standard", [profile]) is None
 
+    def test_shadow_hiring_skips_archived_model_without_cross_channel_leak(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+        profiles = [
+            {
+                **_make_profile("subscription_cli", channel="subscription"),
+                "id": "codex_subscription",
+                "model_options": [{"value": "gpt-5.6-terra", "available": True}],
+            },
+            {
+                **_make_profile("openai_api", channel="api"),
+                "id": "openai_api",
+                "model_options": [{"value": "gpt-5.6-terra", "available": True}],
+            },
+        ]
+        set_model_owner_preference(
+            "codex_subscription",
+            "gpt-5.6-terra",
+            state="archived",
+            reason="archivado solo en suscripción",
+        )
+
+        selected = choose_adapter_for_role("engineer", "standard", profiles)
+
+        assert selected is not None
+        assert selected["adapter_profile_id"] == "openai_api"
+        assert selected["model"] == "gpt-5.6-terra"
+
 
 # ── ensure_quorum_agents ──────────────────────────────────────────────────────
 
@@ -444,6 +496,15 @@ def _rollout_projection(profiles: list[dict], *, role: str, winner: bool) -> dic
             },
             "rank": rank,
             "selection_reason": "hermetic_rollout_canary",
+            "owner_selectable": winner and rank == 1,
+            "tier1_authority": {
+                "policy_version": "tier_role_coverage_v1",
+                "lane": (
+                    "quorum_ready" if role == "quorum_auditor" else "lead_ready"
+                ),
+                "status": "enabled" if winner and rank == 1 else "blocked",
+                "enabled": winner and rank == 1,
+            },
             "selection_score": {
                 "score_version": "model_role_score_v1",
                 "score": 90 - rank,
@@ -453,7 +514,7 @@ def _rollout_projection(profiles: list[dict], *, role: str, winner: bool) -> dic
         })
     winner_id = candidates[0]["candidate_id"] if winner and candidates else None
     return {
-        "schema_version": "model_catalog_read_model_v1",
+        "schema_version": "model_catalog_read_model_v2",
         "score_version": "model_role_score_v1",
         "canonical_role": role,
         "default": {"candidate_id": winner_id},
@@ -626,7 +687,9 @@ class TestEnsureQuorumAgents:
             for row in rows
         )
 
-    def test_assigns_distinct_providers_when_available(self, tmp_path: Path):
+    def test_assigns_distinct_providers_when_available(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         db = tmp_path / "aiteam.db"
         _init_quorum_db(db)
         profiles = [
@@ -635,6 +698,13 @@ class TestEnsureQuorumAgents:
             {**_make_profile("anthropic_sonnet", channel="api"),
              "id": "anthropic_api", "provider": "anthropic"},
         ]
+        monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "auto")
+        monkeypatch.setattr(
+            "aiteam.model_selection_context.contextual_model_selection",
+            lambda *args, **kwargs: _rollout_projection(
+                kwargs["profiles"], role=str(kwargs["role"]), winner=True
+            ),
+        )
 
         ensure_quorum_agents(db, profiles=profiles)
 
@@ -692,7 +762,9 @@ class TestEnsureQuorumAgents:
         assert rows["role:quorum_auditor_2"]["supervisor_agent_id"] == "role:lead"
         assert rows["role:quorum_auditor_1"]["seniority"] == "senior"
 
-    def test_explicit_quorum_selection_persists_owner_intent_for_only_target(self, tmp_path: Path):
+    def test_explicit_quorum_selection_persists_owner_intent_for_only_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         db = tmp_path / "aiteam.db"
         _init_quorum_db(db)
         profile = {
@@ -700,6 +772,25 @@ class TestEnsureQuorumAgents:
             "id": "codex_subscription",
             "provider": "openai-codex",
         }
+        monkeypatch.setattr(
+            "aiteam.model_selection_context.contextual_model_selection",
+            lambda *args, **kwargs: {
+                "candidates": [{
+                    "candidate_id": "codex_subscription::gpt-5.6-sol",
+                    "identity": {
+                        "profile_id": "codex_subscription",
+                        "model_id": "gpt-5.6-sol",
+                    },
+                    "owner_selectable": True,
+                    "tier1_authority": {
+                        "policy_version": "tier_role_coverage_v1",
+                        "lane": "quorum_ready",
+                        "status": "enabled",
+                        "enabled": True,
+                    },
+                }]
+            },
+        )
 
         created = ensure_quorum_agents(
             db,
@@ -732,7 +823,46 @@ class TestEnsureQuorumAgents:
         }
         assert auditor_2 is None
 
-    def test_explicit_quorum_selection_rejects_duplicate_perspective(self, tmp_path: Path):
+    def test_explicit_quorum_selection_rejects_archived_model(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+        db = tmp_path / "aiteam.db"
+        _init_quorum_db(db)
+        profile = {
+            **_make_profile("subscription_cli", channel="subscription"),
+            "id": "codex_subscription",
+            "provider": "openai-codex",
+        }
+        set_model_owner_preference(
+            "codex_subscription",
+            "gpt-5.6-sol",
+            state="archived",
+            reason="no usar en quorum",
+        )
+
+        with pytest.raises(ValueError, match="archived by the owner"):
+            ensure_quorum_agents(
+                db,
+                profiles=[profile],
+                explicit_selections={
+                    "role:quorum_auditor_1": {
+                        "profile_id": "codex_subscription",
+                        "model": "gpt-5.6-sol",
+                        "candidate_id": "codex_subscription::gpt-5.6-sol",
+                    }
+                },
+                target_agent_ids=["role:quorum_auditor_1"],
+            )
+
+        with sqlite3.connect(str(db)) as conn:
+            assert conn.execute(
+                "SELECT 1 FROM agents WHERE id='role:quorum_auditor_1'"
+            ).fetchone() is None
+
+    def test_explicit_quorum_selection_rejects_duplicate_perspective(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         db = tmp_path / "aiteam.db"
         _init_quorum_db(db)
         profiles = [
@@ -747,6 +877,31 @@ class TestEnsureQuorumAgents:
                 "provider": "openai-codex",
             },
         ]
+        monkeypatch.setattr(
+            "aiteam.model_selection_context.contextual_model_selection",
+            lambda *args, **kwargs: {
+                "candidates": [
+                    {
+                        "candidate_id": candidate_id,
+                        "identity": {
+                            "profile_id": profile_id,
+                            "model_id": model,
+                        },
+                        "owner_selectable": True,
+                        "tier1_authority": {
+                            "policy_version": "tier_role_coverage_v1",
+                            "lane": "quorum_ready",
+                            "status": "enabled",
+                            "enabled": True,
+                        },
+                    }
+                    for profile_id, model, candidate_id in (
+                        ("codex_a", "gpt-a", "a"),
+                        ("codex_b", "gpt-b", "b"),
+                    )
+                ]
+            },
+        )
         ensure_quorum_agents(
             db,
             profiles=profiles,
@@ -1008,10 +1163,6 @@ def test_new_slot_recommend_records_but_preserves_legacy_assignment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "recommend")
-    monkeypatch.setattr(
-        "aiteam.model_selection_context.contextual_model_selection",
-        lambda *args, **kwargs: {"candidates": []},
-    )
     observed: dict[str, str] = {}
 
     def no_assignment(*args, **kwargs):
@@ -1019,7 +1170,25 @@ def test_new_slot_recommend_records_but_preserves_legacy_assignment(
         return None
 
     monkeypatch.setattr(project_adapters, "select_model_default_for_new_slot", no_assignment)
-    profile = {"id": "profile-a", "adapter_type": "subscription_cli"}
+    profile = {
+        "id": "profile-a",
+        "adapter_type": "subscription_cli",
+        "config": {"model": "model-a"},
+    }
+    monkeypatch.setattr(
+        project_adapters,
+        "choose_adapter_for_role",
+        lambda *args, **kwargs: {
+            "adapter_type": "subscription_cli",
+            "adapter_profile_id": "profile-a",
+            "adapter_config": {"profile_id": "profile-a", "model": "model-a"},
+            "model": "model-a",
+        },
+    )
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        lambda *args, **kwargs: _automation_projection("profile-a", "model-a"),
+    )
 
     selected = choose_adapter_for_new_slot(
         tmp_path / "aiteam.db",
@@ -1084,6 +1253,20 @@ def test_invalid_new_slot_rollout_rolls_back_to_shadow_without_new_selector(
         "select_model_default_for_new_slot",
         lambda *args, **kwargs: pytest.fail("shadow rollback must not apply a default"),
     )
+    monkeypatch.setattr(
+        project_adapters,
+        "choose_adapter_for_role",
+        lambda *args, **kwargs: {
+            "adapter_type": "subscription_cli",
+            "adapter_profile_id": "profile-a",
+            "adapter_config": {"profile_id": "profile-a", "model": "model-a"},
+            "model": "model-a",
+        },
+    )
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        lambda *args, **kwargs: _automation_projection("profile-a", "model-a"),
+    )
 
     selected = choose_adapter_for_new_slot(
         tmp_path / "aiteam.db",
@@ -1095,6 +1278,43 @@ def test_invalid_new_slot_rollout_rolls_back_to_shadow_without_new_selector(
 
     assert selected is not None
     assert selected["adapter_profile_id"] == "profile-a"
+
+
+def test_new_slot_shadow_rejects_uncalibrated_legacy_assignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "shadow")
+    monkeypatch.setattr(
+        project_adapters,
+        "choose_adapter_for_role",
+        lambda *args, **kwargs: {
+            "adapter_type": "subscription_cli",
+            "adapter_profile_id": "profile-a",
+            "adapter_config": {"profile_id": "profile-a", "model": "model-a"},
+            "model": "model-a",
+        },
+    )
+    projection = _automation_projection("profile-a", "model-a")
+    projection["candidates"][0]["selection_score"]["auto_eligible"] = False
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        lambda *args, **kwargs: projection,
+    )
+
+    selected = choose_adapter_for_new_slot(
+        tmp_path / "aiteam.db",
+        role="reviewer",
+        seniority="senior",
+        profiles=[{"id": "profile-a", "adapter_type": "subscription_cli"}],
+        selection_scope="test:shadow:uncalibrated",
+    )
+
+    assert selected is not None
+    assert selected["adapter_type"] == "role_builtin"
+    assert (
+        selected["adapter_config"]["model_default_rollout"]["reason"]
+        == "fresh_calibration_required"
+    )
 
 
 def test_reconcile_preserves_unresolved_auto_default_without_legacy_repair(

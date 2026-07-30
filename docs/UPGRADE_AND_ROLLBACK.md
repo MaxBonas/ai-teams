@@ -91,8 +91,9 @@ Hasta entonces conserva intacta la instalación anterior y todos los backups.
 
 Para una aceptación automatizada y desechable del ZIP usa
 `scripts/accept_release_archive.py` desde un checkout confiable. El wrapper
-realiza este recorrido, verifica los 17 pasos canónicos y elimina instalación y
-fixture desde un proceso externo. `--allow-preview` nunca autoriza promoción.
+realiza este recorrido, verifica los 18 pasos actuales —los 17 originales más
+el gate redacted de versiones CLI— y elimina instalación y fixture desde un
+proceso externo. `--allow-preview` nunca autoriza promoción.
 
 ## 6. Rollback
 

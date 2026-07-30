@@ -1,0 +1,49 @@
+{
+  "board": {
+    "actionable_count": 18,
+    "complete_count": 0,
+    "identity_count": 1666,
+    "red_adapter_row_count": 1658,
+    "row_count": 1666,
+    "stage_sequence": [
+      "configuration_auth",
+      "catalog_version",
+      "adapter_health",
+      "contract_probe",
+      "role_canary",
+      "multi_family_calibration",
+      "promotion"
+    ]
+  },
+  "checks": {
+    "api_attachment_parity": true,
+    "exact_role_coverage": true,
+    "full_evidence_promotes": true,
+    "green_unprobed_stops_at_contract": true,
+    "identities_unique": true,
+    "owner_policy_prevents_spend": true,
+    "promotion_requires_all_seven": true,
+    "red_adapter_cannot_bypass": true,
+    "red_historical_remediates_health": true,
+    "source_immutable": true
+  },
+  "schema_version": "model_calibration_gate_board_audit_v1",
+  "scope": {
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "live_catalog_identifiers_emitted": false,
+    "paths_emitted": false,
+    "secrets_read": false
+  },
+  "source": {
+    "candidate_count": 98,
+    "content_hash": "b1d044689ab71965491cb4648c7c5a97e01340cf22950b1e55d05599db171019",
+    "role_row_count": 1666,
+    "schema_version": "model_catalog_read_model_v2"
+  },
+  "summary": {
+    "check_count": 10,
+    "passed_count": 10,
+    "promotion_ready": true
+  }
+}

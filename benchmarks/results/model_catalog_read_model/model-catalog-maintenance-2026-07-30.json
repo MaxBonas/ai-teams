@@ -1,0 +1,73 @@
+{
+  "cadence": {
+    "hashes_valid": true,
+    "initial_persisted": true,
+    "monthly_trigger_observed": true,
+    "next_month_persisted": true,
+    "same_month_idempotent": true
+  },
+  "dimensions": [
+    {
+      "dimension": "model",
+      "hash_valid": true,
+      "persisted": true,
+      "trigger_observed": true
+    },
+    {
+      "dimension": "cli",
+      "hash_valid": true,
+      "persisted": true,
+      "trigger_observed": true
+    },
+    {
+      "dimension": "price",
+      "hash_valid": true,
+      "persisted": true,
+      "trigger_observed": true
+    },
+    {
+      "dimension": "quota",
+      "hash_valid": true,
+      "persisted": true,
+      "trigger_observed": true
+    },
+    {
+      "dimension": "prompt",
+      "hash_valid": true,
+      "persisted": true,
+      "trigger_observed": true
+    },
+    {
+      "dimension": "tool",
+      "hash_valid": true,
+      "persisted": true,
+      "trigger_observed": true
+    },
+    {
+      "dimension": "contract",
+      "hash_valid": true,
+      "persisted": true,
+      "trigger_observed": true
+    }
+  ],
+  "schema_version": "model_catalog_maintenance_audit_v1",
+  "scope": {
+    "fixture_database_only": true,
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "paths_emitted": false,
+    "retention": "append_only_no_age_deletion",
+    "secrets_read": false
+  },
+  "source": {
+    "candidate_count": 98,
+    "content_hash": "6705c236843c3a448066dbc6e2266753992fa70b9c1ff186ef43a29cefa3182a",
+    "schema_version": "model_catalog_read_model_v2",
+    "score_version": "model_role_score_v2"
+  },
+  "summary": {
+    "cadence_ready": true,
+    "dimensions_ready": true,
+    "promotion_ready": true
+  }
+}

@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
+from aiteam.adapters.registry import (
+    AdapterDescriptor,
+    ExecutionResult,
+    StaticAdapterRuntime,
+)
 from aiteam.adapters.work_contract import (
     OPENAI_SUBMIT_WORK_SCHEMA,
     SUBMIT_WORK_SCHEMA,
@@ -22,7 +26,7 @@ from aiteam.adapters.work_contract import (
     parse_submit_work,
     tier3_causal_report_instruction,
 )
-from aiteam.platform_runtime import resolve_executable, run_command
+from aiteam.platform_runtime import resolve_provider_cli, run_command
 from aiteam.quorum_quality import quorum_audit_contract_instruction
 
 # Output schema for Codex CLI. Includes an `ops` array so codex agents can
@@ -816,14 +820,9 @@ def _resolve_cli_cmd(name: str) -> str:
     On Windows, npm global scripts install as ``<name>.cmd`` wrappers.
     ``shutil.which('codex')`` may not find them; we try ``codex.cmd`` first.
     """
-    known: list[Path] = []
-    if os.name == "nt" and name.lower() == "agy":
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        if local_app_data:
-            known.append(Path(local_app_data) / "agy" / "bin" / "agy.exe")
-    return resolve_executable(
+    return resolve_provider_cli(
         name,
-        known_candidates=known,
+        [name],
         os_id="windows" if os.name == "nt" else "linux",
         which=shutil.which,
     ) or name

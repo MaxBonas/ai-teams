@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "same_provider_version": true,
+  "role": "test_designer",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "job_state_machine_mutation",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-job-state-cli-0.146.0-seed-1.json",
+    "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-job-state-cli-0.146.0-seed-2.json",
+    "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-job-state-cli-0.146.0-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-job-state-cli-0.146.0-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "58821904868eacc209c86392798f852c49581b2a7bc8a759157b77011aee9bb6"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-job-state-cli-0.146.0-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "8d0fbed1afcbff1c5af0fe175629f1695a57c0dfc6d0703b31399d871c7b0a5e"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-job-state-cli-0.146.0-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "b800478bc62674bf2013fd2b04f3202802b556afc248dac36c0c3d64ed9e0ea6"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true,
+    "same_provider_version": true
+  },
+  "checks_passed": 24,
+  "checks_total": 24,
+  "wall_seconds_median": 62.718,
+  "wall_seconds_range": [
+    60.641,
+    78.359
+  ],
+  "usage": {
+    "cached_input_tokens": 290816,
+    "input_tokens": 376072,
+    "output_tokens": 7559,
+    "reasoning_output_tokens": 1365,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "integración multi-módulo",
+      "tests de browser",
+      "property-based testing"
+    ]
+  }
+}

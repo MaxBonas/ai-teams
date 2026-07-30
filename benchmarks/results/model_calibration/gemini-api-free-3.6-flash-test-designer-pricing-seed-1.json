@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "gemini_api_free",
+  "model": "gemini-3.6-flash",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "pricing_boundary_mutation",
+  "role": "test_designer",
+  "seed": 1,
+  "seconds": 10.828,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": false,
+    "all_hidden_mutants_killed": false,
+    "durable_report_done": false,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 5,
+      "stdout": "\nno tests ran in 0.02s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_zero_quantity": {
+        "killed": true,
+        "exit_code": 5
+      },
+      "allows_negative_price": {
+        "killed": true,
+        "exit_code": 5
+      },
+      "allows_discount_over_100": {
+        "killed": true,
+        "exit_code": 5
+      },
+      "ignores_discount": {
+        "killed": true,
+        "exit_code": 5
+      },
+      "ignores_quantity": {
+        "killed": true,
+        "exit_code": 5
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_pricing.py"
+  ],
+  "run": {
+    "id": "run:26f49e34-e8ec-445c-9090-095cf52b2c60",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gemini-3.6-flash",
+    "provider": "google",
+    "channel": "api",
+    "usage_json": "{\"candidatesTokenCount\": 262, \"promptTokenCount\": 3761, \"promptTokensDetails\": [{\"modality\": \"TEXT\", \"tokenCount\": 3761}], \"serviceTier\": \"standard\", \"thoughtsTokenCount\": 2102, \"totalTokenCount\": 6125}"
+  },
+  "report": null,
+  "usage": {
+    "candidatesTokenCount": 262,
+    "promptTokenCount": 3761,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 3761
+      }
+    ],
+    "serviceTier": "standard",
+    "thoughtsTokenCount": 2102,
+    "totalTokenCount": 6125
+  },
+  "workspace": "runtime/benchmarks/gemini-free-test-designer-pricing-seed-1",
+  "ok": false
+}

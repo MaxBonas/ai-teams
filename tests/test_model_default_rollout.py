@@ -113,6 +113,30 @@ def test_shadow_no_winner_never_invents_fallback(
     assert decision["assignment_changed"] is False
 
 
+def test_archived_candidate_cannot_become_default_from_stale_projection(
+    tmp_path: Path,
+) -> None:
+    projection = _projection()
+    projection["candidates"][0]["owner_preference"] = {
+        "state": "archived",
+        "reason": "owner",
+    }
+    projection["candidates"][0]["owner_selectable"] = False
+
+    decision = evaluate_model_default(
+        _db(tmp_path),
+        selection_scope="new-slot:reviewer",
+        role="reviewer",
+        projection=projection,
+        rollout="auto",
+        new_slot=True,
+    )
+
+    assert decision["winner_candidate_id"] is None
+    assert decision["snapshot"]["auto_applied"] is False
+    assert decision["snapshot"]["candidates"][0]["auto_eligible"] is False
+
+
 def test_default_intent_requires_hash_valid_auto_applied_eligible_snapshot(
     tmp_path: Path,
 ) -> None:

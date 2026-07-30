@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 
 from aiteam.adapters import openai_compatible_adapter
+from aiteam.adapters.http_retry import ApiHttpError
 from aiteam.adapters.openai_compatible_adapter import OpenAICompatibleApiRuntime
 from aiteam.adapters.registry import AdapterDescriptor
-from aiteam.adapters.http_retry import ApiHttpError
 
 
 def test_free_byok_runtime_uses_exact_endpoint_model_and_zero_marginal_cost(monkeypatch):
@@ -128,12 +128,17 @@ def test_compatible_model_without_strict_support_uses_json_object_mode(monkeypat
     monkeypatch.setattr(openai_compatible_adapter, "_post_json", fake_post)
     runtime = OpenAICompatibleApiRuntime(
         AdapterDescriptor(adapter_type="openai_compatible_api", channel="api")
-    ).with_config({"model": "qwen/qwen3.6-27b", "strict_models": ["openai/gpt-oss-120b"]})
+    ).with_config({
+        "model": "qwen/qwen3.6-27b",
+        "strict_models": ["openai/gpt-oss-120b"],
+        "reasoning_format": "hidden",
+    })
 
     result = runtime.execute({}, {"GROQ_API_KEY": "secret"})
 
     assert result.status == "completed"
     assert captured["response_format"] == {"type": "json_object"}
+    assert captured["reasoning_format"] == "hidden"
 
 
 def test_json_object_model_repairs_invalid_contract_once_and_counts_usage(monkeypatch):

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "auth_rollout_incident",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 8.156,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO / ROLLBACK. Se debe ejecutar el rollback inmediato a Auth v1 debido a que la cohorte del 5 % en Auth v2 presenta una tasa de error del 2,4 %, superando el límite de 1,0 % durante 10 minutos, sumado a la existencia de la dependencia pendiente de rotación de secrets.",
+    "challenges": [
+      "La propuesta implícita de mantener Auth v2 al 5 % viola directamente el criterio de estabilidad al registrar una tasa de error de 2,4 %, sustancialmente superior al límite tolerado del 1,0 % sostenido durante 10 minutos.",
+      "Avanzar o sostener el despliegue sin haber completado la rotación de secrets pendiente expone el sistema a fallos de autenticación e inconsistencias de estado."
+    ],
+    "missing_evidence": [
+      "Logs y métricas que verifiquen fehacientemente la recuperación y la reducción de la tasa de error por debajo del límite del 1,0 % exigido por el Reviewer.",
+      "Evidencia de la ejecución exitosa de la rotación de secrets como dependencia pendiente."
+    ],
+    "failure_modes": [
+      "Persistencia e incremento del impacto de errores de autenticación (2,4 %) sobre la cohorte del 5 % de usuarios expuestos a Auth v2.",
+      "Bloqueo de la aceptación por parte del Reviewer al no contar con logs y métricas de recuperación.",
+      "Indisponibilidad o vulnerabilidades operativas derivadas de operar con la rotación de secrets pendiente."
+    ],
+    "recommendation": "El Release Engineer, en calidad de owner, debe ejecutar el rollback inmediato hacia Auth v1 (disponible). La aprobación por parte del Reviewer queda supeditada a que la rotación de secrets sea completada y a que la evidencia de logs y métricas demuestre la recuperación efectiva con una tasa de error inferior al 1,0 %."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": true,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

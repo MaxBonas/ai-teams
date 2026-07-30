@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 14.782,
+  "usage": {
+    "input_tokens": 16715,
+    "cached_input_tokens": 0,
+    "output_tokens": 621
+  },
+  "response": {
+    "verdict": "NO-GO: la propuesta no demuestra checkout atómico ni migración segura mientras continúan runs activas.",
+    "challenges": [
+      "Contraejemplo: dos workers ejecutan SELECT antes de sus UPDATE y ambos procesan la misma issue del mismo tenant_id.",
+      "Contraejemplo: durante la migración, una run activa puede operar por el camino anterior mientras otra usa el nuevo, produciendo reclamaciones duplicadas o estados incompatibles.",
+      "SQLite como única fuente durable exige demostrar que cada transición relevante —checkout, wakeup, finalización y recuperación— se confirma transaccionalmente.",
+      "El flag de rollback no garantiza reversión segura si existen operaciones en curso o datos escritos con semánticas distintas.",
+      "El gate de 100 reinicios con cero wakeups perdidos durante 24 horas no cubre explícitamente duplicados, aislamiento entre tenants, contención ni rollback."
+    ],
+    "missing_evidence": [
+      "Diseño y prueba de un checkout atómico que impida que dos workers ganen la misma issue.",
+      "Invariantes verificables por tenant_id y evidencia de ausencia de cruces entre tenants.",
+      "Protocolo de migración compatible con runs activas, incluyendo convivencia de versiones y punto de corte.",
+      "Definición exacta de wakeup perdido, instrumentación, carga, concurrencia y criterio estadístico del gate.",
+      "Resultados de 100 reinicios, observados durante 24 horas, con cero wakeups perdidos.",
+      "Pruebas de duplicación, recuperación tras crash en cada transición, locks/timeouts de SQLite y reintentos.",
+      "Procedimiento probado para activar el flag y volver al camino anterior sin corrupción, pérdida ni doble procesamiento.",
+      "Responsables, aceptores y disparadores explícitos de escalación o rollback."
+    ],
+    "failure_modes": [
+      "Doble checkout y ejecución duplicada de una issue.",
+      "Pérdida de wakeups por crash entre persistencia, reclamación y notificación.",
+      "Bloqueos, SQLITE_BUSY, starvation o latencia extrema bajo múltiples workers.",
+      "Lecturas o actualizaciones asociadas al tenant_id incorrecto.",
+      "Estados divergentes durante la convivencia del camino nuevo y el anterior.",
+      "Rollback parcial con runs activas y registros incompatibles.",
+      "Falso positivo del gate: cero wakeups perdidos, pero duplicados o corrupción presentes.",
+      "Reprocesamiento indefinido o issue huérfana después de un reinicio."
+    ],
+    "recommendation": "NO-GO. Implementar checkout atómico en SQLite, formalizar invariantes por tenant_id, probar migración y rollback con runs activas y ampliar el gate. Autorizar solo tras completar 100 reinicios con cero wakeups perdidos durante 24 horas y demostrar además cero checkouts duplicados, cero cruces entre tenants y rollback seguro mediante el flag; ante cualquier violación, escalar y volver al camino anterior."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:39:14.489560Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:14.489596Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:14.490229Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:14.492690Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:14.496568Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:39:15.549477Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:15.549503Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:15.550056Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:15.552363Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

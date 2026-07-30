@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from aiteam.db.migration import SCHEMA_PATH
+from aiteam.model_owner_preferences import set_model_owner_preference
 from aiteam.lead_intake import (
     _suggested_issues_for_profile,
     apply_accepted_team_proposal,
@@ -225,6 +226,56 @@ class TestApplyProposalRoutingOverride:
         }
 
         with pytest.raises(ValueError, match="candidate_id does not match"):
+            apply_accepted_team_proposal(
+                db_path,
+                parent_issue_id="issue:root",
+                proposal=proposal,
+                source_run_id="r1",
+            )
+
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT adapter_type, adapter_config_json FROM agents "
+                "WHERE id='role:reviewer'"
+            ).fetchone()
+        assert row == ("manual", "{}")
+
+    def test_accepted_team_rejects_archived_model_before_mutating_agent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+        db_path = tmp_path / "db.sqlite"
+        _init_db(db_path)
+        write_project_adapter_policy(tmp_path, profile_ids=["openai_api"])
+        record_model_health(
+            "openai_api", "gpt-5.6-terra", available=True, reason="test_fixture"
+        )
+        set_model_owner_preference(
+            "openai_api",
+            "gpt-5.6-terra",
+            state="archived",
+            reason="no contratar",
+        )
+        proposal = {
+            "profile": "full_team",
+            "direct_work": False,
+            "proposed_team": [{
+                "id": "role:reviewer",
+                "role": "reviewer",
+                "name": "Reviewer",
+                "seniority": "standard",
+                "adapter_type": "openai_api",
+                "adapter_config": {
+                    "profile_id": "openai_api",
+                    "model": "gpt-5.6-terra",
+                },
+                "capabilities": ["repo_read"],
+                "supervisor_agent_id": "role:lead",
+            }],
+            "suggested_issues": [],
+        }
+
+        with pytest.raises(ValueError, match="archived by the owner"):
             apply_accepted_team_proposal(
                 db_path,
                 parent_issue_id="issue:root",

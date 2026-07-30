@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.6",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 9.234,
+  "usage": {},
+  "response": {
+    "objective": "Eliminar la condición de carrera en tenant_queue_migration unificando la selección y actualización en SQLite como única fuente durable por tenant_id, permitiendo que la migración se realice sin detener runs activas, manteniendo un feature flag de reversión al camino anterior y alcanzando la aprobación del gate mediante 100 reinicios con cero wakeups perdidos durante una ventana de 24 horas.",
+    "work_items": [
+      {
+        "id": "WI-001",
+        "title": "Refactorizar checkout atómico en SQLite por tenant_id",
+        "owner": "Lead Backend Engineer",
+        "acceptor": "Lead Architect",
+        "dependencies": [],
+        "boundary": "SQLite durable storage y delimitación por tenant_id",
+        "description": "Unificar la lógica separada de SELECT y UPDATE en una operación atómica dentro de SQLite para evitar que dos workers ganen la misma issue."
+      },
+      {
+        "id": "WI-002",
+        "title": "Implementar e integrar Feature Flag de rollback",
+        "owner": "Feature Flag / Infrastructure Owner",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-001"
+        ],
+        "boundary": "Ruta de conmutación de código en ejecución activa",
+        "description": "Habilitar un flag de control que permita revertir inmediatamente la ejecución al camino anterior sin interrumpir runs activas."
+      },
+      {
+        "id": "WI-003",
+        "title": "Despliegue sin interrupción de runs activas",
+        "owner": "Operations Lead",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-001",
+          "WI-002"
+        ],
+        "boundary": "Ejecución continua de runs activas durante migración",
+        "description": "Ejecutar el cambio de versión garantizando que las tareas en curso finalicen o continúen sin cortes ni pérdida de estado."
+      }
+    ],
+    "risks": [
+      {
+        "id": "RSK-001",
+        "description": "Adjudicación duplicada de issues debido a la separación de SELECT y UPDATE entre workers concurrentes.",
+        "mitigation": "Consolidar el checkout en una sola transacción o sentencia atómica respaldada únicamente por SQLite.",
+        "owner": "Lead Backend Engineer"
+      },
+      {
+        "id": "RSK-002",
+        "description": "Detección de inconsistencias o fallo durante el despliegue con impacto en runs activas.",
+        "mitigation": "Uso inmediato del flag de reversión para conmutar al camino anterior sin detener ejecuciones.",
+        "owner": "Operations Lead"
+      }
+    ],
+    "verification": {
+      "gate_condition": "Ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas",
+      "metrics": [
+        {
+          "metric": "reinicios",
+          "target_value": 100,
+          "unit": "count",
+          "window": "24 hours",
+          "required_action": "Completar exitosamente 100 reinicios de la infraestructura/servicio sin errores de estado"
+        },
+        {
+          "metric": "wakeups_perdidos",
+          "target_value": 0,
+          "unit": "count",
+          "window": "24 hours",
+          "required_action": "Validar mediante auditoría de logs que no se haya omitido ningún wakeup en el periodo"
+        }
+      ],
+      "rollback_path": "Activar el flag de reversión para alternar instantáneamente al camino anterior sin detener ninguna run activa."
+    },
+    "escalation": {
+      "triggers": [
+        {
+          "condition": "Registro de más de 0 wakeups perdidos durante la prueba del gate o la ventana de 24 horas",
+          "action": "Disparar reversión mediante el flag al camino anterior y notificar inmediatamente al Lead para auditoría de causa raíz"
+        },
+        {
+          "condition": "Detección de dos workers ganando la misma issue (falla de atomicidad por tenant_id)",
+          "action": "Conmutar al flag de reversión anterior, congelar el despliegue y reasignar WI-001 al Lead Architect"
+        }
+      ]
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

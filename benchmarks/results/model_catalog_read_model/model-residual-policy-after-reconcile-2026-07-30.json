@@ -1,0 +1,65 @@
+{
+  "checks": {
+    "all_candidates_visible_in_gate_board": true,
+    "candidate_identities_unique": true,
+    "classification_sources_valid": true,
+    "classification_total_matches_catalog": true,
+    "cross_profile_identity_preserved": true,
+    "low_and_archived_not_actionable": true,
+    "pending_safe_before_reconcile": true,
+    "preference_entries_resolve_exactly": true
+  },
+  "gate_projection": {
+    "actionable_by_classification": {
+      "explicit": 18
+    },
+    "proactive_by_classification": {
+      "explicit": 20
+    },
+    "promotion_ready_by_classification": {
+      "explicit": 0
+    },
+    "role_row_count": 1666,
+    "rows_by_classification": {
+      "explicit": 1666
+    }
+  },
+  "inventory": {
+    "candidate_count": 98,
+    "candidates_by_state": {
+      "archived": 6,
+      "high": 13,
+      "low": 79
+    },
+    "cross_profile_slug_collision_count": 10,
+    "explicit_candidate_count": 98,
+    "invalid_source_count": 0,
+    "orphan_preference_count": 0,
+    "pending_by_profile": {},
+    "pending_candidate_count": 0,
+    "preference_entry_count": 98,
+    "unique_identity_count": 98
+  },
+  "schema_version": "model_residual_policy_inventory_v1",
+  "scope": {
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "model_ids_emitted": false,
+    "paths_emitted": false,
+    "preferences_mutated": false,
+    "secrets_read": false
+  },
+  "source": {
+    "preference_schema_version": "model_owner_preferences_v1",
+    "read_model_content_hash": "9167be6d38fd0ed6aae51b50895f4177f9afb42571bc4a2f92ebb8dc4af4d524",
+    "read_model_schema_version": "model_catalog_read_model_v2"
+  },
+  "summary": {
+    "check_count": 8,
+    "inventory_ready": true,
+    "next_action": "none",
+    "passed_count": 8,
+    "pending_candidate_count": 0,
+    "policy_complete": true
+  }
+}

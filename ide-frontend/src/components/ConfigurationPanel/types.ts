@@ -135,3 +135,55 @@ export interface SecretInfo {
   name: string;
   has_secret: boolean;
 }
+
+export type ProjectHygieneStatus =
+  | 'not_configured'
+  | 'root_missing'
+  | 'review_required'
+  | 'legacy_artifacts_detected'
+  | 'clean';
+
+export interface ProjectHygiene {
+  schema_version: 'project_hygiene_v1';
+  scope: {
+    read_only: true;
+    paths_emitted: false;
+    symlinks_followed: false;
+    database_opened: false;
+    git_invoked: false;
+  };
+  root: {
+    configured: boolean;
+    exists: boolean;
+    reparse_point: boolean;
+    fingerprint: string | null;
+  };
+  status: ProjectHygieneStatus;
+  requires_attention: boolean;
+  counts: {
+    direct_directories: number;
+    aiteam_projects: number;
+    legacy_numbered: number;
+    legacy_tombstones: number;
+    staging_leftovers: number;
+    reparse_points: number;
+    scan_errors: number;
+  };
+  legacy_families: Array<{ family: string; count: number }>;
+  ownership: {
+    aiteam_identity_is_not_cleanup_authority: true;
+    folders_without_aiteam_identity_are_personal_protected: true;
+  };
+  lifecycle: {
+    automatic_cleanup_installed: false;
+    startup_cleanup_installed: false;
+    ttl_cleanup_installed: false;
+    doctor_can_mutate: false;
+  };
+  recommended_action: {
+    code: string;
+    description: string;
+    requires_human: boolean;
+    mutates_state: false;
+  };
+}

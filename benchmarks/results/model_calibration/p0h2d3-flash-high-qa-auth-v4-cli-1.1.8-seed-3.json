@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "provider_version": "1.1.8",
+  "contract_version": "adversarial_qa_fix_cycle_v4",
+  "case_family": "authorization_boundary",
+  "role": "qa",
+  "seed": 3,
+  "checks": {
+    "attack_run_completed": true,
+    "attack_report_changes_requested": true,
+    "production_unchanged_during_attack": true,
+    "adversarial_test_contract": true,
+    "adversarial_tests_fail_before_fix": true,
+    "verification_run_completed": true,
+    "adversarial_tests_pass_after_fix": true,
+    "verification_report_approved": true,
+    "verification_issue_done": true,
+    "passing_adversarial_tests_removed": true,
+    "fixed_production_intact": true
+  },
+  "attack_evaluation": {
+    "anchors": {
+      "imports_target": true,
+      "exact_tenant_id_field": true,
+      "cross_tenant": true,
+      "inactive_actor": true,
+      "private_non_admin": true,
+      "negative_assertion": true
+    },
+    "anchors_retained": 6,
+    "anchors_total": 6,
+    "contract_passed": true
+  },
+  "failing_test_run": {
+    "executed": true,
+    "exit_code": 1,
+    "stdout": "FFF                                                                      [100%]\n================================== FAILURES ===================================\n______________________________ test_tenant_cross ______________________________\n\n    def test_tenant_cross():\n        # cruce tenant-a/tenant-b\n        actor = {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"member\"}\n        resource = {\"tenant_id\": \"tenant-b\", \"private\": False}\n>       assert can_access(actor, resource) is False\nE       AssertionError: assert True is False\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': True, 'role': 'member'}, {'tenant_id': 'tenant-b', 'private': False})\n\ntests\\test_adversarial_auth.py:7: AssertionError\n_____________________________ test_actor_inactive _____________________________\n\n    def test_actor_inactive():\n        # actor inactive\n        actor = {\"tenant_id\": \"tenant-a\", \"active\": False, \"role\": \"member\"}\n        resource = {\"tenant_id\": \"tenant-a\", \"private\": False}\n>       assert can_access(actor, resource) is False\nE       AssertionError: assert True is False\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': False, 'role': 'member'}, {'tenant_id': 'tenant-a', 'private': False})\n\ntests\\test_adversarial_auth.py:13: AssertionError\n__________________________ test_private_role_member ___________________________\n\n    def test_private_role_member():\n        # private con role member\n        actor = {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"member\"}\n        resource = {\"tenant_id\": \"tenant-a\", \"private\": True}\n>       assert can_access(actor, resource) is False\nE       AssertionError: assert True is False\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': True, 'role': 'member'}, {'tenant_id': 'tenant-a', 'private': True})\n\ntests\\test_adversarial_auth.py:19: AssertionError\n=========================== short test summary info ===========================\nFAILED tests\\test_adversarial_auth.py::test_tenant_cross - AssertionError: as...\nFAILED tests\\test_adversarial_auth.py::test_actor_inactive - AssertionError: ...\nFAILED tests\\test_adversarial_auth.py::test_private_role_member - AssertionEr...\n3 failed in 0.08s\n",
+    "stderr": ""
+  },
+  "passing_test_run": {
+    "executed": true,
+    "exit_code": 0,
+    "stdout": "...                                                                      [100%]\n3 passed in 0.06s\n",
+    "stderr": ""
+  },
+  "phases": {
+    "attack": {
+      "seconds": 68.172,
+      "issue_status": "done",
+      "run": {
+        "id": "run:e63497ea-b9a7-4391-98d0-99e2b3f116b7",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gemini-3.5-flash-high",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "usage_json": "{}"
+      },
+      "report": {
+        "id": "c7417f0e-aaa9-46e5-b00f-def2cbc0b1c1",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:e63497ea-b9a7-4391-98d0-99e2b3f116b7",
+        "agent_role": "qa",
+        "result": "changes_requested",
+        "issue_status": "done",
+        "next_owner": "engineer",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "tests/test_adversarial_auth.py + pytest running failed with 3 AssertionError(s). tenant-a/tenant-b cross, inactive actor, and private resource with member role all incorrectly allowed by can_access return True.",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests/test_adversarial_auth.py + pytest running failed with 3 AssertionError(s). tenant-a/tenant-b cross, inactive actor, and private resource with member role all incorrectly allowed by can_access return True.\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 21:58:02"
+      },
+      "comments": [
+        {
+          "id": "f17777c7-dd2a-4b9b-849a-9fdf4647a7d1",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:e63497ea-b9a7-4391-98d0-99e2b3f116b7",
+          "body": "Added adversarial tests for can_access which correctly failed, demonstrating that the current production code incorrectly allows access across tenants, for inactive actors, and for member roles on private resources. Requesting changes.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 21:58:02",
+          "updated_at": "2026-07-29 21:58:02"
+        },
+        {
+          "id": "a8060286-2ee1-4cb8-b0f8-0aa36f644b30",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:e63497ea-b9a7-4391-98d0-99e2b3f116b7",
+          "body": "---AGENT-REPORT---\nrole: qa\nresult: changes_requested\nissue_status: done\nnext_owner: engineer\nblocker: none\nevidence: tests/test_adversarial_auth.py + pytest running failed with 3 AssertionError(s). tenant-a/tenant-b cross, inactive actor, and private resource with member role all incorrectly allowed by can_access return True.",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 21:58:02",
+          "updated_at": "2026-07-29 21:58:02"
+        }
+      ]
+    },
+    "verify_fix": {
+      "seconds": 76.015,
+      "issue_status": "done",
+      "run": {
+        "id": "run:b882366a-41e3-4031-a4eb-cbe5cac534e4",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gemini-3.5-flash-high",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "usage_json": "{}"
+      },
+      "report": {
+        "id": "6f7a2ea2-64b9-4936-942f-497e550aa32a",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:b882366a-41e3-4031-a4eb-cbe5cac534e4",
+        "agent_role": "qa",
+        "result": "approved",
+        "issue_status": "done",
+        "next_owner": "lead",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "tests/test_adversarial_auth.py removed. Test runner reported exit_code=0 (3 passed). Attacked boundaries: cross-tenant access (tenant-a vs tenant-b), inactive actor, and member role on private resource.",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests/test_adversarial_auth.py removed. Test runner reported exit_code=0 (3 passed). Attacked boundaries: cross-tenant access (tenant-a vs tenant-b), inactive actor, and member role on private resource.\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"approved\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 21:59:19"
+      },
+      "comments": [
+        {
+          "id": "c4c1916a-23bf-4f7f-9281-b0d48bda711a",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:b882366a-41e3-4031-a4eb-cbe5cac534e4",
+          "body": "Verified the fix against the adversarial tests. All tests passed on fixed code, so the passing tests have been removed and the issue approved.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 21:59:19",
+          "updated_at": "2026-07-29 21:59:19"
+        },
+        {
+          "id": "1e80509c-68ff-4091-8c1c-9d833b32dc56",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:b882366a-41e3-4031-a4eb-cbe5cac534e4",
+          "body": "Deterministic test runner verified that all 3 adversarial tests pass against the fixed code. The passing tests have been removed as required by the contract.\n\n---AGENT-REPORT---\nrole: qa\nresult: approved\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: tests/test_adversarial_auth.py removed. Test runner reported exit_code=0 (3 passed). Attacked boundaries: cross-tenant access (tenant-a vs tenant-b), inactive actor, and member role on private resource.",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 21:59:19",
+          "updated_at": "2026-07-29 21:59:19"
+        }
+      ]
+    }
+  },
+  "usage": {},
+  "workspace": "runtime/bench/p0h2d3-flash-high-auth-v4-s3",
+  "ok": true
+}

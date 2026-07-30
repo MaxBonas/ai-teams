@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "same_provider_version": true,
+  "role": "test_designer",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "pricing_boundary_mutation",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-pricing-cli-0.146.0-seed-1.json",
+    "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-pricing-cli-0.146.0-seed-2-attempt-2.json",
+    "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-pricing-cli-0.146.0-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-pricing-cli-0.146.0-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "74981b70588857b082cc68a7db6c3143e5df07d96489eb2daf3147a444deae06"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-pricing-cli-0.146.0-seed-2-attempt-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "30ec703f287b6b8b93fba7e843f40262cff06adaca9f9189254ce4a4c0011b68"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-terra-test-designer-pricing-cli-0.146.0-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "354bf7ef6241d6197c236ccb9d0dd52b6316544a0272aba6eefa9ec0fe207535"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true,
+    "same_provider_version": true
+  },
+  "checks_passed": 24,
+  "checks_total": 24,
+  "wall_seconds_median": 60.437,
+  "wall_seconds_range": [
+    56.313,
+    66.25
+  ],
+  "usage": {
+    "cached_input_tokens": 238592,
+    "input_tokens": 299784,
+    "output_tokens": 6780,
+    "reasoning_output_tokens": 1426,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "integración multi-módulo",
+      "tests de browser",
+      "property-based testing"
+    ]
+  }
+}

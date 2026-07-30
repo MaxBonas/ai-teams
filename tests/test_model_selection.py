@@ -1,7 +1,10 @@
 from copy import deepcopy
 
 from aiteam.model_role_scoring import MODEL_ROLE_SCORE_VERSION
-from aiteam.model_selection import build_contextual_model_selection, same_profile_fallback
+from aiteam.model_selection import (
+    build_contextual_model_selection,
+    same_profile_fallback,
+)
 
 
 def _score(candidate_id: str, value: float, *, eligible: bool = True) -> dict:
@@ -63,6 +66,7 @@ def test_same_profile_fallback_uses_canonical_rank_with_recovery_continuity() ->
             "rank": rank,
             "selection_reason": f"rank {rank}",
             "selection_score": {
+                "auto_eligible": automatic,
                 "hard_gates": {"automatic_policy": {"passed": automatic}}
             },
         }
@@ -94,6 +98,7 @@ def test_same_profile_fallback_never_crosses_profile_or_automatic_policy() -> No
             "owner_selectable": True,
             "rank": 1,
             "selection_score": {
+                "auto_eligible": True,
                 "hard_gates": {"automatic_policy": {"passed": True}}
             },
         },
@@ -104,6 +109,7 @@ def test_same_profile_fallback_never_crosses_profile_or_automatic_policy() -> No
             "owner_selectable": True,
             "rank": 2,
             "selection_score": {
+                "auto_eligible": False,
                 "hard_gates": {"automatic_policy": {"passed": False}}
             },
         },
@@ -112,6 +118,38 @@ def test_same_profile_fallback_never_crosses_profile_or_automatic_policy() -> No
     assert same_profile_fallback(
         projection, profile_id="profile", failed_model="gpt-failed"
     ) is None
+
+
+def test_same_profile_fallback_rejects_owner_selectable_but_uncalibrated() -> None:
+    projection = {
+        "candidates": [
+            {
+                "candidate_id": "profile::uncalibrated",
+                "identity": {
+                    "profile_id": "profile",
+                    "model_id": "uncalibrated",
+                },
+                "owner_selectable": True,
+                "selection_score": {
+                    "auto_eligible": False,
+                    "auto_ineligible_reasons": ["gate:calibrated:no"],
+                    "hard_gates": {
+                        "automatic_policy": {"passed": True},
+                        "calibrated": {"passed": False},
+                    },
+                },
+            }
+        ]
+    }
+
+    assert (
+        same_profile_fallback(
+            projection,
+            profile_id="profile",
+            failed_model="failed",
+        )
+        is None
+    )
 
 
 def _fixture() -> tuple[dict, list[dict], dict[str, list[dict]]]:
@@ -241,6 +279,141 @@ def test_owner_can_select_compatible_candidate_that_is_not_auto_eligible() -> No
     lower = next(item for item in result["candidates"] if item["candidate_id"] == "lower")
     assert lower["owner_selectable"] is True
     assert lower["selection_score"]["auto_eligible"] is False
+
+
+def test_tier1_authority_is_a_role_exact_gate_for_owner_default_and_fallback() -> None:
+    read_model, profiles, options = _fixture()
+    read_model["candidates"] = [read_model["candidates"][1]]
+    candidate = read_model["candidates"][0]
+    candidate["roles"][0]["canonical_role"] = "lead"
+    candidate["roles"][0]["score"]["canonical_role"] = "lead"
+    candidate["roles"][0]["tier1_authority"] = {
+        "policy_version": "tier_role_coverage_v1",
+        "lane": "quorum_ready",
+        "status": "enabled",
+        "enabled": True,
+        "reason_code": "exact_role_calibration_verified",
+    }
+    profiles = [profiles[1]]
+    options = {"owner": [options["owner"][0]]}
+    profiles[0]["workspace_mode"] = "write"
+    candidate["model_metadata"]["tier"] = "premium"
+    options["owner"][0]["tier"] = "premium"
+    options["owner"][0]["allowed_roles"] = ["lead"]
+    options["owner"][0]["caps"] = [
+        "reasoning",
+        "synthesis",
+        "repo_read",
+        "repo_write",
+        "skill_run",
+    ]
+
+    blocked = build_contextual_model_selection(
+        read_model,
+        role="lead",
+        profiles=profiles,
+        options_by_profile=options,
+        capacity_by_profile=_available_capacity("owner"),
+    )
+    row = blocked["candidates"][0]
+    assert row["owner_selectable"] is False
+    assert row["selection_score"]["auto_eligible"] is False
+    assert row["selection_score"]["hard_gates"]["tier1_authority"] == {
+        "passed": False,
+        "reason": "tier1_authority_lane_mismatch",
+        "source": "tier_role_coverage_v1",
+    }
+    assert blocked["default"]["candidate_id"] is None
+    assert same_profile_fallback(
+        blocked, profile_id="owner", failed_model="missing"
+    ) is None
+
+    candidate["roles"][0]["tier1_authority"]["lane"] = "lead_ready"
+    enabled = build_contextual_model_selection(
+        read_model,
+        role="lead",
+        profiles=profiles,
+        options_by_profile=options,
+        capacity_by_profile=_available_capacity("owner"),
+    )
+    row = enabled["candidates"][0]
+    assert row["owner_selectable"] is True, (
+        row["disabled_reason"],
+        row["contextual_compatibility"],
+        row["tier1_authority_gate"],
+    )
+    assert row["selection_score"]["hard_gates"]["tier1_authority"]["passed"] is True
+
+
+def test_archived_owner_preference_blocks_default_manual_selection_and_fallback() -> None:
+    read_model, profiles, options = _fixture()
+    read_model["candidates"][0]["owner_preference"] = {
+        "profile_id": "restricted",
+        "model_id": "high-model",
+        "state": "archived",
+        "reason": "retirado por el owner",
+        "updated_at": "2026-07-24T18:00:00+02:00",
+        "source": "user_machine",
+    }
+    original_score = deepcopy(read_model["candidates"][0]["roles"][0]["score"])
+
+    result = build_contextual_model_selection(
+        read_model,
+        role="reviewer",
+        profiles=profiles,
+        options_by_profile=options,
+        capacity_by_profile=_available_capacity("restricted", "owner"),
+    )
+
+    archived = next(item for item in result["candidates"] if item["candidate_id"] == "high")
+    assert result["default"]["candidate_id"] == "lower"
+    assert archived["owner_selectable"] is False
+    assert archived["base_score"] == original_score
+    assert archived["selection_score"]["score"] == original_score["score"]
+    assert archived["selection_score"]["hard_gates"]["owner_preference"] == {
+        "passed": False,
+        "reason": "owner_archived",
+        "source": "user_machine",
+    }
+    assert "retirado por el owner" in archived["disabled_reason"]
+    assert same_profile_fallback(
+        result, profile_id="restricted", failed_model="missing-model"
+    ) is None
+
+
+def test_high_and_low_preferences_do_not_change_ranking_or_scores() -> None:
+    read_model, profiles, options = _fixture()
+    read_model["candidates"][0]["owner_preference"] = {
+        "state": "low",
+        "reason": "sin trabajo proactivo",
+        "source": "user_machine",
+    }
+    read_model["candidates"][1]["owner_preference"] = {
+        "state": "high",
+        "reason": "prioridad de integración",
+        "source": "user_machine",
+    }
+
+    result = build_contextual_model_selection(
+        read_model,
+        role="reviewer",
+        profiles=profiles,
+        options_by_profile=options,
+        capacity_by_profile=_available_capacity("restricted", "owner"),
+    )
+
+    assert [item["candidate_id"] for item in result["candidates"][:2]] == [
+        "high",
+        "lower",
+    ]
+    assert [item["selection_score"]["score"] for item in result["candidates"][:2]] == [
+        95,
+        80,
+    ]
+    assert all(
+        item["selection_score"]["hard_gates"]["owner_preference"]["passed"] is True
+        for item in result["candidates"][:2]
+    )
 
 
 def test_observed_exhaustion_is_a_hard_gate_before_ranking() -> None:

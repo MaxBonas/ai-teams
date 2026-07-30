@@ -25,6 +25,10 @@ interface SelectionCandidate {
   selection_score: SelectionScore;
   contextual_compatibility?: { allowed?: boolean; reason?: string; code?: string };
   owner_selectable: boolean;
+  owner_preference?: {
+    state?: 'high' | 'normal' | 'low' | 'archived';
+    reason?: string;
+  };
   requires_configuration?: boolean;
   disabled_reason?: string | null;
 }
@@ -184,6 +188,9 @@ export function ModelRoleSelector({
                 >
                   #{candidate.rank} {candidate.label || candidate.identity.model_id} · {scoreLabel(candidate.selection_score)}
                   {candidate.candidate_id === selection?.default.candidate_id ? ' · recomendado' : ''}
+                  {candidate.owner_preference?.state === 'high' ? ' · prioridad owner alta' : ''}
+                  {candidate.owner_preference?.state === 'low' ? ' · prioridad owner baja' : ''}
+                  {candidate.owner_preference?.state === 'archived' ? ' · archivado por el owner' : ''}
                   {restrictProfileId && candidate.identity.profile_id !== restrictProfileId
                     ? ' · bloqueado: recovery conserva el adapter'
                     : !candidate.owner_selectable ? ` · bloqueado: ${reason || 'no elegible'}` : ''}

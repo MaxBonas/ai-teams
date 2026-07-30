@@ -29,6 +29,7 @@ from api.routers import dependencies as dependencies_router
 from api.routers import documents as documents_router
 from api.routers import extensions as extensions_router
 from api.routers import goals as goals_router
+from api.routers import guided_setup as guided_setup_router
 from api.routers import interactions as interactions_router
 from api.routers import issues as issues_router
 from api.routers import model_catalog as model_catalog_router
@@ -152,6 +153,7 @@ app.include_router(chat_router.router)
 app.include_router(control_plane_router.router)
 app.include_router(interactions_router.router)
 app.include_router(goals_router.router)
+app.include_router(guided_setup_router.router)
 app.include_router(agents_router.router)
 app.include_router(issues_router.router)
 app.include_router(orientation_router.router)

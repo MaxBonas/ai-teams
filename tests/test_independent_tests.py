@@ -311,6 +311,36 @@ def test_cross_provider_enforcement_covers_adversarial_qa(tmp_path: Path, monkey
         )
         conn.commit()
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.contextual_model_selection",
+        lambda *args, **kwargs: {
+            "candidates": [
+                {
+                    "candidate_id": "gemini_api:gemini-3.6-flash:qa",
+                    "identity": {
+                        "profile_id": "gemini_api",
+                        "model_id": "gemini-3.6-flash",
+                        "model_vendor": "google",
+                    },
+                    "rank": 1,
+                    "owner_selectable": True,
+                    "selection_score": {
+                        "auto_eligible": True,
+                        "hard_gates": {
+                            "calibrated": {
+                                "passed": True,
+                                "reason": "cross_provider_fixture",
+                            },
+                            "freshness": {
+                                "passed": True,
+                                "reason": "cross_provider_fixture",
+                            },
+                        },
+                    },
+                }
+            ]
+        },
+    )
 
     executor = RunExecutor(db_path, AdapterRegistry([]))
     moved = executor._enforce_cross_provider_review(

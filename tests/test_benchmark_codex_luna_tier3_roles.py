@@ -5,8 +5,11 @@ from scripts.benchmark_codex_luna_tier3_roles import (
     adapter_config,
     aggregate_diverse_family_reports,
     aggregate_reports,
+    benchmark_lead_identity,
     bootstrap_profile_ids,
+    cli_version_for_profile,
     evaluate_role_artifact,
+    profile_supports_governed_mcp,
     reevaluate_report,
 )
 
@@ -31,6 +34,15 @@ def test_antigravity_adapter_config_does_not_invent_reasoning_effort() -> None:
     assert config["command"] == ["agy"]
     assert config["model"] == "gemini-3.5-flash-low"
     assert "model_reasoning_effort" not in config
+    assert bootstrap_profile_ids("antigravity_subscription") == [
+        "antigravity_subscription",
+        "codex_subscription",
+    ]
+    assert profile_supports_governed_mcp("antigravity_subscription") is False
+    assert benchmark_lead_identity("antigravity_subscription") == (
+        "codex_subscription",
+        "gpt-5.6-sol",
+    )
 
 
 def test_local_adapter_config_preserves_oss_transport_and_read_only_scope() -> None:
@@ -48,6 +60,25 @@ def test_local_adapter_config_preserves_oss_transport_and_read_only_scope() -> N
         "local_gemma4_ollama",
         "codex_subscription",
     ]
+    assert profile_supports_governed_mcp("local_gemma4_ollama") is True
+
+
+def test_cli_version_is_observed_exactly(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scripts.benchmark_codex_luna_tier3_roles.shutil.which",
+        lambda command: command,
+    )
+
+    class Completed:
+        returncode = 0
+        stdout = "codex-cli 0.146.0-alpha.6"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "scripts.benchmark_codex_luna_tier3_roles.subprocess.run",
+        lambda *args, **kwargs: Completed(),
+    )
+    assert cli_version_for_profile("codex_subscription") == "0.146.0-alpha.6"
 
 
 def test_file_scout_evaluator_requires_causal_workspace_findings() -> None:
@@ -204,7 +235,7 @@ def test_aggregate_requires_three_passing_same_role_samples() -> None:
     assert result["checks_passed"] == result["checks_total"] == 6
     assert result["usage"]["input_tokens"] == 300
     assert result["usage"]["telemetry_status"] == "observed"
-    assert result["conclusion"]["exact_pair_calibrated"] is True
+    assert result["conclusion"]["exact_pair_calibrated"] is False
 
 
 def test_antigravity_aggregate_keeps_missing_usage_unknown() -> None:
@@ -276,6 +307,7 @@ def test_diversity_aggregate_requires_two_exact_tier3_families() -> None:
             "provider_version": "0.145.0",
             "role": "worker",
             "reasoning_effort": "low",
+            "contract_version": "tier3_causal_report_v2",
             "case_family": family,
             "matrix_complete": True,
             "samples_passed": 3,

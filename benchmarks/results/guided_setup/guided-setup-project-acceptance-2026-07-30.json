@@ -1,0 +1,55 @@
+{
+  "checks": {
+    "commit_receipt_is_idempotent_and_conflict_safe": true,
+    "create_collision_is_rejected": true,
+    "import_preserves_foreign_workspace": true,
+    "intermediate_failure_rolls_back_create_and_import": true,
+    "invalid_override_is_rejected": true,
+    "new_research_project_is_lead_only_without_test_loop": true,
+    "non_diverse_quorum_blocks_save": true,
+    "profile_without_coverage_blocks_save": true,
+    "session_resume_keeps_identity_and_revision": true,
+    "stale_revision_is_rejected": true,
+    "truncated_detection_requires_confirmation": true,
+    "unsafe_path_is_rejected": true,
+    "valid_override_stays_explicit_and_non_automatic": true
+  },
+  "evidence": {
+    "durability": {
+      "conflicting_hash_rejected": true,
+      "receipt_id_stable": true,
+      "revision_after_transition": 2,
+      "session_id_stable": true
+    },
+    "import": {
+      "foreign_file_preserved": true,
+      "runtime_created": true,
+      "staging_leftovers": 0
+    },
+    "new_research_project": {
+      "objective_kind": "research",
+      "programming_roles_present": [],
+      "queued_wakeups": 1,
+      "roles": [
+        "lead"
+      ]
+    }
+  },
+  "evidence_hash": "f4e6862e927e24cebc8b741e3abb6066838e143314c860781170a4e0aa5988b3",
+  "schema_version": "guided_setup_project_acceptance_v1",
+  "scope": {
+    "defaults_mutated": false,
+    "inference_attempted": false,
+    "installations_attempted": false,
+    "remote_quota_consumed": false,
+    "secrets_read": false,
+    "temporary_projects_only": true,
+    "user_configuration_mutated": false,
+    "user_projects_mutated": false
+  },
+  "summary": {
+    "check_count": 13,
+    "passed_count": 13,
+    "project_setup_acceptance_ready": true
+  }
+}

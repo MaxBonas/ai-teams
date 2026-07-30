@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "pricing_boundary_mutation",
+  "role": "test_designer",
+  "seed": 2,
+  "seconds": 71.375,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": true,
+    "all_hidden_mutants_killed": true,
+    "durable_report_done": false,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 0,
+      "stdout": ".............                                                            [100%]\n13 passed in 0.03s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_zero_quantity": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_negative_price": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_discount_over_100": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_discount": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_quantity": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_pricing.py"
+  ],
+  "run": {
+    "id": "run:c6420e49-f1cb-4357-9a54-93c57bcc577d",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gpt-5.6-terra",
+    "provider": "openai-codex",
+    "channel": "subscription",
+    "usage_json": "{\"cached_input_tokens\": 124416, \"input_tokens\": 150977, \"output_tokens\": 2601, \"reasoning_output_tokens\": 519}"
+  },
+  "report": null,
+  "usage": {
+    "cached_input_tokens": 124416,
+    "input_tokens": 150977,
+    "output_tokens": 2601,
+    "reasoning_output_tokens": 519
+  },
+  "workspace": "benchmarks/workspaces/p0h2d4-terra-pricing-cli0146-seed2",
+  "ok": false
+}

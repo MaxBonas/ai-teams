@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "team_lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "prompt_version": "v1",
+  "status": "completed",
+  "wall_seconds": 14.031,
+  "usage": {
+    "input_tokens": 16601,
+    "cached_input_tokens": 0,
+    "output_tokens": 729
+  },
+  "response": {
+    "objective": "Migrar la cola multitenant a SQLite como única fuente durable, garantizando checkout atómico por tenant_id, compatibilidad con runs activas y rollback mediante flag.",
+    "assignments": [
+      {
+        "deliverable": "Diseño del checkout atómico y esquema con tenant_id",
+        "owner": "arquitecto_backend",
+        "acceptor": "team_lead"
+      },
+      {
+        "deliverable": "Implementación, migración compatible con runs activas y flag de rollback",
+        "owner": "ingeniero_backend",
+        "acceptor": "arquitecto_backend"
+      },
+      {
+        "deliverable": "Pruebas de concurrencia, 100 reinicios y observación durante 24 horas",
+        "owner": "ingeniero_qa",
+        "acceptor": "team_lead"
+      }
+    ],
+    "dependencies": [
+      {
+        "from": "Diseño del checkout atómico y esquema con tenant_id",
+        "to": "Implementación, migración compatible con runs activas y flag de rollback",
+        "condition": "Diseño aprobado y estrategia sin SELECT/UPDATE separados"
+      },
+      {
+        "from": "Implementación, migración compatible con runs activas y flag de rollback",
+        "to": "Pruebas de concurrencia, 100 reinicios y observación durante 24 horas",
+        "condition": "Implementación desplegable, telemetría disponible y rollback verificado"
+      },
+      {
+        "from": "Pruebas de concurrencia, 100 reinicios y observación durante 24 horas",
+        "to": "Activación definitiva",
+        "condition": "Gate completo sin wakeups perdidos"
+      }
+    ],
+    "acceptance": [
+      {
+        "deliverable": "Diseño del checkout atómico y esquema con tenant_id",
+        "owner": "arquitecto_backend",
+        "acceptor": "team_lead",
+        "criteria": [
+          "SQLite es la única fuente durable",
+          "Cada issue conserva tenant_id",
+          "Dos workers no pueden adquirir la misma issue"
+        ]
+      },
+      {
+        "deliverable": "Implementación, migración compatible con runs activas y flag de rollback",
+        "owner": "ingeniero_backend",
+        "acceptor": "arquitecto_backend",
+        "criteria": [
+          "Las runs activas no se detienen",
+          "El checkout es atómico",
+          "El flag restaura el camino anterior",
+          "El rollback está probado"
+        ]
+      },
+      {
+        "deliverable": "Pruebas de concurrencia, 100 reinicios y observación durante 24 horas",
+        "owner": "ingeniero_qa",
+        "acceptor": "team_lead",
+        "criteria": [
+          "Se completan 100 reinicios",
+          "Hay cero wakeups perdidos",
+          "La observación dura 24 horas",
+          "No existen adquisiciones duplicadas"
+        ]
+      }
+    ],
+    "status_update": {
+      "overall": "planificado",
+      "completed": [],
+      "in_progress": [
+        "Diseño del checkout atómico y esquema con tenant_id"
+      ],
+      "blocked": [
+        "Implementación pendiente de diseño aprobado",
+        "Gate pendiente de implementación y ventana de 24 horas"
+      ],
+      "next_update": "Tras aprobar el diseño o detectar un bloqueo crítico"
+    },
+    "escalation": [
+      {
+        "trigger": "No puede garantizarse checkout atómico en SQLite",
+        "owner": "arquitecto_backend",
+        "escalate_to": "team_lead",
+        "action": "Detener la activación y revisar la estrategia transaccional"
+      },
+      {
+        "trigger": "Una run activa se interrumpe o aparece una adquisición duplicada",
+        "owner": "ingeniero_backend",
+        "escalate_to": "team_lead",
+        "action": "Activar el flag de rollback, preservar evidencia y abrir incidente"
+      },
+      {
+        "trigger": "Se pierde cualquier wakeup durante los 100 reinicios o las 24 horas",
+        "owner": "ingeniero_qa",
+        "escalate_to": "team_lead",
+        "action": "Declarar el gate fallido, bloquear la activación y repetirlo desde cero tras corregir la causa"
+      }
+    ]
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:41:19.436760Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:41:19.436791Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:41:19.437352Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:41:19.439187Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:41:19.442811Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:41:20.482607Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:41:20.482632Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:41:20.483222Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:41:20.485456Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

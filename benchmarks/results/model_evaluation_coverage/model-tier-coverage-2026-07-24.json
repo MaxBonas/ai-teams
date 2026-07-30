@@ -1,0 +1,1384 @@
+{
+  "schema_version": 1,
+  "policy_version": "tier_role_coverage_v1",
+  "source_observed_at": "2026-07-24T22:56:14.343492+02:00",
+  "policy": {
+    "tier_1_quality": "maximum_only_no_numeric_promotion",
+    "lead_ready_gate": "exact_role_lead_calibrated",
+    "quorum_ready_gate": "exact_role_quorum_auditor_calibrated",
+    "authority_invariant": "quorum_ready_never_implies_lead_ready",
+    "eligibility": "automatic_and_executable_and_not_archived_and_exact_role_calibrated",
+    "target_per_role": 2,
+    "diversity_target": "two_perspectives_and_two_capacity_pools"
+  },
+  "tier_1": {
+    "lanes": {
+      "lead_ready": {
+        "roles": [
+          {
+            "role": "lead",
+            "target": 2,
+            "eligible_count": 2,
+            "perspective_count": 2,
+            "capacity_pool_count": 2,
+            "status": "covered",
+            "perspectives": [
+              "google",
+              "openai"
+            ],
+            "capacity_pools": [
+              "antigravity_subscription",
+              "codex_subscription"
+            ],
+            "candidates": [
+              {
+                "profile_id": "antigravity_subscription",
+                "model": "gemini-3.1-pro-high",
+                "role": "lead",
+                "tier": "premium",
+                "status": "calibrated",
+                "provider_org": "google",
+                "model_vendor": "google",
+                "perspective_key": "google",
+                "transport": "subscription",
+                "capacity_pool": "antigravity_subscription"
+              },
+              {
+                "profile_id": "codex_subscription",
+                "model": "gpt-5.6-sol",
+                "role": "lead",
+                "tier": "premium",
+                "status": "calibrated",
+                "provider_org": "openai",
+                "model_vendor": "openai",
+                "perspective_key": "openai",
+                "transport": "subscription",
+                "capacity_pool": "codex_subscription"
+              }
+            ]
+          }
+        ]
+      },
+      "quorum_ready": {
+        "roles": [
+          {
+            "role": "quorum_auditor",
+            "target": 2,
+            "eligible_count": 2,
+            "perspective_count": 2,
+            "capacity_pool_count": 2,
+            "status": "covered",
+            "perspectives": [
+              "google",
+              "openai"
+            ],
+            "capacity_pools": [
+              "antigravity_subscription",
+              "codex_subscription"
+            ],
+            "candidates": [
+              {
+                "profile_id": "antigravity_subscription",
+                "model": "gemini-3.1-pro-high",
+                "role": "quorum_auditor",
+                "tier": "premium",
+                "status": "calibrated",
+                "provider_org": "google",
+                "model_vendor": "google",
+                "perspective_key": "google",
+                "transport": "subscription",
+                "capacity_pool": "antigravity_subscription"
+              },
+              {
+                "profile_id": "codex_subscription",
+                "model": "gpt-5.6-sol",
+                "role": "quorum_auditor",
+                "tier": "premium",
+                "status": "calibrated",
+                "provider_org": "openai",
+                "model_vendor": "openai",
+                "perspective_key": "openai",
+                "transport": "subscription",
+                "capacity_pool": "codex_subscription"
+              }
+            ]
+          }
+        ]
+      },
+      "tier1_support": {
+        "roles": [
+          {
+            "role": "architect",
+            "target": 2,
+            "eligible_count": 1,
+            "perspective_count": 1,
+            "capacity_pool_count": 1,
+            "status": "single_point",
+            "perspectives": [
+              "openai"
+            ],
+            "capacity_pools": [
+              "codex_subscription"
+            ],
+            "candidates": [
+              {
+                "profile_id": "codex_subscription",
+                "model": "gpt-5.6-sol",
+                "role": "architect",
+                "tier": "premium",
+                "status": "calibrated",
+                "provider_org": "openai",
+                "model_vendor": "openai",
+                "perspective_key": "openai",
+                "transport": "subscription",
+                "capacity_pool": "codex_subscription"
+              }
+            ]
+          },
+          {
+            "role": "lead_executor",
+            "target": 2,
+            "eligible_count": 1,
+            "perspective_count": 1,
+            "capacity_pool_count": 1,
+            "status": "single_point",
+            "perspectives": [
+              "openai"
+            ],
+            "capacity_pools": [
+              "codex_subscription"
+            ],
+            "candidates": [
+              {
+                "profile_id": "codex_subscription",
+                "model": "gpt-5.6-sol",
+                "role": "lead_executor",
+                "tier": "premium",
+                "status": "calibrated",
+                "provider_org": "openai",
+                "model_vendor": "openai",
+                "perspective_key": "openai",
+                "transport": "subscription",
+                "capacity_pool": "codex_subscription"
+              }
+            ]
+          },
+          {
+            "role": "team_lead",
+            "target": 2,
+            "eligible_count": 1,
+            "perspective_count": 1,
+            "capacity_pool_count": 1,
+            "status": "single_point",
+            "perspectives": [
+              "openai"
+            ],
+            "capacity_pools": [
+              "codex_subscription"
+            ],
+            "candidates": [
+              {
+                "profile_id": "codex_subscription",
+                "model": "gpt-5.6-sol",
+                "role": "team_lead",
+                "tier": "premium",
+                "status": "calibrated",
+                "provider_org": "openai",
+                "model_vendor": "openai",
+                "perspective_key": "openai",
+                "transport": "subscription",
+                "capacity_pool": "codex_subscription"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "tier_2": {
+    "roles": [
+      {
+        "role": "engineer",
+        "target": 2,
+        "eligible_count": 0,
+        "perspective_count": 0,
+        "capacity_pool_count": 0,
+        "status": "no_eligible",
+        "perspectives": [],
+        "capacity_pools": [],
+        "candidates": []
+      },
+      {
+        "role": "mcp_operator",
+        "target": 2,
+        "eligible_count": 0,
+        "perspective_count": 0,
+        "capacity_pool_count": 0,
+        "status": "no_eligible",
+        "perspectives": [],
+        "capacity_pools": [],
+        "candidates": []
+      },
+      {
+        "role": "qa",
+        "target": 2,
+        "eligible_count": 0,
+        "perspective_count": 0,
+        "capacity_pool_count": 0,
+        "status": "no_eligible",
+        "perspectives": [],
+        "capacity_pools": [],
+        "candidates": []
+      },
+      {
+        "role": "reviewer",
+        "target": 2,
+        "eligible_count": 2,
+        "perspective_count": 2,
+        "capacity_pool_count": 2,
+        "status": "covered",
+        "perspectives": [
+          "google",
+          "openai"
+        ],
+        "capacity_pools": [
+          "codex_subscription",
+          "gemini_api_free"
+        ],
+        "candidates": [
+          {
+            "profile_id": "codex_subscription",
+            "model": "gpt-5.6-terra",
+            "role": "reviewer",
+            "tier": "standard",
+            "status": "calibrated",
+            "provider_org": "openai",
+            "model_vendor": "openai",
+            "perspective_key": "openai",
+            "transport": "subscription",
+            "capacity_pool": "codex_subscription"
+          },
+          {
+            "profile_id": "gemini_api_free",
+            "model": "gemini-3.6-flash",
+            "role": "reviewer",
+            "tier": "standard",
+            "status": "calibrated",
+            "provider_org": "google",
+            "model_vendor": "google",
+            "perspective_key": "google",
+            "transport": "api",
+            "capacity_pool": "gemini_api_free"
+          }
+        ]
+      },
+      {
+        "role": "test_designer",
+        "target": 2,
+        "eligible_count": 0,
+        "perspective_count": 0,
+        "capacity_pool_count": 0,
+        "status": "no_eligible",
+        "perspectives": [],
+        "capacity_pools": [],
+        "candidates": []
+      }
+    ]
+  },
+  "gaps": [
+    {
+      "role": "architect",
+      "status": "single_point",
+      "missing_candidates": 1,
+      "missing_perspectives": 1,
+      "missing_capacity_pools": 1
+    },
+    {
+      "role": "lead_executor",
+      "status": "single_point",
+      "missing_candidates": 1,
+      "missing_perspectives": 1,
+      "missing_capacity_pools": 1
+    },
+    {
+      "role": "team_lead",
+      "status": "single_point",
+      "missing_candidates": 1,
+      "missing_perspectives": 1,
+      "missing_capacity_pools": 1
+    },
+    {
+      "role": "engineer",
+      "status": "no_eligible",
+      "missing_candidates": 2,
+      "missing_perspectives": 2,
+      "missing_capacity_pools": 2
+    },
+    {
+      "role": "mcp_operator",
+      "status": "no_eligible",
+      "missing_candidates": 2,
+      "missing_perspectives": 2,
+      "missing_capacity_pools": 2
+    },
+    {
+      "role": "qa",
+      "status": "no_eligible",
+      "missing_candidates": 2,
+      "missing_perspectives": 2,
+      "missing_capacity_pools": 2
+    },
+    {
+      "role": "test_designer",
+      "status": "no_eligible",
+      "missing_candidates": 2,
+      "missing_perspectives": 2,
+      "missing_capacity_pools": 2
+    }
+  ],
+  "excluded": [
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "role": "architect",
+      "tier": "premium",
+      "status": "deferred_until_material_change",
+      "provider_org": "opencode",
+      "model_vendor": "nvidia",
+      "perspective_key": "nvidia",
+      "transport": "free_gateway",
+      "capacity_pool": "opencode_zen_free",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "role": "lead",
+      "tier": "premium",
+      "status": "deferred_until_material_change",
+      "provider_org": "opencode",
+      "model_vendor": "nvidia",
+      "perspective_key": "nvidia",
+      "transport": "free_gateway",
+      "capacity_pool": "opencode_zen_free",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "role": "quorum_auditor",
+      "tier": "premium",
+      "status": "deferred_until_material_change",
+      "provider_org": "opencode",
+      "model_vendor": "nvidia",
+      "perspective_key": "nvidia",
+      "transport": "free_gateway",
+      "capacity_pool": "opencode_zen_free",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/nemotron-3-ultra-free",
+      "role": "team_lead",
+      "tier": "premium",
+      "status": "deferred_until_material_change",
+      "provider_org": "opencode",
+      "model_vendor": "nvidia",
+      "perspective_key": "nvidia",
+      "transport": "free_gateway",
+      "capacity_pool": "opencode_zen_free",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/deepseek-v4-flash-free",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "opencode",
+      "model_vendor": "deepseek",
+      "perspective_key": "deepseek",
+      "transport": "free_gateway",
+      "capacity_pool": "opencode_zen_free",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "opencode_zen_free",
+      "model": "opencode/mimo-v2.5-free",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "deferred_until_material_change",
+      "provider_org": "opencode",
+      "model_vendor": "xiaomi",
+      "perspective_key": "xiaomi",
+      "transport": "free_gateway",
+      "capacity_pool": "opencode_zen_free",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-terra",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "subscription",
+      "capacity_pool": "codex_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-terra",
+      "role": "mcp_operator",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "subscription",
+      "capacity_pool": "codex_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-terra",
+      "role": "qa",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "subscription",
+      "capacity_pool": "codex_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "codex_subscription",
+      "model": "gpt-5.6-terra",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "subscription",
+      "capacity_pool": "codex_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-sol",
+      "role": "architect",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-sol",
+      "role": "lead",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-sol",
+      "role": "lead_executor",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-sol",
+      "role": "quorum_auditor",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-sol",
+      "role": "team_lead",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-terra",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-terra",
+      "role": "qa",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-terra",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "openai_api",
+      "model": "gpt-5.6-terra",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "openai",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "openai_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.1-pro-preview",
+      "role": "architect",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.1-pro-preview",
+      "role": "lead",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.1-pro-preview",
+      "role": "lead_executor",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.1-pro-preview",
+      "role": "quorum_auditor",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.1-pro-preview",
+      "role": "team_lead",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.6-flash",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.6-flash",
+      "role": "qa",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.6-flash",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api",
+      "model": "gemini-3.6-flash",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "gemini_api_free",
+      "model": "gemini-3.6-flash",
+      "role": "qa",
+      "tier": "standard",
+      "status": "deferred_until_material_change",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api_free",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    },
+    {
+      "profile_id": "gemini_api_free",
+      "model": "gemini-3.6-flash",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "deferred_until_material_change",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "api",
+      "capacity_pool": "gemini_api_free",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "openai/gpt-oss-120b",
+      "role": "qa",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "groq",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "groq_api_free",
+      "reasons": [
+        "not_executable",
+        "maintenance_not_allowed",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "openai/gpt-oss-120b",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "groq",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "groq_api_free",
+      "reasons": [
+        "not_executable",
+        "maintenance_not_allowed",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "groq_api_free",
+      "model": "openai/gpt-oss-120b",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "groq",
+      "model_vendor": "openai",
+      "perspective_key": "openai",
+      "transport": "api",
+      "capacity_pool": "groq_api_free",
+      "reasons": [
+        "not_executable",
+        "maintenance_not_allowed",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.1-pro-high",
+      "role": "architect",
+      "tier": "premium",
+      "status": "partial",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "subscription",
+      "capacity_pool": "antigravity_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.1-pro-high",
+      "role": "lead_executor",
+      "tier": "premium",
+      "status": "partial",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "subscription",
+      "capacity_pool": "antigravity_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.1-pro-high",
+      "role": "team_lead",
+      "tier": "premium",
+      "status": "partial",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "subscription",
+      "capacity_pool": "antigravity_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-high",
+      "role": "qa",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "subscription",
+      "capacity_pool": "antigravity_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-high",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "subscription",
+      "capacity_pool": "antigravity_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "gemini-3.5-flash-high",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "google",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "subscription",
+      "capacity_pool": "antigravity_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "antigravity_subscription",
+      "model": "claude-sonnet-4-6",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "google",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "antigravity_subscription",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-opus-4-8",
+      "role": "lead",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-opus-4-8",
+      "role": "lead_executor",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-opus-4-8",
+      "role": "quorum_auditor",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-opus-4-8",
+      "role": "team_lead",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-fable-5",
+      "role": "architect",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_automatic",
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-sonnet-5",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-sonnet-5",
+      "role": "qa",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-sonnet-5",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "anthropic_api",
+      "model": "claude-sonnet-5",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "api",
+      "capacity_pool": "anthropic_api",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-opus-4-8",
+      "role": "lead",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-opus-4-8",
+      "role": "lead_executor",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-opus-4-8",
+      "role": "quorum_auditor",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-opus-4-8",
+      "role": "team_lead",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-fable-5",
+      "role": "architect",
+      "tier": "premium",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_automatic",
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-sonnet-5",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-sonnet-5",
+      "role": "qa",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-sonnet-5",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "claude_subscription_blocked",
+      "model": "claude-sonnet-5",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "anthropic",
+      "model_vendor": "anthropic",
+      "perspective_key": "anthropic",
+      "transport": "subscription",
+      "capacity_pool": "claude_subscription_blocked",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen3-coder:30b",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "ollama",
+      "model_vendor": "alibaba",
+      "perspective_key": "alibaba",
+      "transport": "local",
+      "capacity_pool": "local_qwen_ollama",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "local_qwen_ollama",
+      "model": "qwen3-coder:30b",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "ollama",
+      "model_vendor": "alibaba",
+      "perspective_key": "alibaba",
+      "transport": "local",
+      "capacity_pool": "local_qwen_ollama",
+      "reasons": [
+        "not_executable",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "gemma-3-12b-it",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "lmstudio",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "local",
+      "capacity_pool": "local_gem4_lmstudio",
+      "reasons": [
+        "not_executable",
+        "maintenance_not_allowed",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "google/gemma-4-26b-a4b",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "lmstudio",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "local",
+      "capacity_pool": "local_gem4_lmstudio",
+      "reasons": [
+        "not_executable",
+        "maintenance_not_allowed",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "local_gem4_lmstudio",
+      "model": "google/gemma-4-26b-a4b",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "blocked",
+      "provider_org": "lmstudio",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "local",
+      "capacity_pool": "local_gem4_lmstudio",
+      "reasons": [
+        "not_executable",
+        "maintenance_not_allowed",
+        "status_blocked"
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:26b",
+      "role": "engineer",
+      "tier": "standard",
+      "status": "partial",
+      "provider_org": "ollama",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "local",
+      "capacity_pool": "local_gemma4_ollama",
+      "reasons": [
+        "status_partial"
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:26b",
+      "role": "reviewer",
+      "tier": "standard",
+      "status": "deferred_until_material_change",
+      "provider_org": "ollama",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "local",
+      "capacity_pool": "local_gemma4_ollama",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    },
+    {
+      "profile_id": "local_gemma4_ollama",
+      "model": "gemma4:26b",
+      "role": "test_designer",
+      "tier": "standard",
+      "status": "deferred_until_material_change",
+      "provider_org": "ollama",
+      "model_vendor": "google",
+      "perspective_key": "google",
+      "transport": "local",
+      "capacity_pool": "local_gemma4_ollama",
+      "reasons": [
+        "status_deferred_until_material_change"
+      ]
+    }
+  ],
+  "complete": false
+}

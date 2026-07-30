@@ -12,7 +12,6 @@ Usage
     aiteam heartbeat          # run heartbeat loop (no HTTP server needed)
     aiteam status             # system status from the DB
     aiteam project list       # list projects
-    aiteam project create     # create a new project
     aiteam project use        # switch active project
     aiteam issue list         # list issues
     aiteam issue show <id>    # show issue details
@@ -359,8 +358,7 @@ def cmd_project_list(args: argparse.Namespace) -> int:
         for entry in sorted(projects_root.iterdir()):
             if not entry.is_dir():
                 continue
-            # Skip soft-deleted tombstone dirs
-            if entry.name.startswith(".aiteam-deleted-"):
+            if entry.name.startswith("."):
                 continue
             db = _resolve_runtime_dir(entry) / "aiteam.db"
             is_active = entry.resolve() == current
@@ -373,7 +371,7 @@ def cmd_project_list(args: argparse.Namespace) -> int:
 
     if not found:
         print(_dim("  No projects found."))
-        print(f"  Create one with: {_c(_CYAN, 'aiteam project create <name>')}")
+        print("  Create or import one with the guided setup in the AI Teams UI.")
         return 0
 
     if getattr(args, "json", False):
@@ -387,56 +385,6 @@ def cmd_project_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_project_create(args: argparse.Namespace) -> int:
-    name: str = args.name
-    task: str | None = getattr(args, "task", None)
-
-    projects_root = _get_projects_root()
-    projects_root.mkdir(parents=True, exist_ok=True)
-
-    safe_name = "".join(c if (c.isalnum() or c in "-_ ") else "_" for c in name).strip()
-    project_dir = projects_root / safe_name
-
-    if project_dir.exists():
-        print(_warn(f"Project '{safe_name}' already exists at {project_dir}"))
-        return 1
-
-    project_dir.mkdir(parents=True)
-    runtime_dir = project_dir / ".aiteam"
-    runtime_dir.mkdir()
-
-    # Copy template configs
-    config_dir = _PROJECT_ROOT / "config"
-    for template_name, target_name in [
-        ("control_plane.example.json", "control_plane.json"),
-        ("agents.example.json", "agents.json"),
-    ]:
-        src = config_dir / template_name
-        dst = runtime_dir / target_name
-        if src.exists() and not dst.exists():
-            import shutil as _shutil
-            _shutil.copy2(src, dst)
-
-    # Initialise DB
-    db_path = runtime_dir / "aiteam.db"
-    _apply_schema(db_path)
-
-    # Persist as current workspace
-    _set_current_workspace(project_dir)
-
-    print(_ok(f"Project '{safe_name}' created"))
-    print(f"  Path → {_dim(str(project_dir))}")
-    print(f"  DB   → {_dim(str(db_path))}")
-
-    if task:
-        # Create an initial issue
-        from aiteam.db.issues import create_issue
-        issue = create_issue(db_path, title=task, status="backlog")
-        print(_ok(f"Initial issue created: [{issue['id'][:8]}] {task}"))
-
-    return 0
-
-
 def cmd_project_use(args: argparse.Namespace) -> int:
     target = Path(args.path).resolve()
     if not target.exists():
@@ -444,7 +392,11 @@ def cmd_project_use(args: argparse.Namespace) -> int:
 
     db = _resolve_runtime_dir(target) / "aiteam.db"
     if not db.exists():
-        print(_warn(f"No aiteam.db found in {target}. Switching anyway."))
+        print(_err(
+            f"No aiteam.db found in {target}. "
+            "Import the directory with the guided setup first."
+        ))
+        return 2
 
     _set_current_workspace(target)
     print(_ok(f"Active project → {target}"))
@@ -684,7 +636,6 @@ Examples
   aiteam heartbeat --once             Run one heartbeat tick and exit
   aiteam status                       Show issue/run counts from the DB
   aiteam project list                 List all projects
-  aiteam project create "My App"      Create a new project
   aiteam project use /path/to/proj    Switch active project
   aiteam issue list --status blocked  List blocked issues
   aiteam issue create "Fix login"     Create an issue
@@ -724,10 +675,6 @@ Examples
 
     pp_list = proj_sub.add_parser("list", help="List projects")
     pp_list.add_argument("--json", action="store_true")
-
-    pp_create = proj_sub.add_parser("create", help="Create a new project")
-    pp_create.add_argument("name", help="Project name")
-    pp_create.add_argument("--task", default=None, help="Optional initial task/issue title")
 
     pp_use = proj_sub.add_parser("use", help="Switch active project")
     pp_use.add_argument("path", help="Path to the project directory")
@@ -828,8 +775,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if pc == "list":
             return cmd_project_list(args)
-        if pc == "create":
-            return cmd_project_create(args)
         if pc == "use":
             return cmd_project_use(args)
 

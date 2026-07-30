@@ -12,7 +12,6 @@ from aiteam.model_catalog_read_model import (
 )
 from aiteam.policies import CANONICAL_ROLES
 
-
 OBSERVED_AT = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
 
 
@@ -248,6 +247,12 @@ def test_read_model_composes_normalized_score_and_provenance(tmp_path: Path) -> 
     )
 
     assert read_model["schema_version"] == MODEL_CATALOG_READ_MODEL_VERSION
+    assert read_model["tier1_authority_contract"] == {
+        "policy_version": "tier_role_coverage_v1",
+        "scope": "exact_profile_model_role",
+        "legacy_missing_policy": "fail_closed",
+        "score_relationship": "independent_hard_gate",
+    }
     assert read_model["rollout"] == "shadow_only"
     assert len(read_model["content_hash"]) == 64
     candidate = read_model["candidates"][0]
@@ -277,6 +282,83 @@ def test_read_model_composes_normalized_score_and_provenance(tmp_path: Path) -> 
         }
     ]
     assert audit_model_catalog_read_model(read_model)["ok"] is True
+
+
+def test_owner_preference_is_projected_without_changing_technical_score(
+    tmp_path: Path,
+) -> None:
+    profile = _profile()
+    common = {
+        "profiles": [profile],
+        "declared_options_by_profile": {"openai_api": profile["model_options"]},
+        "evaluation_report": _evaluation_report(),
+        "runtime_report": collect_model_runtime_observations([_runtime_db(tmp_path)]),
+        "normalized_metrics": _normalized_metrics(),
+        "observed_at": OBSERVED_AT,
+    }
+    baseline = build_model_catalog_read_model(**common)
+    archived = build_model_catalog_read_model(
+        **common,
+        owner_preferences={
+            "schema_version": "model_owner_preferences_v1",
+            "updated_at": "2026-07-24T18:00:00+02:00",
+            "preferences": [{
+                "profile_id": "openai_api",
+                "model_id": "model-a",
+                "state": "archived",
+                "reason": "owner test",
+                "updated_at": "2026-07-24T18:00:00+02:00",
+            }],
+        },
+    )
+
+    preference = archived["candidates"][0]["owner_preference"]
+    assert preference["state"] == "archived"
+    assert preference["source"] == "user_machine"
+    assert _role(archived, "engineer")["score"] == _role(
+        baseline, "engineer"
+    )["score"]
+    assert archived["content_hash"] != baseline["content_hash"]
+
+
+def test_auditor_accepts_suppressed_evaluation_debt_for_low_and_archived() -> None:
+    profile = _profile()
+    for state in ("low", "archived"):
+        evaluation = _evaluation_report()
+        evaluation["rows"][0]["roles"][0].update(
+            {
+                "status": "deferred_until_material_change",
+                "evidence_receipts": [],
+                "next_action": f"none_owner_{state}",
+                "maintenance_allowed": state != "archived",
+                "proactive_maintenance_allowed": False,
+            }
+        )
+        read_model = build_model_catalog_read_model(
+            profiles=[profile],
+            declared_options_by_profile={"openai_api": profile["model_options"]},
+            evaluation_report=evaluation,
+            owner_preferences={
+                "schema_version": "model_owner_preferences_v1",
+                "updated_at": "2026-07-24T18:00:00+02:00",
+                "preferences": [
+                    {
+                        "profile_id": "openai_api",
+                        "model_id": "model-a",
+                        "state": state,
+                        "reason": "owner test",
+                        "updated_at": "2026-07-24T18:00:00+02:00",
+                    }
+                ],
+            },
+            observed_at=OBSERVED_AT,
+        )
+
+        audit = audit_model_catalog_read_model(read_model)
+
+        assert "automatic_role_evaluation_debt_missing" not in {
+            item["code"] for item in audit["failures"]
+        }
 
 
 def test_stale_evidence_keeps_historical_case_diversity_but_cannot_promote(
@@ -407,6 +489,50 @@ def test_durable_catalog_version_fallback_requires_fresh_passing_receipt(
     ]
 
 
+def test_current_read_model_uses_api_contract_version_for_evidence(
+    monkeypatch,
+) -> None:
+    from aiteam import model_catalog_read_model as module
+
+    profile = _profile()
+    profile["config"] = {"api_version": "responses-v1"}
+    profile["health"] = {"status": "ok"}
+    monkeypatch.setattr(module, "load_adapter_profiles", lambda: [profile])
+    monkeypatch.setattr(
+        module,
+        "model_options",
+        lambda: {"openai_api": profile["model_options"]},
+    )
+    monkeypatch.setattr(module, "profile_is_connected", lambda _profile: True)
+    monkeypatch.setattr(
+        module,
+        "observed_profile_cli_version",
+        lambda _profile: None,
+    )
+    monkeypatch.setattr(
+        module,
+        "load_durable_catalog_versions",
+        lambda **_kwargs: {"profiles": {}, "diagnostics": []},
+    )
+    observed = {}
+
+    def evaluation(**kwargs):
+        observed.update(kwargs["observed_versions"])
+        return _evaluation_report()
+
+    monkeypatch.setattr(module, "audit_model_evaluation_coverage", evaluation)
+    read_model = module.build_current_model_catalog_read_model(
+        observed_at=OBSERVED_AT,
+        normalized_metrics={},
+    )
+
+    assert observed["openai_api"] == "api:openai:responses-v1"
+    assert read_model["evaluation_version_evidence"]["openai_api"] == {
+        "version": "api:openai:responses-v1",
+        "source": "adapter_api_contract",
+    }
+
+
 def test_auditor_detects_hash_and_consumer_divergence() -> None:
     profile = _profile()
     read_model = build_model_catalog_read_model(
@@ -486,6 +612,68 @@ def test_auditor_recomputes_role_input_hash_and_score_after_outer_rehash() -> No
         "role_input_hash_mismatch",
         "role_score_mismatch",
     }
+
+
+def test_auditor_rejects_tier1_authority_tampering_even_after_outer_rehash() -> None:
+    import hashlib
+
+    profile = _profile()
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=_evaluation_report(),
+        observed_at=OBSERVED_AT,
+    )
+    role = _role(read_model, "lead")
+    role["tier1_authority"]["enabled"] = True
+    role["tier1_authority"]["status"] = "enabled"
+    canonical = json.dumps(
+        {key: value for key, value in read_model.items() if key != "content_hash"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    read_model["content_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    audit = audit_model_catalog_read_model(read_model)
+
+    assert {
+        "tier1_authority_mismatch",
+        "role_input_hash_mismatch",
+    }.issubset({item["code"] for item in audit["failures"]})
+
+
+def test_high_role_score_cannot_replace_tier1_authority_or_enter_score_inputs() -> None:
+    profile = _profile()
+    profile["model_options"][0].update(
+        {"tier": "premium", "best_for": ["lead"]}
+    )
+    profile["supported_roles"] = ["lead"]
+    report = _evaluation_report()
+    report["rows"][0]["roles"][0].update(
+        {"role": "lead", "status": "partial", "evidence_receipts": ["old.json"]}
+    )
+    metrics = {
+        ("openai_api", "model-a", "lead"): _normalized_metrics()[
+            ("openai_api", "model-a", "engineer")
+        ]
+    }
+    read_model = build_model_catalog_read_model(
+        profiles=[profile],
+        declared_options_by_profile={"openai_api": profile["model_options"]},
+        evaluation_report=report,
+        normalized_metrics=metrics,
+        observed_at=OBSERVED_AT,
+    )
+    lead = _role(read_model, "lead")
+
+    assert lead["score"]["score"] is not None
+    assert lead["tier1_authority"]["enabled"] is False
+    assert lead["tier1_authority"]["reason_code"] == (
+        "exact_role_calibration_required"
+    )
+    assert "tier1_authority" not in json.dumps(lead["score_inputs"])
+    assert audit_model_catalog_read_model(read_model)["ok"] is True
 
 
 def test_matrix_explains_incompatible_cells_without_score() -> None:

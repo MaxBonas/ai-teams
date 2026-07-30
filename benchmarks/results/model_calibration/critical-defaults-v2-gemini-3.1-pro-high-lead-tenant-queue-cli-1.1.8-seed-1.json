@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 8.657,
+  "usage": {},
+  "response": {
+    "objective": "Ejecutar tenant_queue_migration bajo el rol lead (semilla de repetición: 1), consolidando a SQLite como la única fuente durable y garantizando el aislamiento por tenant_id. Se debe eliminar la condición de carrera del checkout actual (que separa SELECT y UPDATE permitiendo que dos workers ganen la misma issue) mediante operaciones atómicas, realizando la migración sin detener runs activas y asegurando la capacidad de rollback mediante el flag al camino anterior.",
+    "work_items": [
+      {
+        "id": "WI-01",
+        "title": "Checkout atómico en SQLite por tenant_id",
+        "owner": "Lead Executor",
+        "acceptor": "Architect",
+        "dependencies": [],
+        "description": "Unificar el SELECT y UPDATE en una operación atómica dentro de SQLite respetando el límite por tenant_id para evitar doble asignación de issues a workers."
+      },
+      {
+        "id": "WI-02",
+        "title": "Migración Zero-Downtime para runs activas",
+        "owner": "Team Lead",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-01"
+        ],
+        "description": "Desplegar la tenant_queue_migration asegurando que la ejecución de runs activas no sea interrumpida ni detenida."
+      },
+      {
+        "id": "WI-03",
+        "title": "Mecanismo de Rollback mediante Flag",
+        "owner": "Lead Executor",
+        "acceptor": "Quorum Auditor",
+        "dependencies": [],
+        "description": "Habilitar y validar la conmutación al camino anterior utilizando el flag de rollback si se detecta alguna falla."
+      }
+    ],
+    "risks": [
+      {
+        "description": "Doble adjudicación de issue por separación de SELECT y UPDATE en dos workers concurrentes",
+        "impact": "Procesamiento duplicado y corrupción de estado por tenant_id",
+        "mitigation": "Transacción o actualización atómica directa en SQLite como fuente durable única"
+      },
+      {
+        "description": "Detención no planificada de runs activas durante la migración de la cola",
+        "impact": "Fallo en tareas en ejecución y degradación de disponibilidad",
+        "mitigation": "Estrategia de migración progresiva garantizando continuidad de ejecuciones activas"
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero (0) wakeups perdidos durante una ventana continua de 24 horas",
+      "metric": "wakeups perdidos",
+      "target_value": 0,
+      "required_restarts": 100,
+      "window_hours": 24,
+      "durable_source": "SQLite"
+    },
+    "escalation": {
+      "triggers": [
+        "Pérdida de >0 wakeups durante el gate de 100 reinicios en la ventana de 24 horas",
+        "Detección de dos workers ganando la misma issue por falla en aislamiento de SELECT/UPDATE",
+        "Interrupción o detención de runs activas durante tenant_queue_migration"
+      ],
+      "action": "Escalar inmediatamente a Lead y activar el flag de reversión para volver al camino anterior."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

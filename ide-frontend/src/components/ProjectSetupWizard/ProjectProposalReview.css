@@ -1,0 +1,323 @@
+.review-command-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 30px;
+  align-items: end;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--setup-line);
+}
+
+.review-command-strip code {
+  padding: 0;
+  background: transparent;
+}
+
+.save-readiness {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 220px;
+  padding: 12px 14px;
+  border: 1px solid #74403a;
+  background: #291a17;
+  color: #ffa7a0;
+}
+
+.save-readiness.ready {
+  border-color: #3c7446;
+  background: #14271a;
+  color: var(--setup-green);
+}
+
+.save-readiness span {
+  display: grid;
+  gap: 2px;
+}
+
+.save-readiness small {
+  color: var(--setup-muted);
+  font-size: 0.65rem;
+}
+
+.review-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 18px 0;
+  border: 1px solid var(--setup-line);
+}
+
+.review-metrics > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 62px;
+  padding: 12px 15px;
+  border-right: 1px solid var(--setup-line);
+  background: #101612;
+}
+
+.review-metrics > div:last-child {
+  border-right: 0;
+}
+
+.review-metrics svg {
+  color: var(--setup-green);
+}
+
+.review-metrics span {
+  display: grid;
+}
+
+.review-metrics small,
+.manifest-score small,
+.manifest-economics small {
+  color: var(--setup-muted);
+  font-size: 0.61rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.review-metrics strong {
+  color: var(--setup-ink);
+  font-size: 0.78rem;
+}
+
+.team-manifest {
+  display: grid;
+  gap: 7px;
+}
+
+.team-manifest-card {
+  display: grid;
+  grid-template-columns: 44px minmax(180px, 1.2fr) minmax(190px, 1fr) 70px 100px;
+  gap: 14px;
+  align-items: center;
+  min-height: 82px;
+  padding: 12px 14px;
+  border: 1px solid var(--setup-line);
+  background: #121914;
+}
+
+.manifest-order {
+  color: var(--setup-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.manifest-role small {
+  color: var(--setup-green);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.manifest-role h3 {
+  margin: 3px 0 2px;
+  color: var(--setup-ink);
+  font-size: 0.88rem;
+}
+
+.manifest-role p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--setup-muted);
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manifest-model {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+}
+
+.manifest-model > div {
+  display: grid;
+  min-width: 0;
+}
+
+.manifest-model strong {
+  overflow: hidden;
+  color: #d8e1da;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manifest-model small {
+  color: var(--setup-muted);
+  font-size: 0.62rem;
+}
+
+.channel-mark {
+  width: 5px;
+  height: 26px;
+  background: #607365;
+}
+
+.channel-api {
+  background: #58a6ff;
+}
+
+.channel-subscription {
+  background: var(--setup-green);
+}
+
+.channel-local {
+  background: #d2a8ff;
+}
+
+.manifest-score,
+.manifest-economics {
+  display: grid;
+  gap: 2px;
+}
+
+.manifest-score strong {
+  color: var(--setup-green);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.05rem;
+}
+
+.manifest-economics strong {
+  color: #c7d1c9;
+  font-size: 0.7rem;
+}
+
+.manifest-override {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px dashed #344139;
+}
+
+.manifest-gates {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.manifest-gates span {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 3px 6px;
+  border: 1px solid #36503c;
+  color: #9fc9a7;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+}
+
+.manifest-gates span.failed {
+  border-color: #6d5729;
+  color: #e3b341;
+}
+
+.review-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+  margin-top: 22px;
+}
+
+.review-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-evidence span {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--setup-line);
+  background: #0f1511;
+  color: var(--setup-muted);
+  font-size: 0.66rem;
+}
+
+.review-evidence .degradation {
+  border-color: #6d5729;
+  color: #e3b341;
+}
+
+.review-next-gate {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  max-width: 270px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--setup-green);
+  background: #101b14;
+  color: var(--setup-green);
+}
+
+.review-next-gate span {
+  display: grid;
+  gap: 2px;
+}
+
+.review-next-gate strong {
+  font-size: 0.68rem;
+}
+
+.review-next-gate small {
+  color: var(--setup-muted);
+  font-size: 0.58rem;
+}
+
+@media (max-width: 820px) {
+  .review-command-strip,
+  .review-foot {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .review-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .review-metrics > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .team-manifest-card {
+    grid-template-columns: 34px 1fr 66px;
+  }
+
+  .manifest-model {
+    grid-column: 2 / -1;
+  }
+
+  .manifest-economics {
+    grid-column: 2;
+  }
+
+  .manifest-override {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
+  }
+
+  .manifest-gates {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 520px) {
+  .review-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .review-metrics > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--setup-line);
+  }
+}

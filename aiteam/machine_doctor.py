@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -8,22 +9,28 @@ import socket
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
+from aiteam.ecosystem_registry import detect_project_ecosystems, doctor_probe_specs
 from aiteam.installation_support import (
     load_installation_support_contract,
     version_meets_minimum,
 )
-from aiteam.ecosystem_registry import detect_project_ecosystems, doctor_probe_specs
 from aiteam.platform_runtime import (
     architecture_id,
     platform_id,
+    provider_cli_fingerprint,
     resolve_executable,
+    resolve_provider_cli,
     run_command,
 )
-from aiteam.user_config import load_adapter_profiles
-
+from aiteam.project_hygiene import (
+    observe_project_hygiene,
+    validate_project_hygiene,
+)
+from aiteam.user_config import get_projects_root, load_adapter_profiles
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_VERSION = "machine_doctor_v1"
@@ -68,6 +75,9 @@ def build_machine_inventory(
     port_probe: Callable[[int], str] | None = None,
     host: tuple[str, str, str] | None = None,
     adapter_profiles: list[dict[str, Any]] | None = None,
+    provider_cli_version_gate: Mapping[str, Any] | None = None,
+    project_hygiene: Mapping[str, Any] | None = None,
+    projects_root: Path | None = None,
 ) -> dict[str, Any]:
     """Build the read-only machine inventory without reading secret values."""
     support = dict(support_contract or load_installation_support_contract())
@@ -177,6 +187,18 @@ def build_machine_inventory(
         if item["requirement"] in {"required", "required_on_windows"}
         and not item["ready"]
     )
+    configured_projects_root = (
+        Path(projects_root)
+        if projects_root is not None
+        else get_projects_root()
+    )
+    hygiene = dict(
+        project_hygiene
+        or observe_project_hygiene(
+            configured_projects_root,
+            configured=configured_projects_root is not None,
+        )
+    )
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "scope": {
@@ -199,7 +221,20 @@ def build_machine_inventory(
         "permissions": permissions,
         "toolchains": toolchains,
         "adapters": adapters,
+        "provider_cli_version_gate": {},
+        "project_hygiene": hygiene,
     }
+    report["provider_cli_version_gate"] = dict(
+        provider_cli_version_gate
+        or _build_provider_cli_version_projection(
+            root=Path(root),
+            report=report,
+            support=support,
+            profiles=profiles,
+            os_id=os_id,
+            command_probe=probe_command,
+        )
+    )
     diagnostics = diagnose_machine_inventory(report)
     severity_counts = {
         severity: sum(item["severity"] == severity for item in diagnostics)
@@ -231,7 +266,7 @@ def build_machine_inventory(
 def validate_machine_inventory(report: Mapping[str, Any]) -> None:
     """Small fail-closed validator for invariants not delegated to a dependency."""
     load_machine_doctor_schema()
-    if set(report) != {
+    required_fields = {
         "schema_version",
         "scope",
         "host",
@@ -240,9 +275,14 @@ def validate_machine_inventory(report: Mapping[str, Any]) -> None:
         "permissions",
         "toolchains",
         "adapters",
+        "provider_cli_version_gate",
         "diagnostics",
         "summary",
-    }:
+    }
+    if frozenset(report) not in {frozenset(required_fields), frozenset({
+        *required_fields,
+        "project_hygiene",
+    })}:
         raise ValueError("machine doctor report fields drift")
     if report.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("machine doctor report schema drift")
@@ -274,6 +314,31 @@ def validate_machine_inventory(report: Mapping[str, Any]) -> None:
     for collection in ("toolchains", "adapters"):
         if not isinstance(report.get(collection), list):
             raise ValueError(f"machine doctor {collection} must be a list")
+    if "project_hygiene" in report:
+        hygiene = report["project_hygiene"]
+        if not isinstance(hygiene, dict):
+            raise ValueError("machine doctor project hygiene must be an object")
+        validate_project_hygiene(hygiene)
+    cli_gate = report.get("provider_cli_version_gate")
+    if not isinstance(cli_gate, dict) or set(cli_gate) != {
+        "schema_version",
+        "status",
+        "identity_version_ok",
+        "catalog_ready",
+        "documentation_ready",
+        "promotion_ready",
+        "report_sha256",
+        "failure_code",
+    }:
+        raise ValueError("machine doctor provider CLI gate fields drift")
+    if cli_gate["schema_version"] != "provider_cli_version_audit_v1":
+        raise ValueError("machine doctor provider CLI gate schema drift")
+    if cli_gate["promotion_ready"] is not (
+        cli_gate["identity_version_ok"]
+        and cli_gate["catalog_ready"]
+        and cli_gate["documentation_ready"]
+    ):
+        raise ValueError("machine doctor provider CLI gate summary drift")
     toolchain_ids = [str(item.get("id") or "") for item in report["toolchains"]]
     expected_toolchains = {str(item["id"]) for item in _TOOLCHAIN_PROBES}
     if set(toolchain_ids) != expected_toolchains or len(toolchain_ids) != len(
@@ -365,6 +430,15 @@ def render_machine_inventory(report: Mapping[str, Any]) -> str:
     lines.append(
         "[toolchains] manifests raíz: " + (", ".join(detected) if detected else "ninguno")
     )
+    hygiene = report.get("project_hygiene")
+    if isinstance(hygiene, Mapping):
+        counts = hygiene["counts"]
+        lines.append(
+            "[higiene] "
+            f"{hygiene['status']}; legacy={counts['legacy_numbered']}; "
+            f"tombstones={counts['legacy_tombstones']}; "
+            f"staging={counts['staging_leftovers']}"
+        )
     for diagnostic in report["diagnostics"]:
         lines.append(
             f"[{diagnostic['severity']}] {diagnostic['code']}: "
@@ -432,7 +506,11 @@ def _observe_adapter_profiles(
     def observe_cli(cli_id: str, candidates: list[str], args: list[str]) -> dict[str, Any]:
         cache_key = json.dumps([cli_id, candidates, args])
         if cache_key not in cli_cache:
-            resolved = _resolve_runtime(candidates, os_id=os_id)
+            resolved = resolve_provider_cli(
+                cli_id,
+                candidates,
+                os_id=os_id,
+            )
             installed, version = (
                 command_probe([resolved, *args]) if resolved else (False, None)
             )
@@ -441,6 +519,10 @@ def _observe_adapter_profiles(
                 "installed": installed,
                 "version": version,
                 "executable": Path(resolved).name if resolved else None,
+                "fingerprint": provider_cli_fingerprint(
+                    resolved,
+                    os_id=os_id,
+                ),
                 "source": "path_lookup_version_only",
             }
         return dict(cli_cache[cache_key])
@@ -458,7 +540,7 @@ def _observe_adapter_profiles(
             if isinstance(command, list) and command and str(command[0]).strip()
             else []
         )
-        if support_row:
+        if support_row and not command_candidates:
             command_candidates = list(support_row["commands"])
         cli = (
             observe_cli(
@@ -821,6 +903,60 @@ def diagnose_machine_inventory(report: Mapping[str, Any]) -> list[dict[str, Any]
             requires_human=requires_human,
             mutates_state=mutates_state,
         )
+    hygiene = report.get("project_hygiene")
+    if isinstance(hygiene, Mapping) and hygiene.get("status") != "clean":
+        hygiene_status = str(hygiene.get("status") or "review_required")
+        action = hygiene["recommended_action"]
+        add(
+            diagnostic_id=f"system:project_hygiene:{hygiene_status}",
+            subject_kind="system",
+            subject_id="project_hygiene",
+            state=(
+                "degraded"
+                if hygiene_status in {
+                    "legacy_artifacts_detected",
+                    "review_required",
+                }
+                else "unverified"
+            ),
+            severity="warning",
+            code="project_root_hygiene_requires_attention",
+            message=(
+                "La raíz de proyectos contiene artefactos legacy o requiere revisión."
+                if hygiene_status in {
+                    "legacy_artifacts_detected",
+                    "review_required",
+                }
+                else "La raíz de proyectos aún no está disponible/configurada."
+            ),
+            source="project_hygiene_v1",
+            action_code=str(action["code"]),
+            action=str(action["description"]),
+            requires_human=bool(action["requires_human"]),
+            mutates_state=False,
+        )
+    cli_gate = report["provider_cli_version_gate"]
+    if cli_gate["promotion_ready"] is not True:
+        add(
+            diagnostic_id="system:provider_cli_version_gate:blocked",
+            subject_kind="system",
+            subject_id="provider_cli_version_gate",
+            state="incompatible",
+            severity="blocker",
+            code="provider_cli_version_gate_failed",
+            message=(
+                "Las versiones/identidades CLI no coinciden con contrato, "
+                "catálogo o documentación."
+            ),
+            source="provider_cli_version_audit_v1",
+            action_code="audit_provider_cli_versions",
+            action=(
+                "Ejecuta audit_provider_cli_versions.py y corrige el diagnóstico "
+                "sin instalar ni autenticar automáticamente."
+            ),
+            requires_human=False,
+            mutates_state=False,
+        )
     primary_ready = any(
         adapter["primary_candidate"]
         and adapter["diagnostic_state"] == "ready"
@@ -861,6 +997,84 @@ def _overall_status(diagnostics: list[dict[str, Any]]) -> str:
     if any(item["state"] == "unverified" for item in diagnostics):
         return "ready_with_unknowns"
     return "ready"
+
+
+def _build_provider_cli_version_projection(
+    *,
+    root: Path,
+    report: Mapping[str, Any],
+    support: Mapping[str, Any],
+    profiles: list[dict[str, Any]],
+    os_id: str,
+    command_probe: Callable[[list[str]], tuple[bool, str | None]],
+) -> dict[str, Any]:
+    try:
+        from aiteam.provider_cli_version_audit import (
+            audit_provider_cli_versions,
+            build_catalog_guards,
+            build_documentation_guard,
+            build_runtime_cli_observations,
+        )
+
+        drift_path = (
+            root
+            / "benchmarks"
+            / "results"
+            / "model_catalog_drift"
+            / "model-catalog-drift-2026-07-29-cli-refresh.json"
+        )
+        guide_path = root / "docs" / "INSTALLATION_AND_INTEGRATION.md"
+        drift = json.loads(drift_path.read_text(encoding="utf-8"))
+        documentation = build_documentation_guard(
+            guide_path.read_text(encoding="utf-8"),
+            support=support,
+        )
+        runtime = build_runtime_cli_observations(
+            support=support,
+            profiles=profiles,
+            command_probe=command_probe,
+            os_id=os_id,
+        )
+        guards = build_catalog_guards(runtime, drift_receipt=drift)
+        audit = audit_provider_cli_versions(
+            report,
+            runtime,
+            support=support,
+            catalog_guards=guards,
+            documentation_guard=documentation,
+        )
+        summary = audit["summary"]
+        digest = hashlib.sha256(
+            json.dumps(
+                audit,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        return {
+            "schema_version": audit["schema_version"],
+            "status": "ready" if summary["promotion_ready"] else "blocked",
+            "identity_version_ok": summary["identity_version_ok"],
+            "catalog_ready": summary["catalog_ready"],
+            "documentation_ready": summary["documentation_ready"],
+            "promotion_ready": summary["promotion_ready"],
+            "report_sha256": digest,
+            "failure_code": None
+            if summary["promotion_ready"]
+            else "provider_cli_version_gate_failed",
+        }
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {
+            "schema_version": "provider_cli_version_audit_v1",
+            "status": "blocked",
+            "identity_version_ok": False,
+            "catalog_ready": False,
+            "documentation_ready": False,
+            "promotion_ready": False,
+            "report_sha256": None,
+            "failure_code": "provider_cli_version_evidence_unavailable",
+        }
 
 
 def _contains_personal_path(value: str) -> bool:

@@ -1,0 +1,54 @@
+{
+  "observed_at": "2026-07-29T22:44:27.092105+00:00",
+  "report": {
+    "failure_count": 0,
+    "failures": [],
+    "negative_matrix": [
+      {
+        "case": "high_score_wrong_lane",
+        "passed": true
+      },
+      {
+        "case": "stale_evidence",
+        "passed": true
+      },
+      {
+        "case": "owner_archived",
+        "passed": true
+      },
+      {
+        "case": "adapter_red",
+        "passed": true
+      }
+    ],
+    "ok": true,
+    "policy_version": "tier_role_coverage_v1",
+    "read_model": {
+      "audit_ok": true,
+      "authority_cell_count": 490,
+      "candidate_count": 98,
+      "content_hash": "b8a8670edf81dcfbcf534e1ec142ef6c11bee8f9070a6270c932f9e0dfe0fde8",
+      "schema_version": "model_catalog_read_model_v2"
+    },
+    "schema_version": "tier1_authority_parity_audit_v1",
+    "surfaces": {
+      "api_projection": {
+        "checked_cells": 490,
+        "coverage_roles": 5,
+        "filter_cases": 3
+      },
+      "contextual_selection": {
+        "checked_active_cells": 235,
+        "roles": 5
+      },
+      "frontend_contract": {
+        "checks": 5,
+        "passed": 5
+      },
+      "snapshots": {
+        "checked_decisions": 20
+      }
+    }
+  },
+  "schema_version": "tier1_authority_parity_receipt_v1"
+}

@@ -5,7 +5,11 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from aiteam.adapters.http_retry import post_json as _post_json
-from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
+from aiteam.adapters.registry import (
+    AdapterDescriptor,
+    ExecutionResult,
+    StaticAdapterRuntime,
+)
 from aiteam.adapters.work_contract import (
     OPENAI_SUBMIT_WORK_SCHEMA,
     build_execution_contract,
@@ -32,9 +36,10 @@ class OpenAICompatibleApiRuntime:
     provider: str = "groq"
     free_tier: bool = True
     strict_models: tuple[str, ...] = ("openai/gpt-oss-120b", "openai/gpt-oss-20b")
+    reasoning_format: str = ""
     timeout: float = 120.0
 
-    def with_config(self, config: dict[str, Any]) -> "OpenAICompatibleApiRuntime":
+    def with_config(self, config: dict[str, Any]) -> OpenAICompatibleApiRuntime:
         provider = str(config.get("provider") or self.provider).strip() or self.provider
         return replace(
             self,
@@ -48,6 +53,9 @@ class OpenAICompatibleApiRuntime:
                 str(item) for item in config.get("strict_models", self.strict_models)
                 if str(item).strip()
             ),
+            reasoning_format=str(
+                config.get("reasoning_format") or self.reasoning_format
+            ).strip(),
             timeout=float(config.get("timeout_sec") or self.timeout),
         )
 
@@ -84,6 +92,8 @@ class OpenAICompatibleApiRuntime:
             # Some compatible providers/models only support JSON Object Mode.
             # parse_submit_work remains the authoritative contract validator.
             body["response_format"] = {"type": "json_object"}
+        if self.reasoning_format:
+            body["reasoning_format"] = self.reasoning_format
         try:
             data = _post_json(
                 f"{self.base_url}/chat/completions",

@@ -20,6 +20,7 @@ from aiteam.provider_governor import GOVERNOR, provider_for_url
 RETRYABLE_STATUS = {429, 500, 502, 503, 504, 529}
 MAX_ATTEMPTS = 4
 MAX_TOTAL_SLEEP_SECONDS = 90.0
+DEFAULT_USER_AGENT = "AI-Teams/1.0 (+https://github.com/MaxBonas/ai-teams)"
 _RETRY_HINT_RE = re.compile(r"try again in ([0-9.]+)s", re.IGNORECASE)
 
 
@@ -44,7 +45,12 @@ def post_json(url: str, body: dict[str, Any], *, headers: dict[str, str], timeou
         req = urllib.request.Request(
             url,
             data=payload,
-            headers={"Content-Type": "application/json", **headers},
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": DEFAULT_USER_AGENT,
+                **headers,
+            },
             method="POST",
         )
         try:

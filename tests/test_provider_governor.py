@@ -128,6 +128,8 @@ def test_http_retry_reports_rate_limits_to_governor(monkeypatch) -> None:
     ]
 
     def fake_urlopen(req, timeout):
+        assert req.get_header("User-agent") == http_retry.DEFAULT_USER_AGENT
+        assert req.get_header("Accept") == "application/json"
         outcome = outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -153,7 +155,7 @@ class _FakeResponse:
 
         return json.dumps(self._payload).encode("utf-8")
 
-    def __enter__(self) -> "_FakeResponse":
+    def __enter__(self) -> _FakeResponse:
         return self
 
     def __exit__(self, *exc_info) -> None:

@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "provider_version": "1.1.8",
+  "contract_version": "adversarial_qa_fix_cycle_v4",
+  "case_family": "webhook_replay_boundary",
+  "role": "qa",
+  "seed": 2,
+  "checks": {
+    "attack_run_completed": true,
+    "attack_report_changes_requested": true,
+    "production_unchanged_during_attack": true,
+    "adversarial_test_contract": true,
+    "adversarial_tests_fail_before_fix": true,
+    "verification_run_completed": true,
+    "adversarial_tests_pass_after_fix": true,
+    "verification_report_approved": true,
+    "verification_issue_done": true,
+    "passing_adversarial_tests_removed": true,
+    "fixed_production_intact": true
+  },
+  "attack_evaluation": {
+    "anchors": {
+      "imports_target": true,
+      "invalid_signature": true,
+      "expired_event": true,
+      "replay_duplicate": true,
+      "negative_assertion": true
+    },
+    "anchors_retained": 5,
+    "anchors_total": 5,
+    "contract_passed": true
+  },
+  "failing_test_run": {
+    "executed": true,
+    "exit_code": 1,
+    "stdout": "FFF                                                                      [100%]\n================================== FAILURES ===================================\n____________________________ test_forged_signature ____________________________\n\n    def test_forged_signature():\n        seen_ids = set()\n        event = {\n            \"id\": \"evt_1\",\n            \"signature\": \"forged\",\n            \"timestamp\": 1000\n        }\n>       assert accept_webhook(event, seen_ids, 1000) is False\nE       AssertionError: assert True is False\nE        +  where True = accept_webhook({'id': 'evt_1', 'signature': 'forged', 'timestamp': 1000}, set(), 1000)\n\ntests\\test_adversarial_webhook.py:10: AssertionError\n___________________________ test_expired_timestamp ____________________________\n\n    def test_expired_timestamp():\n        seen_ids = set()\n        event = {\n            \"id\": \"evt_2\",\n            \"signature\": \"trusted\",\n            \"timestamp\": 699\n        }\n>       assert accept_webhook(event, seen_ids, 1000) is False\nE       AssertionError: assert True is False\nE        +  where True = accept_webhook({'id': 'evt_2', 'signature': 'trusted', 'timestamp': 699}, set(), 1000)\n\ntests\\test_adversarial_webhook.py:19: AssertionError\n_______________________________ test_replay_id ________________________________\n\n    def test_replay_id():\n        seen_ids = {\"evt_3\"}\n        event = {\n            \"id\": \"evt_3\",\n            \"signature\": \"trusted\",\n            \"timestamp\": 1000\n        }\n>       assert accept_webhook(event, seen_ids, 1000) is False\nE       AssertionError: assert True is False\nE        +  where True = accept_webhook({'id': 'evt_3', 'signature': 'trusted', 'timestamp': 1000}, {'evt_3'}, 1000)\n\ntests\\test_adversarial_webhook.py:28: AssertionError\n=========================== short test summary info ===========================\nFAILED tests\\test_adversarial_webhook.py::test_forged_signature - AssertionEr...\nFAILED tests\\test_adversarial_webhook.py::test_expired_timestamp - AssertionE...\nFAILED tests\\test_adversarial_webhook.py::test_replay_id - AssertionError: as...\n3 failed in 0.08s\n",
+    "stderr": ""
+  },
+  "passing_test_run": {
+    "executed": true,
+    "exit_code": 0,
+    "stdout": "...                                                                      [100%]\n3 passed in 0.05s\n",
+    "stderr": ""
+  },
+  "phases": {
+    "attack": {
+      "seconds": 53.891,
+      "issue_status": "done",
+      "run": {
+        "id": "run:61b9eb8b-1a4c-4648-a311-385a225ca999",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gemini-3.5-flash-high",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "usage_json": "{}"
+      },
+      "report": {
+        "id": "e26389be-c7d8-456c-865b-9669c11da502",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:61b9eb8b-1a4c-4648-a311-385a225ca999",
+        "agent_role": "qa",
+        "result": "changes_requested",
+        "issue_status": "done",
+        "next_owner": "engineer",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "tests/test_adversarial_webhook.py. Command: pytest. Result: 3 failed tests (test_forged_signature, test_expired_timestamp, test_replay_id).",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests/test_adversarial_webhook.py. Command: pytest. Result: 3 failed tests (test_forged_signature, test_expired_timestamp, test_replay_id).\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 22:03:05"
+      },
+      "comments": [
+        {
+          "id": "4452fd47-e9cc-48f8-a51b-38d59780a7e8",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:61b9eb8b-1a4c-4648-a311-385a225ca999",
+          "body": "Wrote tests/test_adversarial_webhook.py with tests that fail against the current returning True implementation. Closed the issue as done and assigned back to the engineer.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 22:03:05",
+          "updated_at": "2026-07-29 22:03:05"
+        },
+        {
+          "id": "04a8ca1b-087f-4baa-889f-ea71696e9288",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:61b9eb8b-1a4c-4648-a311-385a225ca999",
+          "body": "---AGENT-REPORT---\nrole: qa\nresult: changes_requested\nissue_status: done\nnext_owner: engineer\nblocker: none\nevidence: tests/test_adversarial_webhook.py. Command: pytest. Result: 3 failed tests (test_forged_signature, test_expired_timestamp, test_replay_id).",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 22:03:05",
+          "updated_at": "2026-07-29 22:03:05"
+        }
+      ]
+    },
+    "verify_fix": {
+      "seconds": 66.391,
+      "issue_status": "done",
+      "run": {
+        "id": "run:ce10329c-99ac-43d4-8aef-744fa05d55b7",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gemini-3.5-flash-high",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "usage_json": "{}"
+      },
+      "report": {
+        "id": "dfe91b34-947f-47b9-8c20-a03a4ae3c46d",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:ce10329c-99ac-43d4-8aef-744fa05d55b7",
+        "agent_role": "qa",
+        "result": "approved",
+        "issue_status": "done",
+        "next_owner": "lead",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "tests/test_adversarial_webhook.py. Command: pytest. Result: 3 passed tests (test_forged_signature, test_expired_timestamp, test_replay_id). Attacked boundaries: forged signature signature!='trusted', expired timestamp >300s, replay of already seen event ID. All tests passed after the fix. Deleted tests/test_adversarial_webhook.py as all 3 adversarial tests passed.",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests/test_adversarial_webhook.py. Command: pytest. Result: 3 passed tests (test_forged_signature, test_expired_timestamp, test_replay_id). Attacked boundaries: forged signature signature!='trusted', expired timestamp >300s, replay of already seen event ID. All tests passed after the fix. Deleted tests/test_adversarial_webhook.py as all 3 adversarial tests passed.\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"approved\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 22:04:12"
+      },
+      "comments": [
+        {
+          "id": "a7073e17-0e44-4b44-bfa2-77000bd4184d",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:ce10329c-99ac-43d4-8aef-744fa05d55b7",
+          "body": "The fix was verified and all adversarial tests passed. Removed tests/test_adversarial_webhook.py as requested and marked the issue as done.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 22:04:12",
+          "updated_at": "2026-07-29 22:04:12"
+        },
+        {
+          "id": "f57f0323-9d24-4ab4-a904-b585c20dc0e5",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:ce10329c-99ac-43d4-8aef-744fa05d55b7",
+          "body": "Wrote tests/test_adversarial_webhook.py with tests that fail against the current returning True implementation. Closed the issue as done and assigned back to the engineer.\n\n---AGENT-REPORT---\nrole: qa\nresult: approved\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: tests/test_adversarial_webhook.py. Command: pytest. Result: 3 passed tests (test_forged_signature, test_expired_timestamp, test_replay_id). Attacked boundaries: forged signature signature!='trusted', expired timestamp >300s, replay of already seen event ID. All tests passed after the fix. Deleted tests/test_adversarial_webhook.py as all 3 adversarial tests passed.",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 22:04:12",
+          "updated_at": "2026-07-29 22:04:12"
+        }
+      ]
+    }
+  },
+  "usage": {},
+  "workspace": "runtime/bench/p0h2d3-flash-high-webhook-v4-s2",
+  "ok": true
+}

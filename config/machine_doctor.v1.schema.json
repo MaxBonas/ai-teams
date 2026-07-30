@@ -13,6 +13,7 @@
     "permissions",
     "toolchains",
     "adapters",
+    "provider_cli_version_gate",
     "diagnostics",
     "summary"
   ],
@@ -74,6 +75,36 @@
       "type": "array",
       "items": {"$ref": "#/$defs/adapter"}
     },
+    "provider_cli_version_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "status",
+        "identity_version_ok",
+        "catalog_ready",
+        "documentation_ready",
+        "promotion_ready",
+        "report_sha256",
+        "failure_code"
+      ],
+      "properties": {
+        "schema_version": {"const": "provider_cli_version_audit_v1"},
+        "status": {"enum": ["ready", "blocked"]},
+        "identity_version_ok": {"type": "boolean"},
+        "catalog_ready": {"type": "boolean"},
+        "documentation_ready": {"type": "boolean"},
+        "promotion_ready": {"type": "boolean"},
+        "report_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "failure_code": {"type": ["string", "null"]}
+      }
+    },
+    "project_hygiene": {
+      "$ref": "#/$defs/project_hygiene"
+    },
     "diagnostics": {
       "type": "array",
       "items": {"$ref": "#/$defs/diagnostic"}
@@ -129,6 +160,136 @@
     }
   },
   "$defs": {
+    "project_hygiene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "scope", "root", "status", "requires_attention",
+        "counts", "legacy_families", "ownership", "lifecycle",
+        "recommended_action"
+      ],
+      "properties": {
+        "schema_version": {"const": "project_hygiene_v1"},
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "read_only", "paths_emitted", "symlinks_followed",
+            "database_opened", "git_invoked"
+          ],
+          "properties": {
+            "read_only": {"const": true},
+            "paths_emitted": {"const": false},
+            "symlinks_followed": {"const": false},
+            "database_opened": {"const": false},
+            "git_invoked": {"const": false}
+          }
+        },
+        "root": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["configured", "exists", "reparse_point", "fingerprint"],
+          "properties": {
+            "configured": {"type": "boolean"},
+            "exists": {"type": "boolean"},
+            "reparse_point": {"type": "boolean"},
+            "fingerprint": {
+              "type": ["string", "null"],
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "status": {
+          "enum": [
+            "not_configured", "root_missing", "review_required",
+            "legacy_artifacts_detected", "clean"
+          ]
+        },
+        "requires_attention": {"type": "boolean"},
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "direct_directories", "aiteam_projects", "legacy_numbered",
+            "legacy_tombstones", "staging_leftovers", "reparse_points",
+            "scan_errors"
+          ],
+          "properties": {
+            "direct_directories": {"type": "integer", "minimum": 0},
+            "aiteam_projects": {"type": "integer", "minimum": 0},
+            "legacy_numbered": {"type": "integer", "minimum": 0},
+            "legacy_tombstones": {"type": "integer", "minimum": 0},
+            "staging_leftovers": {"type": "integer", "minimum": 0},
+            "reparse_points": {"type": "integer", "minimum": 0},
+            "scan_errors": {"type": "integer", "minimum": 0}
+          }
+        },
+        "legacy_families": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["family", "count"],
+            "properties": {
+              "family": {
+                "enum": [
+                  "AnthropicLead", "Demo", "OrgChart", "Quorum",
+                  "Reconcile", "Solo"
+                ]
+              },
+              "count": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        "ownership": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "aiteam_identity_is_not_cleanup_authority",
+            "folders_without_aiteam_identity_are_personal_protected"
+          ],
+          "properties": {
+            "aiteam_identity_is_not_cleanup_authority": {"const": true},
+            "folders_without_aiteam_identity_are_personal_protected": {
+              "const": true
+            }
+          }
+        },
+        "lifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "automatic_cleanup_installed", "startup_cleanup_installed",
+            "ttl_cleanup_installed", "doctor_can_mutate"
+          ],
+          "properties": {
+            "automatic_cleanup_installed": {"const": false},
+            "startup_cleanup_installed": {"const": false},
+            "ttl_cleanup_installed": {"const": false},
+            "doctor_can_mutate": {"const": false}
+          }
+        },
+        "recommended_action": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code", "description", "requires_human", "mutates_state"
+          ],
+          "properties": {
+            "code": {
+              "enum": [
+                "configure_projects_root", "choose_existing_projects_root",
+                "review_project_root_hygiene", "run_project_artifact_audit",
+                "none"
+              ]
+            },
+            "description": {"type": "string", "minLength": 1},
+            "requires_human": {"type": "boolean"},
+            "mutates_state": {"const": false}
+          }
+        }
+      }
+    },
     "runtime": {
       "type": "object",
       "additionalProperties": false,
@@ -219,12 +380,23 @@
     "cli_observation": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["id", "installed", "version", "executable", "source"],
+      "required": [
+        "id",
+        "installed",
+        "version",
+        "executable",
+        "fingerprint",
+        "source"
+      ],
       "properties": {
         "id": {"type": "string", "minLength": 1},
         "installed": {"type": "boolean"},
         "version": {"type": ["string", "null"]},
         "executable": {"type": ["string", "null"], "pattern": "^[^/\\\\]*$"},
+        "fingerprint": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
         "source": {"const": "path_lookup_version_only"}
       }
     },

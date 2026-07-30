@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_tier_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "same_provider_version": true,
+  "role": "mcp_operator",
+  "reasoning_effort": "medium",
+  "contract_version": "tier3_causal_report_v2",
+  "case_family": "dependency_policy_governance",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "samples_artifact_passed": 3,
+  "samples_single_attempt": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/p0h2d5-terra-mcp-policy-cli-0.146.0-seed-1.json",
+    "benchmarks/results/model_calibration/p0h2d5-terra-mcp-policy-cli-0.146.0-seed-2.json",
+    "benchmarks/results/model_calibration/p0h2d5-terra-mcp-policy-cli-0.146.0-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d5-terra-mcp-policy-cli-0.146.0-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "001f74f4ab784c05cd8fa76fc4898a5c7ab96372e090a45b2fef6092d2f72b3f"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d5-terra-mcp-policy-cli-0.146.0-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "ab760897a2b98c0c4b04ad19a0612320ff80c38f1980e1b5bc9fb6cce339640b"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d5-terra-mcp-policy-cli-0.146.0-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "checks": {
+        "artifact_contract": true,
+        "valid_assignee_report": true,
+        "single_attempt": true
+      },
+      "artifact_sha256": "1188e339cb7a33727689defabdd989ef154575941afc03e9aca2da035e7ed576"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "artifacts_hashed": true,
+    "same_provider_version": true
+  },
+  "checks_passed": 36,
+  "checks_total": 36,
+  "wall_seconds_median": 36.453,
+  "wall_seconds_range": [
+    33.344,
+    38.093
+  ],
+  "usage": {
+    "input_tokens": 288397,
+    "output_tokens": 3559,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "MCP remoto",
+      "credenciales reales",
+      "recovery durante una llamada activa"
+    ]
+  }
+}

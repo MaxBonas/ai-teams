@@ -46,6 +46,30 @@ def test_submit_work_schema_is_gemini_compatible_after_sanitizing() -> None:
 
     assert not _has_key(sanitized, "additionalProperties")
     assert sanitized["required"] == ["ops", "status", "summary"]
+    schema_version = (
+        sanitized["properties"]["ops"]["items"]["properties"]["plan"]
+        ["properties"]["schema_version"]
+    )
+    assert schema_version == {"type": "integer"}
+    assert sanitized["properties"]["status"]["enum"] == [
+        "completed", "failed", "skipped",
+    ]
+
+
+def test_sanitizer_strips_non_string_enum_without_mutating_source() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "version": {"type": "integer", "enum": [1]},
+            "status": {"type": "string", "enum": ["ok", "failed"]},
+        },
+    }
+
+    sanitized = _to_gemini_schema(schema)
+
+    assert sanitized["properties"]["version"] == {"type": "integer"}
+    assert sanitized["properties"]["status"]["enum"] == ["ok", "failed"]
+    assert schema["properties"]["version"]["enum"] == [1]
 
 
 def test_sanitizer_does_not_mutate_the_original_schema() -> None:

@@ -1,0 +1,159 @@
+{
+  "contract_schema_version": "provider_cli_version_contract_v1",
+  "contract_updated_at": "2026-07-30",
+  "documentation_guard": {
+    "checks": {
+      "cli_documented:agy": true,
+      "cli_documented:codex": true,
+      "cli_documented:opencode": true,
+      "contract_path_referenced": true,
+      "contract_schema_referenced": true,
+      "validated_floor_semantics": true
+    },
+    "ok": true,
+    "source_sha256": "ec096d0c5070fd305c384d9d4b03b2fff9c3cffcbe95692a2d135e29c8069507",
+    "status": "current"
+  },
+  "rows": [
+    {
+      "accepted_channels": [
+        "prerelease",
+        "stable"
+      ],
+      "adapter_id": "codex_subscription",
+      "catalog_guard": {
+        "contract": "installed_version_matches_catalog_client_and_cache",
+        "ok": true,
+        "status": "current"
+      },
+      "checks": {
+        "channel_allowed": true,
+        "executable_matches": true,
+        "fingerprint_matches": true,
+        "fingerprint_observable": true,
+        "installation_matches": true,
+        "minimum_version": true,
+        "prerelease_explicit": true,
+        "version_matches": true,
+        "version_observable": true
+      },
+      "cli_id": "codex",
+      "doctor": {
+        "executable": "codex.cmd",
+        "fingerprint": "13ba144b5cd8911c49f7ea2c3b5dee66ad3bd945fda8985bfbaaa96808ec7c56",
+        "installed": true,
+        "version": "codex-cli 0.146.0-alpha.6"
+      },
+      "failure_codes": [],
+      "identity_version_ok": true,
+      "minimum_version": "0.146.0-alpha.6",
+      "requirement": "primary_option",
+      "runtime": {
+        "executable": "codex.cmd",
+        "fingerprint": "13ba144b5cd8911c49f7ea2c3b5dee66ad3bd945fda8985bfbaaa96808ec7c56",
+        "installed": true,
+        "version": "codex-cli 0.146.0-alpha.6"
+      },
+      "status": "ready",
+      "validated_version": "0.146.0-alpha.6"
+    },
+    {
+      "accepted_channels": [
+        "stable"
+      ],
+      "adapter_id": "antigravity_subscription",
+      "catalog_guard": {
+        "contract": "authenticated_catalog_observed_with_same_cli_version",
+        "ok": true,
+        "status": "current"
+      },
+      "checks": {
+        "channel_allowed": true,
+        "executable_matches": true,
+        "fingerprint_matches": true,
+        "fingerprint_observable": true,
+        "installation_matches": true,
+        "minimum_version": true,
+        "prerelease_explicit": true,
+        "version_matches": true,
+        "version_observable": true
+      },
+      "cli_id": "agy",
+      "doctor": {
+        "executable": "agy.exe",
+        "fingerprint": "dd88921142922adcdc6a6782895b27d2feae5f6677162ad2ac27a11d3d03bf70",
+        "installed": true,
+        "version": "1.1.8"
+      },
+      "failure_codes": [],
+      "identity_version_ok": true,
+      "minimum_version": "1.1.8",
+      "requirement": "primary_option",
+      "runtime": {
+        "executable": "agy.exe",
+        "fingerprint": "dd88921142922adcdc6a6782895b27d2feae5f6677162ad2ac27a11d3d03bf70",
+        "installed": true,
+        "version": "1.1.8"
+      },
+      "status": "ready",
+      "validated_version": "1.1.8"
+    },
+    {
+      "accepted_channels": [
+        "stable"
+      ],
+      "adapter_id": "opencode_zen_free",
+      "catalog_guard": {
+        "contract": "catalog_and_structured_output_probe_are_independent_gates",
+        "ok": true,
+        "status": "current"
+      },
+      "checks": {
+        "channel_allowed": true,
+        "executable_matches": true,
+        "fingerprint_matches": true,
+        "fingerprint_observable": true,
+        "installation_matches": true,
+        "minimum_version": true,
+        "prerelease_explicit": true,
+        "version_matches": true,
+        "version_observable": true
+      },
+      "cli_id": "opencode",
+      "doctor": {
+        "executable": "opencode.cmd",
+        "fingerprint": "9e973a6eec7a32b6b86843efb3bedfe96b347a644fcd7e4b1232412897619c68",
+        "installed": true,
+        "version": "1.18.4"
+      },
+      "failure_codes": [],
+      "identity_version_ok": true,
+      "minimum_version": "1.18.4",
+      "requirement": "optional_economy",
+      "runtime": {
+        "executable": "opencode.cmd",
+        "fingerprint": "9e973a6eec7a32b6b86843efb3bedfe96b347a644fcd7e4b1232412897619c68",
+        "installed": true,
+        "version": "1.18.4"
+      },
+      "status": "ready",
+      "validated_version": "1.18.4"
+    }
+  ],
+  "schema_version": "provider_cli_version_audit_v1",
+  "scope": {
+    "inference_attempted": false,
+    "login_attempted": false,
+    "paths_emitted": false,
+    "read_only": true,
+    "secrets_read": false
+  },
+  "summary": {
+    "catalog_ready": true,
+    "documentation_ready": true,
+    "failure_count": 0,
+    "identity_version_ok": true,
+    "primary_option_ready": true,
+    "promotion_ready": true
+  }
+}

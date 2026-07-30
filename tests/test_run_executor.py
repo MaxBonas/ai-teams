@@ -142,6 +142,90 @@ class _LeadCreateIssuesRuntime:
         )
 
 
+def test_tier1_dispatch_preflight_blocks_wrong_lane_before_llm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE agents SET role='lead' WHERE id='agent-1'")
+        conn.commit()
+    authority = {
+        "policy_version": "tier_role_coverage_v1",
+        "lane": "quorum_ready",
+        "status": "enabled",
+        "enabled": True,
+    }
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.contextual_model_selection",
+        lambda *args, **kwargs: {
+            "candidates": [{
+                "identity": {
+                    "profile_id": "profile-a",
+                    "model_id": "model-a",
+                },
+                "tier1_authority": authority,
+            }]
+        },
+    )
+    executor = RunExecutor(db_path, AdapterRegistry())
+
+    blocked = executor._tier1_authority_preflight(
+        run={"id": "", "issue_id": "issue-1"},
+        agent_id="agent-1",
+        agent_role="lead",
+        adapter_type="subscription_cli",
+        adapter_cfg={"profile_id": "profile-a", "model": "model-a"},
+        selected_profiles=[],
+    )
+
+    assert blocked is not None
+    assert blocked.error_code == "tier1_authority_lane_mismatch"
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute(
+            "SELECT status FROM issues WHERE id='issue-1'"
+        ).fetchone()[0] == "blocked"
+        payload = json.loads(conn.execute(
+            "SELECT payload_json FROM issue_thread_interactions "
+            "WHERE issue_id='issue-1'"
+        ).fetchone()[0])
+    assert payload["reason"] == "tier1_authority_blocked"
+
+
+def test_tier1_dispatch_preflight_accepts_only_exact_enabled_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.contextual_model_selection",
+        lambda *args, **kwargs: {
+            "candidates": [{
+                "identity": {
+                    "profile_id": "profile-a",
+                    "model_id": "model-a",
+                },
+                "tier1_authority": {
+                    "policy_version": "tier_role_coverage_v1",
+                    "lane": "quorum_ready",
+                    "status": "enabled",
+                    "enabled": True,
+                },
+            }]
+        },
+    )
+    executor = RunExecutor(db_path, AdapterRegistry())
+
+    assert executor._tier1_authority_preflight(
+        run={"id": "", "issue_id": "issue-1"},
+        agent_id="agent-1",
+        agent_role="quorum_auditor",
+        adapter_type="subscription_cli",
+        adapter_cfg={"profile_id": "profile-a", "model": "model-a"},
+        selected_profiles=[],
+    ) is None
+
+
 class _LeadCreateIssuesWithoutReviewerRuntime:
     descriptor = AdapterDescriptor(adapter_type="openai_api", channel="api", provider="openai")
 
@@ -265,6 +349,37 @@ def _dispatch_one(db_path: Path) -> Any:
     return scheduler.dispatch_next()
 
 
+def _selection_candidate(
+    profile_id: str,
+    model: str,
+    *,
+    rank: int = 1,
+    automatic: bool = True,
+    model_vendor: str = "",
+    tier: str = "standard",
+) -> dict[str, Any]:
+    return {
+        "candidate_id": f"{profile_id}:{model}",
+        "identity": {
+            "profile_id": profile_id,
+            "model_id": model,
+            "model_vendor": model_vendor or profile_id,
+        },
+        "model_metadata": {"tier": tier},
+        "owner_selectable": True,
+        "rank": rank,
+        "selection_reason": f"fixture_rank_{rank}",
+        "selection_score": {
+            "auto_eligible": automatic,
+            "auto_ineligible_reasons": [] if automatic else ["not_calibrated"],
+        },
+    }
+
+
+def _selection_projection(*candidates: dict[str, Any]) -> dict[str, Any]:
+    return {"candidates": list(candidates)}
+
+
 @pytest.mark.parametrize(
     ("owner_action", "expected_model", "expected_status", "expected_queued"),
     [
@@ -291,6 +406,24 @@ def test_model_unavailable_requires_owner_before_same_profile_fallback(
         "catalog_client_version": "0.145.0",
         "models": [],
     })
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.contextual_model_selection",
+        lambda *args, **kwargs: _selection_projection(
+            _selection_candidate(
+                "codex_subscription",
+                "gpt-5.6-luna",
+                rank=2,
+                automatic=False,
+                tier="tier_3",
+            ),
+            _selection_candidate(
+                "codex_subscription",
+                "gpt-5.6-terra",
+                rank=1,
+                tier="tier_2",
+            ),
+        ),
+    )
     record_model_health("codex_subscription", "gpt-5.6-terra", available=True, reason="run_completed")
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -550,6 +683,60 @@ def test_executor_completes_run_and_wakeup(tmp_path: Path) -> None:
         ("adapter:subscription_cli", "allowed")
     ]
     assert spent == 5
+
+
+def test_legacy_provider_fallback_cannot_bypass_exact_calibration(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class _OriginalRuntime(_CountingRuntime):
+        descriptor = AdapterDescriptor(
+            adapter_type="openai_api",
+            channel="api",
+            provider="openai",
+        )
+
+    class _FallbackRuntime(_CountingRuntime):
+        descriptor = AdapterDescriptor(
+            adapter_type="gemini_api",
+            channel="api",
+            provider="google",
+        )
+
+    db_path = tmp_path / "aiteam.db"
+    _init_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE agents SET adapter_type='openai_api' WHERE id='agent-1'"
+        )
+        conn.commit()
+    original = _OriginalRuntime()
+    fallback = _FallbackRuntime()
+    monkeypatch.setenv("AITEAM_PROVIDER_FALLBACK_ADAPTER", "gemini_api")
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.GOVERNOR.is_degraded",
+        lambda _provider: True,
+    )
+
+    dispatch = _dispatch_one(db_path)
+    RunExecutor(
+        db_path,
+        AdapterRegistry([original, fallback]),
+    ).execute(dispatch)
+
+    assert original.calls == 1
+    assert fallback.calls == 0
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        denied = conn.execute(
+            "SELECT decision, reason, metadata_json FROM tool_access "
+            "WHERE run_id=? AND tool_name='adapter:gemini_api'",
+            (dispatch.run["id"],),
+        ).fetchone()
+    assert denied["decision"] == "denied"
+    assert "exact calibrated" in denied["reason"]
+    assert json.loads(denied["metadata_json"])["required_flow"] == (
+        "assignment_recovery"
+    )
 
 
 @pytest.mark.parametrize("cli_kind,provider,channel", [
@@ -1973,7 +2160,9 @@ def test_llm_lead_created_issues_get_agents_and_wakeups(tmp_path: Path) -> None:
     assert {row["agent_id"] for row in wakeups} == {"role:engineer", "role:reviewer", "role:test_designer"}
 
 
-def test_llm_lead_created_issue_agents_use_project_adapter_policy(tmp_path: Path) -> None:
+def test_llm_lead_created_issue_agents_use_project_adapter_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = tmp_path / "aiteam.db"
     _init_lead_db(db_path)
     (tmp_path / "project_config.json").write_text(
@@ -1981,8 +2170,53 @@ def test_llm_lead_created_issue_agents_use_project_adapter_policy(tmp_path: Path
         encoding="utf-8",
     )
     with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("UPDATE agents SET adapter_type = ? WHERE id = ?", ("openai_api", "role:lead"))
+        conn.execute(
+            "UPDATE agents SET adapter_type = ?, adapter_config_json = ? "
+            "WHERE id = ?",
+            (
+                "openai_api",
+                json.dumps({
+                    "profile_id": "openai_api",
+                    "model": "gpt-5.6-sol",
+                }),
+                "role:lead",
+            ),
+        )
         conn.commit()
+    def authority_projection(*args, **kwargs):
+        if kwargs.get("role") == "engineer":
+            return _selection_projection(
+                _selection_candidate(
+                    "openai_api",
+                    "gpt-5.6-terra",
+                    tier="tier_2",
+                )
+            )
+        return {
+            "candidates": [{
+                "candidate_id": "openai_api:gpt-5.6-sol",
+                "identity": {
+                "profile_id": "openai_api",
+                "model_id": "gpt-5.6-sol",
+                },
+                "owner_selectable": True,
+                "selection_score": {"auto_eligible": True},
+                "tier1_authority": {
+                    "policy_version": "tier_role_coverage_v1",
+                    "lane": "lead_ready",
+                    "status": "enabled",
+                    "enabled": True,
+                },
+            }]
+        }
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        authority_projection,
+    )
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.contextual_model_selection",
+        authority_projection,
+    )
 
     executor = RunExecutor(db_path, AdapterRegistry([_LeadCreateIssuesRuntime()]))
     dispatch = _dispatch_lead(db_path)
@@ -2001,7 +2235,9 @@ def test_llm_lead_created_issue_agents_use_project_adapter_policy(tmp_path: Path
     assert config["model"] == "gpt-5.6-terra"
 
 
-def test_executor_repairs_existing_builtin_agent_before_execution(tmp_path: Path) -> None:
+def test_executor_repairs_existing_builtin_agent_before_execution(
+    tmp_path: Path, monkeypatch
+) -> None:
     db_path = tmp_path / "aiteam.db"
     _init_db(db_path)
     (tmp_path / "project_config.json").write_text(
@@ -2011,6 +2247,12 @@ def test_executor_repairs_existing_builtin_agent_before_execution(tmp_path: Path
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute("UPDATE agents SET adapter_type = ?, capabilities_json = ? WHERE id = ?", ("role_builtin", "[]", "agent-1"))
         conn.commit()
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        lambda *args, **kwargs: _selection_projection(
+            _selection_candidate("openai_api", "gpt-5.6-terra", tier="tier_2")
+        ),
+    )
 
     executor = RunExecutor(db_path, AdapterRegistry([_OpenAIOkRuntime()]))
     dispatch = _dispatch_one(db_path)
@@ -3932,6 +4174,17 @@ def test_adapter_recovery_reopens_exhausted_issue_with_alternative_adapter(tmp_p
         conn.commit()
     # Project allowlist without CLI profiles so reconcile cannot pre-upgrade.
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.contextual_model_selection",
+        lambda *args, **kwargs: _selection_projection(
+            _selection_candidate(
+                "gemini_api",
+                "gemini-3.6-flash",
+                model_vendor="google",
+                tier="tier_2",
+            )
+        ),
+    )
 
     class _PlanOnlyOpenAIRuntime:
         descriptor = AdapterDescriptor(adapter_type="openai_api", channel="api", provider="openai")
@@ -4457,6 +4710,16 @@ def test_model_escalation_upgrades_to_profile_senior_once(tmp_path: Path, monkey
     })
     record_model_health("codex_subscription", "gpt-5.6-sol", available=True, reason="test")
     db_path = _escalation_db(tmp_path, model="gpt-5.4-mini")
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.contextual_model_selection",
+        lambda *args, **kwargs: _selection_projection(
+            _selection_candidate(
+                "codex_subscription",
+                "gpt-5.6-sol",
+                tier="tier_1",
+            )
+        ),
+    )
     executor = RunExecutor(db_path, AdapterRegistry([]))
 
     escalated = executor._attempt_model_escalation(
@@ -4554,6 +4817,41 @@ def _cross_review_db(tmp_path: Path, *, criticality: str = "high") -> Path:
     return db_path
 
 
+def _patch_cross_provider_projection(monkeypatch) -> None:
+    projection = _selection_projection(
+        _selection_candidate(
+            "gemini_api",
+            "gemini-3.6-flash",
+            rank=1,
+            model_vendor="google",
+            tier="tier_2",
+        ),
+        _selection_candidate(
+            "gemini_api",
+            "gemini-3.5-flash-lite",
+            rank=2,
+            model_vendor="google",
+            tier="tier_3",
+        ),
+        _selection_candidate(
+            "openai_api",
+            "gpt-5.6-sol",
+            rank=3,
+            automatic=False,
+            model_vendor="openai",
+            tier="tier_1",
+        ),
+    )
+    monkeypatch.setattr(
+        "aiteam.heartbeat.executor.contextual_model_selection",
+        lambda *args, **kwargs: projection,
+    )
+    monkeypatch.setattr(
+        "aiteam.model_selection_context.contextual_model_selection",
+        lambda *args, **kwargs: projection,
+    )
+
+
 def test_cross_provider_review_requires_owner_before_repointing(tmp_path: Path, monkeypatch) -> None:
     from aiteam.project_adapters import write_project_adapter_policy
     from aiteam.user_config import store_secret
@@ -4566,6 +4864,7 @@ def test_cross_provider_review_requires_owner_before_repointing(tmp_path: Path, 
         )
     db_path = _cross_review_db(tmp_path, criticality="high")
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    _patch_cross_provider_projection(monkeypatch)
 
     executor = RunExecutor(db_path, build_default_registry())
     moved = executor._enforce_cross_provider_review(
@@ -4622,6 +4921,7 @@ def test_assignment_change_reject_keeps_issue_blocked_and_assignment_unchanged(
         )
     db_path = _cross_review_db(tmp_path, criticality="high")
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    _patch_cross_provider_projection(monkeypatch)
     executor = RunExecutor(db_path, build_default_registry())
     assert executor._enforce_cross_provider_review(
         issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
@@ -4657,9 +4957,8 @@ def test_assignment_change_reject_keeps_issue_blocked_and_assignment_unchanged(
 def test_assignment_change_preserves_newer_valid_owner_override(
     tmp_path: Path, monkeypatch
 ) -> None:
-    from aiteam.model_selection_context import contextual_model_selection
     from aiteam.project_adapters import write_project_adapter_policy
-    from aiteam.user_config import load_adapter_profiles, store_secret
+    from aiteam.user_config import store_secret
 
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
     store_secret(provider="google", name="default", secret="gemini-key")
@@ -4668,6 +4967,7 @@ def test_assignment_change_preserves_newer_valid_owner_override(
         record_model_health("gemini_api", model, available=True, reason="override fixture")
     db_path = _cross_review_db(tmp_path, criticality="high")
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    _patch_cross_provider_projection(monkeypatch)
     executor = RunExecutor(db_path, build_default_registry())
     assert executor._enforce_cross_provider_review(
         issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
@@ -4677,21 +4977,8 @@ def test_assignment_change_preserves_newer_valid_owner_override(
             "SELECT id, payload_json FROM issue_thread_interactions WHERE issue_id='issue-rev'"
         ).fetchone()
         proposed_model = json.loads(interaction[1])["proposed"]["model"]
-        override_model = next(
-            str((candidate.get("identity") or {}).get("model_id") or "")
-            for candidate in contextual_model_selection(
-                db_path,
-                role="reviewer",
-                issue_id="issue-rev",
-                profiles=[
-                    profile for profile in load_adapter_profiles()
-                    if profile.get("id") in {"openai_api", "gemini_api"}
-                ],
-            ).get("candidates") or ()
-            if candidate.get("owner_selectable") is True
-            and str((candidate.get("identity") or {}).get("profile_id") or "") == "gemini_api"
-            and str((candidate.get("identity") or {}).get("model_id") or "") != proposed_model
-        )
+        override_model = "gemini-3.5-flash-lite"
+        assert override_model != proposed_model
         conn.execute(
             "UPDATE agents SET adapter_type='gemini_api', adapter_config_json=? WHERE id='role:reviewer'",
             (json.dumps({
@@ -4731,9 +5018,8 @@ def test_assignment_change_preserves_newer_valid_owner_override(
 def test_assignment_change_rejects_owner_alternative_that_breaks_diversity_gate(
     tmp_path: Path, monkeypatch
 ) -> None:
-    from aiteam.model_selection_context import contextual_model_selection
     from aiteam.project_adapters import write_project_adapter_policy
-    from aiteam.user_config import load_adapter_profiles, store_secret
+    from aiteam.user_config import store_secret
 
     monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
     store_secret(provider="google", name="default", secret="gemini-key")
@@ -4744,23 +5030,18 @@ def test_assignment_change_rejects_owner_alternative_that_breaks_diversity_gate(
             )
     db_path = _cross_review_db(tmp_path, criticality="high")
     write_project_adapter_policy(tmp_path, profile_ids=["openai_api", "gemini_api"])
+    _patch_cross_provider_projection(monkeypatch)
     executor = RunExecutor(db_path, build_default_registry())
     assert executor._enforce_cross_provider_review(
         issue_id="issue-rev", agent_id="role:reviewer", agent_role="reviewer"
     )
-    same_perspective = next(
-        candidate
-        for candidate in contextual_model_selection(
-            db_path,
-            role="reviewer",
-            issue_id="issue-rev",
-            profiles=[
-                profile for profile in load_adapter_profiles()
-                if profile.get("id") in {"openai_api", "gemini_api"}
-            ],
-        ).get("candidates") or ()
-        if candidate.get("owner_selectable") is True
-        and str((candidate.get("identity") or {}).get("profile_id") or "") == "openai_api"
+    same_perspective = _selection_candidate(
+        "openai_api",
+        "gpt-5.6-sol",
+        rank=3,
+        automatic=False,
+        model_vendor="openai",
+        tier="tier_1",
     )
     with sqlite3.connect(str(db_path)) as conn:
         interaction_id = conn.execute(

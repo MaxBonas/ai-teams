@@ -68,7 +68,69 @@ def load_installation_support_contract(path: Path | None = None) -> dict[str, An
     for row in payload["adapters"]:
         if row.get("automatic_install") is not False:
             raise ValueError(f"adapter must not install automatically: {row.get('id')}")
+    _validate_cli_version_contract(payload)
     return payload
+
+
+def _validate_cli_version_contract(payload: Mapping[str, Any]) -> None:
+    contract = payload.get("cli_version_contract")
+    if not isinstance(contract, dict):
+        raise TypeError("cli_version_contract must be an object")
+    if contract.get("schema_version") != "provider_cli_version_contract_v1":
+        raise ValueError("unsupported provider CLI version contract")
+    if not str(contract.get("updated_at") or "").strip():
+        raise ValueError("cli_version_contract updated_at is required")
+    entries = contract.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("cli_version_contract entries must be a non-empty list")
+    adapters = {str(row["id"]): row for row in payload["adapters"]}
+    ids: list[str] = []
+    adapter_ids: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise TypeError("cli_version_contract entry must be an object")
+        entry_id = str(entry.get("id") or "").strip()
+        adapter_id = str(entry.get("adapter_id") or "").strip()
+        ids.append(entry_id)
+        adapter_ids.append(adapter_id)
+        adapter = adapters.get(adapter_id)
+        if not entry_id or adapter is None:
+            raise ValueError("cli_version_contract references an unknown CLI or adapter")
+        if entry.get("requirement") != adapter.get("setup_class"):
+            raise ValueError(f"CLI requirement drifts from adapter: {entry_id}")
+        if not str(entry.get("minimum_version") or "").strip():
+            raise ValueError(f"CLI minimum version is required: {entry_id}")
+        validated = str(entry.get("validated_version") or "").strip()
+        if not validated:
+            raise ValueError(f"CLI validated version is required: {entry_id}")
+        channels = entry.get("accepted_channels")
+        if (
+            not isinstance(channels, list)
+            or not channels
+            or len(channels) != len(set(channels))
+            or not set(channels) <= {"stable", "prerelease"}
+        ):
+            raise ValueError(f"CLI accepted channels are invalid: {entry_id}")
+        prereleases = entry.get("declared_prereleases")
+        if not isinstance(prereleases, list) or len(prereleases) != len(
+            set(prereleases)
+        ):
+            raise ValueError(f"CLI declared prereleases are invalid: {entry_id}")
+        if prereleases and "prerelease" not in channels:
+            raise ValueError(f"CLI prerelease is not an accepted channel: {entry_id}")
+        if ("-" in validated) != (validated in prereleases):
+            raise ValueError(f"CLI validated prerelease is not explicit: {entry_id}")
+        if not str(entry.get("catalog_guard") or "").strip():
+            raise ValueError(f"CLI catalog guard is required: {entry_id}")
+    if len(ids) != len(set(ids)) or len(adapter_ids) != len(set(adapter_ids)):
+        raise ValueError("cli_version_contract contains duplicate identities")
+    required = {
+        "codex_subscription",
+        "antigravity_subscription",
+        "opencode_zen_free",
+    }
+    if not required <= set(adapter_ids):
+        raise ValueError("cli_version_contract omits a baseline provider CLI")
 
 
 def _version_tuple(value: str | None) -> tuple[int, ...]:

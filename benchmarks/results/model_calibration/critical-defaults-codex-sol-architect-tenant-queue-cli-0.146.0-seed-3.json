@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "architect",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "prompt_version": "v1",
+  "status": "completed",
+  "wall_seconds": 65.562,
+  "usage": {
+    "input_tokens": 16676,
+    "cached_input_tokens": 16596,
+    "output_tokens": 1053
+  },
+  "response": {
+    "decision": {
+      "facts": [
+        "SQLite será la única fuente durable.",
+        "Cada issue tiene tenant_id.",
+        "El checkout actual permite que dos workers obtengan la misma issue."
+      ],
+      "assumptions": [
+        "La versión de SQLite admite UPDATE ... RETURNING.",
+        "Cada worker usa una transacción independiente."
+      ],
+      "architecture": "Sustituir SELECT seguido de UPDATE por un claim atómico en una única transacción SQLite: seleccionar una issue elegible del tenant, actualizar su estado y propietario mediante una condición que confirme que sigue disponible, y devolverla solo si la actualización afectó exactamente una fila. Mantener el camino anterior detrás del flag durante la migración. Las runs ya activas conservan su estado y protocolo actuales; el nuevo checkout se aplica únicamente a claims posteriores, sin detenerlas."
+    },
+    "constraints": {
+      "durability": "Ningún estado autoritativo de cola, claim o wakeup puede depender de memoria u otro almacén durable.",
+      "tenant_isolation": "Toda selección, actualización, índice y validación de ownership debe incluir tenant_id.",
+      "concurrency": "Un claim solo es válido si la transición condicional afecta exactamente una fila.",
+      "availability": "El despliegue y el cambio de flag no pueden detener runs activas.",
+      "compatibility": "El esquema añadido debe ser compatible con ambos caminos mientras el rollback siga disponible.",
+      "gate": "No retirar el camino anterior hasta completar 100 reinicios con cero wakeups perdidos y mantener esa condición durante 24 horas."
+    },
+    "interfaces": {
+      "checkout": {
+        "input": {
+          "tenant_id": "identificador obligatorio",
+          "worker_id": "identificador del reclamante"
+        },
+        "output": {
+          "claimed_issue": "issue reclamada o null",
+          "claim_result": "claimed|empty|contended"
+        },
+        "invariants": [
+          "Nunca devuelve una issue de otro tenant.",
+          "Solo devuelve una issue cuya transición atómica fue confirmada.",
+          "Dos workers no pueden recibir válidamente la misma issue."
+        ]
+      },
+      "wakeup": {
+        "input": {
+          "tenant_id": "identificador obligatorio",
+          "issue_id": "identificador de issue",
+          "event_id": "identificador idempotente"
+        },
+        "output": {
+          "result": "recorded|duplicate|rejected"
+        },
+        "invariants": [
+          "El wakeup queda durable en SQLite antes de confirmarse.",
+          "La deduplicación se limita por tenant_id y event_id."
+        ]
+      },
+      "migration_flag": {
+        "states": [
+          "legacy",
+          "atomic"
+        ],
+        "scope": "El valor determina el algoritmo para nuevos checkouts; no modifica claims ni runs ya activas.",
+        "requirement": "Debe poder cambiarse a legacy sin revertir primero el esquema."
+      }
+    },
+    "risks": [
+      {
+        "risk": "Contención de escritura o errores SQLITE_BUSY durante el claim atómico.",
+        "mitigation": "Definir timeout y reintentos acotados; devolver contended sin entregar una issue no confirmada."
+      },
+      {
+        "risk": "Cruce de tenants por una consulta o índice incompleto.",
+        "mitigation": "Hacer tenant_id obligatorio en claves, predicados y pruebas de aislamiento."
+      },
+      {
+        "risk": "Wakeup confirmado pero no observable tras un reinicio.",
+        "mitigation": "Persistir wakeup y estado asociado en una transacción SQLite antes del acuse."
+      },
+      {
+        "risk": "Cambio de flag altera runs activas.",
+        "mitigation": "Aplicar el flag solo en la frontera de nuevos checkouts."
+      },
+      {
+        "risk": "Rollback después de introducir estados que legacy no interpreta.",
+        "mitigation": "Limitar la migración a estados compatibles o mantener una traducción explícita mientras el flag exista."
+      }
+    ],
+    "verification": {
+      "evidence_required": [
+        "Registro durable de 100 reinicios identificados individualmente.",
+        "Por cada reinicio: wakeups emitidos, persistidos, consumidos y pendientes, correlacionados por tenant_id, issue_id y event_id.",
+        "Cero casos donde un mismo issue_id sea reclamado con éxito por más de un worker dentro del mismo tenant.",
+        "Ventana continua de 24 horas posterior al inicio del gate con cero wakeups perdidos.",
+        "Pruebas de que cambiar el flag en ambos sentidos no interrumpe runs activas."
+      ],
+      "acceptance": [
+        "Cada claim exitoso corresponde a exactamente una actualización confirmada.",
+        "La suma de wakeups consumidos y pendientes coincide con los wakeups únicos persistidos.",
+        "No existen accesos cruzados entre tenants.",
+        "El gate completo se satisface antes de retirar legacy."
+      ],
+      "assumption_checks": [
+        "Confirmar soporte y comportamiento de UPDATE ... RETURNING en la versión desplegada de SQLite.",
+        "Medir la política actual de timeout y reintentos ante bloqueo.",
+        "Confirmar que legacy puede leer todos los estados persistidos durante atomic."
+      ]
+    },
+    "rollback": {
+      "trigger": [
+        "Duplicidad de claim confirmada.",
+        "Cualquier wakeup perdido.",
+        "Interrupción o corrupción de una run activa.",
+        "Incompatibilidad observada entre estados atomic y legacy."
+      ],
+      "procedure": [
+        "Cambiar el flag a legacy para nuevos checkouts.",
+        "No cancelar ni reescribir runs o claims ya activos.",
+        "Conservar el esquema y los registros creados por atomic para evitar pérdida durable.",
+        "Drenar o reconciliar claims atomic existentes antes de cualquier retirada de esquema.",
+        "Reiniciar desde cero la ventana de verificación después de corregir la causa."
+      ],
+      "evidence": [
+        "Valor y momento del cambio de flag.",
+        "Inventario de runs y claims activos antes y después del rollback.",
+        "Reconciliación SQLite de issues, claims y wakeups por tenant.",
+        "Confirmación de que ninguna run activa fue detenida."
+      ]
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.architecture_boundaries": true,
+      "role.explicit_assumptions": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "all: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:48.810053Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:48.810748Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:48.814392Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:48.820145Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:39:49.978205Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:49.978247Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:49.978955Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:49.981741Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:35.761559Z  WARN codex_core::responses_retry: stream disconnected - retrying sampling request (1/5 in 183ms)... turn_id=019f94c8-656d-78f3-8304-a9c4fca38696 retries=1 max_retries=5 sampling_error=stream disconnected before completion: websocket closed by server before response.completed\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

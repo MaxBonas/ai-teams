@@ -19,6 +19,9 @@ def test_support_contract_separates_required_primary_and_optional_local() -> Non
     distributions = {item["id"]: item for item in contract["distributions"]}
     acceptance = contract["acceptance_contract"]
     release_acceptance = contract["release_acceptance_contract"]
+    cli_versions = {
+        item["id"]: item for item in contract["cli_version_contract"]["entries"]
+    }
 
     assert {item["status"] for item in contract["platforms"]} <= {
         "verified",
@@ -68,10 +71,18 @@ def test_support_contract_separates_required_primary_and_optional_local() -> Non
     assert "database_rollback_restore" in release_acceptance["required_steps"]
     assert "fixtures_removed" in release_acceptance["required_steps"]
     assert "installation_removed" in release_acceptance["required_steps"]
+    assert "provider_cli_version_gate" in release_acceptance["required_steps"]
+    assert len(release_acceptance["required_steps"]) == 18
     assert "independent_machine=true" in release_acceptance["promotion_requires"]
     posix = [item for item in contract["platforms"] if item["os"] in {"linux", "macos"}]
     assert all(item["status"] == "planned" for item in posix)
     assert all(item["bootstrap"] == "sh scripts/prepare_dev_env.sh" for item in posix)
+    assert set(cli_versions) == {"codex", "agy", "opencode"}
+    assert cli_versions["codex"]["validated_version"] == "0.146.0-alpha.6"
+    assert cli_versions["codex"]["declared_prereleases"] == ["0.146.0-alpha.6"]
+    assert cli_versions["agy"]["validated_version"] == "1.1.8"
+    assert cli_versions["opencode"]["requirement"] == "optional_economy"
+    assert all(item["catalog_guard"] for item in cli_versions.values())
 
     receipt_path = ROOT / windows["evidence"]
     receipt_bytes = receipt_path.read_bytes()
@@ -148,3 +159,22 @@ def test_version_comparison_is_numeric() -> None:
     assert version_meets_minimum("v24.14.0", "22")
     assert version_meets_minimum("Python 3.10.1", "3.10")
     assert not version_meets_minimum("v20.19.0", "22")
+
+
+def test_cli_version_contract_fails_closed_on_implicit_prerelease() -> None:
+    from aiteam.installation_support import _validate_cli_version_contract
+
+    contract = load_installation_support_contract()
+    codex = next(
+        item
+        for item in contract["cli_version_contract"]["entries"]
+        if item["id"] == "codex"
+    )
+    codex["declared_prereleases"] = []
+
+    try:
+        _validate_cli_version_contract(contract)
+    except ValueError as exc:
+        assert "prerelease is not explicit" in str(exc)
+    else:
+        raise AssertionError("implicit prerelease must fail closed")

@@ -11,10 +11,11 @@ import pytest
 import api.main as main_mod
 import api.routers.workspace as workspace_mod
 import aiteam.project_adapters as project_adapters
+import aiteam.model_selection_context as selection_context_mod
+import aiteam.model_selection_intent as selection_intent_mod
 from api.routers.workspace import router
 from api.utils import get_current_workspace, set_current_workspace
 from aiteam.user_config import model_options, record_model_health
-from aiteam.model_catalog_service import get_current_model_catalog
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +27,79 @@ def _verified_api_models(tmp_path: Path, monkeypatch):
             record_model_health(
                 profile_id, str(option["value"]), available=True, reason="workspace fixture"
             )
+    original_selection = selection_context_mod.contextual_model_selection
+
+    def authority_enabled_selection(*args, **kwargs):
+        result = original_selection(*args, **kwargs)
+        role = str(kwargs.get("role") or "")
+        lane = {
+            "lead": "lead_ready",
+            "team_lead": "tier1_support",
+            "lead_executor": "tier1_support",
+            "architect": "tier1_support",
+            "quorum_auditor": "quorum_ready",
+        }.get(role)
+        if lane is None:
+            return result
+        for candidate in result.get("candidates") or ():
+            candidate["tier1_authority"] = {
+                "policy_version": "tier_role_coverage_v1",
+                "lane": lane,
+                "status": "enabled",
+                "enabled": True,
+                "reason_code": "workspace_fixture",
+            }
+            candidate["tier1_authority_gate"] = {
+                "applicable": True,
+                "allowed": True,
+                "policy_version": "tier_role_coverage_v1",
+                "lane": lane,
+                "code": "tier1_authority_verified",
+                "reason": "workspace fixture",
+            }
+            compatibility = candidate.get("contextual_compatibility") or {}
+            preference = candidate.get("owner_preference") or {}
+            selectable = (
+                ((candidate.get("states") or {}).get("selectable") or {}).get(
+                    "value"
+                )
+                is True
+            )
+            candidate["owner_selectable"] = bool(
+                compatibility.get("allowed") is True
+                and preference.get("state") != "archived"
+                and selectable
+            )
+            score = candidate.get("selection_score") or {}
+            gates = score.get("hard_gates") or {}
+            if "tier1_authority" in gates:
+                gates["tier1_authority"] = {
+                    "passed": True,
+                    "reason": "tier1_authority_verified",
+                    "source": "tier_role_coverage_v1",
+                }
+            score["auto_ineligible_reasons"] = [
+                reason
+                for reason in score.get("auto_ineligible_reasons") or ()
+                if "tier1_authority" not in str(reason)
+            ]
+            # Esta suite prueba Workspace, no recalibra modelos. La proyección
+            # hermética declara expresamente la elegibilidad automática para
+            # que conexión/health nunca se confundan con calibración real.
+            score["auto_eligible"] = True
+            candidate["selection_score"] = score
+        return result
+
+    monkeypatch.setattr(
+        selection_context_mod,
+        "contextual_model_selection",
+        authority_enabled_selection,
+    )
+    monkeypatch.setattr(
+        selection_intent_mod,
+        "contextual_model_selection",
+        authority_enabled_selection,
+    )
 
 
 def _client() -> TestClient:
@@ -66,6 +140,13 @@ def test_bootstrap_lead_uses_governed_default_only_without_owner_model(
                     "score": 90,
                     "auto_eligible": True,
                     "hard_gates": {"calibrated": {"passed": True}},
+                },
+                "owner_selectable": True,
+                "tier1_authority": {
+                    "policy_version": "tier_role_coverage_v1",
+                    "lane": "lead_ready",
+                    "status": "enabled",
+                    "enabled": True,
                 },
             }],
         }
@@ -149,7 +230,37 @@ def test_workspace_endpoint_reports_missing_project_db(tmp_path: Path) -> None:
     assert payload["reason"] == "workspace_db_missing"
 
 
-def test_create_project_requires_adapter_profile(tmp_path: Path, monkeypatch) -> None:
+def test_set_workspace_never_creates_or_initializes_a_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    missing = projects_root / "Missing"
+    uninitialized = projects_root / "Personal"
+    uninitialized.mkdir()
+    marker = uninitialized / "keep.txt"
+    marker.write_text("personal", encoding="utf-8")
+    monkeypatch.setenv("AITEAM_PROJECTS_ROOT", str(projects_root))
+
+    missing_response = _client().post(
+        "/api/workspace",
+        json={"path": str(missing)},
+    )
+    uninitialized_response = _client().post(
+        "/api/workspace",
+        json={"path": str(uninitialized)},
+    )
+
+    assert missing_response.status_code == 404
+    assert uninitialized_response.status_code == 409
+    assert not missing.exists()
+    assert marker.read_text(encoding="utf-8") == "personal"
+    assert not (uninitialized / ".aiteam").exists()
+
+
+def test_legacy_project_creation_route_is_absent_and_side_effect_free(
+    tmp_path: Path, monkeypatch
+) -> None:
     source_root = tmp_path / "Ai_Teams"
     source_root.mkdir()
     monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
@@ -161,397 +272,12 @@ def test_create_project_requires_adapter_profile(tmp_path: Path, monkeypatch) ->
     finally:
         set_current_workspace(previous)
 
-    assert response.status_code == 400
-    assert "adapter" in response.json()["detail"]
-
-
-def test_create_project_auto_without_lead_winner_returns_422_and_removes_partial_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    projects_root = tmp_path / "projects"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setenv("AITEAM_PROJECTS_ROOT", str(projects_root))
-    monkeypatch.setenv("AITEAM_MODEL_DEFAULT_ROLLOUT", "auto")
-    monkeypatch.setattr(
-        workspace_mod,
-        "choose_adapter_for_new_slot",
-        lambda *args, **kwargs: project_adapters._unresolved_model_default(
-            "no_auto_eligible_candidate"
-        ),
-    )
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={"name": "NoWinner", "adapter_profile_ids": ["openai_api"]},
-        )
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 422
-    assert "No auto-eligible Lead model" in response.json()["detail"]
-    assert not (projects_root / "NoWinner").exists()
-
-
-def test_create_project_warns_when_no_selected_adapter_connected(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={"name": "Demo", "adapter_profile_ids": ["openai_api"]},
-        )
-        payload = response.json()
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 200
-    assert payload["adapter_warning"]
-    assert "credenciales" in payload["adapter_warning"]
-    # The warning is also visible in the intake thread as a system comment.
-    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
-    with sqlite3.connect(str(db_path)) as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM issue_comments WHERE issue_id = 'issue:intake' AND body LIKE '%credenciales%'"
-        ).fetchone()
-    assert row[0] == 1
-
-
-def test_create_project_blocks_unconnected_when_required(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
-    monkeypatch.setenv("AITEAM_REQUIRE_CONNECTED_ADAPTER", "1")
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={"name": "Demo", "adapter_profile_ids": ["openai_api"]},
-        )
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 400
-    assert "credenciales" in response.json()["detail"]
-
-
-def test_create_project_no_warning_with_stored_secret(tmp_path: Path, monkeypatch) -> None:
-    from aiteam.user_config import store_secret
-
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
-    store_secret(provider="openai", name="default", secret="sk-test")
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={"name": "Demo", "adapter_profile_ids": ["openai_api"]},
-        )
-        payload = response.json()
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 200
-    assert payload["adapter_warning"] is None
-
-
-def test_create_project_bootstraps_lead_with_selected_adapter(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={"name": "Demo", "initial_task": "Build it", "adapter_profile_ids": ["openai_api"]},
-        )
-        payload = response.json()
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 200
-    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
-    import sqlite3
-    with sqlite3.connect(str(db_path)) as conn:
-        row = conn.execute("SELECT adapter_type, adapter_config_json FROM agents WHERE id = 'role:lead'").fetchone()
-    assert row[0] == "openai_api"
-    assert '"profile_id": "openai_api"' in row[1]
-
-
-def test_create_project_persists_lead_quorum_and_bootstraps_auditors(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={
-                "name": "Quorum",
-                "initial_task": "Diseña el plan crítico",
-                "adapter_profile_ids": ["openai_api"],
-                "run_profile": "lead_quorum",
-            },
-        )
-        payload = response.json()
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 200
-    assert payload["run_profile"] == "lead_quorum"
-    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
-    with sqlite3.connect(str(db_path)) as conn:
-        goal_metadata = json.loads(conn.execute(
-            "SELECT metadata_json FROM goals WHERE id = 'goal:intake'"
-        ).fetchone()[0])
-        issue_metadata = json.loads(conn.execute(
-            "SELECT metadata_json FROM issues WHERE id = 'issue:intake'"
-        ).fetchone()[0])
-        auditor_ids = {
-            row[0]
-            for row in conn.execute(
-                "SELECT id FROM agents WHERE role = 'quorum_auditor'"
-            ).fetchall()
-        }
-        wake_payload = json.loads(conn.execute(
-            "SELECT payload_json FROM wakeup_requests WHERE idempotency_key = ?",
-            ("bootstrap:issue:intake:role:lead",),
-        ).fetchone()[0])
-
-    assert goal_metadata["profile"] == "lead_quorum"
-    assert issue_metadata["profile"] == "lead_quorum"
-    assert wake_payload["profile"] == "lead_quorum"
-    assert auditor_ids == {"role:quorum_auditor_1", "role:quorum_auditor_2"}
-
-
-def test_create_solo_lead_project_bootstraps_only_the_lead(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={
-                "name": "Solo",
-                "adapter_profile_ids": ["openai_api"],
-                "run_profile": "solo_lead",
-                "initial_task": (
-                    "Estudio para una empresa de limpieza: crear formularios "
-                    "para analizar sus necesidades y operaciones."
-                ),
-            },
-        )
-        payload = response.json()
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 200
-    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
-    with sqlite3.connect(str(db_path)) as conn:
-        agents = conn.execute("SELECT id, role FROM agents ORDER BY id").fetchall()
-        metadata = json.loads(
-            conn.execute(
-                "SELECT metadata_json FROM issues WHERE id='issue:intake'"
-            ).fetchone()[0]
-        )
-    assert agents == [("role:lead", "lead")]
-    assert metadata["objective_classification"]["kind"] == "research"
-
-
-def test_create_project_uses_user_selected_lead_profile(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
-    record_model_health(
-        "codex_subscription", "gpt-5.6-sol",
-        available=True, reason="test runtime inventory",
-    )
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    candidate_id = next(
-        item["candidate_id"]
-        for item in get_current_model_catalog(db_paths=())["candidates"]
-        if item["identity"]["profile_id"] == "anthropic_api"
-        and item["identity"]["model_id"] == "claude-opus-4-8"
-    )
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={
-                "name": "AnthropicLead",
-                "adapter_profile_ids": ["codex_subscription", "anthropic_api"],
-                "lead_adapter_profile_id": "anthropic_api",
-                "lead_model": "claude-opus-4-8",
-                "lead_candidate_id": candidate_id,
-                "run_profile": "lead_quorum",
-            },
-        )
-        payload = response.json()
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 200
-    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        lead = conn.execute(
-            "SELECT adapter_config_json, metadata_json FROM agents WHERE id='role:lead'"
-        ).fetchone()
-        codex_auditor = conn.execute(
-            """
-            SELECT id FROM agents
-            WHERE role='quorum_auditor'
-              AND json_extract(adapter_config_json, '$.profile_id')='codex_subscription'
-            """
-        ).fetchone()
-
-    lead_config = json.loads(lead["adapter_config_json"])
-    assert lead_config["profile_id"] == "anthropic_api"
-    assert lead_config["model"] == "claude-opus-4-8"
-    assert lead_config["selection_intent"] == {
-        "schema_version": "model_selection_intent_v1",
-        "mode": "owner_explicit",
-        "source": "onboarding_model_role_selector",
-        "candidate_id": candidate_id,
-    }
-    assert json.loads(lead["metadata_json"])["selected_by_user"] is True
-    assert codex_auditor is not None
-
-
-def test_create_project_rejects_forged_lead_candidate_id(
-    tmp_path: Path, monkeypatch
-) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={
-                "name": "ForgedCandidate",
-                "adapter_profile_ids": ["anthropic_api"],
-                "lead_adapter_profile_id": "anthropic_api",
-                "lead_model": "claude-opus-4-8",
-                "lead_candidate_id": "model-candidate:forged",
-                "run_profile": "solo_lead",
-            },
-        )
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 422
-    assert "candidate_id does not match" in response.json()["detail"]
-    assert not (source_root / "ForgedCandidate").exists()
-
-
-def test_create_project_rejects_lead_profile_outside_project_connections(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={
-                "name": "InvalidLead",
-                "adapter_profile_ids": ["anthropic_api"],
-                "lead_adapter_profile_id": "codex_subscription",
-            },
-        )
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 400
-    assert not (source_root / "InvalidLead").exists()
-
-
-def test_create_project_rejects_unknown_run_profile(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={
-                "name": "Invalid",
-                "adapter_profile_ids": ["openai_api"],
-                "run_profile": "maximum_magic",
-            },
-        )
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 422
-    assert not (source_root / "Invalid").exists()
-
-
-def test_create_project_bootstraps_minimum_org_chart(tmp_path: Path, monkeypatch) -> None:
-    """Project creation must immediately create the full minimum org chart.
-
-    Minimum roster:
-      Tier 1 — role:lead
-      Tier 3 — role:file_scout, role:web_scout, role:context_curator
-    All must exist in the DB right after /api/projects/new, before any executor run.
-    """
-    source_root = tmp_path / "Ai_Teams"
-    source_root.mkdir()
-    monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
-    monkeypatch.setattr(main_mod, "PROJECT_ROOT", source_root)
-    previous = get_current_workspace()
-    set_current_workspace(source_root)
-    try:
-        response = _client().post(
-            "/api/projects/new",
-            json={"name": "OrgChart", "adapter_profile_ids": ["openai_api"]},
-        )
-        payload = response.json()
-    finally:
-        set_current_workspace(previous)
-
-    assert response.status_code == 200
-    db_path = Path(payload["workspace"]) / ".aiteam" / "aiteam.db"
-    import sqlite3
-    with sqlite3.connect(str(db_path)) as conn:
-        ids = {r[0] for r in conn.execute("SELECT id FROM agents").fetchall()}
-
-    MINIMUM_AGENTS = {
-        "role:lead",
-        "role:file_scout",
-        "role:web_scout",
-        "role:context_curator",
-    }
-    assert MINIMUM_AGENTS <= ids, f"Missing agents: {MINIMUM_AGENTS - ids}"
+    assert response.status_code == 404
+    assert not (tmp_path / "projects").exists()
 
 
 def test_reconcile_endpoint_is_idempotent_and_returns_repaired(tmp_path: Path, monkeypatch) -> None:
-    """POST /api/agents/reconcile must be callable after project creation and be idempotent."""
+    """POST /api/agents/reconcile remains idempotent for an initialized fixture."""
     source_root = tmp_path / "Ai_Teams"
     source_root.mkdir()
     monkeypatch.setattr(workspace_mod, "PROJECT_ROOT", source_root)
@@ -559,13 +285,17 @@ def test_reconcile_endpoint_is_idempotent_and_returns_repaired(tmp_path: Path, m
     previous = get_current_workspace()
     set_current_workspace(source_root)
     try:
-        # Create project (sets current workspace to new project dir)
-        resp = _client().post(
-            "/api/projects/new",
-            json={"name": "Reconcile", "adapter_profile_ids": ["openai_api"]},
+        workspace_path = tmp_path / "projects" / "Reconcile"
+        workspace_path.mkdir(parents=True)
+        project_adapters.write_project_adapter_policy(
+            workspace_path / ".aiteam",
+            profile_ids=["openai_api"],
         )
-        assert resp.status_code == 200
-        workspace_path = Path(resp.json()["workspace"])
+        workspace_mod._initialize_project_runtime(
+            workspace_path,
+            lead_adapter_profile_id="openai_api",
+            lead_model=str(model_options()["openai_api"][0]["value"]),
+        )
         set_current_workspace(workspace_path)
 
         client = _full_client()
@@ -634,7 +364,9 @@ def test_delete_current_project_post_fallback(tmp_path: Path, monkeypatch) -> No
     assert not project.exists()
 
 
-def test_delete_current_project_moves_locked_folder_to_tombstone(tmp_path: Path, monkeypatch) -> None:
+def test_delete_current_project_never_moves_locked_folder_to_tombstone(
+    tmp_path: Path, monkeypatch
+) -> None:
     source_root = tmp_path / "Ai_Teams"
     source_root.mkdir()
     project = tmp_path / "Demo"
@@ -645,9 +377,7 @@ def test_delete_current_project_moves_locked_folder_to_tombstone(tmp_path: Path,
     monkeypatch.setenv("AITEAM_PROJECTS_ROOT", str(tmp_path))
 
     def fake_rmtree(path: Path) -> None:
-        if Path(path) == project:
-            raise PermissionError("locked")
-        raise PermissionError("still locked")
+        raise PermissionError(f"locked:{Path(path).name}")
 
     monkeypatch.setattr(workspace_mod, "_rmtree_project_tree", fake_rmtree)
     previous = get_current_workspace()
@@ -657,13 +387,10 @@ def test_delete_current_project_moves_locked_folder_to_tombstone(tmp_path: Path,
     finally:
         set_current_workspace(previous)
 
-    payload = response.json()
-    assert response.status_code == 200
-    assert payload["deleted"] is True
-    assert payload["cleanup_pending"] is True
-    assert payload["reason"] == "moved_to_tombstone"
-    assert not project.exists()
-    assert Path(payload["cleanup_path"]).exists()
+    assert response.status_code == 423
+    assert "will not rename it or schedule cleanup" in response.json()["detail"]
+    assert project.exists()
+    assert not list(tmp_path.glob(".aiteam-deleted-*"))
 
 
 def test_pytest_run_never_deletes_real_persisted_workspace(tmp_path):

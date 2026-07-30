@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "benchmark": "test_designer_behavioral_diversity_aggregate",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "provider_version": "1.1.8",
+  "role": "test_designer",
+  "contract_version": "independent_test_designer_two_family_v3",
+  "case_families": [
+    "job_state_machine_mutation",
+    "pricing_boundary_mutation"
+  ],
+  "case_family_count": 2,
+  "seeds_per_family": 3,
+  "samples_total": 6,
+  "family_checks": [
+    {
+      "case_family": "pricing_boundary_mutation",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-pricing-cli-1.1.8-aggregate.json"
+    },
+    {
+      "case_family": "job_state_machine_mutation",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-job-state-cli-1.1.8-aggregate.json"
+    }
+  ],
+  "source_receipts": [
+    "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-pricing-cli-1.1.8-aggregate.json",
+    "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-job-state-cli-1.1.8-aggregate.json"
+  ],
+  "source_sha256": [
+    "ade6f3a498fe3d32b8ed1ca5eac1a611d4f4c1dd45d39ca9dd07041ce40988e6",
+    "d3e274e00769766ac00bc93bfb6099855f51a39eea78c4f560214577e6ec905f"
+  ],
+  "integrity": {
+    "same_exact_pair": true,
+    "same_provider_version": true,
+    "same_current_family_contract": true,
+    "two_distinct_families": true,
+    "sources_bound": true,
+    "sources_hashed": true
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "case_diversity_passed": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_two_family_exact_pair",
+    "goodhart_risk": "moderate",
+    "unmeasured_constructs": [
+      "integración multi-módulo",
+      "tests de browser",
+      "property-based testing"
+    ]
+  }
+}

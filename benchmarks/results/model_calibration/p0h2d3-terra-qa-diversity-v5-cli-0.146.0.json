@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "benchmark": "qa_behavioral_diversity_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "role": "qa",
+  "contract_version": "adversarial_qa_two_family_v5",
+  "case_families": [
+    "authorization_boundary",
+    "webhook_replay_boundary"
+  ],
+  "case_family_count": 2,
+  "seeds_per_family": 3,
+  "samples_total": 6,
+  "family_checks": [
+    {
+      "case_family": "authorization_boundary",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/p0h2d3-terra-qa-auth-v4-aggregate-cli-0.146.0.json"
+    },
+    {
+      "case_family": "webhook_replay_boundary",
+      "matrix_complete": true,
+      "samples_passed": 3,
+      "exact_pair_calibrated": true,
+      "source_receipt": "benchmarks/results/model_calibration/p0h2d3-terra-qa-webhook-v4-aggregate-cli-0.146.0.json"
+    }
+  ],
+  "source_receipts": [
+    "benchmarks/results/model_calibration/p0h2d3-terra-qa-auth-v4-aggregate-cli-0.146.0.json",
+    "benchmarks/results/model_calibration/p0h2d3-terra-qa-webhook-v4-aggregate-cli-0.146.0.json"
+  ],
+  "source_sha256": [
+    "def9b5aa95a52961fbd677b061c4f0d0973382726df831be27cc7732e6940c0b",
+    "bc711e178cb1eca74329241c11f597f3f82237eec9050f630a1a421e08fce34c"
+  ],
+  "integrity": {
+    "same_exact_pair": true,
+    "same_provider_version": true,
+    "same_current_family_contract": true,
+    "two_distinct_families": true,
+    "sources_bound": true,
+    "sources_hashed": true
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "case_diversity_passed": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_two_family_exact_pair",
+    "goodhart_risk": "moderate",
+    "unmeasured_constructs": [
+      "browser QA",
+      "suites multiarchivo",
+      "recovery de infraestructura"
+    ]
+  }
+}

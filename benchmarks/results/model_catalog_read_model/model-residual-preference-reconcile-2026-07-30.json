@@ -1,0 +1,47 @@
+{
+  "application": {
+    "added_count": 51,
+    "after_count": 98,
+    "all_additions_low": true,
+    "applied": true,
+    "before_count": 47,
+    "existing_entries_preserved": true,
+    "reversible_via_explicit_owner_preference": true
+  },
+  "checks": {
+    "additions_absent_from_existing": true,
+    "additions_unique": true,
+    "default_states_valid": true,
+    "existing_entries_untouched_by_plan": true
+  },
+  "plan": {
+    "addition_count": 51,
+    "atomic_write": true,
+    "candidate_count": 98,
+    "existing_preference_count": 47,
+    "invalid_default_state_count": 0,
+    "preserve_existing": true,
+    "states_before": {
+      "archived": 6,
+      "high": 13,
+      "low": 28,
+      "normal": 51
+    },
+    "target_state": "low",
+    "unique_addition_count": 51
+  },
+  "schema_version": "model_residual_preference_reconcile_v1",
+  "scope": {
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "model_ids_emitted": false,
+    "paths_emitted": false,
+    "secrets_read": false
+  },
+  "summary": {
+    "addition_count": 51,
+    "application_valid": true,
+    "apply_required": true,
+    "plan_ready": true
+  }
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
@@ -9,14 +10,14 @@ import sys
 import tempfile
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Callable, Sequence
-
+from typing import Any, Callable, Mapping, Sequence
 
 UTF8_SUBPROCESS_OPTIONS: dict[str, Any] = {
     "text": True,
     "encoding": "utf-8",
     "errors": "replace",
 }
+PROVIDER_CLI_FINGERPRINT_DOMAIN = b"aiteam-provider-cli-identity-v1\0"
 
 
 def configure_utf8_stdio() -> None:
@@ -112,6 +113,60 @@ def resolve_executable(
         if resolved and is_usable_executable_path(resolved, os_id=target_os):
             return resolved
     return None
+
+
+def resolve_provider_cli(
+    cli_id: str,
+    commands: Sequence[str],
+    *,
+    os_id: str | None = None,
+    which: Callable[[str], str | None] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> str | None:
+    """Resolve a provider CLI through one shared doctor/runtime boundary."""
+    target_os = os_id or platform_id()
+    env = os.environ if environment is None else environment
+    clean_id = str(cli_id or "").strip().lower()
+    known: list[Path] = []
+    if target_os == "windows" and clean_id in {"agy", "antigravity"}:
+        local_app_data = str(env.get("LOCALAPPDATA") or "").strip()
+        if local_app_data:
+            known.append(Path(local_app_data) / "agy" / "bin" / "agy.exe")
+    for command in commands:
+        resolved = resolve_executable(
+            str(command),
+            known_candidates=known,
+            os_id=target_os,
+            which=which,
+        )
+        if resolved:
+            return resolved
+    return None
+
+
+def provider_cli_fingerprint(
+    executable: str | Path | None,
+    *,
+    os_id: str | None = None,
+) -> str | None:
+    """Return a path-redacted digest bound to resolution and file content."""
+    if not executable:
+        return None
+    try:
+        resolved = Path(executable).resolve(strict=True)
+        content_hash = hashlib.sha256()
+        with resolved.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                content_hash.update(chunk)
+    except (OSError, RuntimeError):
+        return None
+    identity_hash = hashlib.sha256(PROVIDER_CLI_FINGERPRINT_DOMAIN)
+    identity_hash.update(
+        path_comparison_key(resolved, os_id=os_id).encode("utf-8")
+    )
+    identity_hash.update(b"\0")
+    identity_hash.update(content_hash.digest())
+    return identity_hash.hexdigest()
 
 
 def process_group_popen_options(*, os_id: str | None = None) -> dict[str, Any]:

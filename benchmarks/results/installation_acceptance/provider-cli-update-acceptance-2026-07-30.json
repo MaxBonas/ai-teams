@@ -1,0 +1,93 @@
+{
+  "contract_schema_version": "provider_cli_version_contract_v1",
+  "equivalence": {
+    "matrix_equal": true,
+    "ok": true,
+    "promotion_equal": true
+  },
+  "negative_cases": [
+    {
+      "blocked_as_expected": true,
+      "failed_summary_gate": null,
+      "failure_codes": [
+        "fingerprint_matches"
+      ],
+      "id": "duplicate_binary",
+      "promotion_ready": false
+    },
+    {
+      "blocked_as_expected": true,
+      "failed_summary_gate": null,
+      "failure_codes": [
+        "minimum_version"
+      ],
+      "id": "upgrade_required",
+      "promotion_ready": false
+    },
+    {
+      "blocked_as_expected": true,
+      "failed_summary_gate": null,
+      "failure_codes": [
+        "prerelease_explicit"
+      ],
+      "id": "implicit_prerelease",
+      "promotion_ready": false
+    },
+    {
+      "blocked_as_expected": true,
+      "failed_summary_gate": "documentation_ready",
+      "failure_codes": [],
+      "id": "documentation_drift",
+      "promotion_ready": false
+    },
+    {
+      "blocked_as_expected": true,
+      "failed_summary_gate": "catalog_ready",
+      "failure_codes": [],
+      "id": "catalog_matrix_drift",
+      "promotion_ready": false
+    }
+  ],
+  "optional_case": {
+    "accepted": true,
+    "id": "optional_absent",
+    "promotion_ready": true,
+    "status": "optional_absent"
+  },
+  "schema_version": "provider_cli_update_acceptance_v1",
+  "scope": {
+    "fixtures_only": true,
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "login_attempted": false,
+    "paths_emitted": false,
+    "secrets_read": false
+  },
+  "sources": {
+    "clean_clone": {
+      "matrix_sha256": "b45b978a4b1f68ddaa54fc2d1542a9dd6f5d8193822ea1b8d8fcff5af235bf2b",
+      "promotion_ready": true,
+      "state": "current_contract"
+    },
+    "existing_checkout_after_fast_forward": {
+      "matrix_sha256": "b45b978a4b1f68ddaa54fc2d1542a9dd6f5d8193822ea1b8d8fcff5af235bf2b",
+      "pre_update": {
+        "duplicate_detected": true,
+        "failure_codes": [
+          "fingerprint_matches",
+          "minimum_version"
+        ],
+        "promotion_ready": false,
+        "upgrade_required": true
+      },
+      "promotion_ready": true,
+      "state": "current_contract"
+    }
+  },
+  "summary": {
+    "equivalence_ready": true,
+    "negative_cases_ready": true,
+    "optional_absence_ready": true,
+    "promotion_ready": true
+  }
+}

@@ -2,44 +2,20 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
-from typing import Any
-from datetime import datetime, timezone
 import shutil
 import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api.utils import (
-    _require_api_auth_request,
-    get_current_workspace,
-    resolve_runtime_dir,
-)
+from aiteam.adapters.http_retry import DEFAULT_USER_AGENT
 from aiteam.adapters.registry import build_default_registry
-from aiteam.user_config import (
-    ROLE_CAPABILITY_PROFILES,
-    inject_adapter_secrets,
-    model_options,
-    model_options_for_role,
-    cli_status,
-    launch_subscription_login,
-    list_secrets,
-    load_adapter_profiles,
-    read_secret,
-    record_model_catalog,
-    record_model_health,
-    resolve_adapter_config,
-    save_adapter_health,
-    store_secret,
-    upsert_adapter_profile,
-)
-from aiteam.policies import canonical_role, role_status
-from aiteam.provider_identity import profile_identity
-from aiteam.model_compatibility import compatibility_decision
 from aiteam.model_catalog_api import (
     catalog_selection_reason,
     rank_catalog_candidates_for_role,
@@ -48,7 +24,32 @@ from aiteam.model_catalog_service import (
     get_current_model_catalog,
     invalidate_model_catalog_cache,
 )
+from aiteam.model_compatibility import compatibility_decision
 from aiteam.platform_runtime import resolve_executable
+from aiteam.policies import canonical_role, role_status
+from aiteam.provider_identity import profile_identity
+from aiteam.user_config import (
+    ROLE_CAPABILITY_PROFILES,
+    cli_status,
+    inject_adapter_secrets,
+    launch_subscription_login,
+    list_secrets,
+    load_adapter_profiles,
+    model_options,
+    model_options_for_role,
+    read_secret,
+    record_model_catalog,
+    record_model_health,
+    resolve_adapter_config,
+    save_adapter_health,
+    store_secret,
+    upsert_adapter_profile,
+)
+from api.utils import (
+    _require_api_auth_request,
+    get_current_workspace,
+    resolve_runtime_dir,
+)
 
 router = APIRouter()
 
@@ -521,6 +522,7 @@ def _test_profile(
             "reason": "live_test_completed",
             "detail": result.output or "",
             "tested_model": str(config.get("model") or "") or None,
+            "usage": result.usage,
         }
     return {
         "status": "failed",
@@ -528,6 +530,7 @@ def _test_profile(
         "reason": result.error_code or "live_test_failed",
         "detail": result.error or result.output or "",
         "tested_model": str(config.get("model") or "") or None,
+        "usage": result.usage,
     }
 
 
@@ -549,8 +552,9 @@ def _discover_api_catalog(profile: dict[str, Any]) -> dict[str, Any]:
 
     provider = str(profile.get("provider") or "").strip().lower()
     if adapter_type == "gemini_api" or provider in {"google", "gemini"}:
+        api_version = str(config.get("api_version") or "v1beta").strip()
         url = (
-            "https://generativelanguage.googleapis.com/v1beta/models?"
+            f"https://generativelanguage.googleapis.com/{api_version}/models?"
             + urllib.parse.urlencode({"key": secret})
         )
         headers: dict[str, str] = {}
@@ -580,7 +584,11 @@ def _discover_api_catalog(profile: dict[str, Any]) -> dict[str, Any]:
                 page_url = f"{page_url}{separator}{urllib.parse.urlencode({token_key: next_token})}"
             request = urllib.request.Request(
                 page_url,
-                headers={**headers, "Accept": "application/json"},
+                headers={
+                    **headers,
+                    "Accept": "application/json",
+                    "User-Agent": DEFAULT_USER_AGENT,
+                },
                 method="GET",
             )
             with urllib.request.urlopen(request, timeout=15) as response:

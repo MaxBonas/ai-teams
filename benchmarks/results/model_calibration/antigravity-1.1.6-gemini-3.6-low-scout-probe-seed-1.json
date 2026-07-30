@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "benchmark": "antigravity_role_model_screening",
+  "started_at": "2026-07-24T17:56:29+0200",
+  "seed": 1,
+  "provider": "google-antigravity",
+  "channel": "subscription",
+  "cli_version": "1.1.6",
+  "inventory": [
+    "gemini-3.6-flash-high",
+    "gemini-3.6-flash-medium",
+    "gemini-3.6-flash-low",
+    "gemini-3.5-flash-high",
+    "gemini-3.5-flash-medium",
+    "gemini-3.5-flash-low",
+    "gemini-3.1-pro-high",
+    "gemini-3.1-pro-low",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6-thinking",
+    "gpt-oss-120b-medium"
+  ],
+  "matrix": [
+    {
+      "model": "gemini-3.6-flash-low",
+      "role": "scout",
+      "tier": 3,
+      "baseline": false
+    }
+  ],
+  "evaluation_contract": {
+    "evaluators": [
+      "required_json_shape",
+      "hidden_causal_anchor_coverage",
+      "forbidden_noise"
+    ],
+    "independent_behavioral_evidence": false,
+    "repetitions_per_model": 1
+  },
+  "results": [
+    {
+      "model": "gemini-3.6-flash-low",
+      "role": "scout",
+      "tier": 3,
+      "baseline": false,
+      "exit_code": 0,
+      "wall_seconds": 5.282,
+      "usage": null,
+      "cost_cents": 0,
+      "raw_output": "{\n  \"decisions\": [\n    {\n      \"id\": \"D1\",\n      \"fact\": \"SQLite sera la unica fuente de verdad\",\n      \"owner\": \"Lead\",\n      \"accepted_by\": \"Reviewer\"\n    }\n  ],\n  \"constraints\": [\n    {\n      \"id\": \"R1\",\n      \"fact\": \"ninguna run puede perder su wakeup al reiniciar\"\n    }\n  ],\n  \"risks\": [\n    {\n      \"id\": \"K1\",\n      \"fact\": \"checkout duplicado entre workers\",\n      \"mitigation\": \"transaccion atomica\"\n    }\n  ],\n  \"gates\": [\n    {\n      \"id\": \"G1\",\n      \"metric\": \"wakeups perdidos en reinicios\",\n      \"threshold\": \"0\",\n      \"window\": \"24 horas (100 reinicios)\",\n      \"action\": \"rollback\"\n    }\n  ],\n  \"dependencies\": [\n    {\n      \"id\": \"P1\",\n      \"fact\": \"migracion de runs debe terminar antes de retirar JSONL\"\n    }\n  ],\n  \"blockers\": [\n    {\n      \"id\": \"B1\",\n      \"fact\": \"falta decidir la ventana de mantenimiento\",\n      \"escalate_to\": \"owner humano\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"id\": \"E1\",\n      \"fact\": \"suite oculta y auditoria SQLite deben estar verdes\"\n    }\n  ]\n}",
+      "stderr": "",
+      "status": "completed",
+      "response": {
+        "decisions": [
+          {
+            "id": "D1",
+            "fact": "SQLite sera la unica fuente de verdad",
+            "owner": "Lead",
+            "accepted_by": "Reviewer"
+          }
+        ],
+        "constraints": [
+          {
+            "id": "R1",
+            "fact": "ninguna run puede perder su wakeup al reiniciar"
+          }
+        ],
+        "risks": [
+          {
+            "id": "K1",
+            "fact": "checkout duplicado entre workers",
+            "mitigation": "transaccion atomica"
+          }
+        ],
+        "gates": [
+          {
+            "id": "G1",
+            "metric": "wakeups perdidos en reinicios",
+            "threshold": "0",
+            "window": "24 horas (100 reinicios)",
+            "action": "rollback"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "P1",
+            "fact": "migracion de runs debe terminar antes de retirar JSONL"
+          }
+        ],
+        "blockers": [
+          {
+            "id": "B1",
+            "fact": "falta decidir la ventana de mantenimiento",
+            "escalate_to": "owner humano"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "E1",
+            "fact": "suite oculta y auditoria SQLite deben estar verdes"
+          }
+        ]
+      },
+      "evaluation": {
+        "score": 16,
+        "max_score": 16,
+        "score_percent": 100.0,
+        "present_keys": [
+          "decisions",
+          "constraints",
+          "risks",
+          "gates",
+          "dependencies",
+          "blockers",
+          "evidence"
+        ],
+        "missing_keys": [],
+        "anchor_hits": 9,
+        "anchor_total": 9,
+        "forbidden_hits": [],
+        "contract_pass": true
+      }
+    }
+  ],
+  "conclusion": {
+    "policy_change_allowed": false,
+    "reason": "screening de una sola muestra por modelo; requiere varias semillas y baseline comparable",
+    "economic_comparison_available": false,
+    "economic_reason": "agy headless no expone tokens; suscripcion se mide en llamadas y segundos, no como coste API",
+    "role_rankings_directional": {
+      "lead": [],
+      "coding": [],
+      "review": [],
+      "scout": [
+        {
+          "model": "gemini-3.6-flash-low",
+          "score_percent": 100.0,
+          "wall_seconds": 5.282,
+          "status": "completed"
+        }
+      ]
+    },
+    "next_gate": "repetir al menos tres semillas para los challengers que igualen o superen al baseline de su rol",
+    "goodhart_risk": "material: rubrica estructural/lexica conocida por el harness, sin juez factual independiente"
+  },
+  "finished_at": "2026-07-24T17:56:34+0200",
+  "quota_observation": {
+    "unit": "runs_and_wall_seconds",
+    "runs": 1,
+    "wall_seconds": 5.282,
+    "tokens": null,
+    "marginal_cost_cents": 0
+  }
+}

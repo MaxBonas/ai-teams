@@ -25,12 +25,19 @@ jobs:
   windows-clean-room:
     runs-on: windows-latest
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        installation:
+          - clean-clone
+          - existing-checkout-updated
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 2
 
       - name: Configure Python 3.12
         uses: actions/setup-python@v6
@@ -44,20 +51,88 @@ jobs:
           cache: npm
           cache-dependency-path: ide-frontend/package-lock.json
 
-      - name: Run I.1.4 acceptance
+      - name: Prepare an existing installation before update
+        if: matrix.installation == 'existing-checkout-updated'
+        shell: pwsh
+        env:
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $baseline = git rev-parse "$env:TARGET_SHA^"
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo resolver HEAD^" }
+          git checkout --detach $baseline
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo abrir el baseline" }
+          & cmd.exe /d /c scripts\prepare_dev_env.bat
+          if ($LASTEXITCODE -ne 0) { throw "Falló el bootstrap pre-update" }
+          $tracked = git status --porcelain --untracked-files=no
+          if ($tracked) { throw "El bootstrap pre-update mutó fuentes tracked" }
+          git checkout --detach $env:TARGET_SHA
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo aplicar el update" }
+          "AITEAM_PRE_UPDATE_REVISION=$baseline" >> $env:GITHUB_ENV
+
+      - name: Run Windows clean-room acceptance
         shell: pwsh
         env:
           AITEAM_EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: >
-          python scripts/accept_windows_clean_room.py
-          --receipt "${{ runner.temp }}\windows-clean-room-receipt.json"
-          --fixture-root "${{ runner.temp }}\aiteam-fixtures"
+        run: |
+          $arguments = @(
+            "scripts/accept_windows_clean_room.py",
+            "--receipt",
+            "${{ runner.temp }}\windows-clean-room-${{ matrix.installation }}.json",
+            "--fixture-root",
+            "${{ runner.temp }}\aiteam-fixtures-${{ matrix.installation }}"
+          )
+          if ("${{ matrix.installation }}" -eq "existing-checkout-updated") {
+            $arguments += @(
+              "--installation-state",
+              "existing_checkout_updated",
+              "--pre-update-revision",
+              "$env:AITEAM_PRE_UPDATE_REVISION"
+            )
+          }
+          python @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload redacted receipt
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: windows-clean-room-receipt
-          path: ${{ runner.temp }}\windows-clean-room-receipt.json
+          name: windows-clean-room-${{ matrix.installation }}-receipt
+          path: ${{ runner.temp }}\windows-clean-room-${{ matrix.installation }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  audit-windows-clean-room-evidence:
+    needs: windows-clean-room
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout receipt auditor
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Download both Windows receipts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: windows-clean-room-*-receipt
+          path: ${{ runner.temp }}/windows-receipts
+          merge-multiple: true
+
+      - name: Seal SHA-bound Windows matrix
+        shell: bash
+        run: |
+          python scripts/audit_windows_clean_room_matrix.py \
+            --clean "${{ runner.temp }}/windows-receipts/windows-clean-room-clean-clone.json" \
+            --updated "${{ runner.temp }}/windows-receipts/windows-clean-room-existing-checkout-updated.json" \
+            --output "${{ runner.temp }}/windows-clean-room-matrix.json" \
+            --strict
+
+      - name: Upload sealed Windows matrix
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-clean-room-matrix-receipt
+          path: ${{ runner.temp }}/windows-clean-room-matrix.json
           if-no-files-found: error
           retention-days: 30

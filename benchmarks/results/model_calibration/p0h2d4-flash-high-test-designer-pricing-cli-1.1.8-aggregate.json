@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer_aggregate",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "provider_version": "1.1.8",
+  "same_provider_version": true,
+  "role": "test_designer",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "pricing_boundary_mutation",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-pricing-cli-1.1.8-seed-1.json",
+    "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-pricing-cli-1.1.8-seed-2.json",
+    "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-pricing-cli-1.1.8-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-pricing-cli-1.1.8-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "43c5fc4dca3fc87c3c155b933d67163038d45d47783826e2cb10f693f1ad6dbd"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-pricing-cli-1.1.8-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "620eae2349a0ab1852bf9834d7ca92f919480f67f58ec335252eeaaeafe2b85d"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-pricing-cli-1.1.8-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "b46576140173ad8753030d0201773116a79d9d959f27b921e4f2f703f1fa3dd3"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true,
+    "same_provider_version": true
+  },
+  "checks_passed": 24,
+  "checks_total": 24,
+  "wall_seconds_median": 58.468,
+  "wall_seconds_range": [
+    48.266,
+    83.016
+  ],
+  "usage": {
+    "marginal_cost_cents": 0,
+    "telemetry_status": "unknown",
+    "note": "Antigravity no expone usage headless comparable"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "integración multi-módulo",
+      "tests de browser",
+      "property-based testing"
+    ]
+  }
+}

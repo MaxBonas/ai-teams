@@ -54,9 +54,19 @@ CODING_DIVERSITY_CONTRACT = "coding_hidden_suite_two_family_v4"
 
 
 def bootstrap_profile_ids(profile_id: str) -> list[str]:
-    if profile_id.startswith("local_"):
+    if profile_id not in {
+        "codex_subscription",
+        "antigravity_subscription",
+    }:
         return [profile_id, "codex_subscription"]
     return [profile_id]
+
+
+def benchmark_lead_identity(profile_id: str) -> tuple[str, str]:
+    """Use an explicit calibrated Lead; the benchmark measures Engineer only."""
+    if profile_id == "antigravity_subscription":
+        return profile_id, "gemini-3.1-pro-high"
+    return "codex_subscription", "gpt-5.6-sol"
 
 
 def model_workspace_name(model: str) -> str:
@@ -114,10 +124,22 @@ def run_arm(
     write_project_adapter_policy(
         runtime, profile_ids=bootstrap_profile_ids(profile_id)
     )
-    _initialize_project_runtime(workspace, run_profile="solo_lead")
+    lead_profile_id, lead_model = benchmark_lead_identity(profile_id)
+    _initialize_project_runtime(
+        workspace,
+        run_profile="solo_lead",
+        lead_adapter_profile_id=lead_profile_id,
+        lead_model=lead_model,
+    )
     db = runtime / "aiteam.db"
     profiles = project_profiles(runtime)
-    selection = choose_adapter_for_role("engineer", "standard", profiles)
+    target_profiles = [
+        profile for profile in profiles
+        if str(profile.get("id") or "") == profile_id
+    ]
+    selection = choose_adapter_for_role(
+        "engineer", "standard", target_profiles
+    )
     if not selection or selection.get("adapter_profile_id") != profile_id:
         raise RuntimeError(f"Profile {profile_id} is not selectable for engineer")
     adapter_config = dict(selection.get("adapter_config") or {})

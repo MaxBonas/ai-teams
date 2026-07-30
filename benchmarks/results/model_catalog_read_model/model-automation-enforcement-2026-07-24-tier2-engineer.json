@@ -1,0 +1,42 @@
+{
+  "observed_at": "2026-07-24T21:48:47.575243+00:00",
+  "report": {
+    "candidate_checks": 1568,
+    "consumer_wiring": {
+      "checks": 5,
+      "passed": 5
+    },
+    "default_checks": 0,
+    "failed_calibration_gate_checks": 1559,
+    "failure_count": 0,
+    "failures": [],
+    "fallback_checks": 0,
+    "hermetic_matrix": {
+      "cases": [
+        {
+          "case": "manual_selection_does_not_imply_automation",
+          "passed": true
+        },
+        {
+          "case": "calibrated_candidate_can_automate",
+          "passed": true
+        },
+        {
+          "case": "fallback_skips_higher_ranked_uncalibrated",
+          "passed": true
+        },
+        {
+          "case": "fallback_fails_closed_without_calibrated_candidate",
+          "passed": true
+        }
+      ],
+      "checks": 4,
+      "passed": 4
+    },
+    "ok": true,
+    "read_model_hash": "e08723b1dbc4be8016189eb94cc665b8ec18bf19104b857aeb5c038685cb71b8",
+    "roles_checked": 16,
+    "schema_version": "model_automation_enforcement_v1"
+  },
+  "schema_version": "model_automation_enforcement_receipt_v1"
+}

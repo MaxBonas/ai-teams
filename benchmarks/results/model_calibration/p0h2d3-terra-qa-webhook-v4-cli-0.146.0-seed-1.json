@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "contract_version": "adversarial_qa_fix_cycle_v4",
+  "case_family": "webhook_replay_boundary",
+  "role": "qa",
+  "seed": 1,
+  "checks": {
+    "attack_run_completed": true,
+    "attack_report_changes_requested": true,
+    "production_unchanged_during_attack": true,
+    "adversarial_test_contract": true,
+    "adversarial_tests_fail_before_fix": true,
+    "verification_run_completed": true,
+    "adversarial_tests_pass_after_fix": true,
+    "verification_report_approved": true,
+    "verification_issue_done": true,
+    "passing_adversarial_tests_removed": true,
+    "fixed_production_intact": true
+  },
+  "attack_evaluation": {
+    "anchors": {
+      "imports_target": true,
+      "invalid_signature": true,
+      "expired_event": true,
+      "replay_duplicate": true,
+      "negative_assertion": true
+    },
+    "anchors_retained": 5,
+    "anchors_total": 5,
+    "contract_passed": true
+  },
+  "failing_test_run": {
+    "executed": true,
+    "exit_code": 1,
+    "stdout": "F                                                                        [100%]\n================================== FAILURES ===================================\n_______________ test_rejects_forged_expired_and_replayed_events _______________\n\n    def test_rejects_forged_expired_and_replayed_events():\n        now = 1_000\n        seen_ids = set()\n    \n>       assert not accept_webhook(\n            {\"id\": \"forged\", \"signature\": \"forged\", \"timestamp\": now}, seen_ids, now\n        )\nE       AssertionError: assert not True\nE        +  where True = accept_webhook({'id': 'forged', 'signature': 'forged', 'timestamp': 1000}, set(), 1000)\n\ntests\\test_adversarial_webhook.py:8: AssertionError\n=========================== short test summary info ===========================\nFAILED tests\\test_adversarial_webhook.py::test_rejects_forged_expired_and_replayed_events\n1 failed in 0.08s\n",
+    "stderr": ""
+  },
+  "passing_test_run": {
+    "executed": true,
+    "exit_code": 0,
+    "stdout": ".                                                                        [100%]\n1 passed in 0.07s\n",
+    "stderr": ""
+  },
+  "phases": {
+    "attack": {
+      "seconds": 61.359,
+      "issue_status": "done",
+      "run": {
+        "id": "run:cc3e941c-f326-4478-ab9d-463eeb1367f5",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gpt-5.6-terra",
+        "provider": "openai-codex",
+        "channel": "subscription",
+        "usage_json": "{\"cached_input_tokens\": 93952, \"input_tokens\": 106127, \"output_tokens\": 2268, \"reasoning_output_tokens\": 245}"
+      },
+      "report": {
+        "id": "3c41a917-b1b7-4853-9e2b-e29922114061",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:cc3e941c-f326-4478-ab9d-463eeb1367f5",
+        "agent_role": "qa",
+        "result": "changes_requested",
+        "issue_status": "done",
+        "next_owner": "engineer",
+        "tech_match": null,
+        "blocker": "accept_webhook acepta incondicionalmente firmas forged, eventos expirados y replays; no añade ids aceptados a seen_ids",
+        "evidence": "tests/test_adversarial_webhook.py creado; inspección de webhook.py (return True); comandos pytest_local (wrapper ausente) y python -m pytest (Python 3.12 inexistente) no ejecutables",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"accept_webhook acepta incondicionalmente firmas forged, eventos expirados y replays; no añade ids aceptados a seen_ids\", \"evidence\": \"tests/test_adversarial_webhook.py creado; inspección de webhook.py (return True); comandos pytest_local (wrapper ausente) y python -m pytest (Python 3.12 inexistente) no ejecutables\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 21:44:51"
+      },
+      "comments": [
+        {
+          "id": "af0a90c7-2897-4056-a458-85a4e3563f56",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:cc3e941c-f326-4478-ab9d-463eeb1367f5",
+          "body": "Se dejó una prueba adversarial enfocada y se detectó un defecto: el webhook acepta incondicionalmente. La ejecución de pytest fue bloqueada por un intérprete Python local inexistente.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 21:44:51",
+          "updated_at": "2026-07-29 21:44:51"
+        },
+        {
+          "id": "b460209b-e07e-4594-a5bc-af54f130aea6",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:cc3e941c-f326-4478-ab9d-463eeb1367f5",
+          "body": "Se añadió `tests/test_adversarial_webhook.py` con límites de firma falsificada, antigüedad de 301 s y replay. `webhook.accept_webhook` devuelve actualmente `True` sin inspeccionar el evento ni actualizar `seen_ids`, por lo que el defecto es demostrado por lectura determinista. Ejecución intentada: `python -m pytest tests\\test_adversarial_webhook.py -q` → exit 1; el launcher apunta a un Python 3.12 inexistente. El wrapper `scripts\\pytest_local.bat` tampoco existe en este workspace.\n\n---AGENT-REPORT---\nrole: qa\nresult: changes_requested\nissue_status: done\nnext_owner: engineer\nblocker: accept_webhook acepta incondicionalmente firmas forged, eventos expirados y replays; no añade ids aceptados a seen_ids\nevidence: tests/test_adversarial_webhook.py creado; inspección de webhook.py (return True); comandos pytest_local (wrapper ausente) y python -m pytest (Python 3.12 inexistente) no ejecutables",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 21:44:51",
+          "updated_at": "2026-07-29 21:44:51"
+        }
+      ]
+    },
+    "verify_fix": {
+      "seconds": 43.015,
+      "issue_status": "done",
+      "run": {
+        "id": "run:e5a5c6f4-14cb-4490-80d5-ce0b432d609a",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gpt-5.6-terra",
+        "provider": "openai-codex",
+        "channel": "subscription",
+        "usage_json": "{\"cached_input_tokens\": 58624, \"input_tokens\": 65848, \"output_tokens\": 1671, \"reasoning_output_tokens\": 198}"
+      },
+      "report": {
+        "id": "0af971fb-6a96-422f-a7d9-ba59cf4b79a1",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:e5a5c6f4-14cb-4490-80d5-ce0b432d609a",
+        "agent_role": "qa",
+        "result": "approved",
+        "issue_status": "done",
+        "next_owner": "lead",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "límites atacados: firma forged, timestamp now-301 y replay del mismo id; TEST-RUNNER determinista: pytest tests/test_adversarial_webhook.py -q → exit 0, 1 passed in 0.07s; test adversarial eliminado tras pasar.",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"límites atacados: firma forged, timestamp now-301 y replay del mismo id; TEST-RUNNER determinista: pytest tests/test_adversarial_webhook.py -q → exit 0, 1 passed in 0.07s; test adversarial eliminado tras pasar.\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"approved\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 21:45:35"
+      },
+      "comments": [
+        {
+          "id": "783ab5f6-cc25-417e-aeaa-fa6b452c7af3",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:e5a5c6f4-14cb-4490-80d5-ce0b432d609a",
+          "body": "Corrección aprobada. La prueba adversarial pasó según el test-runner determinista y fue eliminada conforme al contrato QA.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 21:45:35",
+          "updated_at": "2026-07-29 21:45:35"
+        },
+        {
+          "id": "0c7d34d7-e332-42df-8808-abc088eff52d",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:e5a5c6f4-14cb-4490-80d5-ce0b432d609a",
+          "body": "Reverificación completada. `webhook.py` rechaza firmas no trusted, eventos con antigüedad superior a 300 segundos y replays; además registra el ID solo tras aceptar el evento. El test-runner determinista posterior al fix ejecutó `tests/test_adversarial_webhook.py` con resultado `1 passed in 0.07s` (exit 0). Se eliminó la prueba adversarial porque ya pasa y no demuestra un defecto.\n\n---AGENT-REPORT---\nrole: qa\nresult: approved\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: límites atacados: firma forged, timestamp now-301 y replay del mismo id; TEST-RUNNER determinista: pytest tests/test_adversarial_webhook.py -q → exit 0, 1 passed in 0.07s; test adversarial eliminado tras pasar.",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 21:45:35",
+          "updated_at": "2026-07-29 21:45:35"
+        }
+      ]
+    }
+  },
+  "usage": {
+    "cached_input_tokens": 152576,
+    "input_tokens": 171975,
+    "output_tokens": 3939,
+    "reasoning_output_tokens": 443
+  },
+  "workspace": "runtime/bench/p0h2d3-terra-webhook-v4-s1",
+  "ok": true
+}

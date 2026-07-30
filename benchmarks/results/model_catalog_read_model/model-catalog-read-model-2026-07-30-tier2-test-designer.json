@@ -1,0 +1,325 @@
+{
+  "audit": {
+    "automatic_candidate_count": 0,
+    "candidate_count": 98,
+    "failures": [],
+    "ok": true,
+    "read_model_hash": "e9c4ae45850f1bc58c70d2714a776f2fd9ef493475c31eb8795741e8337e3e7e",
+    "role_score_count": 1666,
+    "schema_version": "model_catalog_read_model_audit_v1",
+    "warnings": [
+      {
+        "code": "evaluation_stale",
+        "input_hash": "da0692355b865f8ed6fc4a9554601796537ba20899e71886503813088579e07c",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "073eb44aca301e25e53f9237681ec31e1e0334b471befb55723a202707d53bac",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "31280b098bb7ab9c3d2b9a68f56faecbd7e6c7fb96a03b75d22ef63f493c67ec",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "4e9f573f0c279c245bb94c47d40776cd1db3bca4bdfaf2d59cd669706b9c811d",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "f9b0e8594d4e654ef09155541676cd8905c75a051915483284643d866a267551",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "36b356676f1c0fb6834e20093dcde241304b7ff8be27535a2a696ef37344822a",
+        "reasons": [
+          "provider_version_changed"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "6547e9d278bac5a4685f337fd54bcb032b8950cad8a98b78af54887987887e52",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "8e2ff322f20d7899849e49779a1e6c69aeb6d55f0ccf1ae462554b2c1093fd0d",
+        "reasons": [
+          "evaluation_date_in_future"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "67f4acfd17920782e667dee578c70acfdce1477906f705e0db1939bdd068085a",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "3973098a9b343eb8918fde6ac1c74e3d4ece86d2f710603cda8084839fefa929",
+        "reasons": [
+          "provider_version_changed"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "e30ce8f44812023c7aba7a7cebb527924420b9cc45a9a55bd532cdfab1d03c80",
+        "reasons": [
+          "evaluation_date_in_future"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "b819642a7a44d071c6642a85604a8ce05cbd30404b4910a040f6d313aea5e271",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "e7a4e09b5001fb2bec92d6424b3fa1bb16e06b021bd52b39bde42eaec7b8ade1",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "08e4de22c3501a1bf06b6315aab0d71014f93a8c841fb224441a13353b313c50",
+        "reasons": [
+          "evaluation_date_in_future"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "c7825d4cb56457258cc5a420cc2be247e0909395705a7d7f66afd31e41d4c3a8",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "d85832b355d40ca7abbc09b7b04613cf482917ca463fd5188eec79b7d6d32ff6",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "74909d46dc11847e257af5585ae34c643c1c6dfb8b7242109c8c4b04186e6858",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "cb64ac29d116340296ab197a21083951efc9721a1ace1c0eb76794c1cbe613aa",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "129a4e6869c58aea94b7498b297e02f58dd76557c8329d82cd653c5e9b7db126",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "f32bcfc96ae43b955c84be8485041f82826ad474d383d210ba5111e9e3de9655",
+        "reasons": [
+          "evaluation_date_in_future"
+        ]
+      },
+      {
+        "code": "evaluation_stale",
+        "input_hash": "93c74c66630fa80897997443b43bdc06fa9d7a1d876ceef45833c3154d6649bb",
+        "reasons": [
+          "provider_version_changed_or_unobserved"
+        ]
+      }
+    ]
+  },
+  "observed_at": "2026-07-29T23:30:56.193108+00:00",
+  "read_model": {
+    "candidate_count": 98,
+    "content_hash": "e9c4ae45850f1bc58c70d2714a776f2fd9ef493475c31eb8795741e8337e3e7e",
+    "role_score_count": 1666,
+    "schema_version": "model_catalog_read_model_v2",
+    "score_version": "model_role_score_v2",
+    "tier1_authority_contract": {
+      "legacy_missing_policy": "fail_closed",
+      "policy_version": "tier_role_coverage_v1",
+      "scope": "exact_profile_model_role",
+      "score_relationship": "independent_hard_gate"
+    },
+    "tier1_enabled": [
+      {
+        "authority": {
+          "calibration_contract": {
+            "required_constructs": [
+              "durable_planning",
+              "hiring",
+              "delegation",
+              "accountability",
+              "recovery",
+              "tool_and_workspace_governance"
+            ],
+            "version": "tier1_lead_authority_v1"
+          },
+          "enabled": true,
+          "evaluated_at": "2026-07-24",
+          "evaluation_status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-codex-sol-lead-aggregate-cli-0.146.0.json"
+          ],
+          "lane": "lead_ready",
+          "policy_version": "tier_role_coverage_v1",
+          "prompt_version": "v2",
+          "provider_version": "0.146.0-alpha.6",
+          "reason_code": "exact_role_calibration_verified",
+          "scope": "exact_profile_model_role",
+          "stale_reasons": [],
+          "status": "enabled"
+        },
+        "candidate_id": "model-candidate:2dd18ab4db4f34b9fd569bce",
+        "canonical_role": "lead",
+        "model": "gpt-5.6-sol",
+        "profile_id": "codex_subscription"
+      },
+      {
+        "authority": {
+          "calibration_contract": {
+            "required_constructs": [
+              "exact_role_contract"
+            ],
+            "version": "tier1_support_authority_v1"
+          },
+          "enabled": true,
+          "evaluated_at": "2026-07-24",
+          "evaluation_status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-codex-sol-team-lead-aggregate-cli-0.146.0.json"
+          ],
+          "lane": "tier1_support",
+          "policy_version": "tier_role_coverage_v1",
+          "prompt_version": "v1",
+          "provider_version": "0.146.0-alpha.6",
+          "reason_code": "exact_role_calibration_verified",
+          "scope": "exact_profile_model_role",
+          "stale_reasons": [],
+          "status": "enabled"
+        },
+        "candidate_id": "model-candidate:2dd18ab4db4f34b9fd569bce",
+        "canonical_role": "team_lead",
+        "model": "gpt-5.6-sol",
+        "profile_id": "codex_subscription"
+      },
+      {
+        "authority": {
+          "calibration_contract": {
+            "required_constructs": [
+              "exact_role_contract"
+            ],
+            "version": "tier1_support_authority_v1"
+          },
+          "enabled": true,
+          "evaluated_at": "2026-07-24",
+          "evaluation_status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-codex-sol-lead-executor-aggregate-cli-0.146.0.json"
+          ],
+          "lane": "tier1_support",
+          "policy_version": "tier_role_coverage_v1",
+          "prompt_version": "v1",
+          "provider_version": "0.146.0-alpha.6",
+          "reason_code": "exact_role_calibration_verified",
+          "scope": "exact_profile_model_role",
+          "stale_reasons": [],
+          "status": "enabled"
+        },
+        "candidate_id": "model-candidate:2dd18ab4db4f34b9fd569bce",
+        "canonical_role": "lead_executor",
+        "model": "gpt-5.6-sol",
+        "profile_id": "codex_subscription"
+      },
+      {
+        "authority": {
+          "calibration_contract": {
+            "required_constructs": [
+              "independent_critique",
+              "causal_retention",
+              "go_no_go_judgment",
+              "verifiable_structured_output"
+            ],
+            "version": "tier1_quorum_authority_v1"
+          },
+          "enabled": true,
+          "evaluated_at": "2026-07-24",
+          "evaluation_status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum-auditor-aggregate-cli-0.146.0.json"
+          ],
+          "lane": "quorum_ready",
+          "policy_version": "tier_role_coverage_v1",
+          "prompt_version": "v2",
+          "provider_version": "0.146.0-alpha.6",
+          "reason_code": "exact_role_calibration_verified",
+          "scope": "exact_profile_model_role",
+          "stale_reasons": [],
+          "status": "enabled"
+        },
+        "candidate_id": "model-candidate:2dd18ab4db4f34b9fd569bce",
+        "canonical_role": "quorum_auditor",
+        "model": "gpt-5.6-sol",
+        "profile_id": "codex_subscription"
+      },
+      {
+        "authority": {
+          "calibration_contract": {
+            "required_constructs": [
+              "exact_role_contract"
+            ],
+            "version": "tier1_support_authority_v1"
+          },
+          "enabled": true,
+          "evaluated_at": "2026-07-24",
+          "evaluation_status": "calibrated",
+          "evidence_receipts": [
+            "benchmarks/results/model_calibration/critical-defaults-codex-sol-architect-aggregate-cli-0.146.0.json"
+          ],
+          "lane": "tier1_support",
+          "policy_version": "tier_role_coverage_v1",
+          "prompt_version": "v1",
+          "provider_version": "0.146.0-alpha.6",
+          "reason_code": "exact_role_calibration_verified",
+          "scope": "exact_profile_model_role",
+          "stale_reasons": [],
+          "status": "enabled"
+        },
+        "candidate_id": "model-candidate:2dd18ab4db4f34b9fd569bce",
+        "canonical_role": "architect",
+        "model": "gpt-5.6-sol",
+        "profile_id": "codex_subscription"
+      }
+    ]
+  },
+  "schema_version": "model_catalog_read_model_receipt_v1"
+}

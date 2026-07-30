@@ -7,16 +7,22 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from aiteam.compatibility_service import resolve_assignment_compatibility
 from aiteam.configuration_layers import resolve_configuration
-from aiteam.tools.catalog import default_capabilities_for_role
-from aiteam.provider_identity import profile_perspective_key
 from aiteam.model_compatibility import compatibility_decision
 from aiteam.model_default_rollout import (
     model_default_rollout_mode,
     select_model_default_for_new_slot,
 )
-from aiteam.compatibility_service import resolve_assignment_compatibility
+from aiteam.model_owner_preferences import (
+    load_model_owner_preferences,
+    model_owner_preference_from_document,
+)
+from aiteam.model_selection import candidate_is_automation_eligible
+from aiteam.model_tier_coverage import TIER_1_ROLE_TO_LANE
 from aiteam.policies import canonical_role
+from aiteam.provider_identity import profile_perspective_key
+from aiteam.tools.catalog import default_capabilities_for_role
 from aiteam.user_config import (
     ROLE_CAPABILITY_PROFILES,
     load_adapter_profiles,
@@ -26,17 +32,20 @@ from aiteam.user_config import (
     profile_is_connected,
 )
 
-
 PROJECT_CONFIG_NAME = "project_config.json"
 logger = logging.getLogger(__name__)
 
 # Role tiers for the hiring policy live in aiteam.policies (fase 5) —
 # aliases kept here for existing imports.
-from aiteam.policies import (  # noqa: E402
+from aiteam.policies import (
     AUTONOMY_MODES,
-    JUNIOR_ROLES as JUNIOR_ROLES,
     SENIOR_ROLES,
     TIER3_ROLES,
+)
+from aiteam.policies import (
+    JUNIOR_ROLES as JUNIOR_ROLES,
+)
+from aiteam.policies import (
     cost_policy_enforced as _cost_policy_enforced,
 )
 
@@ -149,10 +158,14 @@ def choose_adapter_for_role(
 ) -> dict[str, Any] | None:
     if not profiles:
         return None
+    owner_preferences = load_model_owner_preferences()
     executable_profiles = []
     role_key = canonical_role(role)
+    seniority_key = str(seniority or "").strip().lower()
+    needs_senior = role_key in SENIOR_ROLES or seniority_key in {"lead", "senior"}
     role_profile = ROLE_CAPABILITY_PROFILES.get(role_key, {})
     for candidate in profiles:
+        profile_id = str(candidate.get("id") or "")
         supported_roles = candidate.get("supported_roles")
         if (
             isinstance(supported_roles, list)
@@ -163,12 +176,42 @@ def choose_adapter_for_role(
         candidate_options = candidate.get("model_options")
         if not isinstance(candidate_options, list) or not candidate_options:
             # Callers using minimal test/custom profiles have no runtime catalog;
-            # preserve their existing explicit configuration.
+            # preserve their existing explicit configuration unless the exact
+            # model is archived locally.
+            candidate_config = (
+                candidate.get("config")
+                if isinstance(candidate.get("config"), dict)
+                else {}
+            )
+            candidate_model = (
+                str(preferred_model or "").strip()
+                or str(candidate_config.get("model") or "").strip()
+                or str(
+                    _choose_model(
+                        profile_id,
+                        role=role_key,
+                        needs_senior=needs_senior,
+                        configured_model=None,
+                        channel=str(candidate.get("channel") or ""),
+                    )
+                    or ""
+                )
+            )
+            if (
+                candidate_model
+                and model_owner_preference_from_document(
+                    owner_preferences,
+                    profile_id,
+                    candidate_model,
+                )["state"]
+                == "archived"
+            ):
+                continue
             executable_profiles.append(candidate)
             continue
         static_by_value = {
             str(item.get("value") or ""): item
-            for item in model_options().get(str(candidate.get("id") or ""), [])
+            for item in model_options().get(profile_id, [])
         }
         enriched_options = [
             {**static_by_value.get(str(item.get("value") or ""), {}), **item}
@@ -190,14 +233,18 @@ def choose_adapter_for_role(
                 not str(preferred_model or "").strip()
                 or str(item.get("value") or "") == str(preferred_model).strip()
             )
+            and model_owner_preference_from_document(
+                owner_preferences,
+                profile_id,
+                str(item.get("value") or ""),
+            )["state"]
+            != "archived"
         ]
         if compatible_options:
             executable_profiles.append({**candidate, "model_options": compatible_options})
     if not executable_profiles:
         return None
     profiles = executable_profiles
-    seniority_key = str(seniority or "").strip().lower()
-    needs_senior = role_key in SENIOR_ROLES or seniority_key in {"lead", "senior"}
     ranked = sorted(
         profiles,
         key=lambda profile: _profile_score(profile, needs_senior=needs_senior),
@@ -270,11 +317,10 @@ def choose_adapter_for_new_slot(
     of inventing an LLM fallback.
     """
     mode = model_default_rollout_mode()
-    legacy = lambda: choose_adapter_for_role(  # noqa: E731 - lazy fallback
+    legacy = lambda: choose_adapter_for_role(
         role, seniority, profiles, **legacy_context
     )
-    if mode == "shadow":
-        return legacy()
+    role_key = canonical_role(role)
     try:
         from aiteam.model_selection_context import contextual_model_selection
 
@@ -288,6 +334,18 @@ def choose_adapter_for_new_slot(
             required_capabilities=legacy_context.get("required_capabilities") or (),
             profiles=profiles,
         )
+        if mode == "shadow":
+            selected = legacy()
+            if not _selection_is_automation_eligible(selected, projection):
+                return _unresolved_model_default(
+                    (
+                        "tier1_authority_required"
+                        if role_key in TIER_1_ROLE_TO_LANE
+                        else "fresh_calibration_required"
+                    ),
+                    mode=mode,
+                )
+            return selected
         selected = select_model_default_for_new_slot(
             Path(db_path),
             selection_scope=selection_scope,
@@ -305,19 +363,65 @@ def choose_adapter_for_new_slot(
             mode,
             exc_info=True,
         )
+        if role_key in TIER_1_ROLE_TO_LANE:
+            return _unresolved_model_default(
+                "tier1_authority_evaluation_failed", mode=mode
+            )
         return _unresolved_model_default("rollout_evaluation_failed") if mode == "auto" else legacy()
     if selected is not None:
         return selected
-    return _unresolved_model_default("no_auto_eligible_candidate") if mode == "auto" else legacy()
+    fallback = legacy()
+    if not _selection_is_automation_eligible(fallback, projection):
+        return _unresolved_model_default(
+            (
+                "tier1_authority_required"
+                if role_key in TIER_1_ROLE_TO_LANE
+                else "fresh_calibration_required"
+            ),
+            mode=mode,
+        )
+    return _unresolved_model_default("no_auto_eligible_candidate") if mode == "auto" else fallback
 
 
-def _unresolved_model_default(reason: str) -> dict[str, Any]:
+def _selection_is_owner_selectable(
+    selection: dict[str, Any] | None, projection: dict[str, Any]
+) -> bool:
+    config = (selection or {}).get("adapter_config") or {}
+    profile_id = str(config.get("profile_id") or "").strip()
+    model = str(config.get("model") or "").strip()
+    if not profile_id or not model:
+        return False
+    return any(
+        row.get("owner_selectable") is True
+        and str((row.get("identity") or {}).get("profile_id") or "") == profile_id
+        and str((row.get("identity") or {}).get("model_id") or "") == model
+        for row in projection.get("candidates") or ()
+    )
+
+
+def _selection_is_automation_eligible(
+    selection: dict[str, Any] | None, projection: dict[str, Any]
+) -> bool:
+    config = (selection or {}).get("adapter_config") or {}
+    profile_id = str(config.get("profile_id") or "").strip()
+    model = str(config.get("model") or "").strip()
+    if not profile_id or not model:
+        return False
+    return any(
+        candidate_is_automation_eligible(row)
+        and str((row.get("identity") or {}).get("profile_id") or "") == profile_id
+        and str((row.get("identity") or {}).get("model_id") or "") == model
+        for row in projection.get("candidates") or ()
+    )
+
+
+def _unresolved_model_default(reason: str, *, mode: str = "auto") -> dict[str, Any]:
     return {
         "adapter_type": "role_builtin",
         "adapter_config": {
             "model_default_rollout": {
                 "schema_version": "model_default_rollout_v1",
-                "mode": "auto",
+                "mode": mode,
                 "state": "default_unresolved",
                 "reason": reason,
             }
@@ -365,16 +469,35 @@ def apply_adapter_policy_to_member(
     criticality: str = "medium",
     data_class: str = "",
     required_capabilities: list[str] | None = None,
+    db_path: Path | None = None,
+    issue_id: str = "",
 ) -> dict[str, Any]:
-    selection = choose_adapter_for_role(
-        str(member.get("role") or ""),
-        str(member.get("seniority") or ""),
-        profiles,
-        run_profile=run_profile,
-        criticality=criticality,
-        data_class=data_class,
-        required_capabilities=required_capabilities or [],
-    )
+    if db_path is not None:
+        selection = choose_adapter_for_new_slot(
+            Path(db_path),
+            role=str(member.get("role") or ""),
+            seniority=str(member.get("seniority") or ""),
+            profiles=profiles,
+            selection_scope=(
+                f"hiring:proposal:{issue_id or 'unscoped'}:"
+                f"{member.get('id') or member.get('role') or 'agent'}"
+            ),
+            issue_id=issue_id,
+            run_profile=run_profile,
+            criticality=criticality,
+            data_class=data_class,
+            required_capabilities=required_capabilities or [],
+        )
+    else:
+        selection = choose_adapter_for_role(
+            str(member.get("role") or ""),
+            str(member.get("seniority") or ""),
+            profiles,
+            run_profile=run_profile,
+            criticality=criticality,
+            data_class=data_class,
+            required_capabilities=required_capabilities or [],
+        )
     if not selection:
         return dict(member)
     return {
@@ -428,6 +551,12 @@ def reconcile_project_agent_policy(db_path: Path, *, include_tier3: bool = True)
                 and _current_config["model_default_rollout"].get("state")
                 == "default_unresolved"
             )
+            is_placeholder = current_adapter in {
+                "",
+                "manual",
+                "role_builtin",
+                "lead_builtin",
+            }
             is_adapter_missing_profile = (
                 current_adapter not in {"", "manual", "role_builtin", "lead_builtin"}
                 and not str(_current_config.get("profile_id") or "").strip()
@@ -444,10 +573,43 @@ def reconcile_project_agent_policy(db_path: Path, *, include_tier3: bool = True)
                 selection = choose_adapter_for_role(role, str(row["seniority"] or ""), repair_profiles)
             if not selection:
                 continue
+            requires_automation_gate = is_placeholder and not unresolved_default
+            if (
+                canonical_role(role) in TIER_1_ROLE_TO_LANE
+                or requires_automation_gate
+            ):
+                try:
+                    from aiteam.model_selection_context import (
+                        contextual_model_selection,
+                    )
+
+                    governed_projection = contextual_model_selection(
+                        db_path,
+                        role=role,
+                        profiles=profiles,
+                    )
+                except Exception:
+                    logger.warning(
+                        "governed reconcile evaluation failed for %s",
+                        row["id"],
+                        exc_info=True,
+                    )
+                    continue
+                selection_allowed = (
+                    _selection_is_automation_eligible(selection, governed_projection)
+                    if requires_automation_gate
+                    else _selection_is_owner_selectable(selection, governed_projection)
+                )
+                if not selection_allowed:
+                    logger.warning(
+                        "governed reconcile left unresolved assignment %s (%s)",
+                        row["id"],
+                        role,
+                    )
+                    continue
             sets: list[str] = ["updated_at = CURRENT_TIMESTAMP"]
             params: list[Any] = []
             # Determine whether this agent's adapter should be replaced.
-            is_placeholder = current_adapter in {"", "manual", "role_builtin", "lead_builtin"}
             selected_adapter = str(selection.get("adapter_type") or "")
             # A subscription_cli agent whose config lost its profile_id falls
             # back to the runtime's default binary ('claude'), which may not be
@@ -642,6 +804,7 @@ def ensure_quorum_agents(
     if any(agent_id not in canonical_ids for agent_id in quorum_ids):
         raise ValueError("unknown quorum auditor id")
     explicit_by_id = explicit_selections or {}
+    owner_preferences = load_model_owner_preferences()
     created: list[str] = []
     profiles_by_id = {str(profile.get("id") or ""): profile for profile in profiles}
     used_profile_ids: set[str] = set()
@@ -699,6 +862,51 @@ def ensure_quorum_agents(
                 if selected_profile is None:
                     raise ValueError(f"unknown quorum profile: {selected_profile_id}")
                 selected_model = str(explicit.get("model") or "")
+                if (
+                    model_owner_preference_from_document(
+                        owner_preferences,
+                        selected_profile_id,
+                        selected_model,
+                    )["state"]
+                    == "archived"
+                ):
+                    raise ValueError(
+                        "quorum model selection is archived by the owner"
+                    )
+                from aiteam.model_selection_context import (
+                    contextual_model_selection,
+                )
+
+                explicit_projection = contextual_model_selection(
+                    db_path,
+                    role="quorum_auditor",
+                    issue_id=issue_id,
+                    profiles=profiles,
+                )
+                explicit_candidate = next(
+                    (
+                        item
+                        for item in explicit_projection.get("candidates") or ()
+                        if str(item.get("candidate_id") or "")
+                        == str(explicit.get("candidate_id") or "")
+                        and str(
+                            (item.get("identity") or {}).get("profile_id") or ""
+                        )
+                        == selected_profile_id
+                        and str(
+                            (item.get("identity") or {}).get("model_id") or ""
+                        )
+                        == selected_model
+                    ),
+                    None,
+                )
+                if (
+                    explicit_candidate is None
+                    or explicit_candidate.get("owner_selectable") is not True
+                ):
+                    raise ValueError(
+                        "quorum model selection lacks exact enabled quorum_ready authority"
+                    )
                 perspective = profile_perspective_key(
                     selected_profile, selected_model=selected_model
                 )

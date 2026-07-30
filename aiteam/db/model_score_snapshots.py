@@ -11,6 +11,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from aiteam.model_tier_coverage import (
+    TIER_1_ROLE_TO_LANE,
+    TIER_COVERAGE_POLICY_VERSION,
+)
 
 _ENSURE_SQL = """
 CREATE TABLE IF NOT EXISTS model_role_score_snapshots (
@@ -95,6 +99,16 @@ def persist_model_role_score_snapshot(
         )
         if winner is None or winner.get("auto_eligible") is not True:
             raise ValueError("auto-applied winner must be explicitly auto-eligible")
+        if role in TIER_1_ROLE_TO_LANE:
+            authority = _candidate_tier1_authority(winner)
+            if (
+                authority.get("policy_version") != TIER_COVERAGE_POLICY_VERSION
+                or authority.get("lane") != TIER_1_ROLE_TO_LANE[role]
+                or authority.get("enabled") is not True
+            ):
+                raise ValueError(
+                    "auto-applied Tier 1 winner requires exact enabled authority"
+                )
 
     payload = {
         "selection_scope": scope,
@@ -194,6 +208,23 @@ def _decode_row(row: sqlite3.Row) -> dict[str, Any]:
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _candidate_tier1_authority(candidate: Mapping[str, Any]) -> Mapping[str, Any]:
+    direct = candidate.get("tier1_authority")
+    if isinstance(direct, Mapping):
+        return direct
+    base = candidate.get("base_role_evaluation")
+    if isinstance(base, Mapping) and isinstance(base.get("tier1_authority"), Mapping):
+        return base["tier1_authority"]
+    roles = candidate.get("roles")
+    if isinstance(roles, Sequence):
+        for row in roles:
+            if isinstance(row, Mapping) and isinstance(
+                row.get("tier1_authority"), Mapping
+            ):
+                return row["tier1_authority"]
+    return {}
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:

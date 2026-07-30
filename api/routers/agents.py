@@ -231,14 +231,6 @@ async def patch_agent(agent_id: str, body: UpdateAgentRequest, request: Request)
             new_profile = str(body.adapter_config.get("profile_id") or "")
             if (new_profile, new_model) != (old_profile, old_model):
                 validate_model_selection(body.adapter_config)
-            body.adapter_config = normalize_owner_explicit_selection(
-                db,
-                role=str(existing_decoded.get("role") or ""),
-                adapter_config=body.adapter_config,
-                issue_id=body.issue_id,
-                source="agent_update_api",
-                existing_config=existing_config or {},
-            )
         if existing and (
             body.adapter_type is not None
             or body.adapter_config is not None
@@ -265,6 +257,15 @@ async def patch_agent(agent_id: str, body: UpdateAgentRequest, request: Request)
                 adapter_config=body.adapter_config if body.adapter_config is not None else existing_decoded.get("adapter_config") or {},
                 role=str(existing_decoded.get("role") or ""),
                 **context,
+            )
+        if body.adapter_config is not None:
+            body.adapter_config = normalize_owner_explicit_selection(
+                db,
+                role=str(existing_decoded.get("role") or ""),
+                adapter_config=body.adapter_config,
+                issue_id=body.issue_id,
+                source="agent_update_api",
+                existing_config=existing_decoded.get("adapter_config") or {},
             )
         row = update_agent(
             db, agent_id=agent_id,

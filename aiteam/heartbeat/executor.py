@@ -52,8 +52,13 @@ from aiteam.heartbeat.scheduler import DispatchResult
 from aiteam.lead_intake import apply_accepted_team_proposal, build_team_proposal, format_team_proposal
 from aiteam.hiring_economics import log_hiring_decision
 from aiteam.mcp_runtime import mcp_servers_for_run
-from aiteam.model_selection import same_profile_fallback
+from aiteam.model_selection import (
+    candidate_is_automation_eligible,
+    same_profile_fallback,
+)
 from aiteam.model_selection_context import contextual_model_selection
+from aiteam.model_owner_preferences import get_model_owner_preference
+from aiteam.model_tier_coverage import tier1_authority_gate
 from aiteam.objective_classification import (
     MIXED,
     NON_PROGRAMMING_KINDS,
@@ -132,7 +137,9 @@ def _is_rate_limit_error(error: str | None) -> bool:
 
 _COMMENT_BODY_MAX = 4096  # hard limit stored in DB
 _AGENT_REPORT_MARKER = "---AGENT-REPORT---"
-_REPORT_REQUIRED_CLOSE_ROLES = frozenset({"worker", "file_scout", "web_scout", "test_runner"})
+_REPORT_REQUIRED_CLOSE_ROLES = frozenset(
+    {"worker", "file_scout", "web_scout", "test_runner", "test_designer"}
+)
 
 
 def _safe_truncate_output(text: str, max_len: int = _COMMENT_BODY_MAX) -> str:
@@ -210,6 +217,65 @@ class RunExecutor:
         agent_info = self._agent_info(agent_id)
         adapter_type = (agent_info.get("adapter_type") if agent_info else None) or "manual"
         agent_role = (agent_info.get("role") if agent_info else None) or ""
+        archived_assignment_proposal_pending = False
+        try:
+            archived_assignment_proposal_pending = (
+                self._enforce_archived_assignment(
+                    issue_id=str(run.get("issue_id") or ""),
+                    agent_id=agent_id,
+                    agent_role=agent_role,
+                    run_id=run_id,
+                )
+            )
+        except Exception:
+            # Fail closed: a corrupt preferences document must never permit an
+            # archived assignment to consume another inference.
+            logger.warning(
+                "archived assignment enforcement failed for run %s",
+                run_id,
+                exc_info=True,
+            )
+            issue_id = str(run.get("issue_id") or "")
+            if issue_id:
+                with contextlib.suppress(Exception):
+                    update_issue(self.db_path, issue_id=issue_id, status="blocked")
+                interaction: dict[str, Any] = {}
+                with contextlib.suppress(Exception):
+                    interaction = create_interaction(
+                        self.db_path,
+                        issue_id=issue_id,
+                        kind="request_confirmation",
+                        payload={
+                            "version": 1,
+                            "reason": "owner_preferences_unreadable",
+                            "agent_id": agent_id,
+                            "agent_role": agent_role,
+                            "failed_issue_id": issue_id,
+                            "required_action": "repair_model_owner_preferences",
+                        },
+                        continuation_policy="wake_assignee",
+                        idempotency_key=(
+                            f"owner_preferences_unreadable:{agent_id}:{issue_id}"
+                        ),
+                        source_run_id=run_id,
+                        created_by_agent_id=agent_id,
+                        title="Preferencias de modelos ilegibles",
+                        summary=(
+                            "La selección se bloqueó de forma segura. Repara la "
+                            "configuración local de preferencias antes de reintentar."
+                        ),
+                    )
+                with contextlib.suppress(Exception):
+                    log_activity(
+                        self.db_path,
+                        action="issue.owner_preferences_unreadable",
+                        target_type="issue",
+                        target_id=issue_id,
+                        actor_agent_id=agent_id,
+                        run_id=run_id,
+                        payload={"interaction_id": interaction.get("id")},
+                    )
+            archived_assignment_proposal_pending = True
         _solo_direct_lead = (
             _active_run_profile == SOLO_LEAD
             and str(agent_role or "").strip().lower() in {"lead", "team_lead"}
@@ -219,15 +285,16 @@ class RunExecutor:
         # propone al owner una alternativa exacta. Nunca se reescribe una
         # asignación existente de forma silenciosa.
         cross_provider_proposal_pending = False
-        try:
-            cross_provider_proposal_pending = self._enforce_cross_provider_review(
-                issue_id=str(run.get("issue_id") or ""),
-                agent_id=agent_id,
-                agent_role=agent_role,
-                run_id=run_id,
-            )
-        except Exception:
-            logger.warning("cross-provider review enforcement failed for run %s", run_id, exc_info=True)
+        if not archived_assignment_proposal_pending:
+            try:
+                cross_provider_proposal_pending = self._enforce_cross_provider_review(
+                    issue_id=str(run.get("issue_id") or ""),
+                    agent_id=agent_id,
+                    agent_role=agent_role,
+                    run_id=run_id,
+                )
+            except Exception:
+                logger.warning("cross-provider review enforcement failed for run %s", run_id, exc_info=True)
         runtime = self.registry.get(adapter_type)
         # Per-agent model override via adapter_config_json
         adapter_cfg: dict[str, Any] = {}
@@ -257,11 +324,10 @@ class RunExecutor:
                 if agent_role.lower() in _NON_EDITING_ROLES and not _solo_direct_lead:
                     adapter_cfg = {**adapter_cfg, "sandbox": "read-only"}
                 runtime = runtime.with_config(adapter_cfg)
-        # ── Provider degradation fallback (opt-in) ───────────────────────────
-        # When the provider is degraded (repeated 429s) and the operator has
-        # configured a fallback adapter, worker roles switch to it for this run
-        # instead of hammering a saturated provider. Lead/senior keep their
-        # adapter — quality of top-level decisions must not silently degrade.
+        # ── Provider degradation fallback legacy (fail-closed) ───────────────
+        # Un adapter_type aislado no identifica perfil+modelo+rol y, por tanto,
+        # no puede demostrar calibración fresca. Se conserva la señal para
+        # diagnóstico, pero el cambio debe pasar por assignment recovery.
         _fallback_adapter_type = os.environ.get("AITEAM_PROVIDER_FALLBACK_ADAPTER", "").strip()
         if (
             _fallback_adapter_type
@@ -270,21 +336,23 @@ class RunExecutor:
             and agent_role not in {"lead", "team_lead"}
             and GOVERNOR.is_degraded(runtime.descriptor.provider)
         ):
-            _fallback_runtime = self.registry.get(_fallback_adapter_type)
-            if _fallback_runtime is not None:
-                record_tool_access(
-                    self.db_path,
-                    run_id=run_id,
-                    agent_id=agent_id,
-                    issue_id=str(run.get("issue_id") or "") or None,
-                    tool_name=f"adapter:{_fallback_adapter_type}",
-                    decision="allowed",
-                    reason=f"provider {runtime.descriptor.provider} degraded — fallback adapter engaged",
-                    metadata={"original_adapter_type": adapter_type, "fallback_adapter_type": _fallback_adapter_type},
-                )
-                runtime = _fallback_runtime
-                adapter_type = _fallback_adapter_type
-                adapter_cfg = {}
+            record_tool_access(
+                self.db_path,
+                run_id=run_id,
+                agent_id=agent_id,
+                issue_id=str(run.get("issue_id") or "") or None,
+                tool_name=f"adapter:{_fallback_adapter_type}",
+                decision="denied",
+                reason=(
+                    "legacy provider fallback lacks an exact calibrated "
+                    "profile+model+role candidate"
+                ),
+                metadata={
+                    "original_adapter_type": adapter_type,
+                    "fallback_adapter_type": _fallback_adapter_type,
+                    "required_flow": "assignment_recovery",
+                },
+            )
         if runtime is None:
             record_tool_access(
                 self.db_path,
@@ -316,6 +384,7 @@ class RunExecutor:
                 "model_fallback_required",
                 "cross_provider_review_required",
                 "adapter_recovery_required",
+                "owner_archived_assignment",
             }
         skill_content = compose_skill(agent_role, self.db_path.parent) if agent_role else None
 
@@ -1184,6 +1253,15 @@ class RunExecutor:
             elif _model_fallback_resolution is not None:
                 is_assignment_transition = True
                 result = _model_fallback_resolution
+            elif archived_assignment_proposal_pending:
+                is_assignment_transition = True
+                result = ExecutionResult(
+                    status="skipped",
+                    output=(
+                        "Asignación pausada: el modelo está archivado. "
+                        "El owner debe confirmar una sustitución o reactivarlo."
+                    ),
+                )
             elif cross_provider_proposal_pending:
                 is_assignment_transition = True
                 result = ExecutionResult(
@@ -2304,7 +2382,11 @@ class RunExecutor:
                 output=plan_body,
                 actions={"issue_status": "done", "notify_supervisor": True},
             )
-        proposal = build_team_proposal(issue, adapter_profiles=project_profiles(Path(self.db_path).parent))
+        proposal = build_team_proposal(
+            issue,
+            adapter_profiles=project_profiles(Path(self.db_path).parent),
+            db_path=self.db_path,
+        )
         plan_body = format_team_proposal(proposal)
         run_id_str = str(run.get("id") or "")
         # Write plan as durable document — idempotent on first intake
@@ -4599,6 +4681,7 @@ class RunExecutor:
             issue,
             adapter_profiles=project_profiles(Path(self.db_path).parent),
             profile=LEAD_QUORUM,
+            db_path=self.db_path,
         )
         proposal["plan_revision_id"] = revision_id
         outcome = apply_accepted_team_proposal(
@@ -5453,6 +5536,8 @@ class RunExecutor:
             title=(
                 "Aprobar reviewer independiente"
                 if reason == "cross_provider_review_required"
+                else "Resolver asignación con modelo archivado"
+                if reason == "owner_archived_assignment"
                 else "Aprobar recuperación por otro adapter"
             ),
             summary=f"{summary} Rechazar mantiene la issue bloqueada.",
@@ -5474,6 +5559,183 @@ class RunExecutor:
                 },
                 "proposed": proposed,
                 "constraint": constraint,
+            },
+        )
+        return True
+
+    def _enforce_archived_assignment(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        agent_role: str,
+        run_id: str = "",
+    ) -> bool:
+        """Pause an existing archived assignment without silently replacing it."""
+        if (
+            not issue_id
+            or str(agent_role or "").strip().lower() == "test_runner"
+        ):
+            return False
+        agent = get_agent(self.db_path, agent_id=agent_id) or {}
+        config = _decode_json(agent.get("adapter_config_json"))
+        profile_id = str(config.get("profile_id") or "").strip()
+        model = str(config.get("model") or "").strip()
+        adapter_type = str(agent.get("adapter_type") or "").strip()
+        if not profile_id or not model:
+            return False
+        # Preferences v1 deliberately accept only stable operational IDs.
+        # Legacy labels with whitespace cannot have an exact preference entry,
+        # so they remain governed by their existing compatibility path.
+        if any(character.isspace() or ord(character) < 32 for character in profile_id + model):
+            return False
+        preference = get_model_owner_preference(profile_id, model)
+        if preference.get("state") != "archived":
+            return False
+
+        profiles = [
+            profile
+            for profile in project_profiles(Path(self.db_path).parent)
+            if profile_is_connected(profile)
+        ]
+        profile_by_id = {
+            str(profile.get("id") or ""): profile for profile in profiles
+        }
+        projection = contextual_model_selection(
+            self.db_path,
+            role=agent_role,
+            issue_id=issue_id,
+            profiles=profiles,
+        )
+        alternatives = [
+            row
+            for row in projection.get("candidates") or ()
+            if candidate_is_automation_eligible(row)
+            and str((row.get("identity") or {}).get("profile_id") or "")
+            in profile_by_id
+        ]
+        selected = min(
+            alternatives,
+            key=lambda row: (
+                str((row.get("identity") or {}).get("profile_id") or "")
+                != profile_id,
+                int(row.get("rank") or 10**9),
+            ),
+            default=None,
+        )
+        if selected is not None:
+            identity = selected.get("identity") or {}
+            proposed_profile = str(identity.get("profile_id") or "")
+            proposed_model = str(identity.get("model_id") or "")
+            proposed_adapter = str(
+                profile_by_id.get(proposed_profile, {}).get("adapter_type") or ""
+            )
+            proposed = {
+                "adapter_type": proposed_adapter,
+                "profile_id": proposed_profile,
+                "model": proposed_model,
+                "candidate_id": selected.get("candidate_id"),
+                "rank": selected.get("rank"),
+                "selection_reason": selected.get("selection_reason"),
+            }
+            recommendation = (
+                f"Se recomienda `{proposed_profile}/{proposed_model}`; "
+                "el owner puede escoger otra opción habilitada."
+            )
+        else:
+            current_candidate = next(
+                (
+                    row
+                    for row in projection.get("candidates") or ()
+                    if str((row.get("identity") or {}).get("profile_id") or "")
+                    == profile_id
+                    and str((row.get("identity") or {}).get("model_id") or "")
+                    == model
+                ),
+                {}
+            )
+            proposed = {
+                "adapter_type": adapter_type,
+                "profile_id": profile_id,
+                "model": model,
+                "candidate_id": current_candidate.get("candidate_id"),
+                "rank": current_candidate.get("rank"),
+                "selection_reason": "reactivation_required",
+            }
+            recommendation = (
+                "No existe una alternativa habilitada; hay que reactivar este "
+                "modelo o configurar otro antes de aceptar."
+            )
+
+        proposed_change = self._propose_assignment_change(
+            issue_id=issue_id,
+            agent_id=agent_id,
+            agent_role=agent_role,
+            run_id=run_id,
+            reason="owner_archived_assignment",
+            proposed=proposed,
+            constraint={
+                "kind": "owner_archived_assignment",
+                "archived_profile_id": profile_id,
+                "archived_model": model,
+                "preference_reason": preference.get("reason"),
+                "preference_updated_at": preference.get("updated_at"),
+            },
+            summary=(
+                f"La asignación existente usa `{profile_id}/{model}`, archivado "
+                f"por el owner ({preference.get('reason')}). {recommendation}"
+            ),
+        )
+        if proposed_change:
+            return True
+
+        # Legacy/incomplete assignments may lack enough adapter identity to
+        # build a concrete replacement. They still must not run: persist a
+        # durable warning and require the owner to repair Team explicitly.
+        update_issue(self.db_path, issue_id=issue_id, status="blocked")
+        interaction = create_interaction(
+            self.db_path,
+            issue_id=issue_id,
+            kind="request_confirmation",
+            payload={
+                "version": 1,
+                "reason": "owner_archived_assignment_unresolved",
+                "agent_id": agent_id,
+                "agent_role": agent_role,
+                "failed_issue_id": issue_id,
+                "current": {
+                    "adapter_type": adapter_type,
+                    "profile_id": profile_id,
+                    "model": model,
+                },
+                "required_action": "change_team_assignment_or_reactivate_model",
+            },
+            continuation_policy="wake_assignee",
+            idempotency_key=(
+                f"assignment_change:owner_archived_assignment_unresolved:"
+                f"{agent_id}:{issue_id}"
+            ),
+            source_run_id=run_id or None,
+            created_by_agent_id=agent_id,
+            title="Asignación archivada sin alternativa aplicable",
+            summary=(
+                f"`{profile_id}/{model}` está archivado y la asignación no "
+                "contiene identidad suficiente para proponer un reemplazo. "
+                "Corrige Equipo o reactiva el modelo antes de reintentar."
+            ),
+        )
+        log_activity(
+            self.db_path,
+            action="issue.archived_assignment_blocked",
+            target_type="issue",
+            target_id=issue_id,
+            actor_agent_id=agent_id,
+            run_id=run_id or None,
+            payload={
+                "interaction_id": interaction.get("id"),
+                "profile_id": profile_id,
+                "model": model,
+                "preference_reason": preference.get("reason"),
             },
         )
         return True
@@ -5540,7 +5802,7 @@ class RunExecutor:
         selected = next(
             (
                 row for row in projection.get("candidates") or ()
-                if row.get("owner_selectable") is True
+                if candidate_is_automation_eligible(row)
                 and str((row.get("identity") or {}).get("model_vendor") or "") != engineer_perspective
                 and str((row.get("identity") or {}).get("profile_id") or "") in profile_by_id
             ),
@@ -5621,6 +5883,30 @@ class RunExecutor:
 
         new_config = {**config, "model": senior}
         selected_profiles = project_profiles(Path(self.db_path).parent)
+        escalation_projection = contextual_model_selection(
+            self.db_path,
+            role=agent_role,
+            issue_id=issue_id,
+            profiles=selected_profiles or None,
+        )
+        senior_candidate = next(
+            (
+                candidate
+                for candidate in escalation_projection.get("candidates") or ()
+                if str((candidate.get("identity") or {}).get("profile_id") or "")
+                == profile_id
+                and str((candidate.get("identity") or {}).get("model_id") or "")
+                == senior
+            ),
+            None,
+        )
+        if not candidate_is_automation_eligible(senior_candidate):
+            logger.info(
+                "model escalation rejected by owner selection gate issue=%s model=%s",
+                issue_id,
+                senior,
+            )
+            return False
         decision = resolve_assignment_compatibility(
             adapter_type=str(agent_row["adapter_type"] or ""),
             adapter_config=new_config,
@@ -5722,7 +6008,14 @@ class RunExecutor:
             profiles=selected_profiles or None,
         )
         if decision.get("allowed"):
-            return None
+            return self._tier1_authority_preflight(
+                run=run,
+                agent_id=agent_id,
+                agent_role=agent_role,
+                adapter_type=adapter_type,
+                adapter_cfg=adapter_cfg,
+                selected_profiles=selected_profiles,
+            )
 
         code = str(decision.get("code") or "model_role_incompatible")
         reason = str(decision.get("reason") or "Asignación incompatible")
@@ -5798,6 +6091,127 @@ class RunExecutor:
                 actor_agent_id=agent_id,
                 run_id=str(run.get("id") or "") or None,
                 payload={"issue_id": issue_id or None, "decision": decision},
+            )
+        return ExecutionResult(
+            status="failed",
+            error_code=code,
+            error=reason,
+            output=f"{code}: {reason}",
+            actions={"issue_status": "blocked"},
+        )
+
+    def _tier1_authority_preflight(
+        self,
+        *,
+        run: dict[str, Any],
+        agent_id: str,
+        agent_role: str,
+        adapter_type: str,
+        adapter_cfg: dict[str, Any],
+        selected_profiles: list[dict[str, Any]],
+    ) -> ExecutionResult | None:
+        """Revalida autoridad exacta para assignments antiguos y lifecycle."""
+        applicability = tier1_authority_gate(role=agent_role, authority=None)
+        if applicability["applicable"] is not True:
+            return None
+        issue_id = str(run.get("issue_id") or "").strip()
+        profile_id = str(adapter_cfg.get("profile_id") or "").strip()
+        model = str(adapter_cfg.get("model") or "").strip()
+        candidate: dict[str, Any] | None = None
+        if profile_id and model:
+            projection = contextual_model_selection(
+                self.db_path,
+                role=agent_role,
+                issue_id=issue_id,
+                profiles=selected_profiles or None,
+            )
+            candidate = next(
+                (
+                    dict(item)
+                    for item in projection.get("candidates") or ()
+                    if str((item.get("identity") or {}).get("profile_id") or "")
+                    == profile_id
+                    and str((item.get("identity") or {}).get("model_id") or "")
+                    == model
+                ),
+                None,
+            )
+        gate = tier1_authority_gate(
+            role=agent_role,
+            authority=(candidate or {}).get("tier1_authority"),
+        )
+        if gate["allowed"] is True:
+            return None
+
+        code = str(gate.get("code") or "tier1_authority_blocked")
+        reason = str(
+            gate.get("reason")
+            or "La autoridad Tier 1 exacta no está habilitada."
+        )
+        if issue_id:
+            with contextlib.suppress(Exception):
+                update_issue(self.db_path, issue_id=issue_id, status="blocked")
+            with contextlib.suppress(Exception):
+                create_interaction(
+                    self.db_path,
+                    issue_id=issue_id,
+                    kind="request_confirmation",
+                    payload={
+                        "version": 1,
+                        "reason": "tier1_authority_blocked",
+                        "agent_id": agent_id,
+                        "agent_role": agent_role,
+                        "failed_issue_id": issue_id,
+                        "profile_id": profile_id,
+                        "model": model,
+                        "authority_gate": gate,
+                        "required_action": (
+                            "change_team_assignment_to_exact_authorized_candidate"
+                        ),
+                    },
+                    continuation_policy="wake_assignee",
+                    idempotency_key=(
+                        f"tier1_authority:{agent_id}:{profile_id}:{model}:"
+                        f"{gate.get('lane')}"
+                    ),
+                    source_run_id=str(run.get("id") or "") or None,
+                    created_by_agent_id=agent_id,
+                    title=f"Autoridad Tier 1 bloqueada para {agent_role}",
+                    summary=(
+                        f"{reason} Corrige la asignación en Equipo con un modelo "
+                        "habilitado para el carril exacto y después acepta para "
+                        "reintentar; el owner no puede omitir este gate."
+                    ),
+                )
+        with contextlib.suppress(Exception):
+            record_tool_access(
+                self.db_path,
+                run_id=str(run.get("id") or ""),
+                agent_id=agent_id,
+                issue_id=issue_id or None,
+                tool_name=f"adapter:{adapter_type}",
+                decision="denied",
+                reason=f"{code}: {reason}",
+                metadata={
+                    "profile_id": profile_id,
+                    "model": model,
+                    "tier1_authority_gate": gate,
+                },
+            )
+        with contextlib.suppress(Exception):
+            log_activity(
+                self.db_path,
+                action="run.tier1_authority_denied",
+                target_type="run",
+                target_id=str(run.get("id") or ""),
+                actor_agent_id=agent_id,
+                run_id=str(run.get("id") or "") or None,
+                payload={
+                    "issue_id": issue_id or None,
+                    "profile_id": profile_id,
+                    "model": model,
+                    "authority_gate": gate,
+                },
             )
         return ExecutionResult(
             status="failed",
@@ -6006,30 +6420,57 @@ class RunExecutor:
         result_payload = _decode_json((interaction or {}).get("result_json"))
         owner_selection = (result_payload.get("resolution_data") or {}).get("model_selection") or {}
         owner_candidate_id = str(owner_selection.get("candidateId") or "").strip()
-        if owner_selection:
-            selected_profile = str(owner_selection.get("profileId") or "").strip()
-            selected_model = str(owner_selection.get("model") or "").strip()
-            projection = contextual_model_selection(
-                self.db_path,
-                role=str(payload.get("agent_role") or agent.get("role") or ""),
-                issue_id=issue_id,
+        selected_profile = (
+            str(owner_selection.get("profileId") or "").strip()
+            if owner_selection
+            else expected_profile
+        )
+        selected_model = (
+            str(owner_selection.get("model") or "").strip()
+            if owner_selection
+            else proposed_model
+        )
+        selected_candidate_id = (
+            owner_candidate_id
+            if owner_selection
+            else str(payload.get("proposed_candidate_id") or "").strip()
+        )
+        projection = contextual_model_selection(
+            self.db_path,
+            role=str(payload.get("agent_role") or agent.get("role") or ""),
+            issue_id=issue_id,
+        )
+        selected_candidate = next(
+            (
+                item
+                for item in projection.get("candidates") or ()
+                if item.get("candidate_id") == selected_candidate_id
+                and str((item.get("identity") or {}).get("profile_id") or "")
+                == selected_profile
+                and str((item.get("identity") or {}).get("model_id") or "")
+                == selected_model
+            ),
+            None,
+        )
+        valid_selection = bool(
+            selected_profile == expected_profile
+            and selected_candidate is not None
+            and (
+                selected_candidate.get("owner_selectable") is True
+                if owner_selection
+                else candidate_is_automation_eligible(selected_candidate)
             )
-            selected_candidate = next(
-                (
-                    item for item in projection.get("candidates") or ()
-                    if item.get("candidate_id") == owner_candidate_id
-                    and str((item.get("identity") or {}).get("profile_id") or "") == selected_profile
-                    and str((item.get("identity") or {}).get("model_id") or "") == selected_model
+        )
+        if not valid_selection:
+            return ExecutionResult(
+                status="failed",
+                error_code="model_fallback_owner_selection_invalid",
+                error=(
+                    "fallback selection is no longer calibrated/selectable "
+                    "in the current adapter"
                 ),
-                None,
             )
-            if selected_profile != expected_profile or selected_candidate is None or selected_candidate.get("owner_selectable") is not True:
-                return ExecutionResult(
-                    status="failed",
-                    error_code="model_fallback_owner_selection_invalid",
-                    error="owner fallback selection is not selectable in the current adapter",
-                )
-            proposed_model = selected_model
+        proposed_model = selected_model
 
         if (current_profile, current_model) != (expected_profile, failed_model):
             # The owner already changed Team while the card was pending. Preserve
@@ -6132,7 +6573,11 @@ class RunExecutor:
         interaction = get_interaction(self.db_path, interaction_id=interaction_id) if interaction_id else None
         payload = _decode_json((interaction or {}).get("payload_json"))
         reason = str(payload.get("reason") or "")
-        if reason not in {"cross_provider_review_required", "adapter_recovery_required"}:
+        if reason not in {
+            "cross_provider_review_required",
+            "adapter_recovery_required",
+            "owner_archived_assignment",
+        }:
             return None
         if (
             str(payload.get("failed_issue_id") or "") != issue_id
@@ -6183,6 +6628,8 @@ class RunExecutor:
                 return perspective_key(provider, resolved_model) != str(
                     constraint.get("engineer_perspective") or ""
                 )
+            if kind == "owner_archived_assignment":
+                return bool(adapter_type and profile_id and model)
             return False
 
         expected_tuple = (
@@ -6254,7 +6701,11 @@ class RunExecutor:
                     if str(item.get("candidate_id") or "") == selected_candidate_id
                     and str((item.get("identity") or {}).get("profile_id") or "") == selected_profile
                     and str((item.get("identity") or {}).get("model_id") or "") == selected_model
-                    and item.get("owner_selectable") is True
+                    and (
+                        item.get("owner_selectable") is True
+                        if owner_selection
+                        else candidate_is_automation_eligible(item)
+                    )
                 ),
                 None,
             )
@@ -6386,7 +6837,7 @@ class RunExecutor:
         selected = next(
             (
                 row for row in projection.get("candidates") or ()
-                if row.get("owner_selectable") is True
+                if candidate_is_automation_eligible(row)
                 and str((row.get("identity") or {}).get("profile_id") or "") in profile_by_id
             ),
             None,

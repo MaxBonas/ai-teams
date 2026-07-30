@@ -1,0 +1,73 @@
+{
+  "checks": {
+    "all_candidates_visible_in_gate_board": true,
+    "candidate_identities_unique": true,
+    "classification_sources_valid": true,
+    "classification_total_matches_catalog": true,
+    "cross_profile_identity_preserved": true,
+    "low_and_archived_not_actionable": true,
+    "pending_safe_before_reconcile": true,
+    "preference_entries_resolve_exactly": true
+  },
+  "gate_projection": {
+    "actionable_by_classification": {
+      "explicit": 18,
+      "pending": 0
+    },
+    "proactive_by_classification": {
+      "explicit": 20,
+      "pending": 0
+    },
+    "promotion_ready_by_classification": {
+      "explicit": 0,
+      "pending": 0
+    },
+    "role_row_count": 1666,
+    "rows_by_classification": {
+      "explicit": 799,
+      "pending": 867
+    }
+  },
+  "inventory": {
+    "candidate_count": 98,
+    "candidates_by_state": {
+      "archived": 6,
+      "high": 13,
+      "low": 28,
+      "normal": 51
+    },
+    "cross_profile_slug_collision_count": 10,
+    "explicit_candidate_count": 47,
+    "invalid_source_count": 0,
+    "orphan_preference_count": 0,
+    "pending_by_profile": {
+      "gemini_api_free": 39,
+      "groq_api_free": 12
+    },
+    "pending_candidate_count": 51,
+    "preference_entry_count": 47,
+    "unique_identity_count": 98
+  },
+  "schema_version": "model_residual_policy_inventory_v1",
+  "scope": {
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "model_ids_emitted": false,
+    "paths_emitted": false,
+    "preferences_mutated": false,
+    "secrets_read": false
+  },
+  "source": {
+    "preference_schema_version": "model_owner_preferences_v1",
+    "read_model_content_hash": "5b83fe80aa6773ef23427699d8f3fb25ce16d5907d17814343ca70fa921a0efb",
+    "read_model_schema_version": "model_catalog_read_model_v2"
+  },
+  "summary": {
+    "check_count": 8,
+    "inventory_ready": true,
+    "next_action": "reconcile_pending_exact_identities_as_owner_low",
+    "passed_count": 8,
+    "pending_candidate_count": 51,
+    "policy_complete": false
+  }
+}

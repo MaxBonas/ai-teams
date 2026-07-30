@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "job_state_machine_mutation",
+  "role": "test_designer",
+  "seed": 2,
+  "seconds": 62.718,
+  "checks": {
+    "run_completed": true,
+    "production_unchanged": true,
+    "only_expected_test_authored": true,
+    "baseline_passes": true,
+    "all_hidden_mutants_killed": true,
+    "durable_report_done": true,
+    "issue_done": true,
+    "production_restored_after_evaluation": true
+  },
+  "mutation_evaluation": {
+    "baseline": {
+      "exit_code": 0,
+      "stdout": ".....                                                    [100%]\n5 passed, 16 subtests passed in 0.03s\n",
+      "stderr": ""
+    },
+    "mutants": {
+      "allows_pending_succeed": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "maps_failure_to_success": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "allows_terminal_restart": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "ignores_unknown_event": {
+        "killed": true,
+        "exit_code": 1
+      },
+      "mutates_input": {
+        "killed": true,
+        "exit_code": 1
+      }
+    },
+    "mutants_killed": 5,
+    "mutants_total": 5
+  },
+  "authored_files": [
+    "tests/test_acceptance_job_state.py"
+  ],
+  "run": {
+    "id": "run:9386276c-bf7c-4fed-9f8b-e5d392d78d93",
+    "status": "completed",
+    "error_code": null,
+    "error": null,
+    "model": "gpt-5.6-terra",
+    "provider": "openai-codex",
+    "channel": "subscription",
+    "usage_json": "{\"cached_input_tokens\": 62208, \"input_tokens\": 90893, \"output_tokens\": 2518, \"reasoning_output_tokens\": 622}"
+  },
+  "report": {
+    "id": "5ffcd66a-7104-4727-b249-777dc1112004",
+    "issue_id": "issue:benchmark_test_designer",
+    "agent_id": "role:benchmark_test_designer",
+    "run_id": "run:9386276c-bf7c-4fed-9f8b-e5d392d78d93",
+    "agent_role": "test_designer",
+    "result": "done",
+    "issue_status": "done",
+    "next_owner": "lead",
+    "tech_match": null,
+    "blocker": "none",
+    "evidence": "tests de aceptación escritos en el único archivo autorizado",
+    "valid": 1,
+    "is_assignee": 1,
+    "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests de aceptación escritos en el único archivo autorizado\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"done\", \"role\": \"test_designer\"}",
+    "created_at": "2026-07-29 23:16:47"
+  },
+  "usage": {
+    "cached_input_tokens": 62208,
+    "input_tokens": 90893,
+    "output_tokens": 2518,
+    "reasoning_output_tokens": 622
+  },
+  "workspace": "benchmarks/workspaces/p0h2d4-terra-job-state-cli0146-seed2",
+  "ok": true
+}

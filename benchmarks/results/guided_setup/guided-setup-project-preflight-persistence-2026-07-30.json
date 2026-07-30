@@ -1,0 +1,39 @@
+{
+  "checks": {
+    "artifact_is_content_addressed": true,
+    "corrupt_artifact_fails_closed": true,
+    "evidence_is_session_confined": true,
+    "fixture_reference_resolves": true,
+    "go_receipt_is_durable": true,
+    "same_plan_is_idempotent": true
+  },
+  "evidence": {
+    "execution_plan_hash": "20f712e944864fdcdeb89b924265b58a986b3acb17b4cdf5c912eb07f2294da2",
+    "execution_receipt_hash": "bfe7c2e20c082f0f99cbbb35afa7e90731a8a3b0c79d541f37ec3eae5571bc77",
+    "execution_schema_version": "guided_setup_project_preflight_execution_receipt_v1",
+    "preflight_hash": "45eddf1289e83cb405e5897e6137d78765a3c1c1f4876fbdd2541c51764b85ec",
+    "preflight_schema_version": "guided_setup_project_preflight_v1",
+    "receipt_hash": "a3770e23d2ff1f6789a13ed2bc0a322d244121eb9179b61de29605adde28a7cc",
+    "receipt_schema_version": "guided_setup_project_preflight_receipt_v1",
+    "row_counts": {
+      "artifacts": 1,
+      "receipts": 1
+    }
+  },
+  "evidence_hash": "789fd63ce707cdde9b1e73d58f3a0a4c8ba75e45d46ea1080b2fe3ab8451e146",
+  "schema_version": "guided_setup_project_preflight_persistence_audit_v1",
+  "scope": {
+    "commands_executed": false,
+    "inference_attempted": false,
+    "quota_consumed": false,
+    "remote_calls": false,
+    "temporary_database_only": true,
+    "tests_executed": false,
+    "user_projects_mutated": false
+  },
+  "summary": {
+    "check_count": 6,
+    "passed_count": 6,
+    "persistence_contract_ready": true
+  }
+}

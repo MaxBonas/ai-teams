@@ -1,16 +1,27 @@
 from scripts.benchmark_antigravity_durable_review import (
     CODEX_MODELS,
+    GEMINI_API_MODELS,
     LOCAL_MODELS,
     OPENCODE_MODELS,
     _model_transport,
     _sum_usage,
     aggregate_reports,
+    cli_version_for_profile,
 )
 
 
 def _report(model: str, seed: int, seconds: float) -> dict:
+    profile_id = (
+        "gemini_api_free"
+        if model == "gemini-3.6-flash"
+        else "codex_subscription"
+        if model == "gpt-5.6-terra"
+        else "antigravity_subscription"
+    )
     return {
+        "profile_id": profile_id,
         "model": model,
+        "cli_version": "0.146.0-alpha.6",
         "seed": seed,
         "ok": True,
         "reject": {"ok": True},
@@ -22,6 +33,8 @@ def _report(model: str, seed: int, seconds: float) -> dict:
             "wall_seconds": seconds,
             "tokens": None,
         },
+        "_source_receipt": f"{profile_id}-{model}-{seed}.json",
+        "_source_sha256": f"hash-{profile_id}-{model}-{seed}",
     }
 
 
@@ -69,6 +82,32 @@ def test_durable_review_matrix_includes_codex_terra() -> None:
     assert CODEX_MODELS == ("gpt-5.6-terra",)
 
 
+def test_codex_transport_observes_current_cli_version(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scripts.benchmark_antigravity_durable_review.cli_version_for_profile",
+        lambda profile_id: (
+            "0.146.0-alpha.6" if profile_id == "codex_subscription" else ""
+        ),
+    )
+
+    transport = _model_transport("gpt-5.6-terra")
+
+    assert transport["cli_version"] == "0.146.0-alpha.6"
+
+
+def test_cli_version_for_api_is_protocol_bound() -> None:
+    assert cli_version_for_profile("gemini_api_free") == "api:google:v1beta"
+
+
+def test_durable_review_supports_gemini_free_without_cli_transport() -> None:
+    assert GEMINI_API_MODELS == ("gemini-3.6-flash",)
+    transport = _model_transport("gemini-3.6-flash")
+    assert transport["profile_id"] == "gemini_api_free"
+    assert transport["adapter_type"] == "gemini_api"
+    assert transport["channel"] == "api"
+    assert transport["command"] == []
+
+
 def test_local_durable_review_uses_ollama_without_external_quota() -> None:
     assert LOCAL_MODELS == ("gemma4:26b",)
     transport = _model_transport("gemma4:26b")
@@ -108,6 +147,30 @@ def test_sum_usage_counts_provider_calls_even_when_one_has_no_usage() -> None:
     assert totals == {"input_tokens": 17, "total_tokens": 21}
 
 
+def test_sum_usage_preserves_gemini_token_fields() -> None:
+    totals = _sum_usage([
+        {
+            "usage_json": (
+                '{"promptTokenCount":100,"candidatesTokenCount":20,'
+                '"thoughtsTokenCount":30,"totalTokenCount":150}'
+            )
+        },
+        {
+            "usage_json": (
+                '{"promptTokenCount":80,"candidatesTokenCount":10,'
+                '"thoughtsTokenCount":15,"totalTokenCount":105}'
+            )
+        },
+    ])
+
+    assert totals == {
+        "promptTokenCount": 180,
+        "candidatesTokenCount": 30,
+        "thoughtsTokenCount": 45,
+        "totalTokenCount": 255,
+    }
+
+
 def test_aggregate_preserves_subscription_token_telemetry_when_every_seed_has_it() -> None:
     reports = [_report("gpt-5.6-terra", seed, 50 + seed) for seed in (1, 2, 3)]
     for seed, report in enumerate(reports, start=1):
@@ -125,4 +188,22 @@ def test_aggregate_preserves_subscription_token_telemetry_when_every_seed_has_it
     assert aggregate["conclusion"]["tokens_available"] is True
     assert aggregate["conclusion"]["exact_pair_calibrated"] is True
     assert aggregate["conclusion"]["decision"] == "calibrate_exact_pair"
+    assert aggregate["cli_version"] == "0.146.0-alpha.6"
+    assert aggregate["integrity"]["same_cli_version"] is True
     assert "presión de cuota" in aggregate["conclusion"]["quota_note"]
+
+
+def test_exact_pair_rejects_mixed_or_missing_cli_versions() -> None:
+    reports = [_report("gpt-5.6-terra", seed, 50 + seed) for seed in (1, 2, 3)]
+    reports[-1]["cli_version"] = "0.145.0"
+
+    mixed = aggregate_reports(reports)
+
+    assert mixed["conclusion"]["exact_pair_calibrated"] is False
+    assert mixed["integrity"]["same_cli_version"] is False
+    reports[-1]["cli_version"] = ""
+
+    missing = aggregate_reports(reports)
+
+    assert missing["conclusion"]["exact_pair_calibrated"] is False
+    assert missing["integrity"]["same_cli_version"] is False

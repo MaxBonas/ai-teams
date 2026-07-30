@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.6",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 9.469,
+  "usage": {},
+  "response": {
+    "objective": {
+      "role": "lead",
+      "seed": 3,
+      "case": "tenant_queue_migration",
+      "summary": "Descomponer y gestionar la migración de tenant_queue asegurando SQLite como única fuente durable, garantizando el aislamiento por tenant_id, resolviendo la condición de carrera en checkout (separación de SELECT y UPDATE), ejecutando la migración sin detener runs activas, manteniendo un flag de rollback al camino anterior y alcanzando el gate de verificación.",
+      "durable_storage": "SQLite",
+      "isolation_boundary": "tenant_id"
+    },
+    "work_items": [
+      {
+        "id": "WI-01",
+        "title": "Atomización del checkout en SQLite",
+        "description": "Unificar las operaciones SELECT y UPDATE en una transacción/instrucción atómica única en SQLite por tenant_id para evitar que dos workers ganen la misma issue.",
+        "owner": "Backend Lead Engineer",
+        "acceptor": "Lead Architect",
+        "dependencies": []
+      },
+      {
+        "id": "WI-02",
+        "title": "Implementación del flag de rollback",
+        "description": "Crear y verificar el flag de configuración que permite conmutar al camino anterior de checkout de forma inmediata en caso de regresión.",
+        "owner": "Infrastructure Lead",
+        "acceptor": "Lead Architect",
+        "dependencies": [
+          "WI-01"
+        ]
+      },
+      {
+        "id": "WI-03",
+        "title": "Ejecución de la migración en vivo sin interrupciones",
+        "description": "Migrar la cola manteniendo SQLite como fuente durable única sin detener runs activas ni violar el aislamiento de tenant_id.",
+        "owner": "Migration Lead",
+        "acceptor": "Operations Lead",
+        "dependencies": [
+          "WI-01",
+          "WI-02"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "id": "R-01",
+        "description": "Dos workers ganan la misma issue debido a la separación actual de SELECT y UPDATE previo a la atomización.",
+        "impact": "Procesamiento duplicado e inconsistencia de estado por tenant_id.",
+        "mitigation": "Atomizar el checkout en SQLite dentro de WI-01."
+      },
+      {
+        "id": "R-02",
+        "description": "Detención o fallo en runs activas durante el proceso de migración.",
+        "impact": "Interrupción de servicio y violación de la restricción de migración caliente.",
+        "mitigation": "Diseñar la migración para operar de forma transparente y concurrente con las runs activas."
+      },
+      {
+        "id": "R-03",
+        "description": "Pérdida de wakeups durante los reinicios del sistema en la fase de verificación.",
+        "impact": "Incumplimiento del gate de calidad y degradación del procesamiento de colas.",
+        "mitigation": "Ejecutar validación continua del gate de 100 reinicios y activar el flag de rollback si se detecta pérdida."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas",
+      "metrics": {
+        "restarts": 100,
+        "lost_wakeups": 0,
+        "window_hours": 24
+      },
+      "rollback_path": "Flag de rollback para conmutar al camino anterior de inmediato",
+      "owner": "QA Lead",
+      "acceptor": "Lead"
+    },
+    "escalation": {
+      "triggers": [
+        "Detección de 1 o más wakeups perdidos durante la prueba del gate de 24 horas.",
+        "Ocurrencia de doble asignación de una issue entre dos workers por falta de atomicidad.",
+        "Cualquier detención o fallo originado en runs activas durante la migración."
+      ],
+      "action": "Activar inmediatamente el flag de rollback hacia el camino anterior, pausar la migración y notificar al Lead."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

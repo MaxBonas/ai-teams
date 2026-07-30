@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "team_lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v1",
+  "status": "completed",
+  "wall_seconds": 15.297,
+  "usage": {
+    "input_tokens": 16599,
+    "cached_input_tokens": 0,
+    "output_tokens": 894
+  },
+  "response": {
+    "objective": {
+      "owner": "team_lead",
+      "acceptor": "product_owner",
+      "deliverable": "Migrar la cola multi-tenant para que SQLite sea la única fuente durable, garantizando checkout atómico por tenant_id, continuidad de runs activas y reversión mediante el flag existente."
+    },
+    "assignments": [
+      {
+        "owner": "backend_engineer",
+        "acceptor": "team_lead",
+        "deliverable": "Diseñar e implementar el checkout atómico que impida que dos workers ganen la misma issue e incluya tenant_id."
+      },
+      {
+        "owner": "migration_engineer",
+        "acceptor": "team_lead",
+        "deliverable": "Implementar la migración sin detener runs activas y manteniendo SQLite como única fuente durable."
+      },
+      {
+        "owner": "release_engineer",
+        "acceptor": "team_lead",
+        "deliverable": "Validar y documentar la reversión al camino anterior mediante el flag existente."
+      },
+      {
+        "owner": "qa_engineer",
+        "acceptor": "team_lead",
+        "deliverable": "Ejecutar el gate de 100 reinicios y observar durante 24 horas que haya cero wakeups perdidos."
+      },
+      {
+        "owner": "team_lead",
+        "acceptor": "product_owner",
+        "deliverable": "Coordinar dependencias, consolidar evidencias de aceptación, actualizar el estado y decidir el escalado."
+      }
+    ],
+    "dependencies": [
+      {
+        "deliverable": "Implementación del checkout atómico",
+        "owner": "backend_engineer",
+        "acceptor": "team_lead",
+        "depends_on": [
+          "SQLite como única fuente durable",
+          "tenant_id presente en cada issue"
+        ]
+      },
+      {
+        "deliverable": "Migración sin interrupción",
+        "owner": "migration_engineer",
+        "acceptor": "team_lead",
+        "depends_on": [
+          "checkout atómico disponible",
+          "runs activas preservadas"
+        ]
+      },
+      {
+        "deliverable": "Validación de reversión",
+        "owner": "release_engineer",
+        "acceptor": "team_lead",
+        "depends_on": [
+          "flag existente operativo",
+          "camino anterior accesible"
+        ]
+      },
+      {
+        "deliverable": "Gate final",
+        "owner": "qa_engineer",
+        "acceptor": "team_lead",
+        "depends_on": [
+          "migración integrada",
+          "checkout atómico integrado",
+          "reversión validada"
+        ]
+      }
+    ],
+    "acceptance": [
+      {
+        "deliverable": "Checkout atómico",
+        "owner": "backend_engineer",
+        "acceptor": "team_lead",
+        "criteria": [
+          "Dos workers no pueden ganar la misma issue",
+          "tenant_id participa correctamente en el flujo de checkout"
+        ]
+      },
+      {
+        "deliverable": "Migración de cola",
+        "owner": "migration_engineer",
+        "acceptor": "team_lead",
+        "criteria": [
+          "SQLite es la única fuente durable",
+          "La migración no detiene runs activas"
+        ]
+      },
+      {
+        "deliverable": "Reversión",
+        "owner": "release_engineer",
+        "acceptor": "team_lead",
+        "criteria": [
+          "El flag permite volver al camino anterior"
+        ]
+      },
+      {
+        "deliverable": "Gate de estabilidad",
+        "owner": "qa_engineer",
+        "acceptor": "team_lead",
+        "criteria": [
+          "100 reinicios completados",
+          "Cero wakeups perdidos durante 24 horas"
+        ]
+      },
+      {
+        "deliverable": "Aceptación final",
+        "owner": "team_lead",
+        "acceptor": "product_owner",
+        "criteria": [
+          "Todas las entregas anteriores aceptadas",
+          "Evidencias del gate consolidadas"
+        ]
+      }
+    ],
+    "status_update": {
+      "owner": "team_lead",
+      "acceptor": "product_owner",
+      "state": "planificado",
+      "completed": [],
+      "in_progress": [],
+      "pending": [
+        "checkout atómico",
+        "migración sin detener runs activas",
+        "validación del flag de reversión",
+        "100 reinicios",
+        "observación de cero wakeups perdidos durante 24 horas"
+      ],
+      "next_update": "Al completar cada dependencia o detectar un bloqueo."
+    },
+    "escalation": {
+      "owner": "team_lead",
+      "acceptor": "product_owner",
+      "triggers": [
+        "Dos workers pueden ganar la misma issue",
+        "La migración requiere detener runs activas",
+        "SQLite deja de ser la única fuente durable",
+        "El flag no permite volver al camino anterior",
+        "Se pierde cualquier wakeup durante el gate",
+        "No se completan 100 reinicios o las 24 horas de observación"
+      ],
+      "action": "Bloquear la aceptación final, mantener o activar el camino anterior mediante el flag y escalar el bloqueo con la evidencia disponible."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:39:23.625984Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:23.626032Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:23.626794Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:23.629154Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:23.632980Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:39:24.657191Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:24.657216Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:39:24.657718Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:39:24.659599Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

@@ -8,19 +8,17 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
-from api.routers.user_adapters import _codex_auth_info, _discover_api_catalog
 from aiteam.project_adapters import choose_adapter_for_role
 from aiteam.user_config import (
     _cmd_command,
+    _powershell_command,
     _write_windows_login_launcher,
     cli_status,
+    executable_model_options,
     inject_adapter_secrets,
     load_adapter_profiles,
-    executable_model_options,
     model_fallback_for_role,
     observed_profile_cli_version,
-    _powershell_command,
     record_model_catalog,
     record_model_health,
     resolve_adapter_config,
@@ -28,6 +26,8 @@ from aiteam.user_config import (
     store_secret,
     validate_model_selection,
 )
+from api.main import app
+from api.routers.user_adapters import _codex_auth_info, _discover_api_catalog
 
 
 def test_observed_profile_cli_version_uses_local_provider_transport(
@@ -84,9 +84,12 @@ def test_user_adapter_profiles_include_subscriptions_and_local_models(tmp_path: 
     assert "gemini_subscription" not in profiles
     assert profiles["gemini_api"]["config"]["api_key_ref"] == "secret:google:default"
     assert profiles["gemini_api_free"]["config"]["free_tier"] is True
+    assert profiles["gemini_api_free"]["config"]["api_version"] == "v1beta"
     assert profiles["gemini_api_free"]["config"]["api_key_ref"] == "secret:google-free:default"
     assert profiles["groq_api_free"]["adapter_type"] == "openai_compatible_api"
     assert profiles["groq_api_free"]["config"]["api_key_ref"] == "secret:groq:default"
+    assert profiles["groq_api_free"]["config"]["model"] == "qwen/qwen3.6-27b"
+    assert profiles["groq_api_free"]["config"]["reasoning_format"] == "hidden"
     assert profiles["groq_api_free"]["config"]["api_quota_source"] == (
         "provider_response_headers"
     )
@@ -106,6 +109,20 @@ def test_user_adapter_profiles_include_subscriptions_and_local_models(tmp_path: 
         "gemini-3.1-pro-high", "gemini-3.1-pro-low", "gemini-3.5-flash-high",
         "claude-opus-4-6-thinking", "gpt-oss-120b-medium",
     }
+    antigravity_36 = {
+        item["value"]: item
+        for item in profiles["antigravity_subscription"]["model_options"]
+        if item["value"].startswith("gemini-3.6-flash-")
+    }
+    assert set(antigravity_36) == {
+        "gemini-3.6-flash-high",
+        "gemini-3.6-flash-medium",
+        "gemini-3.6-flash-low",
+    }
+    assert all(item["probe_status"] == "completed" for item in antigravity_36.values())
+    assert all(item["probe_version"] == "1.1.6" for item in antigravity_36.values())
+    assert all(item["automatic"] is False for item in antigravity_36.values())
+    assert all(item["requires_probe"] is True for item in antigravity_36.values())
     assert profiles["openai_api"]["health"]["status"] == "untested"
 
 
@@ -285,7 +302,11 @@ def test_authenticated_openai_discovery_reads_ids_without_leaking_key(tmp_path: 
             }).encode("utf-8")
 
     import api.routers.user_adapters as router_mod
-    monkeypatch.setattr(router_mod.urllib.request, "urlopen", lambda _request, timeout: _Response())
+    def fake_urlopen(request, timeout):
+        assert request.get_header("User-agent") == router_mod.DEFAULT_USER_AGENT
+        return _Response()
+
+    monkeypatch.setattr(router_mod.urllib.request, "urlopen", fake_urlopen)
 
     result = _discover_api_catalog(profile)
 

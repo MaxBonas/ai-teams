@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "same_provider_version": true,
+  "role": "qa",
+  "contract_version": "adversarial_qa_fix_cycle_v4",
+  "case_family": "authorization_boundary",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/p0h2d3-terra-qa-auth-v4-cli-0.146.0-seed-1.json",
+    "benchmarks/results/model_calibration/p0h2d3-terra-qa-auth-v4-cli-0.146.0-seed-2.json",
+    "benchmarks/results/model_calibration/p0h2d3-terra-qa-auth-v4-cli-0.146.0-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d3-terra-qa-auth-v4-cli-0.146.0-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "f53d9fe64da7d5ae12398d4aac6022fc90ad33c83b51dbc19c2397c82a4ef569"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d3-terra-qa-auth-v4-cli-0.146.0-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "4e6f8fea4f993e50ca4d30cafe41c6dd79b3d3af2f606bb4ad2d429cea2b6602"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d3-terra-qa-auth-v4-cli-0.146.0-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "775068c91645a1064294fb56dce8e9ad39eb0dc96d8acb99c3ee9fb69f833c87"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true
+  },
+  "checks_passed": 33,
+  "checks_total": 33,
+  "wall_seconds_median": 104.25,
+  "wall_seconds_range": [
+    94.967,
+    105.015
+  ],
+  "usage": {
+    "cached_input_tokens": 557568,
+    "input_tokens": 664023,
+    "output_tokens": 10675,
+    "reasoning_output_tokens": 1190,
+    "marginal_cost_cents": 0,
+    "telemetry_status": "observed",
+    "note": "presión de cuota de suscripción; no coste API"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "browser QA",
+      "suites multiarchivo",
+      "recovery de entorno de tests roto"
+    ]
+  }
+}

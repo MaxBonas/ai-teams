@@ -1,0 +1,29 @@
+{
+  "checks": {
+    "cli_version_mismatch_fails_contract": true,
+    "discovery_never_claims_quality": true,
+    "exact_evidence_passes_four_independent_stages": true,
+    "missing_receipt_fails_contract": true,
+    "remote_probe_requires_quota_confirmation": true,
+    "stale_health_fails_auth_and_health": true,
+    "stale_persisted_catalog_fails": true,
+    "stale_probe_fails_contract": true,
+    "structured_output_is_required": true,
+    "unsafe_receipt_reference_is_dropped": true
+  },
+  "contract_version": "guided_setup_provider_evidence_v1",
+  "schema_version": "guided_setup_provider_evidence_audit_v1",
+  "scope": {
+    "canonical_api_wired": true,
+    "fixture_only": true,
+    "inference_attempted": false,
+    "paths_emitted": false,
+    "remote_probes_executed": false,
+    "secrets_read": false
+  },
+  "summary": {
+    "check_count": 10,
+    "passed_count": 10,
+    "provider_evidence_ready": true
+  }
+}

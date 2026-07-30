@@ -19,181 +19,28 @@ import {
 } from 'lucide-react';
 
 import { apiFetch } from '../../lib/api';
+import {
+  OwnerPreferenceControl,
+} from './OwnerPreferenceControl';
+import { PREFERENCE_LABELS, type OwnerPreferenceState, type PreferenceCandidate } from './preferenceTypes';
+import { ProviderCard } from './ProviderCard';
+import {
+  type CatalogCandidate,
+  type CatalogPayload,
+  type CatalogState,
+  type DetailSelection,
+  type Filters,
+  type RoleCandidatesPayload,
+  type RoleEvaluation,
+  type StateValue,
+} from './catalogTypes';
+import {
+  Tier1AuthorityBadgeStack,
+  Tier1AuthorityCellMark,
+  Tier1AuthorityDetail,
+  Tier1CoverageBoard,
+} from './Tier1Authority';
 import './ModelCatalog.css';
-
-type StateValue = true | false | null;
-
-interface CatalogState {
-  value: StateValue;
-  reason?: string | null;
-  source?: string | null;
-  version?: string | null;
-  observed_at?: string | null;
-}
-
-interface ScoreComponent {
-  value?: number | null;
-  status?: string;
-  reason?: string;
-  source?: string;
-  weight_percent?: number;
-  weighted_points?: number | null;
-  sample_count?: number;
-  basis?: string;
-  latency_ms?: number | null;
-}
-
-interface RoleScore {
-  score?: number | null;
-  score_range?: { minimum?: number; maximum?: number };
-  confidence?: {
-    value?: number;
-    minimum_for_auto?: number;
-    evidence_status?: string;
-    seeds?: number;
-    cases?: number;
-    goodhart_risk?: string;
-    fresh?: boolean;
-    evaluated_at?: string | null;
-    provider_version?: string | null;
-    unmeasured_constructs?: string[];
-  };
-  breakdown?: Record<string, ScoreComponent>;
-  hard_gates?: Record<string, { passed?: StateValue; reason?: string; source?: string }>;
-  auto_eligible?: boolean;
-  auto_ineligible_reasons?: string[];
-  known_weight_percent?: number;
-  rollout?: string;
-}
-
-interface RoleEvaluation {
-  canonical_role: string;
-  compatibility?: { allowed?: boolean; code?: string; reason?: string };
-  evaluation?: {
-    status?: string;
-    evaluated_at?: string | null;
-    provider_version?: string | null;
-    evidence_receipts?: string[];
-    diagnostic_receipts?: string[];
-    diagnostic_stale_reasons?: string[];
-    rerun_policy?: string | null;
-    material_change_triggers?: string[];
-    next_action?: string | null;
-    stale_reasons?: string[];
-  };
-  runtime_metrics?: Record<string, unknown>;
-  provenance?: {
-    evaluation_receipts?: string[];
-    diagnostic_receipts?: string[];
-    runtime_database_ids?: string[];
-    runtime_run_ids?: string[];
-    metric_sources?: string[];
-  };
-  score?: RoleScore;
-  score_inputs?: Record<string, unknown>;
-  input_hash?: string;
-}
-
-interface CatalogCandidate {
-  candidate_id: string;
-  label?: string;
-  identity: {
-    profile_id: string;
-    provider_org: string;
-    model_vendor?: string;
-    perspective_key?: string;
-    channel: string;
-    capacity_pool?: string;
-    model_id: string;
-  };
-  states: Record<string, CatalogState>;
-  provider_metadata?: {
-    label?: string | null;
-    adapter_type?: string | null;
-    status?: string | null;
-    data_policy?: string | null;
-    privacy_note?: string | null;
-    workspace_mode?: string | null;
-    mcp_transport?: string | null;
-    structured_output?: string | null;
-  };
-  model_metadata: {
-    tier?: string | null;
-    capability_band?: string | null;
-    capabilities?: string[];
-    economy?: {
-      cost_class?: string;
-      measurement_basis?: string;
-      input_cents_per_mtok?: number | null;
-      output_cents_per_mtok?: number | null;
-      quota_unlimited?: boolean;
-    };
-    speed_class?: string | null;
-    speed_source?: string | null;
-    context_window_tokens?: number | null;
-    price_note?: string | null;
-    capability_basis?: string | null;
-    probe_status?: string | null;
-    probe_reason?: string | null;
-    probe_version?: string | null;
-    probe_evaluated_at?: string | null;
-    probe_receipts?: string[];
-  };
-  roles: RoleEvaluation[];
-  rank?: number;
-  selection_reason?: string;
-  role_evaluation?: RoleEvaluation;
-}
-
-interface ProviderSummary {
-  profile_id: string;
-  provider: string;
-  channel: string;
-  capacity_pool?: string | null;
-  model_count: number;
-  configured_count: number;
-  green_count: number;
-  selectable_count: number;
-  blocked_count: number;
-  data_policy?: string | null;
-  privacy_note?: string | null;
-  economy_classes?: string[];
-}
-
-interface CatalogPayload {
-  success: boolean;
-  schema_version: string;
-  score_version: string;
-  content_hash: string;
-  observed_at: string;
-  rollout: string;
-  counts: { candidates: number; providers: number };
-  providers: ProviderSummary[];
-  candidates: CatalogCandidate[];
-}
-
-interface RoleCandidatesPayload {
-  success: boolean;
-  canonical_role: string;
-  content_hash: string;
-  rollout: string;
-  counts: { candidates: number; auto_eligible: number };
-  candidates: CatalogCandidate[];
-}
-
-interface Filters {
-  query: string;
-  role: string;
-  provider: string;
-  channel: string;
-  tier: string;
-  state: string;
-}
-
-interface DetailSelection {
-  candidate: CatalogCandidate;
-  role: string;
-}
 
 const INITIAL_FILTERS: Filters = {
   query: '',
@@ -202,6 +49,8 @@ const INITIAL_FILTERS: Filters = {
   channel: '',
   tier: '',
   state: '',
+  preference: '',
+  authority: '',
 };
 
 const STATE_LABELS: Record<string, string> = {
@@ -243,6 +92,16 @@ const COMPONENT_LABELS: Record<string, string> = {
   reliability: 'Fiabilidad',
   economy: 'Economía',
   speed: 'Velocidad',
+};
+
+const CALIBRATION_STAGE_LABELS: Record<string, string> = {
+  configuration_auth: 'Configuración y auth',
+  catalog_version: 'Catálogo y versión',
+  adapter_health: 'Health del adapter',
+  contract_probe: 'Probe structured output/tools',
+  role_canary: 'Canario del rol',
+  multi_family_calibration: 'Calibración multi-familia',
+  promotion: 'Promoción',
 };
 
 function humanize(value?: string | null): string {
@@ -321,10 +180,11 @@ function RoleCell({
   const confidence = score?.confidence?.value;
   const status = evaluation.evaluation?.status || 'untested';
   const allowed = evaluation.compatibility?.allowed !== false;
+  const authority = evaluation.tier1_authority;
   return (
     <button
       type="button"
-      className={`role-score-cell ${allowed ? '' : 'is-denied'} ${score?.auto_eligible ? 'is-eligible' : ''}`}
+      className={`role-score-cell ${allowed ? '' : 'is-denied'} ${score?.auto_eligible ? 'is-eligible' : ''} ${authority?.enabled ? 'has-authority' : ''}`}
       onClick={() => onOpen(candidate, role)}
       aria-label={`${candidate.label || candidate.identity.model_id}, ${ROLE_LABELS[role] || role}: score ${scoreText(score?.score)}, confianza ${percentText(confidence)}`}
       data-testid={`model-cell-${candidate.identity.model_id}-${role}`}
@@ -332,48 +192,31 @@ function RoleCell({
       <span className="role-score-value">{scoreText(score?.score)}</span>
       <span className="role-score-confidence">{percentText(confidence)}</span>
       <span className={`role-evidence-pip status-${status}`} title={humanize(status)} />
+      <Tier1AuthorityCellMark authority={authority} />
     </button>
   );
 }
 
-function ProviderCard({ provider }: { provider: ProviderSummary }) {
-  const allGreen = provider.model_count > 0 && provider.green_count === provider.model_count;
-  const economy = provider.economy_classes?.[0];
-  return (
-    <article className={`model-provider-card ${allGreen ? 'is-green' : ''}`} data-testid={`provider-${provider.profile_id}`}>
-      <header>
-        <span
-          className={`provider-pulse ${allGreen ? 'is-green' : ''}`}
-          role="img"
-          aria-label={allGreen ? 'Adapter verde' : 'Adapter no completamente verde'}
-        />
-        <div>
-          <strong>{humanize(provider.provider)}</strong>
-          <small>{provider.profile_id}</small>
-        </div>
-        <span className="channel-stamp">{humanize(provider.channel)}</span>
-      </header>
-      <div className="provider-card-counts">
-        <span><strong>{provider.model_count}</strong> modelos</span>
-        <span><strong>{provider.configured_count}</strong> configurados</span>
-        <span><strong>{provider.green_count}</strong> verdes</span>
-        <span><strong>{provider.selectable_count}</strong> seleccionables</span>
-        <span className={provider.blocked_count ? 'has-blocked' : ''}><strong>{provider.blocked_count}</strong> bloqueados</span>
-      </div>
-      <dl>
-        <div><dt>Economía</dt><dd>{humanize(economy)}</dd></div>
-        <div><dt>Datos</dt><dd>{humanize(provider.data_policy)}</dd></div>
-      </dl>
-    </article>
-  );
-}
-
-function CandidateDetail({ selection, onClose }: { selection: DetailSelection; onClose: () => void }) {
+function CandidateDetail({
+  selection,
+  onClose,
+  onPreferenceChange,
+}: {
+  selection: DetailSelection;
+  onClose: () => void;
+  onPreferenceChange: (
+    candidate: PreferenceCandidate,
+    state: OwnerPreferenceState,
+    reason: string,
+  ) => Promise<void>;
+}) {
   const dialogRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const { candidate, role } = selection;
   const evaluation = candidateRole(candidate, role);
   const score = evaluation?.score;
+  const authority = evaluation?.tier1_authority;
+  const calibrationGate = evaluation?.calibration_gate;
   const receipts = [
     ...(evaluation?.provenance?.evaluation_receipts || []),
     ...(evaluation?.provenance?.diagnostic_receipts || []),
@@ -442,6 +285,35 @@ function CandidateDetail({ selection, onClose }: { selection: DetailSelection; o
             </div>
           </div>
         </section>
+
+        <Tier1AuthorityDetail authority={authority} />
+
+        <OwnerPreferenceControl candidate={candidate} onChange={onPreferenceChange} />
+
+        {calibrationGate ? (
+          <section className="detail-section calibration-gate-board" data-testid="calibration-gate-board">
+            <div className="detail-section-title"><Layers3 size={15} /><h3>Ruta adapter → calibración</h3></div>
+            <div className="calibration-gate-summary">
+              <span className={calibrationGate.promotion_ready ? 'is-ready' : 'is-blocked'}>
+                {calibrationGate.promotion_ready ? <Check size={13} /> : <LockKeyhole size={13} />}
+                {calibrationGate.promotion_ready ? 'Lista para promoción' : `Bloqueada en ${humanize(calibrationGate.blocker?.stage)}`}
+              </span>
+              <p>Owner: <strong>{humanize(calibrationGate.owner)}</strong> · Próxima acción: <strong>{humanize(calibrationGate.next_action)}</strong></p>
+            </div>
+            <ol className="calibration-gate-path">
+              {calibrationGate.gates.map((gate, index) => (
+                <li key={gate.stage} className={`status-${gate.status}`}>
+                  <span className="gate-step-index">{index + 1}</span>
+                  <div>
+                    <strong>{CALIBRATION_STAGE_LABELS[gate.stage] || humanize(gate.stage)}</strong>
+                    <small>{humanize(gate.reason_code)}</small>
+                  </div>
+                  <code>{humanize(gate.status)}</code>
+                </li>
+              ))}
+            </ol>
+          </section>
+        ) : null}
 
         <section className="detail-section">
           <div className="detail-section-title"><Gauge size={15} /><h3>Desglose del score</h3></div>
@@ -517,7 +389,7 @@ function CandidateDetail({ selection, onClose }: { selection: DetailSelection; o
 
         <details className="detail-raw">
           <summary>Provenance y métricas crudas</summary>
-          <pre>{JSON.stringify({ runtime_metrics: evaluation?.runtime_metrics, provenance: evaluation?.provenance, score_inputs: evaluation?.score_inputs, input_hash: evaluation?.input_hash }, null, 2)}</pre>
+          <pre>{JSON.stringify({ tier1_authority: authority, calibration_gate: calibrationGate, runtime_metrics: evaluation?.runtime_metrics, provenance: evaluation?.provenance, score_inputs: evaluation?.score_inputs, input_hash: evaluation?.input_hash }, null, 2)}</pre>
         </details>
       </aside>
     </div>
@@ -534,6 +406,26 @@ export function ModelCatalog() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [detail, setDetail] = useState<DetailSelection | null>(null);
   const closeDetail = useCallback(() => setDetail(null), []);
+  const updatePreference = useCallback(async (
+    candidate: PreferenceCandidate,
+    state: OwnerPreferenceState,
+    reason: string,
+  ) => {
+    const response = await apiFetch('/api/model-catalog/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profile_id: candidate.identity.profile_id,
+        model_id: candidate.identity.model_id,
+        state,
+        reason,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(String(payload.detail || `preference_http_${response.status}`));
+    setDetail(null);
+    setRefreshKey((value) => value + 1);
+  }, []);
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -569,6 +461,7 @@ export function ModelCatalog() {
       if (filters.channel) params.set('channel', filters.channel);
       if (filters.tier) params.set('tier', filters.tier);
       if (filters.state) params.set('state', filters.state);
+      if (filters.authority) params.set('authority', filters.authority);
       try {
         const response = await apiFetch(`/api/model-catalog/candidates?${params.toString()}`);
         if (!response.ok) throw new Error(`role_catalog_http_${response.status}`);
@@ -582,7 +475,7 @@ export function ModelCatalog() {
     };
     void loadRole();
     return () => { cancelled = true; };
-  }, [filters.role, filters.provider, filters.channel, filters.tier, filters.state, refreshKey]);
+  }, [filters.role, filters.provider, filters.channel, filters.tier, filters.state, filters.authority, refreshKey]);
 
   const roles = useMemo(() => {
     const seen = new Set<string>();
@@ -601,6 +494,16 @@ export function ModelCatalog() {
       if (!filters.role && filters.channel && candidate.identity.channel !== filters.channel) return false;
       if (!filters.role && filters.tier && candidate.model_metadata.tier !== filters.tier) return false;
       if (!filters.role && !matchesState(candidate, filters.state)) return false;
+      if (!filters.role && filters.authority) {
+        const authorities = candidate.roles.map((role) => role.tier1_authority);
+        const matches = filters.authority === 'enabled'
+          ? authorities.some((authority) => authority?.enabled === true)
+          : filters.authority === 'blocked'
+            ? authorities.some((authority) => authority?.status === 'blocked')
+            : authorities.some((authority) => authority?.lane === filters.authority && authority.enabled === true);
+        if (!matches) return false;
+      }
+      if (filters.preference && (candidate.owner_preference?.state || 'normal') !== filters.preference) return false;
       return true;
     });
   }, [catalog, filters, roleCandidates]);
@@ -656,6 +559,8 @@ export function ModelCatalog() {
         {catalog.providers.map((provider) => <ProviderCard provider={provider} key={`${provider.profile_id}:${provider.channel}`} />)}
       </section>
 
+      <Tier1CoverageBoard coverage={catalog.tier1_coverage} />
+
       <section className="catalog-workbench">
         <div className="catalog-filterbar">
           <label className="catalog-search">
@@ -673,6 +578,8 @@ export function ModelCatalog() {
           <label><span>Canal</span><select value={filters.channel} onChange={(event) => setFilters((current) => ({ ...current, channel: event.target.value }))}><option value="">Todos</option><option value="api">API</option><option value="subscription">Suscripción</option><option value="local">Local</option><option value="free_gateway">Gateway free</option></select></label>
           <label><span>Tier</span><select value={filters.tier} onChange={(event) => setFilters((current) => ({ ...current, tier: event.target.value }))}><option value="">Todos</option><option value="premium">Premium</option><option value="standard">Standard</option><option value="budget">Budget</option></select></label>
           <label><span>Estado</span><select value={filters.state} onChange={(event) => setFilters((current) => ({ ...current, state: event.target.value }))} data-testid="model-state-filter"><option value="">Todos</option>{Object.entries(STATE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label><span>Preferencia</span><select value={filters.preference} onChange={(event) => setFilters((current) => ({ ...current, preference: event.target.value }))} data-testid="model-preference-filter"><option value="">Todas</option>{Object.entries(PREFERENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label><span>Autoridad Tier 1</span><select value={filters.authority} onChange={(event) => setFilters((current) => ({ ...current, authority: event.target.value }))} data-testid="model-authority-filter"><option value="">Todas</option><option value="enabled">Cualquier habilitación</option><option value="lead_ready">Lead-ready</option><option value="quorum_ready">Quorum-ready</option><option value="tier1_support">Soporte Tier 1</option><option value="blocked">Bloqueada</option></select></label>
           {activeFilterCount ? <button type="button" className="clear-filters" onClick={() => setFilters(INITIAL_FILTERS)}><X size={13} /> Limpiar {activeFilterCount}</button> : null}
         </div>
 
@@ -700,11 +607,13 @@ export function ModelCatalog() {
               <thead><tr><th className="sticky-model-col">Modelo operacional</th>{matrixRoles.map((role) => <th key={role}>{ROLE_LABELS[role] || humanize(role)}</th>)}</tr></thead>
               <tbody>
                 {visibleCandidates.map((candidate) => (
-                  <tr key={candidate.candidate_id} className={candidate.states.blocked?.value ? 'candidate-blocked' : ''} data-testid={`model-row-${candidate.identity.model_id}`}>
+                  <tr key={candidate.candidate_id} className={`${candidate.states.blocked?.value ? 'candidate-blocked' : ''} ${candidate.owner_preference?.state === 'archived' ? 'candidate-archived' : ''}`} data-testid={`model-row-${candidate.identity.model_id}`}>
                     <th className="sticky-model-col">
                       <button type="button" className="model-identity-button" onClick={() => setDetail({ candidate, role: filters.role || primaryRole(candidate) })}>
                         <span className={`tier-rail tier-${candidate.model_metadata.tier || 'unknown'}`} />
                         <span className="model-identity-copy"><strong>{candidate.label || candidate.identity.model_id}</strong><small>{candidate.identity.profile_id} · {humanize(candidate.identity.channel)}</small><code>{candidate.identity.model_id}</code></span>
+                        <span className={`preference-badge preference-${candidate.owner_preference?.state || 'normal'}`}>{PREFERENCE_LABELS[candidate.owner_preference?.state || 'normal']}</span>
+                        <Tier1AuthorityBadgeStack authorities={candidate.roles.map((role) => role.tier1_authority)} />
                         <ModelStateStrip states={candidate.states} />
                         <ChevronRight size={14} />
                       </button>
@@ -725,7 +634,7 @@ export function ModelCatalog() {
         <span className="catalog-policy"><ArrowUpRight size={13} /> Selección contextual: API canónica activa</span>
       </footer>
 
-      {detail ? <CandidateDetail selection={detail} onClose={closeDetail} /> : null}
+      {detail ? <CandidateDetail selection={detail} onClose={closeDetail} onPreferenceChange={updatePreference} /> : null}
     </section>
   );
 }

@@ -266,6 +266,7 @@ de descarga ni una política de actualización automática.
   - https://ai.google.dev/gemini-api/docs/rate-limits
   - https://console.groq.com/docs/rate-limits
   - https://console.groq.com/docs/models
+  - https://console.groq.com/docs/model/qwen/qwen3.6-27b
   - https://console.groq.com/docs/api-reference
   - https://console.groq.com/docs/structured-outputs
   - https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models
@@ -279,7 +280,7 @@ de descarga ni una política de actualización automática.
   - https://api-docs.deepseek.com/quick_start/pricing/
   - https://mimo.mi.com/docs/en-US/price/pay-as-you-go
 - Calidad: A, documentación oficial de cada servicio.
-- Revisión: `2026-07-22`.
+- Revisión: `2026-07-24`.
 - Cubre: existencia y alcance de free tiers, unidades/headers de cuota,
   requisitos de key, límites de prototipo y precios directos vigentes. La
   ausencia de una cuota NVIDIA pública verificable se trata como desconocida,

@@ -1,6 +1,7 @@
 from scripts.benchmark_critical_default_roles import (
     CASES,
     ROLES,
+    _antigravity_command,
     aggregate_reports,
     build_prompt,
     compare_prompt_versions,
@@ -55,6 +56,20 @@ def test_v2_prompt_adds_production_fact_retention_contract() -> None:
     prompt = build_prompt("lead", "tenant_queue_migration", 1, "v2")
     assert "Tier 1 causal fact retention" in prompt
     assert "metric with value, unit, window and required action" in prompt
+
+
+def test_antigravity_command_enforces_plan_and_sandbox() -> None:
+    command = _antigravity_command(
+        "agy.exe",
+        model="gemini-3.1-pro-high",
+        prompt="frozen prompt",
+        timeout=240,
+    )
+
+    assert command[:2] == ["agy.exe", "--new-project"]
+    assert command[command.index("--mode") + 1] == "plan"
+    assert "--sandbox" in command
+    assert "--dangerously-skip-permissions" not in command
 
 
 def test_evaluator_requires_exact_schema_hidden_anchors_and_no_discarded_option() -> None:
@@ -133,6 +148,19 @@ def test_compound_numeric_anchors_require_value_and_unit_together() -> None:
     assert "case.observation_window" in tenant_eval["missing_anchors"]
 
 
+def test_atomic_checkout_accepts_indivisible_spanish_semantics() -> None:
+    response = _valid_response("lead", "tenant_queue_migration")
+    response = {
+        key: value.replace("atomic transaction", "operación indivisible")
+        for key, value in response.items()
+    }
+
+    evaluation = evaluate_response("lead", "tenant_queue_migration", response)
+
+    assert evaluation["anchors"]["case.atomic_checkout"] is True
+    assert evaluation["contract_passed"] is True
+
+
 def test_lead_executor_requires_material_steps_and_evidence_not_role_echo() -> None:
     response = _valid_response("lead_executor", "tenant_queue_migration")
     response["execution_steps"] = ["Aplicar cambio", "Ejecutar prueba causal"]
@@ -157,6 +185,7 @@ def test_aggregate_requires_two_cases_three_seeds_and_one_exact_pair() -> None:
             "role": "lead",
             "case_id": case_id,
             "seed": seed,
+            "cli_version": "0.146.0",
             "wall_seconds": seed,
             "ok": True,
             "response": {"seed": seed, "case": case_id},
@@ -166,6 +195,8 @@ def test_aggregate_requires_two_cases_three_seeds_and_one_exact_pair() -> None:
         for seed in (1, 2, 3)
     ]
     result = aggregate_reports(reports)
+    assert result["contract_version"] == "critical_role_aggregate_v2"
+    assert result["cli_version"] == "0.146.0"
     assert result["matrix_complete"] is True
     assert result["conclusion"]["exact_pair_calibrated"] is True
     assert result["conclusion"]["default_change_allowed"] is False
@@ -207,6 +238,7 @@ def test_prompt_comparison_requires_same_family_and_never_calibrates() -> None:
     v1 = [
         {
             **base, "seed": seed, "prompt_version": "v1", "ok": seed == 1,
+            "cli_version": "0.146.0",
             "_source_receipt": f"v1-{seed}.json",
         }
         for seed in (1, 2, 3)
@@ -214,6 +246,7 @@ def test_prompt_comparison_requires_same_family_and_never_calibrates() -> None:
     v2 = [
         {
             **base, "seed": seed, "prompt_version": "v2", "ok": True,
+            "cli_version": "0.146.0",
             "_source_receipt": f"v2-{seed}.json",
         }
         for seed in (1, 2, 3)
@@ -225,3 +258,31 @@ def test_prompt_comparison_requires_same_family_and_never_calibrates() -> None:
     assert result["conclusion"]["calibration_allowed"] is False
     v2[-1]["case_id"] = "tenant_queue_migration"
     assert compare_prompt_versions(v1, v2)["comparable"] is False
+
+
+def test_aggregate_rejects_missing_or_mixed_cli_versions() -> None:
+    reports = [
+        {
+            "profile_id": "antigravity_subscription",
+            "model": "gemini-3.1-pro-high",
+            "role": "lead",
+            "case_id": case_id,
+            "seed": seed,
+            "prompt_version": "v2",
+            "cli_version": "1.1.6",
+            "ok": True,
+            "response": {"seed": seed, "case": case_id},
+            "_source_receipt": f"{case_id}-seed-{seed}.json",
+        }
+        for case_id in CASES
+        for seed in (1, 2, 3)
+    ]
+
+    assert aggregate_reports(reports)["integrity"]["single_cli_version"] is True
+    reports[-1]["cli_version"] = "1.1.5"
+    mixed = aggregate_reports(reports)
+    assert mixed["matrix_complete"] is False
+    assert mixed["integrity"]["single_cli_version"] is False
+    assert mixed["conclusion"]["exact_pair_calibrated"] is False
+    reports[-1]["cli_version"] = ""
+    assert aggregate_reports(reports)["conclusion"]["exact_pair_calibrated"] is False

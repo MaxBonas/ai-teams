@@ -2,13 +2,576 @@
 
 # Handoff actual
 
-Fecha: `2026-07-24`
+Fecha: `2026-07-30`
 
 AI Teams ya no está en reconstrucción inicial. Es un control plane multiagente Paperclip-like funcional, centrado en SQLite, y se encuentra en fase de endurecimiento operativo, validación con proveedores reales y medición frente a un agente único.
 
 El quorum profundo tiene defensa en profundidad: objetivo congelado frente a
 Chat, nuevos objetivos mediante Nueva tarea y aceptación SQLite limitada a un
 Plan B creado en la misma run por el Lead configurado.
+
+La cobertura Tier 1 distingue ya `lead_ready` de `quorum_ready` sin crear
+subtiers ni rebajar calidad. El recibo
+`benchmarks/results/model_evaluation_coverage/model-tier-coverage-2026-07-24.json`
+cuenta únicamente pares automáticos, ejecutables, no archivados y calibrados.
+Gemini 3.1 Pro High queda revalidado en Antigravity 1.1.8 por dos contratos
+independientes: Lead 6/6 y quorum 6/6, dos familias por tres semillas. Cada
+agregado sella CLI 1.1.8, prompt v2, fuentes y hashes sin heredar evidencia
+desde QA ni el otro carril. `lead_ready` y `quorum_ready` vuelven a `covered`
+2/2 con Sol/Codex, dos perspectivas y dos pools.
+
+P0.g queda cerrado el `2026-07-30`. El sistema publica ahora una ruta canónica
+por perfil+modelo+rol con siete gates ordenados: configuración/auth,
+catálogo+versión, health, probe de contrato, canario, calibración multi-familia
+y promoción. Backend, API y pestaña Modelos comparten la proyección
+`model_calibration_gate_board_v1`; React no decide gates. La auditoría viva
+recorre 98 candidatos/1.666 celdas y pasa 10/10 invariantes: ningún adapter rojo
+abre una acción avanzada, un verde sin prueba se detiene antes del canario,
+evidencia antigua queda histórica y una promoción exige siete `passed`.
+El recibo redacted es
+`benchmarks/results/model_catalog_read_model/model-calibration-gate-board-2026-07-30.json`.
+Verificación: 22 tests del bloque, 104 tests integrados, suite global 1.764
+passed / 2 skipped, TypeScript, ESLint, Stylelint y 3/3 E2E. Permanece un solo
+warning conocido de deprecación Starlette/httpx. La suite global tarda hoy
+805,24 s en esta máquina; usar un timeout superior a cinco minutos. P0.f queda
+dividido en cuatro unidades tras observar 51 identidades todavía `normal`;
+ninguna es accionable hoy, pero esa seguridad circunstancial no equivale a la
+directiva durable `low`. P0.f.1 queda cerrado con
+`model-residual-policy-inventory-2026-07-30.json`: 98 identidades visibles,
+47 explícitas y 51 pendientes —39 Gemini Free y 12 Groq—. Diez slugs aparecen
+en más de un perfil y permanecen separados. Los ocho invariantes pasan y las
+867 filas pendientes tienen cero acciones, permisos proactivos o promociones;
+aun así el recibo conserva `policy_complete=false`. P0.f.2 y P0.f.3 quedan
+también cerrados. La reconciliación local añadió 51
+entradas `low` en una sola escritura, preservó literalmente las 47 anteriores
+y fue idempotente: 98 preferencias explícitas —13 `high`, 79 `low`, 6
+archivadas—. El recibo es
+`model-residual-preference-reconcile-2026-07-30.json`. Además, cualquier modelo
+nuevo `source=default` queda `owner_unclassified` aunque sea normal y nominado:
+no abre backlog ni inferencia hasta clasificación explícita. Verificación:
+76 tests de política y 49 de selección/API/defaults. Siguiente unidad P0.f.4,
+paridad transversal y cierre. P0.d/Groq, P0.e/OpenCode y P0.h.2d.5b
+permanecen correctamente event-gated.
+
+Se añade P0.N al plan: inteligencia durable de cambios de proveedores. Cubre
+releases y compatibilidad de CLI, servidores MCP, SDK/API, adapters internos y
+diffs autenticados del catálogo/model metadata. Se divide en contrato/fuentes,
+detectores semánticos, persistencia+scheduler, workflow con rollback,
+inbox/avisos al developer y aceptación portable. Detectar una versión nueva no
+autoriza actualizar: toda mutación, credencial, canario o promoción requiere
+aprobación; offline/auth/rate-limit quedan `unknown`. P0.f.4 continúa siendo la
+siguiente unidad inmediata y P0.N entra después en el orden P0.
+
+P0.f queda cerrado de extremo a extremo con
+`model-residual-policy-parity-2026-07-30.json`: 10/10 invariantes, 98
+identidades explícitas, 1.666 celdas en paridad, backlog residual cero y 1.568
+decisiones automáticas sin fallos. API/UI, hiring/defaults/fallback,
+reactivación y asignaciones existentes comparten la política; la auditoría no
+muta estado ni ejecuta inferencias. Verificación: 76 tests transversales, 3 del
+auditor y Ruff.
+
+Se añade además P0.K: rediseño del primer uso y Nuevo proyecto como asistente
+guiado, adaptativo, persistido y reanudable. Se divide en contrato/state
+machine, entrevista de necesidades, preparación de adapters, cobertura
+progresiva, proyecto/equipo Lead-first, preflight, diseño accesible e
+integración/aceptación para instalaciones nuevas o actualizadas. El objetivo es
+configurar el máximo de canales realmente útiles con consentimiento, no
+instalarlo todo: local runtimes y CLIs no elegidos siguen opcionales. El
+preflight reutiliza doctor, catálogo, health, probes y selector canónico y se
+adapta a `software/research/operations/mixed` para no crear bucles de tests en
+proyectos teóricos. P0.K.1 es ahora la siguiente unidad inmediata y P0.K entra
+antes de P0.N en el orden de ejecución.
+
+P0.K.1 queda cerrado con `guided_setup_v1`. La máquina de estados durable
+publica 6 pasos de onboarding de máquina, 7 de proyecto y 4 de reparación,
+persistidos en SQLite global de configuración para funcionar antes de elegir
+workspace. Create/resume es idempotente; dependencias, revisión optimista,
+drafts, blocked→resume y reset confirmado fallan cerrados. `secret_ref` es
+válido, pero valores de claves/password/tokens se rechazan. API
+contract/create/get/transition/reset conectada. Recibo 10/10:
+`benchmarks/results/guided_setup/guided-setup-contract-2026-07-30.json`;
+15 tests y Ruff verdes.
+
+P0.K.2 queda cerrado con `guided_setup_needs_v1`: entrevista adaptativa de 12
+preguntas, recomendaciones explicadas, `unknown` explícito y drafts
+reanudables. Clasifica el caso de estudio de empresa de limpieza como
+`research` pendiente de confirmación, recomienda el perfil y canales sin
+activar local salvo opt-in y sella el assessment. SQLite lo recalcula antes de
+completar el paso para impedir bypass o manipulación. API autenticada conectada;
+recibo `guided-setup-needs-2026-07-30.json` 10/10, 25 tests focalizados y Ruff
+verdes. Siguiente unidad: P0.K.3.
+
+P0.K.3 se dividió en cinco cierres manejables. K.3.1 ya está verde:
+`guided_setup_preparation_v1` proyecta entrevista+doctor en requisitos y seis
+fases fail-closed; instalación no equivale a auth/catálogo/health/contrato,
+Lead exige evidencia completa y local solo aparece tras opt-in. No muta la
+máquina. Verificación transversal: 36 tests y Ruff. Siguiente unidad:
+P0.K.3.2, API durable y persistencia de evidencia.
+
+P0.K.3.2 queda cerrado. La API autenticada genera doctor y plan en servidor y
+solo recibe `expected_revision`; inventarios o `provider_evidence` del cliente
+son inválidos. `guided_setup_preparation_receipts` guarda hashes, readiness y
+bloqueadores con FK al paso. Un recibo no listo bloquea completion y el último
+recibo server-side reemplaza evidencia forjada. Auditoría 10/10 en
+`guided-setup-preparation-persistence-2026-07-30.json`; 23 tests focalizados y
+Ruff verdes. Siguiente unidad: P0.K.3.3, guías por proveedor y acciones
+humanas.
+
+P0.K.3.3 queda cerrado con `guided_setup_provider_guidance_v1`. La respuesta de
+preparación incluye acciones manuales para Codex, Antigravity, OpenCode y API
+personal, limitadas a los canales elegidos. Expone versiones, riesgos, login y
+evidencia esperada; no ejecuta comandos y completar una acción no vuelve verde
+el adapter. OpenCode declara key personal/oferta temporal/política de datos; la
+API usa el endpoint de secretos y conserva solo `secret_ref`; local sigue
+opt-in. Auditoría `guided-setup-provider-guidance-2026-07-30.json` 10/10, 17
+tests y Ruff verdes. Siguiente unidad: P0.K.3.4.
+
+P0.K.3.4 queda cerrado con `guided_setup_provider_evidence_v1`. API y doctor
+comparten la misma carga redacted de perfiles; auth, catálogo, health y
+contrato se proyectan por separado. Discovery/run completada no equivale a
+contrato: JSON requiere recibo relativo, ≤30 días y versión CLI exacta;
+health/auth y catálogo API persistido exigen ≤24 h. Stale, mismatch, falta de
+recibo o ruta insegura quedan `not_checked`. Los probes remotos siguen
+manuales, con confirmación de cuota, y no se ejecutaron. Auditoría
+`guided-setup-provider-evidence-2026-07-30.json` 10/10, 23 tests y Ruff verdes.
+Siguiente unidad: P0.K.3.5.
+
+P0.K.3.5 y, con él, P0.K.3 quedan cerrados. El owner puede seleccionar IDs de
+perfiles API existentes; el servidor valida que sean API y conserva autoridad
+sobre catálogo/health/contract. Las APIs ligan probe a versión de transporte y
+las suscripciones a CLI. La aceptación
+`guided-setup-adapter-repair-acceptance-2026-07-30.json` pasa 10/10: limpia,
+parcial, CLI antiguo, auth ausente, catálogo incompatible, API válida,
+offline/rate-limit, opt-in local, frontera cliente y resume durable sin
+reinstalar. 24 tests focalizados y Ruff verdes; no hubo comandos, logins,
+inferencia o cuota. Siguiente unidad: P0.K.4.
+
+P0.K.4 se divide en contrato, API canónica, recomendaciones, visualización y
+aceptación. K.4.1 queda cerrado con `guided_setup_coverage_v1`: cobertura solo
+por pares auto-elegibles del selector; Lead obligatorio, quorum con dos
+perspectivas/pools y full team Lead+Engineer+Reviewer. Filtra adapters no
+preparados y expone score/gates/privacidad/capacidades/economía; local y
+suscripción son coste marginal cero. Auditoría
+`guided-setup-coverage-contract-2026-07-30.json` 10/10, 33 tests y Ruff verdes.
+K.4.2 queda también cerrado: el endpoint autenticado `/coverage` comparte la
+reconstrucción server-side de preparación, usa el read model una vez y llama al
+selector contextual para los cuatro roles de equipo y un Worker informativo.
+Filtra perfiles no
+preparados y devuelve hash/contexto explicable. Una prueba conserva idénticos
+la revisión y `adapter_setup`, rechaza revisión stale y evidencia del cliente,
+y confirma que no se crean proyectos ni cambian defaults. 10 tests focalizados
+y Ruff verdes. K.4.3 queda cerrado con recomendaciones progresivas: un único
+camino Lead con alternativas, quorum/full team según perfil y Worker económico
+opcional al final; nunca reinstala un adapter verde ni cambia defaults.
+Auditoría `guided-setup-recommendations-2026-07-30.json` 10/10, 17 tests y Ruff
+verdes. K.4.4 queda cerrado con el componente `GuidedSetupCoverage`: perfiles,
+acción siguiente y matriz de roles con candidatos elegibles y bloqueados
+separados, score/gates/economía/privacidad/capacidades y causas server-side.
+Corrige la proyección para devolver `excluded_candidates`, que antes solo
+contaba alternativas bloqueadas aunque el contrato exigía mantenerlas visibles.
+Pasa 2 tests React, 19 backend del delta, tipos, linters, límites, build y
+presupuesto de bundle. K.7 lo insertará en el shell completo del wizard.
+K.4.5 y el bloque K.4 quedan cerrados con
+`guided-setup-coverage-acceptance-2026-07-30.json`, 10/10: sin Lead, Lead
+único, quorum sin diversidad, full team parcial/completo, local gratuito, API
+limitada, override manual, paridad con selector+adapter preparado e inputs
+inmutables. No instaló, leyó secretos, creó proyectos, infirió, consumió cuota
+ni cambió defaults. Siguiente unidad: P0.K.5, configuración de proyecto y equipo
+Lead-first.
+
+P0.K.5 queda dividido en cinco cierres. K.5.1 y K.5.2 ya están cerrados.
+`guided_setup_project_proposal_v1` genera un preview Lead-first sellado con
+identidad create/import, objetivo, ecosistemas, `.aiteam/instructions.md`,
+perfil, asignaciones, diversidad, presupuesto, accountability, degradaciones y
+save gate. Overrides manuales no saltan compatibilidad/preparación ni se
+convierten en cobertura. La API `/project-proposal` reconstruye todo server-side,
+confina paths a `projects_root` y no crea carpetas, DB, agentes o wakeups.
+Revisión stale y payloads forjados se rechazan. Verificación: 61 tests, Ruff y
+diff check verdes.
+
+P0.K.5.3 queda cerrado con `/project-commit`. El endpoint recompone el preview
+server-side y compara su hash antes de mutar; no acepta propuesta, inventario ni
+evidence del cliente. Create se prepara en un sibling temporal e import solo en
+`.aiteam-staging-*`; el publish es rename y el rollback borra únicamente lo
+creado por la operación. El nuevo camino no llama al selector durante el
+guardado: persiste exactamente perfil/modelo/candidato del preview. Objetivo,
+intake, Lead primero, equipo, blueprint, assignments y el único wakeup se crean
+en una transacción SQLite mientras la DB sigue invisible en staging. El recibo
+global único por sesión da replay idempotente y detecta receipt stale. Create
+mantiene Git gestionado opcional; import preserva contenido e historia ajenos.
+Verificación específica y transversal: 68 tests guided-setup, Ruff y diff check
+verdes.
+
+P0.K.5.4 queda cerrado con un wizard canónico de cuatro etapas y revisión
+sellada. Create/import, objetivo, instrucciones, perfil y adapters preparados
+se convierten en sesión+needs server-side; la mesa final muestra el equipo
+Lead-first exacto, modelos/canales, scores, gates, tier, economía, presupuesto,
+ecosistemas, degradaciones y hash. Override invalida el preview y Guardar exige
+`save_gate.allowed`. El frontend dejó de invocar `/api/projects/new`; su panel
+manual queda plegado solo como diagnóstico y la acción legacy está retirada.
+También se corrigieron el falso onboarding durante bootstrap y la carrera que
+vaciaba `projects_root`. Validación: 12 tests React, build, ESLint, Stylelint,
+límites de módulo/bundle y Playwright real desktop+móvil sin errores. Siguiente
+unidad completada: P0.K.5.5, auditoría y aceptación end-to-end del bloque.
+
+P0.K.5.5 y el padre P0.K.5 quedan cerrados. El auditor
+`guided_setup_project_acceptance_v1` ejecuta 13 invariantes con filesystem
+temporal y SQLite real: create/import, preservación de archivos ajenos,
+confinamiento/colisión, detección truncada, cobertura, diversidad, overrides,
+revisión stale, rollback y reanudación/idempotencia. El fixture de estudio de
+empresa de limpieza persiste `objective_kind=research`, contrata únicamente al
+Lead, crea una sola wakeup y no materializa roles de programación o tests. El
+recibo con hash anti-manipulación está en
+`benchmarks/results/guided_setup/guided-setup-project-acceptance-2026-07-30.json`.
+Verificación: 13/13 checks, 89 tests guided-setup, 3 tests propios del auditor,
+Ruff y test unitario del wizard verdes. No se tocaron proyectos/configuración
+del usuario ni se usaron secretos, inferencia o cuota. La siguiente unidad
+inmediata es P0.K.6, preflight y prueba proporcional antes de entrar al
+proyecto.
+
+P0.K.6 ya está dividido en cinco cierres y K.6.1 queda completado. El contrato
+`guided_setup_project_preflight_v1` recompone de forma pura seis gates:
+propuesta, ruta, runtimes, adapters seleccionados, toolchains y fixture
+proporcional. Research/operations no ejecutan tests; software exige smoke;
+mixed solo lo exige con superficie software detectada. Discovery no concede
+readiness, la ruta no confinada falla cerrada y ningún receipt puede ocultar
+remote calls, cuota o mutación. La salida mantiene
+`enter_project_allowed=false` hasta persistencia y el validador recalcula
+resumen/hash para detectar manipulación. El auditor durable pasa 10/10 checks
+en `benchmarks/results/guided_setup/guided-setup-project-preflight-contract-2026-07-30.json`;
+17 tests focales, 106 guided-setup y Ruff están verdes. Siguiente unidad:
+P0.K.6.2, endpoint server-side que recomponga propuesta por revisión/hash,
+observe ruta e inventario de forma confinada y no confíe en evidence del
+navegador.
+
+P0.K.6.2 queda completado. El nuevo
+`POST /api/guided-setup/sessions/{id}/project-preflight` recompone todos los
+inputs desde la sesión y exige revisión+proposal hash exactos. Ruta y permisos
+se observan en servidor; doctor recibe la raíz objetivo para que imports usen
+sus manifests reales. La propia `projects_root` se rechaza como proyecto.
+Pydantic prohíbe inventario/path/evidence inline y solo admite referencias
+SHA-256 deduplicadas; mientras no exista el store de K.6.3/K.6.4, cualquier
+referencia ausente falla explícitamente. El endpoint distingue la composición
+pura de los probes read-only de versión/puertos del doctor y no ejecuta tests,
+inferencia, probes remotos ni cuota. La matriz cubre software no-go, research
+go sin tests, spoofing 422, stale 409 y create/import/root; 23 tests focales,
+106 guided-setup y Ruff verdes. Siguiente unidad inmediata: P0.K.6.3, executor
+acotado y consentido para el probe/fixture proporcional exacto.
+
+P0.K.6.3 queda cerrado. `guided_setup_project_preflight_execution_plan_v1`
+sella como máximo un fixture local y un probe adapter+modelo exacto, en orden
+económico, un intento y consentimientos separados. El runner local reutiliza
+fixtures allowlisted en copia temporal con timeout/redacción/cleanup y produce
+evidence SHA-256 sin tocar el proyecto; `python_pytest` fue ejecutado realmente
+y pasó. El probe exacto valida perfil/modelo/structured output/timeout antes de
+credenciales, exige doble consentimiento remoto+cuota y devuelve solo código,
+tokens/coste y flags redacted; no se ejecutó contra ningún proveedor en esta
+run. `project-preflight-execute` recompone y compara proposal, preflight y plan,
+valida toda autorización antes del primer runner y devuelve receipt+preflight
+posterior sin persistir sesión, DB, health, catálogo, defaults o workspace.
+Verificación: 30 pruebas focales, 129 guided-setup y Ruff verdes. Siguiente:
+P0.K.6.4, persistencia durable/idempotente, invalidación stale y bloqueo de
+`project-commit` hasta el último preflight `go`; solo entonces podrá crearse la
+wakeup y entrar al cockpit.
+
+P0.K.6.4 queda cerrado. El endpoint de ejecución persiste ahora
+`guided_setup_project_preflight_receipt_v1` y artifacts SHA-256 confinados a la
+sesión; repetir cualquier plan exacto devuelve su intento anterior sin volver
+a ejecutar fixture/probe. El resolver rehashea contenido y evidencia
+normalizada, rechaza referencias de otra sesión y falla cerrado ante corrupción.
+`project-commit` exige el último receipt `go` y recompone todos los inputs
+server-side antes de materializar: ausencia/no-go, proposal o path/doctor/
+adapter/toolchain stale y evidence manipulada bloquean antes de crear target,
+SQLite de proyecto, agentes o wakeup. El auditor hermético pasa 6/6 en
+`benchmarks/results/guided_setup/guided-setup-project-preflight-persistence-2026-07-30.json`;
+54 pruebas focales, 132 guided-setup y Ruff están verdes, sin inferencia, red
+ni cuota. Siguiente
+unidad inmediata: P0.K.6.5, UI del preflight durable y aceptación end-to-end.
+
+P0.K.6.5 y el padre P0.K.6 quedan cerrados. El wizard carga el preflight
+server-side tras sellar la propuesta y `ProjectPreflightPanel` separa
+consentimiento de fixture local, probe remoto y cuota. Research no presenta
+tests; blocked/no-go no presenta ejecución o entrada, y solo un receipt durable
+`go` con hash vigente muestra “Entrar al proyecto”. Los 409 stale invalidan el
+preview; offline/429 preservan diagnóstico. El E2E Chromium real pasa sin
+errores ni overflow y el auditor 10/10 queda en
+`benchmarks/results/guided_setup/guided-setup-project-preflight-ui-acceptance-2026-07-30.json`.
+Validación: 20 unitarios frontend, build, linters, typecheck, límites,
+1 E2E, 135 tests guided-setup, 3 tests de auditor y Ruff verdes; cero llamada a
+proveedor, inferencia o cuota. Siguiente unidad: P0.K.7, diseño visual y
+accesibilidad integral del asistente.
+
+P0.K.7 se dividió en cinco cierres y K.7.1 queda completado.
+`ProjectSetupProgress` muestra y anuncia posición/estado sin depender del
+color; solo permite volver a pasos completados. `useWizardStageFocus` no roba
+el autofocus inicial y enfoca la región etiquetada al avanzar, volver, generar
+la propuesta o invalidar el preflight. La acción principal referencia su
+condición de readiness y los errores describen el paso activo. Pasan 11 tests
+focales, typecheck, ESLint, límites, build/bundle y E2E Chromium con foco real,
+sin errores ni overflow. Siguiente unidad: P0.K.7.2, teclado, foco visible y
+errores próximos al campo.
+
+P0.K.7.2 queda cerrado. La acción primaria solo se deshabilita durante `busy`;
+Enter valida y enfoca el primer error adyacente con `aria-invalid` y
+`aria-describedby`. Modo, perfil y adapters publican `aria-pressed`; la región,
+inputs, selects y botones tienen foco visible. Un 409 stale retorna con foco a
+Recursos y el no-go conserva su revisión explícita. `ProjectIdentityStep` y
+`invalidProjectStepControls` mantienen módulos y orden de corrección acotados.
+Pasan 16 tests focales, 26 unitarios frontend, E2E Chromium con teclado,
+typecheck, linters, módulos, build y bundle. Siguiente: K.7.3, empezando por
+recuperar presupuesto sin elevar límites; quedan 321 B JS y 136 B CSS.
+
+P0.K.7.3 queda cerrado. El configurador legacy duplicado ya no se monta y el
+minificador lo excluye del bundle; K.8 debe borrar físicamente la fuente y su
+estado. El wizard usa mapa móvil 2×2, protocolo vertical y preflight responsive.
+El E2E prueba desktop, 768, 390 y reflow a 320 CSS px, acciones/readiness
+visibles, cero overflow, contraste AA sin violaciones, foco de teclado ≥3:1 y
+reduced motion ≤0,011 ms; se corrigió el ordinal de manifiesto que daba 2,74:1.
+Capturas inspeccionadas. Pasan 26 unitarios, typecheck, linters, límites, build,
+bundle y E2E. Bundle final sin elevar límites: JS 400.925/116.129 B raw/gzip;
+CSS 122.316/22.057 B. Siguiente: P0.K.7.4, lectores de pantalla y auditoría
+automática completa.
+
+P0.K.7.4 queda cerrado con Axe WCAG 2 A/AA en seis estados del flujo: Proyecto
+y Objetivo limpios/con error, Recursos y Revisión+preflight pendiente. Resultado:
+cero violaciones de cualquier impacto. El E2E prueba `main`, navegación,
+región activa, headings sin saltos, consentimiento nombrado y lista ordenada
+del protocolo. Se corrigieron un hover blanco/verde de 2,62:1 y el anuncio
+excesivo de todo el preflight: solo el sello durable mantiene
+`aria-live=polite` atómico. Pasan 26 unitarios, tipos, linters, límites, build,
+bundle y E2E. Bundle: JS 400.942/116.144 B raw/gzip; CSS 122.514/22.108 B.
+Siguiente: P0.K.7.5, matriz visual y durable pending/GO/NO-GO con hashes y
+auditoría anti-manipulación.
+
+P0.K.7.5 y P0.K.7 quedan cerrados. El E2E recorre los cuatro pasos y la
+secuencia `pending → NO-GO → Recursos → nueva propuesta/preflight → GO`.
+`preflightExecutionAuthorizesCommit` comparte el guard de panel y commit:
+preflight posterior, plan y execution receipt deben enlazar exactamente con el
+durable GO. Se corrigieron la proyección del preflight previo tras ejecutar, la
+cadena incompleta y un hover de paso completado a 4,41:1. Un GO inconsistente
+falla cerrado y vuelve a Recursos.
+
+El receipt
+`guided-setup-project-visual-acceptance-2026-07-30.json` pasa 10/10 con seis
+PNG ligados a viewport y hashes de autoridad; el auditor reabre los binarios y
+rechaza imagen, matriz, cadena o informe manipulados. Dos repeticiones conservan
+visual hash `810fc439…45cdba5` y report hash `3cce823b…0072a53`; auditor y
+tests quedan también sellados. Pasan 27
+unitarios frontend, 38 backend/auditor focales, Axe NO-GO/GO, tipos, linters,
+Ruff, límites, build, bundle y E2E. Bundle: JS 401.517/116.261 B raw/gzip; CSS
+122.564/22.115 B. Siguiente: P0.K.8, integración, actualización y aceptación
+portable del asistente.
+
+Esta separación es ahora un P0 transversal, no un cierre local del auditor de
+cobertura. `task.md` P0.h.4 exige integrarla en read model y migración, scoring
+como hard gate externo, API/Catálogo/UI y todos los consumidores de selección y
+lifecycle. El criterio de cierre prohíbe inferir autoridad desde tier,
+`best_for`, nombre o score y exige tests negativos de no-escalado
+`quorum_ready`→Lead y `lead_ready`→auditor sin calibración exacta.
+
+P0.h.4a está cerrado: `model_catalog_read_model_v2` proyecta y hashea
+`tier1_authority` por rol exacto; selección contextual y snapshots nuevos lo
+transportan. Los snapshots legacy siguen legibles, pero una autoaplicación
+Tier 1 sin gate versionado se rechaza. El recibo compacto
+`model-catalog-read-model-2026-07-24-tier1-authority-v2.json` audita 98
+identidades/1.666 celdas, seis habilitaciones, cero candidatos automáticos y
+cero fallos. P0.h.4b queda también cerrado: Lead y quorum publican contratos de calibración
+versionados con constructos distintos; el auditor impide que la autoridad se
+mezcle en `model_role_score_v2`. Un test cubre score alto con calibración Lead
+parcial y confirma que continúa bloqueado. Verificación conjunta: 84 tests,
+lint dirigido y auditor vivo verdes. P0.h.4c queda cerrado: API y Catálogo
+publican `tier1_coverage`, filtran por autoridad y muestran badges, huecos de
+cobertura y el contrato/bloqueo exacto sin recalcularlo en React. Su cierre
+añade 34 tests backend dirigidos, 7 unitarios frontend y 3 E2E, además de tipos,
+linters, límites y build verdes. P0.h.4d queda también cerrado: selector,
+override del owner, onboarding, Equipo/hiring, defaults, quorum, fallback y
+reconcile exigen el carril exacto; el executor revalida antes del LLM y
+persiste bloqueo, interacción y deny para asignaciones legacy, stale o
+manipuladas, cubriendo dispatch, retry, recovery y liveness. Verificación:
+executor 118/118, 176 tests dirigidos de consumidores y suite backend
+1688/1688. P0.h.4e y el contrato padre quedan cerrados con
+`tier1_authority_parity_audit_v1`: 490 celdas read-model/API, 235 decisiones
+activas, 20 decisiones de snapshot, cinco invariantes frontend y cuatro ataques
+negativos, sin divergencias. El recibo durable es
+`benchmarks/results/model_catalog_read_model/tier1-authority-parity-2026-07-24.json`.
+Verificación final: backend 1692/1692, frontend 8/8, Ruff, ESLint, typecheck,
+build y diff check verdes.
+
+P0.h.3 queda cerrado. `candidate_is_automation_eligible` exige el score
+contextual automático completo —incluidas calibración y frescura— para
+defaults, hiring/reconcile, fallback, escalado y recovery; `owner_selectable`
+se reserva a decisiones manuales explícitas y no concede cobertura. Shadow y
+recommend dejan la plaza sin resolver si el selector legacy no supera el gate.
+El fallback de proveedor por `adapter_type` aislado queda denegado y remite al
+recovery gobernado. El recibo
+`model-automation-enforcement-2026-07-24.json` pasa 1.568 celdas, 1.560 gates
+rojos sin bypass, wiring 5/5 y matriz hermética 4/4. Verificación final:
+1697 tests backend.
+
+P0.h.2b queda cerrado: Gemini Pro High/Lead pasa 6/6 en CLI 1.1.6 con
+schema exacto, 12 anclas en auth y 9 en queue, fuentes y respuestas hasheadas.
+El harness rechaza ahora agregados con versión CLI ausente o mezclada.
+`lead_ready` pasa a 2/2; P0.h.2c queda satisfecho por diversidad real
+Codex/Antigravity. Verificación: 64 tests dirigidos, 1698 backend y los
+auditores de read model, paridad y enforcement verdes. Siguiente unidad:
+P0.h.2d.1 queda cerrado: Terra/Reviewer pasa 3/3 ciclos durables en Codex
+`0.146.0-alpha.6`, con seis llamadas, 12 runs, versión única y fuentes
+hasheadas. El agregado v2 y el validador fallan ante versión ausente, mezclada
+o manipulada. Reviewer Tier 2 queda 2/2 con Gemini API Free, dos perspectivas
+y dos pools, sin cambiar defaults. P0.h.2d continúa dividido por rol.
+Read model conserva cero candidatos automáticos y enforcement cero defaults o
+fallbacks; cierre verificado con 39 tests focalizados y 1.700 backend
+(un skip de toolchain).
+
+P0.h.2d.2 queda cerrado como resultado negativo válido, no como cobertura:
+Terra/Engineer en Codex `0.146.0-alpha.6` pasa 9/9 tests ocultos de
+`cli_conversor`, pero falla el gate Ruff con dos incidencias y detiene las otras
+cinco ejecuciones. Sonnet/Engineer conserva su screening actual 1.1.6 (3/3
+ocultos, siete incidencias Ruff), así que no se consume otro run idéntico.
+Ambos diagnósticos validan profundamente recibo, identidad, versión, familia y
+score, prevalecen sobre evidencia histórica stale y quedan
+`deferred_until_material_change`. Engineer permanece 0/2. Verificación final:
+103 tests transversales y 1.702 backend
+verdes, con un skip de toolchain; read model y enforcement conservan cero
+candidatos automáticos, defaults y fallbacks.
+
+P0.h.2d.3 queda cerrado. Terra/QA en Codex `0.146.0-alpha.6` y Flash High/QA
+en Antigravity `1.1.8` completan dos familias por tres semillas cada uno:
+6/6 muestras y 66/66 gates por modelo. El contrato familiar v4 corrige la
+ambigüedad `tenant`/`tenant_id` y separa la inferencia QA de un test runner
+determinista que persiste la prueba post-fix; así, un venv inaccesible desde el
+sandbox del proveedor no produce un falso diagnóstico de calidad. El agregado
+v5 exige versión única y valida profundamente las seis muestras por hash.
+QA Tier 2 queda 2/2 con perspectivas OpenAI/Google y pools Codex/Antigravity,
+sin habilitar defaults. Los intentos v3 permanecen como diagnóstico y no se
+contabilizan. Recibos:
+`p0h2d3-terra-qa-diversity-v5-cli-0.146.0.json` y
+`p0h2d3-flash-high-qa-diversity-v5-cli-1.1.8.json`. Verificación: 245 tests
+transversales, 1.704 backend con dos skips de toolchain, 18 recibos JSON
+válidos sin patrones de secretos, Ruff F/I del bloque y diff check verdes.
+La regresión corrigió únicamente el snapshot temporal del 23/07, que no puede
+consumir evidencia QA creada el 29/07; no se relajó el gate productivo.
+
+P0.h.2c.1 queda cerrado. El harness crítico de Antigravity incorpora
+`--sandbox --mode plan` y una prueba de la línea de comando; las matrices
+Gemini Pro High/Lead y `quorum_auditor` completan 12/12 muestras sin retries.
+Los dos agregados son version-bound, enlazan las fuentes por hash y mantienen
+`default_change_allowed=false`. El recibo vivo
+`model-tier-coverage-2026-07-30-tier1-restored.json` registra Lead y quorum
+2/2; QA y Reviewer permanecen 2/2. Read model, enforcement y paridad pasan con
+cero divergencias, defaults o fallbacks automáticos. La próxima unidad es
+P0.h.2d.4 Test Designer. Verificación del cierre: 320 tests transversales,
+1.706 backend con dos skips de toolchain, 14 recibos JSON válidos sin patrones
+de secretos, Ruff F/I del bloque y diff check verdes.
+
+P0.h.2d.4 queda cerrado. Terra/Test Designer en Codex `0.146.0-alpha.6` y
+Gemini 3.5 Flash High/Test Designer en Antigravity `1.1.8` completan dos
+familias por tres semillas: 6/6 muestras, 48/48 gates y 30/30 mutantes por
+modelo. Los agregados `independent_test_designer_two_family_v3` ligan versión,
+familias y fuentes por hash y mantienen `default_change_allowed=false`.
+El runner observa la versión antes de inferir, usa un Lead Sol fijo para aislar
+el rol y ejecuta baseline/mutantes fuera del sandbox del proveedor. Un primer
+Terra seed 2 quedó como diagnóstico: la suite y los 5/5 mutantes pasaron, pero
+las claves traducidas del `AGENT-REPORT` no eran válidas. El contrato se hizo
+literal y el executor exige ahora reporte durable también a `test_designer`,
+por lo que no puede cerrar silenciosamente; el nuevo intento pasó 8/8.
+El auditor baja a las doce muestras y comprueba hash, identidad, versión,
+familia, baseline, cinco mutantes, artefacto único y reporte. El recibo
+`model-tier-coverage-2026-07-30-tier2-test-designer.json` deja el rol
+`covered` 2/2 con perspectivas OpenAI/Google y pools Codex/Antigravity. Read
+model y enforcement conservan cero candidatos automáticos, defaults y
+fallbacks. Verificación final: 183 tests transversales y 1.712 backend pasan,
+con dos skips de toolchain; 23 recibos nuevos son JSON válidos sin patrones de
+secretos, Ruff F/I del bloque y diff check quedan verdes. El único warning es
+la deprecación Starlette/httpx ya existente.
+
+P0.h.2d.5a queda cerrado y P0.h.2d.5b permanece condicionado. Terra/MCP
+Operator en Codex `0.146.0-alpha.6` completa dos familias por tres semillas:
+6/6 muestras, 72/72 gates y single-attempt. Los gates demuestran fallo de
+versión y recovery activo, allow read/deny write, una llamada MCP permitida
+real, ninguna write y reporte durable. El agregado liga contrato, versión y
+hashes hasta cada muestra; el auditor rechaza cualquier gate MCP manipulado.
+`model-tier-coverage-2026-07-30-tier2-mcp-operator.json` deja el rol
+`single_point` 1/2 con perspectiva OpenAI y pool Codex, sin defaults ni
+fallbacks nuevos. Sol comparte perspectiva/pool y no rellena diversidad. No
+hay segundo brazo ejecutable hoy: Ollama está ausente, los modelos LM Studio
+están archivados, OpenCode 1.18.4 no habilita el rol/structured output y
+Antigravity/APIs carecen de loop MCP gobernado. P0.h.2d.5b solo se reabre ante
+un cambio material de uno de esos canales. Verificación: 205 tests focales,
+Ruff F/I, 13 receipts JSON válidos sin patrones de secretos, diff check y
+1.715 tests backend pasan; quedan los dos skips de toolchain y la deprecación
+Starlette/httpx ya conocida.
+
+El siguiente bloque ejecutable es I.10. La auditoría inicial confirma que la
+guía ya describe el gate final, pero doctor y runtime todavía no demuestran que
+resuelvan el mismo binario. I.10 queda dividido en autoridad canónica,
+resolución compartida, auditor fail-closed, integración durable y aceptación
+clean/update. I.10.1 introduce `provider_cli_version_contract_v1` dentro de
+`installation_support.v1.json`: referencia las filas de adapter para no
+duplicar comandos y fija suelos validados/canales para Codex, Antigravity y
+OpenCode. Una versión validada no sustituye health, catálogo ni calidad.
+I.10.2a unifica después la resolución con
+`platform_runtime.resolve_provider_cli`: doctor y runtime comparten shims
+Windows y la ubicación conocida de Antigravity. El doctor vivo observa
+Codex `0.146.0-alpha.6`, Antigravity 1.1.8 y OpenCode 1.18.4 con nombres de
+ejecutable, nunca paths. Pasan 119 tests integrados y 106 al repetir el núcleo.
+
+I.10.2b queda después cerrado. `provider_cli_fingerprint` liga resolución
+normalizada y contenido bajo un dominio versionado, pero solo expone basename
+y digest SHA-256. Cambia por ruta o contenido, es estable para el mismo archivo
+y devuelve `null` si no puede verificarlo. `machine_doctor_v1` publica ya
+fingerprints no nulos para Codex `0.146.0-alpha.6`, Antigravity 1.1.8 y
+OpenCode 1.18.4 sin rutas personales. Pasan 122 tests integrados, Ruff F/I y
+diff check. Siguiente unidad: I.10.3, auditor fail-closed de identidad, versión,
+canal y catálogo/cache.
+
+I.10.3 queda cerrado con `provider_cli_version_audit_v1`. Compara doctor,
+runtime, SemVer/prerelease, basename, fingerprint y guía; Codex usa cache vivo
+y Antigravity/OpenCode evidencia de catálogo fresca ligada a versión. Una
+alternativa primaria puede faltar, ambas no; OpenCode sigue opcional. El recibo
+`provider-cli-version-audit-2026-07-30.json` deja identidad, catálogo,
+documentación y promoción del gate CLI en `true`, cero fallos, cero paths y
+cero secretos. Esto no concede health ni calibración de modelos. Pasan 70
+tests integrados, Ruff F/I y diff check.
+
+I.10.4 queda cerrado. `machine_doctor_v1` proyecta resultado+hash del auditor
+y falla estricto con `provider_cli_version_gate_failed`. El recibo
+`machine-doctor-i10-4-2026-07-30.json` queda `ready`, mutation guard verde y
+sin paths/secretos. Los harnesses Windows/POSIX crean tres shims efímeros y
+cache Codex dentro del fixture, sin instalación global ni login; el contrato de
+release añade `provider_cli_version_gate` como paso 18. El fixture descubrió y
+corrigió una divergencia real: doctor sustituía el comando configurado `agy`
+por la lista genérica y podía observar otro ejecutable que runtime. Pasan 61
+tests dirigidos, ambos harnesses compilan, Ruff E402/F/I y diff check quedan
+verdes; la regresión backend completa queda en 1735 passed, 2 skipped. Ambos
+recibos son JSON válido, no contienen rutas personales ni patrones de secreto,
+y el hash canónico del reporte de doctor coincide. El doctor completo continúa
+con bloqueos locales ajenos a este gate; la proyección CLI sí queda `ready`.
+
+I.10.5 queda cerrado con
+`provider-cli-update-acceptance-2026-07-30.json`. El fixture read-only demuestra
+que `clean_clone` y `existing_checkout_after_fast_forward` convergen al mismo
+SHA-256 de matriz y quedan promocionables. El checkout existente conserva antes
+del update un preflight bloqueado por `minimum_version` y
+`fingerprint_matches`. Cinco canarios bloquean como se espera binario
+duplicado, upgrade requerido, prerelease implícita, documentación obsoleta y
+catálogo/matriz desincronizados; OpenCode ausente continúa válido como opcional.
+El recibo no contiene rutas personales ni patrones de secreto. Verificación
+dirigida: 60 tests integrados y Ruff E402/F/I verdes; regresión backend completa
+posterior al cambio: 1738 passed, 2 skipped.
+
+M.8 y el bloque P0.M quedan cerrados. La última deuda era mantenimiento
+continuo: `model_catalog_maintenance_v1` persiste en SQLite un histórico
+append-only al cambiar modelo/CLI/precio/cuota/prompt/tool/contrato o al
+comenzar un mes. Repetir el mismo input/mes no escribe; cada fila conserva
+métricas, tendencias, razones y hash válido, nunca candidatos o secretos. El
+servicio lo reconcilia al reconstruir el catálogo y la API ofrece
+`GET /api/model-catalog/maintenance`. El receipt
+`model-catalog-maintenance-2026-07-30.json` pasa los siete triggers y la cadencia
+mensual sin paths/secretos. M.9.1–M.9.6 ya estaban completos; se corrige su
+checkbox padre sin cambiar preferencias locales. Verificación: 106 tests
+integrados, Ruff E402/F/I y diff check verdes; regresión backend completa:
+1752 passed, 2 skipped.
 
 ## Autoridad documental
 
@@ -81,14 +644,141 @@ test. Los directorios históricos no se eliminan automáticamente porque están
 mezclados con proyectos reales. El cierre conjunto pasa 100 tests focales,
 22/22 de workspace, 1639/1639 backend globales, el check frontend completo,
 Ruff F/E9 y las auditorías de catálogo/cobertura.
-Codex 0.145.0 sigue siendo la última versión publicada en npm, pero
-su cache exige 0.146.0, así que el auditor lo bloquea correctamente. Antigravity
+El inventario read-only ampliado del `2026-07-30` confirma la escala del
+incidente en la raíz personal configurada: 2.716 carpetas de primer nivel,
+2.366 nombres con sufijo numérico y `.aiteam/aiteam.db`, 2.029 de ellos con
+`.git`. Las familias dominantes son Demo (998), OrgChart (333), Reconcile (333),
+Quorum (244), Solo (236) y AnthropicLead (215). No se movió ni borró nada. El
+código conserva dos causas legacy verificadas: `_allocate_project_path` genera
+siblings `Nombre 2…Nombre 999` y el fallback de borrado crea
+`.aiteam-deleted-*` en la misma raíz. P0.K.8 queda desglosado para atribuir
+contenido antes de proponer limpieza, eliminar esas fuentes de contaminación,
+usar cuarentena reversible y exigir doble aprobación para cualquier purgado.
+El owner aclara que esto no debe convertirse en deuda de limpieza futura:
+K.8 exige ahora cero basura por construcción en cualquier instalación y
+prohíbe daemon, tarea programada, cleanup de startup, TTL destructivo,
+tombstones hermanos y sufijos automáticos. La remediación queda separada,
+manual y exclusiva para raíces legacy; clone/bootstrap/create/retry/restart/
+upgrade deben dejar un footprint exacto comprobado. La siguiente unidad concreta
+era P0.K.8.2, prevención.
+P0.K.8.2 queda cerrado: allocator, `/api/projects/new`, panel/estado React,
+`aiteam project create` y fallback `.aiteam-deleted-*` fueron extirpados.
+API/CLI no inicializan carpetas al seleccionarlas. El commit guiado exige parent
+existente, colisión exacta, cleanup estricto y footprint pre/post; retry no crea
+siblings y una entrada concurrente se conserva. Borrado bloqueado devuelve 423
+sin rename ni cleanup pendiente. Pasan 159 tests backend dirigidos, 27
+unitarios frontend, un E2E Chromium, Ruff, TypeScript, ESLint, Stylelint,
+límites y build Vite. K.8.1 queda cerrado después con auditor portable
+read-only, receipt fuera de la raíz, SQLite immutable, Git/remotos redacted,
+handles opt-in y clasificación fail-safe. La pasada real corregida cubrió 2.716
+carpetas: 2.359 candidatas de las seis familias legacy conocidas, 342 a
+preservar/migrar y 15 personales protegidas; cero acciones autorizadas o
+ejecutadas. Siguiente: K.8.3 dry-run manual e inmutable; todavía no mover ni
+borrar el histórico.
+K.8.3 queda cerrado con generador y CLI de manifiesto manual: revalidación viva,
+targets hijos directos exactos, denegaciones fail-closed, output local exclusivo
+y doble sello de integridad. El dry-run real propone 2.359 paths
+(766.901.650 bytes), cero denegados dentro del batch y cero operaciones. Hash
+del manifiesto `3aadd5a9828c1f8bf8544c578d9ff4463136fb35fcf5e8c59010ed782fc6fcfc`;
+batch `8a1be67c6e1057b82b95931b3f3d6d65e6b90a8125f6f380d173d5a18da2debb`.
+K.8.4 permanece bloqueado hasta revisión humana explícita; aprobar el documento
+no equivale a ejecutar y toda acción futura debe revalidar.
+K.8.4.1 queda implementado y probado solo en fixtures: doble sello, reauditoría
+viva con handles, checksum de árboles, mismo filesystem, rename atómico,
+journal sellado, rollback inverso y restore con preflight total. Se corrigió el
+handle SQLite read-only usando cierre explícito; era la causa del
+`PermissionError` de rename en Windows. Pasan 13 tests propios, incluido
+apply→restore CLI real sobre un fixture. No existe purga. K.8.4.2 sigue
+bloqueado: `continúa` no aprueba los 2.359 paths ni sus dos hashes.
+P0.K.8.5 queda cerrado sin tocar la raíz real. `project_hygiene_v1` comparte una
+observación ligera, redacted y read-only entre machine doctor, API, primer uso,
+Nuevo proyecto y Configuración. Una ruta editada debe recomprobarse antes de
+guardar; el doctor solo avisa y nunca instala cleanup. La API reconoce
+`AITEAM_PROJECTS_ROOT` como configuración efectiva y los tests demuestran que
+cambiar la raíz conserva preferencias y almacenamiento de adapters. Contrato
+humano/IA en `docs/PROJECT_ROOT_HYGIENE.md`. Verificación: 69 tests backend del
+bloque K.8 y 32 unitarios frontend, Ruff, tipos, linters, límites, build y
+bundle verdes. Siguiente unidad ejecutable: K.8.6; K.8.4.2 continúa requiriendo
+aprobación owner exacta.
+Codex npm estable sigue en 0.145.0, pero la prerelease oficial
+0.146.0-alpha.6 reconcilia la caché 0.146.0 y mantiene auth ChatGPT. Antigravity
 1.1.6 conserva catálogo, vuelve stale Sonnet/Engineer 1.1.5 y su screening de
 revalidación pasa 3/3 hidden pero falla Ruff con 7 incidencias; no repetir hasta
 otro cambio material. El owner ha despriorizado por ahora I.8.4c/d Linux/macOS,
 Containers, Mobile nativo y PHP/Ruby/Swift. El descriptor v0.1.0 conserva
 `publish.enabled=false`: no crear el tag sin evidencia independiente.
 I.8.1 e I.9 ya están cerrados.
+El owner ha fijado una prioridad explícita de catálogo. Deben archivarse de
+forma reversible los tres modelos de `local_gem4_lmstudio` y las identidades
+GPT-OSS 120B de Antigravity y GPT-OSS 120B/20B de Groq, conservando su historial
+pero excluyéndolos de selección y mantenimiento. Son prioridad alta Sol Tier 1
+en Codex, Antigravity Gemini 3.6 High/Medium/Low, Gemini API Free, Groq Qwen
+3.6 y los seis modelos OpenCode Free. El resto queda en prioridad baja, no
+retirado.
+M.9.1 implementa `model_owner_preferences_v1` en configuración local:
+identidad exacta perfil+modelo, estados high/normal/low/archived, razón, fecha,
+escritura atómica y fallo cerrado. Pasa 9 tests propios y 69 focales conjuntos.
+M.9.2 ya lo convierte en un gate contextual efectivo: el read model proyecta
+la preferencia y la hashea; archivados no pueden ser selección nueva, default,
+hiring ni fallback, sin alterar el score técnico o borrar receipts. El backlog
+de mantenimiento prioriza `high` y no propone trabajo proactivo para `low` o
+`archived`; la caché se invalida con el archivo local y corrupción falla
+cerrado. Verificación: 59 pruebas focales, 201 integradas con API/executor y
+Ruff F/I/E402 del delta.
+
+M.9.3 está implementado: el executor pausa antes de inferencia una asignación
+existente archivada, bloquea su issue y persiste una interacción idempotente.
+No muta el agente hasta que el owner acepta; entonces revalida selección,
+preferencia, adapter y compatibilidad antes de actualizar y reencolar. Rechazo,
+stale, corrupción o falta de alternativa permanecen bloqueados. Las nuevas
+selecciones explícitas y la escalada senior tampoco pueden elegir archivados.
+M.9.4 añade API local GET/PUT y controles de prioridad, archivo y reactivación
+en Modelos, más badges/filtros y opciones archivadas visibles pero
+deshabilitadas en Equipo. El doble check conjunto M.9.3–M.9.4 pasa 152 tests
+backend relevantes, TypeScript, ESLint, Stylelint y límites frontend.
+M.9.5 queda cerrado con persistencia entre procesos, máquina limpia y matriz de
+onboarding, Equipo, hiring, quorum, fallback y defaults. Corrige el bypass del
+selector legacy en rollout `shadow`, la causa falsa de tier en onboarding y el
+orden de diagnóstico en PATCH de Equipo; añade defensa para quorum/defaults
+stale. Pasa 308 tests backend integrados y 7 unitarios frontend, además de los
+gates estáticos del delta.
+M.9.6 y P0.a quedan cerrados: la configuración local clasifica 47 identidades
+exactas en 6 archivadas, 13 altas y 28 bajas mediante reemplazo validado y
+atómico. El read model pasa con 47 candidatos/799 filas y cero fallos; una
+matriz sobre los 17 roles confirma cero archivados seleccionables/default. La
+cobertura durable conserva 124 pares, seis filas archivadas sin mantenimiento
+y backlog vacío. Las preferencias personales siguen fuera de Git, por lo que
+un clon nuevo comienza en `normal`.
+P0.b queda cerrado: Sol es ejecutable/selectable y sus cinco roles críticos
+(`architect`, `lead`, `lead_executor`, `quorum_auditor`, `team_lead`) pasan
+30/30 muestras, dos familias × tres semillas, con CLI exacto
+0.146.0-alpha.6. Los cinco agregados quedan registrados y la cobertura los
+declara calibrados. El juez añadió el sinónimo general `indivis` y reevaluó la
+misma respuesta, sin re-roll. Sol sigue sin auto-promoverse; Terra/Luna
+0.145.0 quedan stale. Sustituir la prerelease cuando npm publique 0.146.0
+estable y revalidar transporte. El siguiente lote ejecutable es P0.c,
+Antigravity Gemini 3.6 High/Medium/Low.
+P0.I añade I.10 como gate final pendiente: antes de cerrar instalación/release
+debe coincidir la versión o rango declarado en la guía, el ejecutable que
+resuelve el adapter y la versión publicada por `machine_doctor_v1`. Codex,
+Antigravity y OpenCode son el mínimo; drift, prerelease no declarada o
+CLI/cache incompatibles fallan cerrado y producen receipt redacted.
+P0.c queda cerrado sobre Antigravity 1.1.6: catálogo autenticado de 11 modelos
+y submits exactos verdes para High/Lead+coding, Medium/review y Low/scout. Los
+tres están verificados y seleccionables manualmente, pero siguen
+`manual_only`; las muestras 93,3 %, 72,7 %, 100 % y 100 % son screening
+estructural de una semilla, no autorización de default. El siguiente lote del
+owner es P0.d: readiness separado de Gemini API Free y Groq Free.
+P0.d.1 completa el preflight sin secretos: ninguna de las referencias
+`secret:google-free:default`/`secret:groq:default` existe aún. Ambos perfiles
+persisten `blocked/api_key_ref_missing`, catálogo `not_checked` y no se hizo
+ninguna llamada API. P0.d.2 requiere que el owner cree y guarde localmente sus
+keys; después se ejecutan por separado discovery, health y structured output
+de Gemini y Groq antes de calibrar.
+El trabajo de modelos debe respetar además el
+gate único configuración/auth → catálogo/versionado → adapter verde → contrato
+estructurado/tools → canario → calibración multi-familia → promoción. Un
+adapter rojo es deuda de integración y nunca un resultado de calidad.
 PHP/Ruby queda pausado por prioridad del owner. I.6.2 está cerrado con la run
 `30085247826`: 18 receipts/27 celdas ligadas a `775e72e` y agregado durable;
 Web moderno amplía la matriz a 30/30 en `30085680374` sobre `8888dfe`.
@@ -1079,3 +1769,65 @@ Auditoría de un proyecto capa 2:
 ```
 
 No sustituir una ejecución actual por la cifra de este documento: registrar fecha y resultado cuando cambie sustancialmente la suite.
+
+## Continuación P0.K.8 — `2026-07-30`
+
+K.8.6 se dividió para separar evidencia hermética, reparación del runner,
+evidencia Windows independiente y plataformas aplazadas. K.8.6.1 queda cerrado
+con `project_portability_acceptance_v1`: compone los contratos canónicos de
+reparación de adapters, commit guiado, preflight proporcional y equivalencia
+clean/update, ejecuta el fixture local React+TypeScript y añade una raíz
+temporal adversa con proyecto personal numerado, Git limpio/dirty/remoto
+redacted, SQLite corrupta, staging interrumpido y symlink/reparse no seguido.
+Pasa 9/9 checks; 88 tests dirigidos pasan y 2 se omiten por capacidades
+opcionales ajenas al gate. Ruff E/F/I y diff check están verdes. Receipt:
+`benchmarks/results/guided_setup/project-portability-acceptance-2026-07-30.json`;
+evidence hash
+`865bf7bd544861b5a6a090c3ce68cf9e34657f190030de8683f2b56ae0d2aef2`;
+SHA-256 de archivo
+`c6cae54eb332effc20c8d9771186ada95c39372af0e00a517359ee4e28caa483`.
+No se inspeccionó ni mutó la raíz real.
+
+Siguiente unidad: K.8.6.2. `scripts/accept_windows_clean_room.py` todavía llama
+al comando `aiteam project create`, retirado en K.8.2 para impedir siblings
+numerados. Hay que reemplazar esa etapa por el commit guiado actual, sellar su
+footprint en clone/retry/restart/update y demostrar que no instala tareas,
+daemons, TTL ni utilidades de limpieza. No reintroducir el comando legacy.
+
+K.8.6.2 queda cerrado. `accept_windows_clean_room.py` ya no contiene ni invoca
+`aiteam project create`: materializa una propuesta sellada Lead-first de
+investigación mediante `guided_setup_project_commit_v1` y un adapter fixture
+que no infiere. El runner exige un único nuevo directorio, retry por colisión
+sin siblings, árbol idéntico tras bootstrap/update, dos ciclos start/health/stop
+y rollback SQLite byte a byte sin dejar el backup. También sella cinco
+entrypoints y falla si registran scheduled tasks, servicios o startup; higiene
+mantiene limpieza automática/startup/TTL en falso. La provenance conserva hash
+del harness y dirty state, y un checkout Git dirty no puede ser independiente.
+Pasan 32 tests dirigidos, Ruff E/F/I y diff check. La ejecución local completó
+24/24 pasos en 42 s, dejó ambos puertos libres y se registró honestamente como
+`local_existing_host`, dirty y no promocionable. Receipt:
+`benchmarks/results/installation_acceptance/windows-clean-room-k8-6-2-local-2026-07-30.json`;
+SHA-256
+`739daa80be69fb418f48b17274401b55bc83c47c0df0c3366db524c782d91913`.
+Las raíces temporales creadas durante los intentos fueron eliminadas.
+
+Siguiente unidad: K.8.6.3. Ejecutar el runner actualizado en un checkout Windows
+limpio independiente y en una instalación existente actualizable, conservar
+ambos receipts SHA-bound y no confundir el receipt local dirty con evidencia
+de promoción.
+
+K.8.6.3 queda dividido. K.8.6.3a está implementado: el workflow Windows usa una
+matriz `clean-clone`/`existing-checkout-updated`; la segunda celda bootstrappea
+`HEAD^`, rechaza cambios tracked y avanza al SHA objetivo. El runner sella
+`installation_state`, revisión anterior, dirty state y harness. El nuevo
+`audit_windows_clean_room_matrix.py` agrega los dos receipts y exige 9/9 gates:
+ambos independientes/promocionables/clean, misma revisión+harness, baseline
+distinto, commit guiado+retry, restart/update+rollback y cero lifecycle
+persistente. Un receipt local dirty queda rechazado. Pasan 25 tests, parse YAML,
+Ruff E/F/I y diff check.
+
+K.8.6.3 no está cerrado: 3b requiere publicar un SHA coherente —el worktree
+actual contiene muchas dependencias nuevas aún untracked, por lo que un commit
+parcial sería inválido— y recoger los tres artefactos reales de Actions. 3c
+requiere consentimiento y ejecución redacted en otra instalación ya existente.
+No se hizo commit, push ni se inventó evidencia CI en esta unidad.

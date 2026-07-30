@@ -1,0 +1,48 @@
+{
+  "checks": {
+    "accessibility_and_responsive_contract_present": true,
+    "commit_requires_durable_go": true,
+    "durable_no_go_routes_to_resources": true,
+    "execution_uses_server_plan": true,
+    "http_409_and_429_remain_distinguishable": true,
+    "local_fixture_requires_consent": true,
+    "proposal_loads_server_preflight": true,
+    "remote_probe_and_quota_are_separate": true,
+    "research_mode_declares_zero_software_runs": true,
+    "stale_preflight_invalidates_preview": true
+  },
+  "evidence": {
+    "authority_boundary": "La UI proyecta preflight, plan y receipt del servidor; no puntúa ni autoriza modelos.",
+    "behavioral_test_files": [
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectPreflightPanel.test.tsx",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectSetupWizard.test.tsx",
+      "ide-frontend/src/components/ProjectSetupWizard/projectSetupApi.test.ts",
+      "ide-frontend/e2e/project-preflight.spec.ts"
+    ],
+    "source_hashes": {
+      "ide-frontend/e2e/project-preflight.spec.ts": "e066456239082618d182908674c075e44b9896bd66c4207d5cb9a8b751762355",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectPreflightPanel.css": "ed07d6c82a6b6e7f3d2a1a59f912fca8fedc458228a8fc5f8531a90c6f893f6b",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectPreflightPanel.test.tsx": "b48bc5de92904966f4ae14bec940d6942937b36594e16d23f1901d1920ab6d0e",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectPreflightPanel.tsx": "cd2fe2fae44133589c6b86ebdda39a724cc493c49d17fa79dd9a36534c2e9dda",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectSetupWizard.test.tsx": "226cea2bdabb73d0cdcf181be804dc2232bc1a25f7a52b01a179c1a0ebc13ff3",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectSetupWizard.tsx": "ca59ce65ea71a5977e60998eba0657dd2c432d48a1756e338bf4564dbb8df11e",
+      "ide-frontend/src/components/ProjectSetupWizard/projectPreflightApi.ts": "17bb3b70211740b0a041ea41e82576aa70872d23712fe1434ff38bbfee52160c",
+      "ide-frontend/src/components/ProjectSetupWizard/projectSetupApi.test.ts": "771a2800aea012fb9450a7a42030a915a6ed810855dd30936daf4ee28e4b3328",
+      "ide-frontend/src/components/ProjectSetupWizard/projectSetupApi.ts": "1bbe32497ac78d0fdfbba6f06ae51d2c9e3a0585d1f008058ca50b4266ea40c7"
+    }
+  },
+  "evidence_hash": "21da8969718bde62aacef78cfdf49af4dfa26551751b52354f78f9ec6839220e",
+  "schema_version": "guided_setup_project_preflight_ui_audit_v1",
+  "scope": {
+    "inference_attempted": false,
+    "quota_consumed": false,
+    "remote_calls": false,
+    "source_files_mutated": false,
+    "user_projects_mutated": false
+  },
+  "summary": {
+    "check_count": 10,
+    "passed_count": 10,
+    "ui_contract_ready": true
+  }
+}

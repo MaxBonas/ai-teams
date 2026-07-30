@@ -1,0 +1,30 @@
+{
+  "checks": {
+    "complete_full_team_is_covered": true,
+    "coverage_and_recommendations_do_not_mutate_inputs": true,
+    "coverage_matches_canonical_selector_gate": true,
+    "eligible_local_worker_preserves_zero_cost": true,
+    "no_lead_blocks_minimum_route": true,
+    "owner_override_never_becomes_automatic_coverage": true,
+    "partial_full_team_names_missing_role": true,
+    "quorum_without_diversity_is_blocked": true,
+    "rate_limited_api_stays_visible_but_excluded": true,
+    "single_lead_covers_only_minimum": true
+  },
+  "schema_version": "guided_setup_coverage_acceptance_v1",
+  "scope": {
+    "defaults_mutated": false,
+    "fixture_only": true,
+    "inference_attempted": false,
+    "installations_attempted": false,
+    "projects_created": false,
+    "remote_quota_consumed": false,
+    "secrets_read": false,
+    "user_configuration_mutated": false
+  },
+  "summary": {
+    "check_count": 10,
+    "coverage_acceptance_ready": true,
+    "passed_count": 10
+  }
+}

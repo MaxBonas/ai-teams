@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.6",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 7.219,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO",
+    "challenges": [
+      "El checkout descompuesto en SELECT y UPDATE permite race conditions donde dos workers asumen la misma issue para un tenant_id.",
+      "La migración en vivo sin detener runs activas mientras SQLite opera como única fuente durable introduce riesgos de inconsistencia de estado.",
+      "El flag de rollback devuelve el sistema al camino anterior que contiene el fallo de checkout concurrente."
+    ],
+    "missing_evidence": [
+      "Evidencia de atomicidad en la operación de checkout en SQLite para evitar que dos workers ganen la misma issue.",
+      "Registros empíricos del cumplimiento del gate: 100 reinicios ejecutados con cero wakeups perdidos durante la ventana de 24 horas.",
+      "Validación de no interferencia entre colas por tenant_id durante la migración con runs activas."
+    ],
+    "failure_modes": [
+      "Doble procesamiento simultáneo de la misma issue por dos workers debido a la separación entre SELECT y UPDATE.",
+      "Pérdida de wakeups en la cola de SQLite durante los 100 reinicios requeridos en la ventana de 24 horas.",
+      "Contención o corrupción en SQLite como única fuente durable al ejecutar la migración sin detener runs activas."
+    ],
+    "recommendation": "NO-GO"
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v1",
+  "status": "completed",
+  "wall_seconds": 17.219,
+  "usage": {
+    "input_tokens": 16607,
+    "cached_input_tokens": 0,
+    "output_tokens": 634
+  },
+  "response": {
+    "objective": "Migrar el checkout de issues multi-tenant a una operación atómica en SQLite, manteniendo las runs activas y conservando el flag de retorno al camino anterior.",
+    "execution_steps": [
+      {
+        "order": 1,
+        "change": "Definir el estado e invariantes del checkout: toda issue incluye tenant_id y solo un worker puede obtenerla."
+      },
+      {
+        "order": 2,
+        "change": "Implementar personalmente el checkout atómico en SQLite, uniendo la selección y la actualización dentro de una única operación transaccional y filtrando por tenant_id."
+      },
+      {
+        "order": 3,
+        "change": "Mantener ambos caminos detrás del flag existente, sin modificar las runs que ya están activas."
+      },
+      {
+        "order": 4,
+        "change": "Añadir pruebas de concurrencia con dos o más workers compitiendo por la misma issue y comprobar que existe un único ganador."
+      },
+      {
+        "order": 5,
+        "change": "Añadir pruebas de aislamiento entre tenants para impedir que un worker retire issues de otro tenant."
+      },
+      {
+        "order": 6,
+        "change": "Añadir pruebas de compatibilidad durante la migración con runs activas y cambios del flag."
+      },
+      {
+        "order": 7,
+        "change": "Ejecutar el gate de 100 reinicios y observar durante 24 horas que se produzcan cero wakeups perdidos antes de completar la migración."
+      }
+    ],
+    "evidence": {
+      "status": "No ejecutado; esta respuesta solo propone el trabajo.",
+      "required_results": [
+        "Pruebas de concurrencia con un único checkout exitoso por issue.",
+        "Pruebas de aislamiento por tenant_id superadas.",
+        "Runs activas completadas sin interrupción durante la migración.",
+        "100 reinicios completados y cero wakeups perdidos durante 24 horas.",
+        "Funcionamiento verificado de ambos estados del flag."
+      ]
+    },
+    "risks": [
+      "Duplicación de procesamiento si queda algún checkout con SELECT y UPDATE separados.",
+      "Cruce de issues entre tenants si falta tenant_id en algún filtro.",
+      "Wakeups perdidos durante reinicios.",
+      "Comportamiento mixto inconsistente mientras conviven ambos caminos.",
+      "Runs activas afectadas por cambios incompatibles de estado."
+    ],
+    "rollback": {
+      "trigger": "Cualquier checkout duplicado, cruce entre tenants, wakeup perdido o regresión en runs activas.",
+      "actions": [
+        "Activar el flag para volver al camino anterior.",
+        "Detener la ampliación del nuevo camino sin detener las runs activas.",
+        "Conservar SQLite como única fuente durable.",
+        "Analizar la evidencia fallida, corregir y repetir todas las pruebas y el gate completo."
+      ]
+    },
+    "escalation": {
+      "conditions": [
+        "No es posible garantizar atomicidad con el diseño actual.",
+        "La compatibilidad con runs activas exige cambiar estados durables.",
+        "El gate registra al menos un wakeup perdido.",
+        "El rollback mediante el flag no restaura el comportamiento esperado."
+      ],
+      "response": "Bloquear la finalización de la migración y solicitar una decisión explícita sobre el cambio de diseño o de alcance."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:38:57.179129Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:38:57.179200Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:38:57.179968Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:38:57.182149Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:38:57.187482Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:38:58.240050Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:38:58.240079Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:38:58.240796Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:38:58.243007Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

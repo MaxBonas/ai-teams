@@ -6,6 +6,7 @@ import type {
   McpCatalogEntry,
   McpServer,
   McpToolDrafts,
+  ProjectHygiene,
   ProjectSkill,
   SecretInfo,
   SkillDraft,
@@ -28,6 +29,9 @@ export function useConfigurationData({
   const [projectsRoot, setProjectsRoot] = useState('');
   const [settingsConfigured, setSettingsConfigured] = useState(true);
   const [settingsDraft, setSettingsDraft] = useState('');
+  const [projectHygiene, setProjectHygiene] = useState<ProjectHygiene | null>(null);
+  const [projectHygieneRoot, setProjectHygieneRoot] = useState('');
+  const [projectHygieneBusy, setProjectHygieneBusy] = useState(false);
   const [adapterProfiles, setAdapterProfiles] = useState<AdapterProfile[]>([]);
   const [adapterTestModels, setAdapterTestModels] = useState<Record<string, string>>({});
   const [cliStatus, setCliStatus] = useState<CliStatus[]>([]);
@@ -86,10 +90,14 @@ export function useConfigurationData({
         configured?: boolean;
         projects_root?: string;
         projects_root_effective?: string;
+        project_hygiene?: ProjectHygiene;
       };
+      const effectiveRoot = data.projects_root_effective || data.projects_root || '';
       setSettingsConfigured(Boolean(data.configured));
-      setProjectsRoot(data.projects_root_effective || data.projects_root || '');
+      setProjectsRoot(effectiveRoot);
       setSettingsDraft((current) => current || data.projects_root || '');
+      setProjectHygiene(data.project_hygiene || null);
+      setProjectHygieneRoot(effectiveRoot);
     } catch {
       setSettingsConfigured(true);
     }
@@ -111,13 +119,44 @@ export function useConfigurationData({
       const data = (await response.json()) as {
         configured?: boolean;
         projects_root_effective?: string;
+        project_hygiene?: ProjectHygiene;
       };
       setSettingsConfigured(Boolean(data.configured));
-      setProjectsRoot(data.projects_root_effective || settingsDraft.trim());
+      const effectiveRoot = data.projects_root_effective || settingsDraft.trim();
+      setProjectsRoot(effectiveRoot);
+      setProjectHygiene(data.project_hygiene || null);
+      setProjectHygieneRoot(effectiveRoot);
     } catch (error) {
       reportError(error instanceof Error ? error.message : 'save_settings_failed');
     } finally {
       setGlobalBusy(false);
+    }
+  };
+
+  const previewProjectHygiene = async (root = settingsDraft.trim()) => {
+    if (!root || projectHygieneBusy) return;
+    setProjectHygieneBusy(true);
+    reportError('');
+    try {
+      const response = await apiFetch('/api/settings/project-hygiene/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projects_root: root }),
+      });
+      const data = (await response.json()) as {
+        detail?: string;
+        projects_root?: string;
+        project_hygiene?: ProjectHygiene;
+      };
+      if (!response.ok || !data.project_hygiene) {
+        throw new Error(data.detail || `project_hygiene:${response.status}`);
+      }
+      setProjectHygiene(data.project_hygiene);
+      setProjectHygieneRoot(data.projects_root || root);
+    } catch (error) {
+      reportError(error instanceof Error ? error.message : 'project_hygiene_failed');
+    } finally {
+      setProjectHygieneBusy(false);
     }
   };
 
@@ -468,6 +507,9 @@ export function useConfigurationData({
     settingsConfigured,
     settingsDraft,
     setSettingsDraft,
+    projectHygiene,
+    projectHygieneRoot,
+    projectHygieneBusy,
     adapterProfiles,
     adapterTestModels,
     setAdapterTestModels,
@@ -493,6 +535,7 @@ export function useConfigurationData({
     profileState,
     loadAppSettings,
     saveAppSettings,
+    previewProjectHygiene,
     loadUserAdapters,
     saveAutonomy,
     loadProjectSkills,

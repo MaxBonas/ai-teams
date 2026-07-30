@@ -172,7 +172,13 @@ export function ConfigurationWorkspace({
           mode={health?.mode}
           lastResult={lastResult}
           busy={loading}
+          projectHygiene={config.projectHygiene}
+          projectHygieneRoot={config.projectHygieneRoot}
+          projectHygieneBusy={config.projectHygieneBusy}
           onDraftChange={config.setSettingsDraft}
+          onInspectRoot={() => void config.previewProjectHygiene(
+            config.settingsDraft || config.projectsRoot,
+          )}
           onSave={async () => {
             await config.saveAppSettings();
             await onRefresh();

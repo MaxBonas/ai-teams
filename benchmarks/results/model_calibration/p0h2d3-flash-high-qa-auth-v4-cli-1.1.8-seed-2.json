@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "provider_version": "1.1.8",
+  "contract_version": "adversarial_qa_fix_cycle_v4",
+  "case_family": "authorization_boundary",
+  "role": "qa",
+  "seed": 2,
+  "checks": {
+    "attack_run_completed": true,
+    "attack_report_changes_requested": true,
+    "production_unchanged_during_attack": true,
+    "adversarial_test_contract": true,
+    "adversarial_tests_fail_before_fix": true,
+    "verification_run_completed": true,
+    "adversarial_tests_pass_after_fix": true,
+    "verification_report_approved": true,
+    "verification_issue_done": true,
+    "passing_adversarial_tests_removed": true,
+    "fixed_production_intact": true
+  },
+  "attack_evaluation": {
+    "anchors": {
+      "imports_target": true,
+      "exact_tenant_id_field": true,
+      "cross_tenant": true,
+      "inactive_actor": true,
+      "private_non_admin": true,
+      "negative_assertion": true
+    },
+    "anchors_retained": 6,
+    "anchors_total": 6,
+    "contract_passed": true
+  },
+  "failing_test_run": {
+    "executed": true,
+    "exit_code": 1,
+    "stdout": "FFF                                                                      [100%]\n================================== FAILURES ===================================\n____________________________ test_tenant_mismatch _____________________________\n\n    def test_tenant_mismatch():\n        actor = {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"admin\"}\n        resource = {\"tenant_id\": \"tenant-b\", \"private\": False}\n>       assert not can_access(actor, resource), \"Should deny cross-tenant access\"\nE       AssertionError: Should deny cross-tenant access\nE       assert not True\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': True, 'role': 'admin'}, {'tenant_id': 'tenant-b', 'private': False})\n\ntests\\test_adversarial_auth.py:6: AssertionError\n_____________________________ test_actor_inactive _____________________________\n\n    def test_actor_inactive():\n        actor = {\"tenant_id\": \"tenant-a\", \"active\": False, \"role\": \"admin\"}\n        resource = {\"tenant_id\": \"tenant-a\", \"private\": False}\n>       assert not can_access(actor, resource), \"Should deny inactive actor\"\nE       AssertionError: Should deny inactive actor\nE       assert not True\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': False, 'role': 'admin'}, {'tenant_id': 'tenant-a', 'private': False})\n\ntests\\test_adversarial_auth.py:11: AssertionError\n______________________ test_private_resource_role_member ______________________\n\n    def test_private_resource_role_member():\n        actor = {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"member\"}\n        resource = {\"tenant_id\": \"tenant-a\", \"private\": True}\n>       assert not can_access(actor, resource), \"Should deny non-admin access to private resource\"\nE       AssertionError: Should deny non-admin access to private resource\nE       assert not True\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': True, 'role': 'member'}, {'tenant_id': 'tenant-a', 'private': True})\n\ntests\\test_adversarial_auth.py:16: AssertionError\n=========================== short test summary info ===========================\nFAILED tests\\test_adversarial_auth.py::test_tenant_mismatch - AssertionError:...\nFAILED tests\\test_adversarial_auth.py::test_actor_inactive - AssertionError: ...\nFAILED tests\\test_adversarial_auth.py::test_private_resource_role_member - As...\n3 failed in 0.08s\n",
+    "stderr": ""
+  },
+  "passing_test_run": {
+    "executed": true,
+    "exit_code": 0,
+    "stdout": "...                                                                      [100%]\n3 passed in 0.05s\n",
+    "stderr": ""
+  },
+  "phases": {
+    "attack": {
+      "seconds": 63.437,
+      "issue_status": "done",
+      "run": {
+        "id": "run:34c1cf3d-f5b4-4165-bfb7-1ac48cfea7dd",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gemini-3.5-flash-high",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "usage_json": "{}"
+      },
+      "report": {
+        "id": "3f496a18-0967-4938-8ca4-aeba6f58b604",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:34c1cf3d-f5b4-4165-bfb7-1ac48cfea7dd",
+        "agent_role": "qa",
+        "result": "changes_requested",
+        "issue_status": "done",
+        "next_owner": "engineer",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "tests/test_adversarial_auth.py",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests/test_adversarial_auth.py\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 21:55:41"
+      },
+      "comments": [
+        {
+          "id": "927d623d-6afa-4b9c-8191-517107929c72",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:34c1cf3d-f5b4-4165-bfb7-1ac48cfea7dd",
+          "body": "Completed QA adversarial analysis showing that auth.py returns True for all cases. Created failing tests to capture these boundaries.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 21:55:41",
+          "updated_at": "2026-07-29 21:55:41"
+        },
+        {
+          "id": "0ba10299-daff-417f-9d18-2ee29148c3f0",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:34c1cf3d-f5b4-4165-bfb7-1ac48cfea7dd",
+          "body": "Adversarial test suite has been written to tests/test_adversarial_auth.py to demonstrate the gaps in auth.py.\n\n---AGENT-REPORT---\nrole: qa\nresult: changes_requested\nissue_status: done\nnext_owner: engineer\nblocker: none\nevidence: tests/test_adversarial_auth.py",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 21:55:41",
+          "updated_at": "2026-07-29 21:55:41"
+        }
+      ]
+    },
+    "verify_fix": {
+      "seconds": 50.86,
+      "issue_status": "done",
+      "run": {
+        "id": "run:13b943f4-fbf3-426e-8a2b-e0e7923779e3",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gemini-3.5-flash-high",
+        "provider": "google-antigravity",
+        "channel": "subscription",
+        "usage_json": "{}"
+      },
+      "report": {
+        "id": "9c49513d-91b3-40bf-9a5a-45eaf2383f6c",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:13b943f4-fbf3-426e-8a2b-e0e7923779e3",
+        "agent_role": "qa",
+        "result": "approved",
+        "issue_status": "done",
+        "next_owner": "lead",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "tests/test_adversarial_auth.py (3 passed)",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"tests/test_adversarial_auth.py (3 passed)\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"approved\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 21:56:33"
+      },
+      "comments": [
+        {
+          "id": "e515589d-edcb-461d-b67c-80ff4b6f3df0",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:13b943f4-fbf3-426e-8a2b-e0e7923779e3",
+          "body": "Verified adversarial tests pass, deleted test file, and reported approved.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 21:56:33",
+          "updated_at": "2026-07-29 21:56:33"
+        },
+        {
+          "id": "9f736b58-454e-4a87-afc6-d0018200a3d8",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:13b943f4-fbf3-426e-8a2b-e0e7923779e3",
+          "body": "Adversarial tests verified and deleted as all tests passed. auth.py now correctly denies cross-tenant access, inactive actors, and non-admin access to private resources.\n\n---AGENT-REPORT---\nrole: qa\nresult: approved\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: tests/test_adversarial_auth.py (3 passed)",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 21:56:33",
+          "updated_at": "2026-07-29 21:56:33"
+        }
+      ]
+    }
+  },
+  "usage": {},
+  "workspace": "runtime/bench/p0h2d3-flash-high-auth-v4-s2",
+  "ok": true
+}

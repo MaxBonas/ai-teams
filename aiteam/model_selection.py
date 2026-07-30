@@ -7,9 +7,9 @@ de candidatos auto-elegibles nunca se disfraza como recomendación.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
-import math
 from typing import Any
 
 from aiteam.model_compatibility import compatibility_decision
@@ -19,10 +19,10 @@ from aiteam.model_role_scoring import (
     MODEL_ROLE_SCORE_WEIGHTS,
     rank_model_role_scores,
 )
+from aiteam.model_tier_coverage import tier1_authority_gate
 from aiteam.policies import canonical_role
 from aiteam.tools.catalog import default_capabilities_for_role
 from aiteam.user_config import ROLE_CAPABILITY_PROFILES
-
 
 MODEL_SELECTION_VERSION = "model_selection_v1"
 _CONTEXT_GATE_BY_CODE = {
@@ -131,6 +131,23 @@ def build_contextual_model_selection(
             "state": "capacity_unknown",
             "source": "not_observed",
         })
+        owner_preference = dict(
+            candidate.get("owner_preference")
+            or {
+                "profile_id": profile_id,
+                "model_id": model_id,
+                "state": "normal",
+                "reason": "default_normal",
+                "updated_at": None,
+                "source": "default",
+            }
+        )
+        owner_archived = owner_preference.get("state") == "archived"
+        authority = deepcopy((base_row or {}).get("tier1_authority"))
+        authority_gate = tier1_authority_gate(
+            role=role_key,
+            authority=authority,
+        )
         selection_score = _contextual_score(
             base_score,
             candidate_id=candidate_id,
@@ -139,6 +156,8 @@ def build_contextual_model_selection(
             channel=str(identity.get("channel") or "unknown"),
             capacity=capacity,
             budget=budget,
+            owner_preference=owner_preference,
+            authority_gate=authority_gate,
         )
         states = candidate.get("states") or {}
         selectable_state = _state_value(states, "selectable") is True
@@ -152,26 +171,32 @@ def build_contextual_model_selection(
         )
         owner_selectable = bool(
             decision.get("allowed") and selectable_state
-            and not capacity_blocked and not budget_blocked
+            and not capacity_blocked and not budget_blocked and not owner_archived
+            and authority_gate["allowed"]
         )
         disabled_reason = _disabled_reason(
+            owner_preference=owner_preference,
             decision=decision,
             selectable=selectable_state,
             configured=configured,
             green=green,
             capacity_state=capacity_state,
             budget_blocked=budget_blocked,
+            authority_gate=authority_gate,
         )
         row = {
             **candidate,
             "roles": [base_row] if base_row else [],
             "canonical_role": role_key,
             "base_role_evaluation": base_row,
+            "tier1_authority": authority,
+            "tier1_authority_gate": authority_gate,
             "base_score": base_score,
             "selection_score": selection_score,
             "contextual_compatibility": decision,
             "capacity_evidence": capacity,
             "budget_evidence": budget,
+            "owner_preference": owner_preference,
             "owner_selectable": owner_selectable,
             "requires_configuration": owner_selectable and not (configured and green),
             "disabled_reason": disabled_reason,
@@ -249,13 +274,7 @@ def same_profile_fallback(
         item for item in rows
         if str((item.get("identity") or {}).get("profile_id") or "") == profile_id
         and str((item.get("identity") or {}).get("model_id") or "") != failed_value
-        and item.get("owner_selectable") is True
-        and (
-            ((item.get("selection_score") or {}).get("hard_gates") or {})
-            .get("automatic_policy", {})
-            .get("passed")
-            is True
-        )
+        and candidate_is_automation_eligible(item)
     ]
     if not candidates:
         return None
@@ -290,6 +309,20 @@ def same_profile_fallback(
     }
 
 
+def candidate_is_automation_eligible(candidate: Mapping[str, Any] | None) -> bool:
+    """Gate único para defaults, hiring, fallback y recovery automáticos.
+
+    ``owner_selectable`` conserva la selección manual explícita. Automatizar
+    exige además que todos los hard gates del score —incluidos calibración y
+    frescura— hayan producido ``auto_eligible=true``.
+    """
+    row = candidate or {}
+    return bool(
+        row.get("owner_selectable") is True
+        and (row.get("selection_score") or {}).get("auto_eligible") is True
+    )
+
+
 def _model_family(model: str) -> str:
     normalized = str(model or "").strip().lower()
     for family, prefixes in {
@@ -313,7 +346,30 @@ def _contextual_score(
     channel: str,
     capacity: Mapping[str, Any],
     budget: Mapping[str, Any],
+    owner_preference: Mapping[str, Any],
+    authority_gate: Mapping[str, Any],
 ) -> dict[str, Any]:
+    owner_state = str(owner_preference.get("state") or "normal")
+    owner_archived = owner_state == "archived"
+    owner_gate = {
+        "passed": not owner_archived,
+        "reason": (
+            "owner_archived"
+            if owner_archived
+            else f"owner_preference:{owner_state}"
+        ),
+        "source": str(owner_preference.get("source") or "default"),
+    }
+    authority_hard_gate = {
+        "passed": authority_gate.get("allowed") is True,
+        "reason": str(authority_gate.get("code") or "tier1_authority_unknown"),
+        "source": str(
+            authority_gate.get("policy_version") or "tier1_authority_unversioned"
+        ),
+    }
+    initial_gates = {"owner_preference": owner_gate}
+    if authority_gate.get("applicable") is True:
+        initial_gates["tier1_authority"] = authority_hard_gate
     if not isinstance(base_score, Mapping):
         return {
             "score_version": MODEL_ROLE_SCORE_VERSION,
@@ -325,9 +381,22 @@ def _contextual_score(
             "unknown_components": list(MODEL_ROLE_SCORE_WEIGHTS),
             "breakdown": {},
             "confidence": {"value": 0.0, "evidence_rank": 0.0},
-            "hard_gates": {},
+            "hard_gates": initial_gates,
             "auto_eligible": False,
-            "auto_ineligible_reasons": ["role_score_missing"],
+            "auto_ineligible_reasons": [
+                "role_score_missing",
+                *(
+                    ["gate:owner_preference:owner_archived"]
+                    if owner_archived
+                    else []
+                ),
+                *(
+                    [f"gate:tier1_authority:{authority_hard_gate['reason']}"]
+                    if authority_gate.get("applicable") is True
+                    and authority_gate.get("allowed") is not True
+                    else []
+                ),
+            ],
             "tie_break": {"evidence_rank": 0.0, "quality": None},
             "rollout": "shadow_only",
             "context_adjustments": {
@@ -338,6 +407,9 @@ def _contextual_score(
         }
     score = deepcopy(dict(base_score))
     gates = score.setdefault("hard_gates", {})
+    gates["owner_preference"] = owner_gate
+    if authority_gate.get("applicable") is True:
+        gates["tier1_authority"] = authority_hard_gate
     allowed = compatibility.get("allowed") is True
     gates["compatible"] = {
         "passed": allowed,
@@ -409,6 +481,12 @@ def _contextual_score(
         "numeric_components_changed": numeric_changes,
         "hard_gates_recomputed": sorted({
             "compatible",
+            "owner_preference",
+            *(
+                ["tier1_authority"]
+                if authority_gate.get("applicable") is True
+                else []
+            ),
             *([context_gate] if context_gate else []),
             *(
                 ["capacity_available"]
@@ -520,11 +598,21 @@ def _capacity_is_unknown(*, channel: str, capacity: Mapping[str, Any]) -> bool:
 
 
 def _disabled_reason(
-    *, decision: Mapping[str, Any], selectable: bool, configured: bool,
+    *, owner_preference: Mapping[str, Any], decision: Mapping[str, Any],
+    selectable: bool, configured: bool,
     green: bool, capacity_state: str, budget_blocked: bool,
+    authority_gate: Mapping[str, Any],
 ) -> str | None:
+    if owner_preference.get("state") == "archived":
+        reason = str(owner_preference.get("reason") or "sin motivo registrado")
+        return f"Modelo archivado por el owner: {reason}"
     if decision.get("allowed") is not True:
         return str(decision.get("reason") or decision.get("code") or "incompatible")
+    if authority_gate.get("allowed") is not True:
+        return str(
+            authority_gate.get("reason")
+            or "La autoridad Tier 1 exacta no está habilitada."
+        )
     if not selectable:
         return "El modelo no está marcado como seleccionable en este adapter."
     if capacity_state == "exhausted_observed":

@@ -1,6 +1,6 @@
 # Instalación e integración de AI Teams
 
-Actualizado: `2026-07-23`
+Actualizado: `2026-07-24`
 
 Esta es la guía canónica para instalar AI Teams en una máquina nueva, trasladar
 una instalación y entregar la integración a una persona o agente de IA. Describe
@@ -95,6 +95,76 @@ siguientes acciones legibles, pero no ejecuta esas acciones. El segundo comando
 genera `machine_doctor_receipt_v1`: compara metadata —no contenido— del checkout
 y configuración local, además de presencia de CLIs conocidos. Solo escribe el
 output explícito, no crea su directorio padre y exige `--force` para reemplazarlo.
+
+### Gate final de versiones CLI
+
+Antes de declarar terminada una instalación, actualización o release, AI Teams
+debe comparar una única matriz versionada contra tres superficies:
+
+1. los requisitos y recomendaciones de esta guía;
+2. el ejecutable exacto que resolverá cada adapter en runtime;
+3. la identidad y versión que publica `machine_doctor_v1`.
+
+La matriz cubre como mínimo Codex, Antigravity y OpenCode. Para cada CLI
+conserva estado requerido/opcional, origen o tag permitido (`stable` o una
+prerelease explícita), rango compatible, ejecutable resuelto y relación con el
+catálogo/cache que vaya a consumir. No basta con que el comando exista:
+versiones desconocidas, un doctor y runtime que resuelvan binarios distintos,
+una prerelease no declarada o un CLI más antiguo que su catálogo fallan
+cerrado. Un CLI opcional ausente no bloquea si guía, manifiesto y doctor
+coinciden en que es opcional.
+
+La autoridad canónica ya está reservada como
+`provider_cli_version_contract_v1` dentro de
+`config/installation_support.v1.json`. Sus versiones son suelos validados y
+fechados, no una afirmación de que sean permanentemente las últimas ni una
+prueba de health. Los adapters referenciados aportan los comandos candidatos,
+por lo que la matriz no mantiene una segunda lista de ejecutables. Codex
+declara de forma explícita la prerelease validada; Antigravity y OpenCode
+declaran canal estable. OpenCode continúa opcional aunque esté inventariado.
+
+Doctor y runtime resuelven los CLIs mediante
+`platform_runtime.resolve_provider_cli`. `machine_doctor_v1` publica únicamente
+el basename y un fingerprint SHA-256 con dominio versionado que liga la ruta
+resuelta normalizada y el contenido del ejecutable; nunca emite la ruta. Esto
+permite detectar shims/copias diferentes aunque anuncien el mismo nombre y
+versión. Un fingerprint `null` significa identidad no verificable y el auditor
+final debe tratarlo como fallo para un CLI instalado.
+
+El auditor ejecutable es:
+
+```powershell
+.\scripts\python_local.bat scripts\audit_provider_cli_versions.py `
+  --output runtime\provider-cli-version-audit.json --strict
+```
+
+`provider_cli_version_audit_v1` compara doctor/runtime, SemVer y canales,
+fingerprints y documentación. Para Codex inspecciona el cache local vivo; para
+Antigravity/OpenCode exige un recibo de catálogo fresco ligado a la versión
+exacta. El estado `promotion_ready` pertenece exclusivamente al gate de
+instalación/release: no concede auth, health, compatibilidad de rol,
+calibración ni selección automática de modelos.
+
+Este gate pertenece a la aceptación final, no al bootstrap mutante: es
+read-only, no actualiza CLIs ni inicia login y genera un receipt redacted ligado
+a revisión Git, OS y arquitectura. Se ejecuta tanto sobre una instalación
+limpia como sobre una actualización existente. Ninguna versión concreta
+documentada se considera permanente; cuando cambie el canal oficial se
+actualizan juntos guía, matriz y expectativas del doctor.
+
+La equivalencia de ambos recorridos se audita sin depender del entorno personal:
+
+```powershell
+.\scripts\python_local.bat scripts\audit_provider_cli_update_acceptance.py `
+  --output runtime\provider-cli-update-acceptance.json --strict
+```
+
+El fixture exige que un clone limpio y un checkout tras fast-forward produzcan
+la misma matriz y hash. Conserva además el preflight fallido de la actualización
+cuando coexisten versión antigua y binario divergente. Los canarios negativos
+bloquean versión inferior, prerelease no declarada, documentación obsoleta y
+catálogo desincronizado; OpenCode ausente se acepta porque continúa siendo
+opcional. No instala, autentica ni ejecuta inferencias.
 
 Para obtener guía sobre una acción ya diagnosticada:
 
@@ -197,9 +267,16 @@ El contrato ejecutable de I.1.4 vive en
 - checkout de la revisión exacta;
 - bootstrap dos veces;
 - auditoría estricta del control plane;
-- arranque y health de backend/frontend;
-- creación de un proyecto fixture con issue inicial y SQLite válida;
-- parada y comprobación de puertos liberados;
+- arranque, health y parada de backend/frontend antes y después de simular una
+  actualización;
+- creación de un proyecto fixture por `guided_setup_project_commit_v1`, nunca
+  por el comando legacy retirado, con Lead único, issue inicial y SQLite válida;
+- retry fail-closed sin sibling numerado y footprint raíz/árbol sellado;
+- bootstrap de checkout existente y equivalencia clean/update sin mutar el
+  proyecto;
+- rollback SQLite byte a byte, retirada del backup y puertos liberados;
+- comprobación de que los entrypoints no registran tareas programadas,
+  servicios, startup ni limpieza automática/startup/TTL;
 - verificación de que el bootstrap no instaló CLIs globales.
 
 El workflow conserva `windows-clean-room-receipt.json` como artefacto redacted.
@@ -213,6 +290,27 @@ python scripts\accept_windows_clean_room.py `
   --receipt "$env:TEMP\windows-clean-room-receipt.json" `
   --fixture-root "$env:TEMP\aiteam-i1-fixtures"
 ```
+
+El receipt incluye `source.harness_sha256` y
+`source.working_tree_dirty`. Un job Git solo puede declarar
+`independent_machine=true` si la provenance SHA coincide y el checkout está
+limpio. Un receipt local dirty puede validar funcionalidad, pero nunca
+promocionar soporte.
+
+El workflow ejecuta dos celdas independientes:
+
+- `clean-clone`, directamente sobre el SHA objetivo;
+- `existing-checkout-updated`, que abre `HEAD^`, ejecuta el bootstrap vigente
+  allí, comprueba que no mutó fuentes tracked y avanza al mismo SHA objetivo
+  antes de lanzar el runner actualizado.
+
+Un tercer job descarga ambos receipts y ejecuta
+`scripts/audit_windows_clean_room_matrix.py`. El agregado solo queda verde si
+ambos receipts son independientes, promocionables y clean, comparten revisión y
+hash del harness, el baseline es distinto y todos los gates de commit guiado,
+retry, restart/update, rollback y lifecycle persistente pasan. Preparar el
+workflow no sustituye ejecutarlo: el cierre exige publicar un SHA limpio y
+conservar los artefactos reales de GitHub Actions.
 
 La revisión `f2a20ed` completó el workflow en el
 [run 30023876549](https://github.com/MaxBonas/ai-teams/actions/runs/30023876549).
@@ -238,7 +336,8 @@ instalación:
 ```
 
 `--allow-preview` existe solo para depuración local y fuerza
-`promotion_allowed=false`. El recibo canónico exige 17/17 pasos, restauración
+`promotion_allowed=false`. El recibo canónico exigía 17/17 pasos; I.10.4 añade
+`provider_cli_version_gate` como paso 18, además de restauración
 SQLite byte a byte y ausencia de CLIs globales nuevos. En un tag, el workflow de
 release ejecuta este harness sobre el mismo ZIP en `windows-latest`,
 `ubuntu-latest` y `macos-latest`; el job de publicación depende de las tres
@@ -262,7 +361,8 @@ sh scripts/python_local.sh scripts/migrate_to_v2.py --json
 bootstrap usa `venv/`, `node_modules/` y `runtime/` del checkout, locks
 versionados y exclusión mutua, nunca instalaciones globales. La misma matriz de
 recovery está implementada como contrato y el harness POSIX ya ejecuta los 17
-gates del ZIP. Sus filas permanecen `planned` hasta conservar receipts reales
+gates originales del ZIP más `provider_cli_version_gate` como paso 18. Sus
+filas permanecen `planned` hasta conservar receipts reales
 de CI ligados al SHA y repetir la aceptación en máquinas físicas. Disponer del
 harness no convierte la plataforma en `verified`.
 
@@ -361,6 +461,51 @@ Ubicación actual de configuración de usuario:
 puede persistirla en `settings.json`. Los perfiles de adapter, health y secretos
 son locales: un perfil solo está disponible si su canal exacto está configurado
 y verde en esa máquina.
+
+### Higiene y propiedad de la raíz de proyectos
+
+La raíz de proyectos puede contener proyectos personales y de AI Teams. Por
+ello, una carpeta con `.aiteam/` demuestra que el producto la inicializó o
+importó, pero no demuestra que pueda eliminarse. Creación, importación,
+actualización, doctor y tests deben cumplir estas invariantes:
+
+- una instalación limpia solo crea el destino exacto aceptado y `.aiteam/`
+  dentro de él; no instala ni necesita ningún limpiador posterior;
+- una colisión de nombre o ruta se bloquea y requiere una decisión explícita;
+  nunca se resuelve creando automáticamente `Nombre 2`, `Nombre 3`, etc.;
+- cada carpeta materializada conserva provenance durable de sesión, operación,
+  versión y lifecycle; retries idempotentes reutilizan la misma identidad;
+- tests y aceptación usan `AITEAM_PROJECTS_ROOT` temporal y hermético, nunca la
+  raíz personal o el padre del repositorio;
+- staging pertenece a una operación transaccional temporal: se publica
+  atómicamente o se retira antes de devolver control; no quedan tombstones,
+  receipts ni cuarentenas como siblings de proyectos personales;
+- doctor puede inventariar y avisar, pero no borrar, mover ni reparar carpetas
+  durante startup o actualización.
+
+AI Teams no instala daemons de limpieza, tareas programadas, hooks destructivos
+de startup ni TTL sobre proyectos o cuarentenas. Reiniciar, reintentar o
+actualizar tampoco debe crear una carpeta nueva. La aceptación portable compara
+el footprint antes y después de clone, bootstrap, primer proyecto, retry,
+restart y actualización, y falla ante cualquier path no declarado.
+
+La creación antigua por `POST /api/projects/new` y `aiteam project create` no
+existe. `POST /api/workspace` y `aiteam project use` solo seleccionan un
+directorio ya inicializado; nunca crean `.aiteam/`. Toda creación/importación
+pasa por propuesta, preflight y commit sellados del asistente. Un fallo de
+borrado explícito conserva la ruta original y exige que el usuario cierre los
+handles y reintente: no la renombra ni deja trabajo de limpieza pendiente.
+
+Para una instalación existente, la auditoría comienza siempre en modo
+read-only. Debe comprobar `.aiteam`, SQLite, referencias del workspace, Git
+remoto/branch/dirty/untracked, tamaño, fechas y symlinks/reparse points antes de
+proponer una categoría. Los elementos ambiguos o personales quedan protegidos.
+La acción posterior es un dry-run con manifest y hash exactos; solo una
+aprobación humana permite mover candidatos a cuarentena recuperable. El borrado
+permanente requiere otra confirmación tras validar la restauración. Nunca usar
+globs ni una raíz completa como objetivo destructivo. Esta remediación es una
+herramienta manual y opt-in para instalaciones legacy; no forma parte del
+lifecycle normal ni se ejecuta en una instalación limpia.
 
 Para APIs, configurar únicamente las variables necesarias usando
 `.env.example` como referencia. Para suscripciones, instalar y autenticar el CLI

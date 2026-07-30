@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-sol",
+  "role": "quorum_auditor",
+  "prompt_version": "v2",
+  "required_cases": [
+    "tenant_queue_migration",
+    "auth_rollout_incident"
+  ],
+  "required_seeds": [
+    1,
+    2,
+    3
+  ],
+  "samples_observed": 6,
+  "samples_passed": 6,
+  "matrix_complete": true,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-auth-rollout-cli-0.146.0-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-auth-rollout-cli-0.146.0-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-auth-rollout-cli-0.146.0-seed-3.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-tenant-queue-cli-0.146.0-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-tenant-queue-cli-0.146.0-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-tenant-queue-cli-0.146.0-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-auth-rollout-cli-0.146.0-seed-1.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "c2834c690513a4a8adb77718356e3e1aa6989174455eb2aa82a42169a65f4145"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-auth-rollout-cli-0.146.0-seed-2.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "5146bfe330f9f4baa29e53385b690a3a540025b73121ae8d791f90ed635151ba"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-auth-rollout-cli-0.146.0-seed-3.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "6b074c80ce38c9d4f2bb383d03369aeb14b9547e46195a021093c6180b034109"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-tenant-queue-cli-0.146.0-seed-1.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "61b0fb77d4746f1f58553ff3af6484fc6a2d0c1abc64e8af2df72a839bd48661"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-tenant-queue-cli-0.146.0-seed-2.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "8129738e3a2ca3dfb2fd27fd58c1d2d1f34edc37c4fc9e37f912255db009d066"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-quorum_auditor-tenant-queue-cli-0.146.0-seed-3.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "f34e115c5c889a13cffa53fa5a644069500e45f06a58d501150e50817f8c9275"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "responses_hashed": true,
+    "single_prompt_version": true
+  },
+  "wall_seconds_median": 13.75,
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "reason": "eligible_for_registry_review",
+    "next_gate": "M.7.4 snapshot vivo y promoción gobernada"
+  }
+}

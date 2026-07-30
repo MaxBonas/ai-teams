@@ -15,12 +15,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from api.routers.workspace import _initialize_project_runtime  # noqa: E402
 from aiteam.adapters.registry import build_default_registry  # noqa: E402
 from aiteam.db.agent_reports import latest_agent_report  # noqa: E402
 from aiteam.db.agents import create_agent  # noqa: E402
@@ -31,10 +29,13 @@ from aiteam.extensions import approve_mcp_server, approve_mcp_server_tools  # no
 from aiteam.heartbeat.executor import RunExecutor  # noqa: E402
 from aiteam.heartbeat.scheduler import HeartbeatScheduler  # noqa: E402
 from aiteam.mcp_runtime import check_and_activate_mcp_server  # noqa: E402
-from aiteam.project_adapters import project_profiles, write_project_adapter_policy  # noqa: E402
+from aiteam.project_adapters import (  # noqa: E402
+    project_profiles,
+    write_project_adapter_policy,
+)
 from aiteam.tools.catalog import default_capabilities_for_role  # noqa: E402
 from aiteam.user_config import DEFAULT_ADAPTER_PROFILES  # noqa: E402
-
+from api.routers.workspace import _initialize_project_runtime  # noqa: E402
 
 CONTRACT_VERSION = "tier3_causal_report_v2"
 TIER3_DIVERSITY_CONTRACT = "tier3_two_family_causal_report_v3"
@@ -48,9 +49,30 @@ SUPPORTED_PROFILES = (
 
 def bootstrap_profile_ids(profile_id: str) -> list[str]:
     """Provide a non-executed Lead profile when the target is deliberately non-Lead."""
-    if profile_id.startswith("local_"):
+    if profile_id != "codex_subscription":
         return [profile_id, "codex_subscription"]
     return [profile_id]
+
+
+def benchmark_lead_identity(profile_id: str) -> tuple[str, str]:
+    """Fija un Lead calibrado; el benchmark mide únicamente el especialista."""
+    return "codex_subscription", "gpt-5.6-sol"
+
+
+def profile_supports_governed_mcp(profile_id: str) -> bool:
+    """Filtra transportes incapaces antes de atribuir el fallo al modelo."""
+    profile = next(
+        (item for item in DEFAULT_ADAPTER_PROFILES if item["id"] == profile_id),
+        None,
+    )
+    if profile is None:
+        return False
+    config = (
+        profile.get("config")
+        if isinstance(profile.get("config"), dict)
+        else {}
+    )
+    return str(config.get("cli_kind") or "").lower() in {"codex", "opencode"}
 
 
 def cli_version_for_profile(profile_id: str) -> str:
@@ -409,6 +431,17 @@ def run_canary(
     case_family: str | None = None,
 ) -> dict[str, Any]:
     resolved_family, case = resolve_case(role, case_family)
+    provider_version = cli_version_for_profile(profile_id)
+    if not provider_version:
+        raise RuntimeError(
+            f"no se pudo observar la versión del transporte {profile_id}"
+        )
+    if role in {"web_scout", "mcp_operator"} and not profile_supports_governed_mcp(
+        profile_id
+    ):
+        raise RuntimeError(
+            f"{profile_id} no ofrece un loop MCP gobernado apto para {role}"
+        )
     workspace.mkdir(parents=True, exist_ok=True)
     for relative, content in case["files"].items():
         target = workspace / relative
@@ -423,7 +456,13 @@ def run_canary(
     write_project_adapter_policy(
         runtime, profile_ids=bootstrap_profile_ids(profile_id)
     )
-    _initialize_project_runtime(workspace, run_profile="solo_lead")
+    lead_profile_id, lead_model = benchmark_lead_identity(profile_id)
+    _initialize_project_runtime(
+        workspace,
+        run_profile="solo_lead",
+        lead_adapter_profile_id=lead_profile_id,
+        lead_model=lead_model,
+    )
     db = runtime / "aiteam.db"
     mcp_trace = runtime / f"{role.replace('_', '-')}-mcp-trace.jsonl"
     policy_case = resolved_family == "dependency_policy_governance"
@@ -594,7 +633,7 @@ def run_canary(
         "benchmark": "tier3_role_canary",
         "profile_id": profile_id,
         "model": model,
-        "provider_version": cli_version_for_profile(profile_id),
+        "provider_version": provider_version,
         "reasoning_effort": (
             reasoning_effort if profile_id == "codex_subscription" else None
         ),
@@ -685,10 +724,9 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
     role = reports[0].get("role") if reports else None
     unmeasured = (
         ["MCP remoto", "credenciales reales", "recovery durante una llamada activa"]
-        if role == "web_scout"
+        if role in {"web_scout", "mcp_operator"}
         else ["workspaces grandes", "peticiones ambiguas", "inputs binarios"]
     )
-    calibrated = matrix_complete and sources_bound and passed == 3
     artifact_passed = sum(
         (report.get("checks") or {}).get("artifact_contract") is True
         for report in reports
@@ -697,12 +735,20 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         (report.get("checks") or {}).get("single_attempt") is True
         for report in reports
     )
+    calibrated = (
+        matrix_complete
+        and sources_bound
+        and passed == 3
+        and artifact_passed == 3
+        and single_attempt == 3
+    )
     return {
         "schema_version": 1,
         "benchmark": "codex_tier_role_canary_aggregate",
         "profile_id": reports[0].get("profile_id") if reports else None,
         "model": reports[0].get("model") if reports else None,
         "provider_version": next(iter(provider_versions), None),
+        "same_provider_version": same_provider_version,
         "role": role,
         "reasoning_effort": reports[0].get("reasoning_effort") if reports else None,
         "contract_version": reports[0].get("contract_version") if reports else None,
@@ -786,6 +832,12 @@ def aggregate_diverse_family_reports(
     same_provider_version = (
         len(provider_versions) == 1 and "" not in provider_versions
     )
+    family_contract_versions = {
+        str(report.get("contract_version") or "") for report in aggregates
+    }
+    same_current_family_contract = family_contract_versions == {
+        CONTRACT_VERSION
+    }
     sources = [str(report.get("_source_receipt") or "") for report in aggregates]
     hashes = [
         hashlib.sha256(
@@ -824,6 +876,7 @@ def aggregate_diverse_family_reports(
         and len(families) == 2
         and identities == expected_identity
         and same_provider_version
+        and same_current_family_contract
         and len(sources) == 2
         and all(sources)
         and len(set(sources)) == 2
@@ -857,6 +910,7 @@ def aggregate_diverse_family_reports(
         "integrity": {
             "same_exact_pair": identities == expected_identity,
             "same_provider_version": same_provider_version,
+            "same_current_family_contract": same_current_family_contract,
             "two_distinct_families": len(families) == 2,
             "sources_bound": len(sources) == 2 and all(sources),
             "sources_hashed": len(hashes) == 2,

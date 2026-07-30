@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
+import shutil
 import sqlite3
 import statistics
 import subprocess
@@ -12,22 +14,26 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from api.routers.workspace import _initialize_project_runtime  # noqa: E402
 from aiteam.adapters.registry import build_default_registry  # noqa: E402
 from aiteam.db.agents import create_agent  # noqa: E402
 from aiteam.db.issues import create_issue  # noqa: E402
 from aiteam.db.wakeups import enqueue_wakeup  # noqa: E402
 from aiteam.heartbeat.executor import RunExecutor  # noqa: E402
 from aiteam.heartbeat.scheduler import HeartbeatScheduler  # noqa: E402
-from aiteam.project_adapters import project_profiles, write_project_adapter_policy  # noqa: E402
+from aiteam.project_adapters import (  # noqa: E402
+    project_profiles,
+    write_project_adapter_policy,
+)
 from aiteam.tools.catalog import default_capabilities_for_role  # noqa: E402
-from aiteam.user_config import DEFAULT_ADAPTER_PROFILES  # noqa: E402
-
+from aiteam.user_config import (  # noqa: E402
+    DEFAULT_ADAPTER_PROFILES,
+    resolve_adapter_config,
+)
+from api.routers.workspace import _initialize_project_runtime  # noqa: E402
 
 PRODUCTION = '''def quote(unit_price, quantity, discount_pct=0):
     """Return a two-decimal quote or reject invalid commercial inputs."""
@@ -96,6 +102,7 @@ SUPPORTED_PROFILES = (
     "codex_subscription",
     "antigravity_subscription",
     "local_gemma4_ollama",
+    "gemini_api_free",
 )
 CONTRACT_VERSION = "independent_test_designer_mutation_v2"
 TEST_DESIGNER_DIVERSITY_CONTRACT = "independent_test_designer_two_family_v3"
@@ -140,13 +147,62 @@ def adapter_config(profile_id: str, model: str) -> dict[str, Any]:
             }
         )
         return config
+    if profile_id == "gemini_api_free":
+        config = resolve_adapter_config(
+            "gemini_api", {"profile_id": profile_id}
+        )
+        config.update(
+            {
+                "profile_id": profile_id,
+                "model": model,
+                "timeout_sec": 240,
+            }
+        )
+        return config
     raise ValueError(f"unsupported benchmark profile: {profile_id}")
 
 
 def bootstrap_profile_ids(profile_id: str) -> list[str]:
-    if profile_id.startswith("local_"):
+    if profile_id != "codex_subscription":
         return [profile_id, "codex_subscription"]
     return [profile_id]
+
+
+def benchmark_lead_identity(profile_id: str) -> tuple[str, str]:
+    """Fija un Lead calibrado; el benchmark mide únicamente Test Designer."""
+    return "codex_subscription", "gpt-5.6-sol"
+
+
+def provider_version_for_profile(profile_id: str) -> str:
+    """Observa la versión del transporte exacto antes de consumir inferencia."""
+    if profile_id == "gemini_api_free":
+        config = resolve_adapter_config(
+            "gemini_api", {"profile_id": profile_id}
+        )
+        provider = str(config.get("provider") or "google")
+        api_version = str(config.get("api_version") or "")
+        return f"api:{provider}:{api_version}" if api_version else ""
+    command = {
+        "codex_subscription": "codex",
+        "antigravity_subscription": "agy",
+    }.get(profile_id, "")
+    executable = shutil.which(command) if command else None
+    if not executable:
+        return ""
+    completed = subprocess.run(
+        [executable, "--version"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    match = re.search(
+        r"\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b",
+        f"{completed.stdout}\n{completed.stderr}",
+    )
+    return match.group(1) if completed.returncode == 0 and match else ""
 
 
 def durable_authored_files(
@@ -210,7 +266,7 @@ def evaluate_mutation_suite(
         "baseline": baseline,
         "mutants": results,
         "mutants_killed": sum(bool(result["killed"]) for result in results.values()),
-        "mutants_total": len(MUTANTS),
+        "mutants_total": len(mutation_set),
     }
 
 
@@ -232,6 +288,11 @@ def run_canary(
 ) -> dict[str, Any]:
     if case_family not in SUPPORTED_CASE_FAMILIES:
         raise ValueError(f"unsupported Test Designer family: {case_family}")
+    provider_version = provider_version_for_profile(profile_id)
+    if not provider_version:
+        raise RuntimeError(
+            f"no se pudo observar la versión del transporte {profile_id}"
+        )
     is_state_machine = case_family == STATE_MACHINE_FAMILY
     production_filename = "job_state.py" if is_state_machine else "pricing.py"
     production_source = STATE_MACHINE_PRODUCTION if is_state_machine else PRODUCTION
@@ -249,7 +310,13 @@ def run_canary(
     write_project_adapter_policy(
         runtime, profile_ids=bootstrap_profile_ids(profile_id)
     )
-    _initialize_project_runtime(workspace, run_profile="solo_lead")
+    lead_profile_id, lead_model = benchmark_lead_identity(profile_id)
+    _initialize_project_runtime(
+        workspace,
+        run_profile="solo_lead",
+        lead_adapter_profile_id=lead_profile_id,
+        lead_model=lead_model,
+    )
     db = runtime / "aiteam.db"
     profile = next(item for item in project_profiles(runtime) if item["id"] == profile_id)
     agent_id = "role:benchmark_test_designer"
@@ -292,14 +359,25 @@ def run_canary(
         )
         + (
             "Cubre happy path y cada frontera o transición inválida. No edites producción ni "
-            "otros archivos. No conoces los mutantes ocultos. Persiste un AGENT-REPORT válido "
-            "dentro del add_comment final, notifica al supervisor y cierra done."
+            "otros archivos. No conoces los mutantes ocultos. La evaluación externa ejecutará "
+            "la suite aunque el intérprete local no esté disponible. En el add_comment final "
+            "termina con exactamente este contrato, conservando las claves en inglés:\n"
+            "---AGENT-REPORT---\n"
+            "role: test_designer\n"
+            "result: done\n"
+            "issue_status: done\n"
+            "next_owner: lead\n"
+            "blocker: none\n"
+            "evidence: tests de aceptación escritos en el único archivo autorizado\n"
+            "---END-AGENT-REPORT---\n"
+            "Notifica al supervisor y después cierra done."
         ),
         status="todo",
         role="test_designer",
         complexity="medium",
         criticality="medium",
         assignee_agent_id=agent_id,
+        metadata={"data_class": "public"},
     )
     enqueue_wakeup(
         db,
@@ -356,6 +434,7 @@ def run_canary(
         "benchmark": "codex_terra_independent_test_designer",
         "profile_id": profile_id,
         "model": model,
+        "provider_version": provider_version,
         "contract_version": CONTRACT_VERSION,
         "case_family": case_family,
         "role": "test_designer",
@@ -417,6 +496,7 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         (
             report.get("profile_id"),
             report.get("model"),
+            report.get("provider_version"),
             report.get("role"),
             report.get("contract_version"),
             report.get("case_family", PRICING_FAMILY),
@@ -455,7 +535,16 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
     )
     source_receipts = [str(row["receipt"]) for row in manifest if row["receipt"]]
     sources_bound = len(source_receipts) == 3 and len(set(source_receipts)) == 3
-    calibrated = matrix_complete and sources_bound and passed == 3
+    provider_versions = {
+        str(report.get("provider_version") or "") for report in reports
+    }
+    same_provider_version = (
+        len(provider_versions) == 1 and "" not in provider_versions
+    )
+    calibrated = (
+        matrix_complete and sources_bound and passed == 3
+        and same_provider_version
+    )
     usage_observed = any(
         key.endswith("_tokens") and value
         for key, value in usage.items()
@@ -465,6 +554,8 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "benchmark": "codex_terra_independent_test_designer_aggregate",
         "profile_id": reports[0].get("profile_id") if reports else None,
         "model": reports[0].get("model") if reports else None,
+        "provider_version": next(iter(provider_versions), None),
+        "same_provider_version": same_provider_version,
         "role": "test_designer",
         "contract_version": reports[0].get("contract_version") if reports else None,
         "case_family": (
@@ -475,7 +566,11 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "samples_passed": passed,
         "source_receipts": source_receipts,
         "sample_manifest": manifest,
-        "integrity": {"sources_bound": sources_bound, "evidence_hashed": True},
+        "integrity": {
+            "sources_bound": sources_bound,
+            "evidence_hashed": True,
+            "same_provider_version": same_provider_version,
+        },
         "checks_passed": checks_passed,
         "checks_total": checks_total,
         "wall_seconds_median": round(statistics.median(seconds), 3) if seconds else None,
@@ -517,6 +612,18 @@ def aggregate_diverse_family_reports(
         (str(report.get("profile_id") or ""), str(report.get("model") or ""))
         for report in aggregates
     }
+    provider_versions = {
+        str(report.get("provider_version") or "") for report in aggregates
+    }
+    same_provider_version = (
+        len(provider_versions) == 1 and "" not in provider_versions
+    )
+    family_contract_versions = {
+        str(report.get("contract_version") or "") for report in aggregates
+    }
+    same_current_family_contract = family_contract_versions == {
+        CONTRACT_VERSION
+    }
     sources = [str(report.get("_source_receipt") or "") for report in aggregates]
     hashes = [
         hashlib.sha256(
@@ -547,6 +654,8 @@ def aggregate_diverse_family_reports(
         len(aggregates) == 2
         and len(families) == 2
         and identities == {(profile_id, model)}
+        and same_provider_version
+        and same_current_family_contract
         and len(sources) == 2
         and all(sources)
         and len(set(sources)) == 2
@@ -562,6 +671,7 @@ def aggregate_diverse_family_reports(
         "benchmark": "test_designer_behavioral_diversity_aggregate",
         "profile_id": profile_id,
         "model": model,
+        "provider_version": next(iter(provider_versions), None),
         "role": "test_designer",
         "contract_version": TEST_DESIGNER_DIVERSITY_CONTRACT,
         "case_families": families,
@@ -575,6 +685,8 @@ def aggregate_diverse_family_reports(
         "source_sha256": hashes,
         "integrity": {
             "same_exact_pair": identities == {(profile_id, model)},
+            "same_provider_version": same_provider_version,
+            "same_current_family_contract": same_current_family_contract,
             "two_distinct_families": len(families) == 2,
             "sources_bound": len(sources) == 2 and all(sources),
             "sources_hashed": len(hashes) == 2,

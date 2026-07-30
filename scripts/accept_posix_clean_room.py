@@ -17,6 +17,10 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from aiteam.provider_cli_acceptance_fixture import (
+    build_provider_cli_acceptance_fixture,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_PORT = 8010
 FRONTEND_PORT = 9490
@@ -356,6 +360,40 @@ def main() -> int:
             "control_plane_ready": True,
             "live_runs_status": audit.get("live_runs", {}).get("status"),
             "runtimes": runtimes,
+        }
+
+        env.update(
+            build_provider_cli_acceptance_fixture(
+                fixture_root,
+                os_id="macos" if system == "darwin" else "linux",
+            )
+        )
+        cli_gate_proc = step(
+            "provider_cli_version_gate",
+            [
+                "sh",
+                "scripts/python_local.sh",
+                "scripts/audit_provider_cli_versions.py",
+                "--json",
+                "--strict",
+            ],
+            180,
+        )
+        cli_gate = json.loads(cli_gate_proc.stdout)
+        receipt["provider_cli_version_gate"] = {
+            "schema_version": cli_gate.get("schema_version"),
+            "fixture_mode": env["AITEAM_PROVIDER_CLI_FIXTURE"],
+            "summary": cli_gate.get("summary"),
+            "rows": [
+                {
+                    "cli_id": item.get("cli_id"),
+                    "version": item.get("runtime", {}).get("version"),
+                    "executable": item.get("runtime", {}).get("executable"),
+                    "fingerprint": item.get("runtime", {}).get("fingerprint"),
+                    "status": item.get("status"),
+                }
+                for item in cli_gate.get("rows", [])
+            ],
         }
 
         step(

@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
 import statistics
 import subprocess
@@ -13,22 +14,24 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from api.routers.workspace import _initialize_project_runtime  # noqa: E402
 from aiteam.adapters.registry import build_default_registry  # noqa: E402
 from aiteam.db.agents import create_agent  # noqa: E402
-from aiteam.db.comments import list_comments  # noqa: E402
+from aiteam.db.comments import create_comment, list_comments  # noqa: E402
 from aiteam.db.issues import create_issue, update_issue  # noqa: E402
 from aiteam.db.wakeups import enqueue_wakeup  # noqa: E402
 from aiteam.heartbeat.executor import RunExecutor  # noqa: E402
 from aiteam.heartbeat.scheduler import HeartbeatScheduler  # noqa: E402
-from aiteam.project_adapters import project_profiles, write_project_adapter_policy  # noqa: E402
+from aiteam.project_adapters import (  # noqa: E402
+    project_profiles,
+    write_project_adapter_policy,
+)
 from aiteam.tools.catalog import default_capabilities_for_role  # noqa: E402
-
+from aiteam.user_config import resolve_adapter_config  # noqa: E402
+from api.routers.workspace import _initialize_project_runtime  # noqa: E402
 
 BROKEN = '''def can_access(actor, resource):
     """Return whether actor may read resource."""
@@ -66,9 +69,13 @@ FIXED_WEBHOOK = '''def accept_webhook(event, seen_ids, now):
 
 # Model-role calibration must not measure the separate human-approval gate.
 QA_CANARY_CRITICALITY = "medium"
-SUPPORTED_PROFILES = ("codex_subscription", "antigravity_subscription")
-CONTRACT_VERSION = "adversarial_qa_fix_cycle_v2"
-QA_DIVERSITY_CONTRACT = "adversarial_qa_two_family_v3"
+SUPPORTED_PROFILES = (
+    "codex_subscription",
+    "antigravity_subscription",
+    "gemini_api_free",
+)
+CONTRACT_VERSION = "adversarial_qa_fix_cycle_v4"
+QA_DIVERSITY_CONTRACT = "adversarial_qa_two_family_v5"
 AUTH_FAMILY = "authorization_boundary"
 WEBHOOK_FAMILY = "webhook_replay_boundary"
 SUPPORTED_CASE_FAMILIES = (AUTH_FAMILY, WEBHOOK_FAMILY)
@@ -95,12 +102,68 @@ def adapter_config(profile_id: str, model: str) -> dict[str, Any]:
             "sandbox": "workspace-write",
             "timeout_sec": 240,
         }
+    if profile_id == "gemini_api_free":
+        config = resolve_adapter_config(
+            "gemini_api", {"profile_id": profile_id}
+        )
+        config.update(
+            {
+                "profile_id": profile_id,
+                "model": model,
+                "timeout_sec": 240,
+            }
+        )
+        return config
     raise ValueError(f"unsupported benchmark profile: {profile_id}")
+
+
+def bootstrap_profile_ids(profile_id: str) -> list[str]:
+    if profile_id != "codex_subscription":
+        return [profile_id, "codex_subscription"]
+    return [profile_id]
+
+
+def benchmark_lead_identity(profile_id: str) -> tuple[str, str]:
+    """Fija un Lead calibrado; el benchmark mide únicamente el rol QA."""
+    return "codex_subscription", "gpt-5.6-sol"
+
+
+def provider_version_for_profile(profile_id: str) -> str:
+    """Observa la versión del transporte exacto antes de ejecutar el canario."""
+    if profile_id == "gemini_api_free":
+        config = resolve_adapter_config(
+            "gemini_api", {"profile_id": profile_id}
+        )
+        provider = str(config.get("provider") or "google")
+        api_version = str(config.get("api_version") or "")
+        return f"api:{provider}:{api_version}" if api_version else ""
+    command = {
+        "codex_subscription": "codex",
+        "antigravity_subscription": "agy",
+    }.get(profile_id, "")
+    executable = shutil.which(command) if command else None
+    if not executable:
+        return ""
+    completed = subprocess.run(
+        [executable, "--version"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    match = re.search(
+        r"\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b",
+        f"{completed.stdout}\n{completed.stderr}",
+    )
+    return match.group(1) if completed.returncode == 0 and match else ""
 
 
 def evaluate_adversarial_test(text: str) -> dict[str, Any]:
     anchors = {
         "imports_target": bool(re.search(r"(?:from\s+auth\s+import\s+can_access|auth\.can_access)", text)),
+        "exact_tenant_id_field": "tenant_id" in text,
         "cross_tenant": "tenant-a" in text.lower() and "tenant-b" in text.lower(),
         "inactive_actor": bool(
             re.search(
@@ -236,8 +299,16 @@ def run_canary(
     production_file.write_text(broken_source, encoding="utf-8")
     runtime = workspace / ".aiteam"
     runtime.mkdir(parents=True, exist_ok=True)
-    write_project_adapter_policy(runtime, profile_ids=[profile_id])
-    _initialize_project_runtime(workspace, run_profile="solo_lead")
+    write_project_adapter_policy(
+        runtime, profile_ids=bootstrap_profile_ids(profile_id)
+    )
+    lead_profile_id, lead_model = benchmark_lead_identity(profile_id)
+    _initialize_project_runtime(
+        workspace,
+        run_profile="solo_lead",
+        lead_adapter_profile_id=lead_profile_id,
+        lead_model=lead_model,
+    )
     db = runtime / "aiteam.db"
     profile = next(item for item in project_profiles(runtime) if item["id"] == profile_id)
     agent_id = "role:benchmark_qa"
@@ -269,8 +340,10 @@ def run_canary(
             )
             if is_webhook
             else (
-                "Especificación: can_access solo permite actor activo del mismo tenant; un recurso "
-                "private exige role admin. Intenta romper auth.py. Escribe únicamente "
+                "Especificación exacta: actor usa las claves tenant_id, active y role; resource "
+                "usa tenant_id y private. can_access solo permite actor activo con el mismo "
+                "tenant_id; un recurso private exige role admin. Usa esas claves exactas en los "
+                "casos. Intenta romper auth.py. Escribe únicamente "
                 "tests/test_adversarial_auth.py con casos que FALLEN ahora: cruce tenant-a/tenant-b, "
                 "actor inactive y private con role member. "
             )
@@ -279,14 +352,17 @@ def run_canary(
             "Ejecuta esos tests. No edites producción ni otros archivos. Si demuestran defecto, "
             "reporta changes_requested pero cierra tu issue done para que el Engineer corrija. "
             "Tras la corrección, elimina tests adversariales que ya pasen y reporta approved con "
-            "evidencia de los límites atacados. Siempre usa un AGENT-REPORT válido y "
-            "notify_supervisor."
+            "evidencia de los límites atacados. Antes de la reverificación, un test_runner "
+            "determinista añadirá al hilo el exit code y la salida contra la corrección; esa "
+            "evidencia prevalece si tu shell no puede resolver el intérprete. Siempre usa un "
+            "AGENT-REPORT válido y notify_supervisor."
         ),
         status="todo",
         role="qa",
         complexity="medium",
         criticality=QA_CANARY_CRITICALITY,
         assignee_agent_id=agent_id,
+        metadata={"data_class": "public"},
     )
 
     phase1 = _run_phase(db, agent_id=agent_id, issue_id=issue_id, phase=f"attack-seed-{seed}")
@@ -301,6 +377,23 @@ def run_canary(
     failing_run = _run_pytest(workspace, tests_after_attack)
 
     production_file.write_text(fixed_source, encoding="utf-8")
+    passing_run = _run_pytest(workspace, tests_after_attack)
+    create_comment(
+        db,
+        issue_id=issue_id,
+        body=(
+            "TEST-RUNNER determinista tras el fix\n"
+            f"executed={passing_run['executed']}\n"
+            f"exit_code={passing_run['exit_code']}\n"
+            f"stdout:\n{passing_run['stdout']}\n"
+            f"stderr:\n{passing_run['stderr']}"
+        ),
+        metadata={
+            "source": "deterministic_test_runner",
+            "phase": "verify_fix",
+            "exit_code": passing_run["exit_code"],
+        },
+    )
     with sqlite3.connect(str(db)) as conn:
         conn.execute(
             "UPDATE issues SET status='done' WHERE json_extract(metadata_json,'$.source')="
@@ -321,6 +414,9 @@ def run_canary(
         "adversarial_test_contract": attack_evaluation["contract_passed"],
         "adversarial_tests_fail_before_fix": failing_run["executed"] and failing_run["exit_code"] != 0,
         "verification_run_completed": phase2["run"]["status"] == "completed",
+        "adversarial_tests_pass_after_fix": (
+            passing_run["executed"] and passing_run["exit_code"] == 0
+        ),
         "verification_report_approved": second_report.get("result") == "approved",
         "verification_issue_done": phase2["issue_status"] == "done",
         "passing_adversarial_tests_removed": not tests_after_fix,
@@ -337,6 +433,7 @@ def run_canary(
         "benchmark": "codex_terra_adversarial_qa",
         "profile_id": profile_id,
         "model": model,
+        "provider_version": provider_version_for_profile(profile_id),
         "contract_version": CONTRACT_VERSION,
         "case_family": case_family,
         "role": "qa",
@@ -344,6 +441,7 @@ def run_canary(
         "checks": checks,
         "attack_evaluation": attack_evaluation,
         "failing_test_run": failing_run,
+        "passing_test_run": passing_run,
         "phases": {"attack": phase1, "verify_fix": phase2},
         "usage": usage,
         "workspace": (
@@ -363,6 +461,8 @@ def reevaluate_report(report: dict[str, Any]) -> dict[str, Any]:
     persisted_evidence = str(
         (report.get("failing_test_run") or {}).get("stdout") or ""
     )
+    if "exact_tenant_id_field" not in anchors:
+        anchors["exact_tenant_id_field"] = "tenant_id" in persisted_evidence
     if not anchors.get("inactive_actor"):
         anchors["inactive_actor"] = bool(
             re.search(r"\bactive\s*=\s*False\b", persisted_evidence)
@@ -410,6 +510,7 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         (
             report.get("profile_id"),
             report.get("model"),
+            report.get("provider_version"),
             report.get("role"),
             report.get("contract_version"),
             report.get("case_family", AUTH_FAMILY),
@@ -434,6 +535,7 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
                             "checks": report.get("checks"),
                             "attack_evaluation": report.get("attack_evaluation"),
                             "failing_test_run": report.get("failing_test_run"),
+                            "passing_test_run": report.get("passing_test_run"),
                         },
                         ensure_ascii=False,
                         sort_keys=True,
@@ -449,6 +551,13 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
     sources_bound = len(source_receipts) == 3 and len(set(source_receipts)) == 3
     calibrated = matrix_complete and sources_bound and passed == 3
     profile_id = reports[0].get("profile_id") if reports else None
+    provider_versions = {
+        str(report.get("provider_version") or "") for report in reports
+    }
+    same_provider_version = (
+        len(provider_versions) == 1 and "" not in provider_versions
+    )
+    calibrated = calibrated and same_provider_version
     usage_observed = any(
         key.endswith("_tokens") and value
         for key, value in usage.items()
@@ -458,6 +567,8 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "benchmark": "codex_terra_adversarial_qa_aggregate",
         "profile_id": profile_id,
         "model": reports[0].get("model") if reports else None,
+        "provider_version": next(iter(provider_versions), None),
+        "same_provider_version": same_provider_version,
         "role": "qa",
         "contract_version": reports[0].get("contract_version") if reports else None,
         "case_family": (
@@ -510,6 +621,18 @@ def aggregate_diverse_family_reports(
         (str(report.get("profile_id") or ""), str(report.get("model") or ""))
         for report in aggregates
     }
+    provider_versions = {
+        str(report.get("provider_version") or "") for report in aggregates
+    }
+    same_provider_version = (
+        len(provider_versions) == 1 and "" not in provider_versions
+    )
+    family_contract_versions = {
+        str(report.get("contract_version") or "") for report in aggregates
+    }
+    same_current_family_contract = family_contract_versions == {
+        CONTRACT_VERSION
+    }
     sources = [str(report.get("_source_receipt") or "") for report in aggregates]
     hashes = [
         hashlib.sha256(
@@ -538,6 +661,8 @@ def aggregate_diverse_family_reports(
         len(aggregates) == 2
         and len(families) == 2
         and identities == {(profile_id, model)}
+        and same_provider_version
+        and same_current_family_contract
         and len(sources) == 2
         and all(sources)
         and len(set(sources)) == 2
@@ -553,6 +678,7 @@ def aggregate_diverse_family_reports(
         "benchmark": "qa_behavioral_diversity_aggregate",
         "profile_id": profile_id,
         "model": model,
+        "provider_version": next(iter(provider_versions), None),
         "role": "qa",
         "contract_version": QA_DIVERSITY_CONTRACT,
         "case_families": families,
@@ -566,6 +692,8 @@ def aggregate_diverse_family_reports(
         "source_sha256": hashes,
         "integrity": {
             "same_exact_pair": identities == {(profile_id, model)},
+            "same_provider_version": same_provider_version,
+            "same_current_family_contract": same_current_family_contract,
             "two_distinct_families": len(families) == 2,
             "sources_bound": len(sources) == 2 and all(sources),
             "sources_hashed": len(hashes) == 2,

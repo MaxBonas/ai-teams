@@ -8,10 +8,14 @@ el health/config de usuario se aísla dentro de cada muestra.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
+import shutil
 import sqlite3
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
@@ -28,7 +32,7 @@ from aiteam.db.wakeups import enqueue_wakeup  # noqa: E402
 from aiteam.heartbeat.executor import RunExecutor  # noqa: E402
 from aiteam.heartbeat.scheduler import HeartbeatScheduler  # noqa: E402
 from aiteam.project_adapters import write_project_adapter_policy  # noqa: E402
-from aiteam.user_config import record_model_health  # noqa: E402
+from aiteam.user_config import record_model_health, resolve_adapter_config  # noqa: E402
 
 ANTIGRAVITY_MODELS = ("gemini-3.5-flash-high", "gemini-3.6-flash-medium")
 OPENCODE_MODELS = (
@@ -39,7 +43,48 @@ OPENCODE_MODELS = (
 )
 CODEX_MODELS = ("gpt-5.6-terra",)
 LOCAL_MODELS = ("gemma4:26b",)
-MODELS = (*ANTIGRAVITY_MODELS, *OPENCODE_MODELS, *CODEX_MODELS, *LOCAL_MODELS)
+GEMINI_API_MODELS = ("gemini-3.6-flash",)
+MODELS = (
+    *ANTIGRAVITY_MODELS,
+    *OPENCODE_MODELS,
+    *CODEX_MODELS,
+    *LOCAL_MODELS,
+    *GEMINI_API_MODELS,
+)
+
+
+def cli_version_for_profile(profile_id: str) -> str:
+    if profile_id == "gemini_api_free":
+        return "api:google:v1beta"
+    command = (
+        "agy"
+        if profile_id == "antigravity_subscription"
+        else "codex"
+        if profile_id == "codex_subscription"
+        else "ollama"
+        if profile_id.startswith("local_")
+        else "opencode"
+        if profile_id == "opencode_zen_free"
+        else ""
+    )
+    executable = shutil.which(command) if command else None
+    if not executable:
+        return ""
+    completed = subprocess.run(
+        [executable, "--version"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    match = re.search(
+        r"\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b",
+        f"{completed.stdout}\n{completed.stderr}",
+    )
+    return match.group(1) if completed.returncode == 0 and match else ""
+
 
 BROKEN = '''def close_issue(db, issue_id, actor):
     issue = db.query("SELECT * FROM issues WHERE id=?", issue_id)
@@ -71,12 +116,25 @@ def _model_transport(model: str) -> dict[str, Any]:
     is_opencode = model.startswith("opencode/")
     is_codex = model in CODEX_MODELS
     is_local = model in LOCAL_MODELS
+    is_gemini_api = model in GEMINI_API_MODELS
+    if is_gemini_api:
+        return {
+            "profile_id": "gemini_api_free",
+            "provider": "google",
+            "channel": "api",
+            "adapter_type": "gemini_api",
+            "cli_version": cli_version_for_profile("gemini_api_free"),
+            "command": [],
+            "cli_kind": "",
+            "extra_config": {},
+        }
     if is_local:
         return {
             "profile_id": "local_gemma4_ollama",
             "provider": "ollama",
             "channel": "local",
-            "cli_version": "0.145.0",
+            "adapter_type": "subscription_cli",
+            "cli_version": cli_version_for_profile("local_gemma4_ollama"),
             "command": ["codex"],
             "cli_kind": "codex",
             "extra_config": {
@@ -90,7 +148,8 @@ def _model_transport(model: str) -> dict[str, Any]:
             "profile_id": "opencode_zen_free",
             "provider": "opencode-zen",
             "channel": "free_gateway",
-            "cli_version": "1.18.4",
+            "adapter_type": "subscription_cli",
+            "cli_version": cli_version_for_profile("opencode_zen_free"),
             "command": ["opencode.cmd"],
             "cli_kind": "opencode",
             "extra_config": {},
@@ -100,7 +159,8 @@ def _model_transport(model: str) -> dict[str, Any]:
             "profile_id": "codex_subscription",
             "provider": "openai-codex",
             "channel": "subscription",
-            "cli_version": "0.145.0",
+            "adapter_type": "subscription_cli",
+            "cli_version": cli_version_for_profile("codex_subscription"),
             "command": ["codex"],
             "cli_kind": "codex",
             "extra_config": {"model_reasoning_effort": "medium"},
@@ -109,7 +169,8 @@ def _model_transport(model: str) -> dict[str, Any]:
         "profile_id": "antigravity_subscription",
         "provider": "google-antigravity",
         "channel": "subscription",
-        "cli_version": "1.1.5",
+        "adapter_type": "subscription_cli",
+        "cli_version": cli_version_for_profile("antigravity_subscription"),
         "command": ["agy"],
         "cli_kind": "antigravity",
         "extra_config": {},
@@ -119,7 +180,8 @@ def _model_transport(model: str) -> dict[str, Any]:
 def _init_sample(root: Path, model: str) -> Path:
     transport = _model_transport(model)
     profile_id = str(transport["profile_id"])
-    os.environ["AITEAM_USER_CONFIG_DIR"] = str(root / "user-config")
+    if profile_id != "gemini_api_free":
+        os.environ["AITEAM_USER_CONFIG_DIR"] = str(root / "user-config")
     record_model_health(
         profile_id, model, available=True,
         reason="canary exact-model precondition",
@@ -128,24 +190,36 @@ def _init_sample(root: Path, model: str) -> Path:
     (root / "close_issue.py").write_text(BROKEN, encoding="utf-8")
     db_path = root / ".aiteam" / "aiteam.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    config_payload = {
-        "profile_id": profile_id,
-        "command": transport["command"],
-        "cli_kind": transport["cli_kind"],
-        "model": model,
-        "timeout_sec": 180,
-        "sandbox": (
-            "read-only"
-            if profile_id
-            in {"opencode_zen_free", "codex_subscription", "local_gemma4_ollama"}
-            else "workspace-write"
-        ),
-        **dict(transport["extra_config"]),
-    }
+    if profile_id == "gemini_api_free":
+        config_payload = resolve_adapter_config(
+            "gemini_api", {"profile_id": profile_id}
+        )
+        config_payload.update(
+            {"profile_id": profile_id, "model": model, "timeout_sec": 180}
+        )
+    else:
+        config_payload = {
+            "profile_id": profile_id,
+            "command": transport["command"],
+            "cli_kind": transport["cli_kind"],
+            "model": model,
+            "timeout_sec": 180,
+            "sandbox": (
+                "read-only"
+                if profile_id
+                in {"opencode_zen_free", "codex_subscription", "local_gemma4_ollama"}
+                else "workspace-write"
+            ),
+            **dict(transport["extra_config"]),
+        }
     config = json.dumps(config_payload)
     root_meta = json.dumps({
         "profile": "full_team",
-        "data_class": "public" if profile_id == "opencode_zen_free" else "internal",
+        "data_class": (
+            "public"
+            if profile_id in {"opencode_zen_free", "gemini_api_free"}
+            else "internal"
+        ),
     })
     description = (
         "Revisa close_issue.py. Debe impedir cruce de tenant/assignee, persistir status+activity "
@@ -163,8 +237,8 @@ def _init_sample(root: Path, model: str) -> Path:
             "INSERT INTO agents (id,role,name,seniority,adapter_type,adapter_config_json,status) "
             "VALUES ('role:lead','lead','Lead','lead','lead_builtin','{}','active'),"
             "('role:engineer','engineer','Engineer','standard','role_builtin','{}','active'),"
-            "('role:reviewer','reviewer','Reviewer','senior','subscription_cli',?,'active')",
-            (config,),
+            "('role:reviewer','reviewer','Reviewer','senior',?,?,'active')",
+            (transport["adapter_type"], config),
         )
         conn.execute(
             "INSERT INTO issues (id,goal_id,title,status,role,assignee_agent_id,metadata_json) "
@@ -214,6 +288,10 @@ def _latest_report(db_path: Path) -> dict[str, Any] | None:
 
 def run_sample(root: Path, *, model: str, seed: int) -> dict[str, Any]:
     transport = _model_transport(model)
+    if not str(transport.get("cli_version") or "").strip():
+        raise RuntimeError(
+            f"No se pudo observar la versión del proveedor para {transport['profile_id']}"
+        )
     db_path = _init_sample(root, model)
     reject_seconds = _wake_and_run(db_path, f"reject-seed-{seed}")
     rejected = _latest_report(db_path)
@@ -254,7 +332,8 @@ def run_sample(root: Path, *, model: str, seed: int) -> dict[str, Any]:
     approve_ok = bool(approved and approved.get("result") in {"approved", "done", "completed"})
     provider_runs = [
         row for row in runs
-        if row.get("adapter_type") == "subscription_cli" and row.get("model") == model
+        if row.get("adapter_type") == transport["adapter_type"]
+        and row.get("model") == model
     ]
     usage_totals = _sum_usage(provider_runs)
     return {
@@ -294,6 +373,8 @@ def _sum_usage(runs: list[dict[str, Any]]) -> dict[str, int] | None:
         for key in (
             "input_tokens", "output_tokens", "reasoning_output_tokens",
             "cached_input_tokens", "cache_write_tokens", "total_tokens",
+            "promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount",
+            "totalTokenCount",
         ):
             value = usage.get(key)
             if isinstance(value, (int, float)):
@@ -302,13 +383,40 @@ def _sum_usage(runs: list[dict[str, Any]]) -> dict[str, int] | None:
 
 
 def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    profile_ids = {
+        str(row.get("profile_id") or "").strip()
+        for row in reports
+        if str(row.get("profile_id") or "").strip()
+    }
+    cli_versions = {
+        str(row.get("cli_version") or "").strip()
+        for row in reports
+    }
+    same_cli_version = len(cli_versions) == 1 and "" not in cli_versions
+    source_receipts = [
+        str(row.get("_source_receipt") or "") for row in reports
+    ]
+    source_hashes = [
+        str(row.get("_source_sha256") or "") for row in reports
+    ]
+    sources_bound = (
+        len(source_receipts) == len(reports)
+        and len(set(source_receipts)) == len(reports)
+        and all(source_receipts)
+        and len(source_hashes) == len(reports)
+        and all(source_hashes)
+    )
     arms: list[dict[str, Any]] = []
     models = list(dict.fromkeys(str(row.get("model") or "") for row in reports))
     for model in models:
         rows = [row for row in reports if row.get("model") == model]
         seconds = [float(row["quota_observation"]["wall_seconds"]) for row in rows]
         seeds = sorted(int(row.get("seed") or 0) for row in rows)
-        usage_rows = [row.get("quota_observation", {}).get("tokens") for row in rows]
+        usage_rows = [
+            row.get("quota_observation", {}).get("tokens")
+            or _sum_usage(list(row.get("runs") or []))
+            for row in rows
+        ]
         tokens_available = all(isinstance(usage, dict) and bool(usage) for usage in usage_rows)
         token_totals = {
             key: sum(int(usage.get(key) or 0) for usage in usage_rows if isinstance(usage, dict))
@@ -356,18 +464,34 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         len(arms) == 1
         and baseline["seed_matrix_complete"]
         and baseline["passed"] == baseline["samples"] == 3
+        and len(profile_ids) == 1
+        and same_cli_version
+        and sources_bound
     )
     if exact_pair_calibrated:
         reason = "modelo único completa el contrato durable 3/3; calibra solo el par exacto"
     return {
         "schema_version": 1,
         "benchmark": "durable_review_aggregate",
+        "aggregate_contract_version": "durable_review_aggregate_v2",
+        "profile_id": next(iter(profile_ids)) if len(profile_ids) == 1 else None,
+        "cli_version": next(iter(cli_versions)) if same_cli_version else None,
+        "model": models[0] if len(models) == 1 else None,
+        "role": "reviewer",
         "providers": list(dict.fromkeys(str(row.get("provider") or "") for row in reports)),
         "channels": list(dict.fromkeys(str(row.get("channel") or "") for row in reports)),
         "contract": "same_broken_diff_then_same_fix_v1",
         "source_reports": len(reports),
         "arms": arms,
         "matrix_balanced": balanced,
+        "source_receipts": source_receipts,
+        "source_sha256": source_hashes,
+        "integrity": {
+            "same_exact_pair": len(profile_ids) == 1 and len(models) == 1,
+            "same_cli_version": same_cli_version,
+            "sources_bound": sources_bound,
+            "samples_hashed": sources_bound,
+        },
         "conclusion": {
             "behavioral_contract_tied": balanced and all_passed,
             "exact_pair_calibrated": exact_pair_calibrated,
@@ -388,6 +512,13 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
             "quota_note": (
                 "modelo local: sin coste API ni presión de cuota externa"
                 if set(str(row.get("channel") or "") for row in reports) == {"local"}
+                else (
+                    "tokens observados por Gemini API Free; consumen cuota del "
+                    "proyecto, con coste marginal monetario cero en este perfil"
+                )
+                if set(str(row.get("channel") or "") for row in reports) == {"api"}
+                and set(str(row.get("profile_id") or "") for row in reports)
+                == {"gemini_api_free"}
                 else "tokens observados por Codex subscription; presión de cuota, no coste API"
                 if all(bool(arm["tokens_available"]) for arm in arms)
                 else "algún transporte no expone usage comparable por run"
@@ -406,9 +537,19 @@ def main() -> int:
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.inputs:
-        report = aggregate_reports([
-            json.loads(path.read_text(encoding="utf-8")) for path in args.inputs
-        ])
+        sources = []
+        for path in args.inputs:
+            raw = path.read_bytes()
+            source = json.loads(raw.decode("utf-8"))
+            try:
+                source["_source_receipt"] = (
+                    path.resolve().relative_to(REPO_ROOT).as_posix()
+                )
+            except ValueError:
+                source["_source_receipt"] = path.resolve().as_posix()
+            source["_source_sha256"] = hashlib.sha256(raw).hexdigest()
+            sources.append(source)
+        report = aggregate_reports(sources)
         args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(json.dumps(report["conclusion"], ensure_ascii=False))
         return 0 if report["matrix_balanced"] else 2

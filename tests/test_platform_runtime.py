@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,7 +17,9 @@ from aiteam.platform_runtime import (
     probe_filesystem_boundary,
     probe_timeout_cleanup,
     process_group_popen_options,
+    provider_cli_fingerprint,
     resolve_executable,
+    resolve_provider_cli,
     run_command,
     venv_python_candidates,
 )
@@ -56,6 +58,48 @@ def test_executable_resolution_uses_real_windows_shims() -> None:
         )
         == r"C:\Tools\codex.cmd"
     )
+
+
+def test_provider_cli_resolution_shares_antigravity_known_location(
+    tmp_path: Path,
+) -> None:
+    binary = tmp_path / "agy" / "bin" / "agy.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"fixture")
+
+    assert resolve_provider_cli(
+        "agy",
+        ["agy.exe", "agy"],
+        os_id="windows",
+        which=lambda _name: None,
+        environment={"LOCALAPPDATA": str(tmp_path)},
+    ) == str(binary)
+
+
+def test_provider_cli_fingerprint_is_stable_and_binds_path_and_content(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "one" / "tool.cmd"
+    second = tmp_path / "two" / "tool.cmd"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_bytes(b"same-version-output")
+    second.write_bytes(b"same-version-output")
+
+    first_digest = provider_cli_fingerprint(first, os_id="windows")
+
+    assert first_digest == provider_cli_fingerprint(first, os_id="windows")
+    assert first_digest != provider_cli_fingerprint(second, os_id="windows")
+    second.write_bytes(b"different-content")
+    assert first_digest != provider_cli_fingerprint(second, os_id="windows")
+    assert first_digest is not None
+    assert str(tmp_path).casefold() not in first_digest.casefold()
+
+
+def test_provider_cli_fingerprint_fails_closed_for_missing_file(
+    tmp_path: Path,
+) -> None:
+    assert provider_cli_fingerprint(tmp_path / "missing.exe") is None
 
 
 def test_virtualenv_layout_is_platform_specific(tmp_path: Path) -> None:

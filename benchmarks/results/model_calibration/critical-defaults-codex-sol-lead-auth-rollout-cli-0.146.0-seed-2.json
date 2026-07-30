@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "case_id": "auth_rollout_incident",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 12.813,
+  "usage": {
+    "input_tokens": 16725,
+    "cached_input_tokens": 0,
+    "output_tokens": 662
+  },
+  "response": {
+    "objective": "Recuperar auth v2 reduciendo la tasa de error del 2,4 % a un máximo del 1,0 %, detener el rollout en el 5 % y preservar auth v1 como ruta de rollback.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "action": "Pausar el rollout de auth v2 en el 5 % y recopilar logs y métricas del periodo observado de 10 minutos.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Acceso a logs y métricas"
+        ],
+        "gate": "No ampliar el rollout mientras la tasa de error supere el 1,0 %."
+      },
+      {
+        "id": "WI-2",
+        "action": "Completar la rotación de secrets pendiente y validar su impacto en auth v2.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Rotación de secrets pendiente"
+        ],
+        "gate": "No reanudar el rollout hasta completar la dependencia y confirmar recuperación mediante logs y métricas."
+      },
+      {
+        "id": "WI-3",
+        "action": "Ejecutar rollback a auth v1 si no se confirma la recuperación o si la tasa de error continúa por encima del 1,0 %.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer",
+        "dependencies": [
+          "Auth v1 disponible"
+        ],
+        "gate": "Reviewer acepta únicamente cuando logs y métricas confirmen la recuperación."
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Persistencia o aumento de errores en auth v2.",
+        "impact": "El rollout al 5 % mantiene una tasa de error superior al límite permitido.",
+        "mitigation": "Mantener pausado el rollout y conservar auth v1 disponible para rollback.",
+        "owner": "Release Engineer"
+      },
+      {
+        "risk": "La rotación de secrets pendiente impide o retrasa la recuperación.",
+        "impact": "No puede superarse el gate de reanudación.",
+        "mitigation": "Completar y validar la rotación antes de solicitar aceptación.",
+        "owner": "Release Engineer"
+      }
+    ],
+    "verification": {
+      "observed_metric": {
+        "name": "tasa de error",
+        "value": "2,4 %",
+        "limit": "1,0 %",
+        "window": "10 minutos",
+        "required_action": "Pausar el rollout y preparar rollback."
+      },
+      "acceptance_conditions": [
+        "La rotación de secrets está completada.",
+        "Los logs y métricas confirman recuperación.",
+        "La tasa de error es igual o inferior al 1,0 %.",
+        "Reviewer registra la aceptación."
+      ],
+      "accountable_owner": "Release Engineer",
+      "acceptor": "Reviewer"
+    },
+    "escalation": [
+      {
+        "trigger": "La tasa de error permanece por encima del 1,0 % tras las acciones de recuperación.",
+        "action": "Ejecutar rollback a auth v1 y escalar el incidente.",
+        "owner": "Release Engineer"
+      },
+      {
+        "trigger": "La rotación de secrets no puede completarse o bloquea la validación.",
+        "action": "Escalar la dependencia sin ampliar el rollout de auth v2.",
+        "owner": "Release Engineer"
+      },
+      {
+        "trigger": "Logs o métricas no confirman recuperación.",
+        "action": "No solicitar ni conceder aceptación; mantener la pausa o realizar rollback a auth v1.",
+        "owner": "Release Engineer",
+        "acceptor": "Reviewer"
+      }
+    ]
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": true,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:40:17.069513Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:17.069538Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:17.070022Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:17.071758Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:17.075125Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:40:18.092618Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:18.092644Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:18.093133Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:18.095591Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

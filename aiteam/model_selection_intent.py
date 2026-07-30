@@ -8,7 +8,6 @@ from typing import Any
 
 from aiteam.model_selection_context import contextual_model_selection
 
-
 SELECTION_INTENT_VERSION = "model_selection_intent_v1"
 OWNER_EXPLICIT = "owner_explicit"
 
@@ -64,6 +63,27 @@ def normalize_owner_explicit_selection(
         raise ValueError(
             f"model selection ({profile_id!r}, {model!r}) has no canonical candidate"
         )
+    preference = candidate.get("owner_preference") or {}
+    if preference.get("state") == "archived":
+        raise ValueError(
+            "model selection is archived by the owner and must be reactivated "
+            "before creating a new assignment"
+        )
+    if (
+        "owner_selectable" in candidate
+        and candidate.get("owner_selectable") is not True
+    ):
+        authority_gate = candidate.get("tier1_authority_gate")
+        if (
+            isinstance(authority_gate, Mapping)
+            and authority_gate.get("applicable") is True
+            and authority_gate.get("allowed") is not True
+        ):
+            raise ValueError(
+                "model selection lacks exact Tier 1 authority: "
+                f"{authority_gate.get('code')}: {authority_gate.get('reason')}"
+            )
+        raise ValueError("model selection is not owner-selectable in the current context")
     candidate_id = str(candidate.get("candidate_id") or "").strip()
     if not candidate_id:
         raise ValueError("canonical model candidate has no candidate_id")

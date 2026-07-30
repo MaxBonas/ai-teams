@@ -50,6 +50,7 @@
       "bootstrap_first",
       "bootstrap_second",
       "installation_audit",
+      "provider_cli_version_gate",
       "minimum_tests",
       "start",
       "backend_health",
@@ -261,6 +262,48 @@
       "No se exige instalar todos los canales.",
       "OpenCode Zen, Ollama y LM Studio no satisfacen por sí solos el mínimo Lead-capable vigente.",
       "API y suscripción son canales independientes."
+    ]
+  },
+  "cli_version_contract": {
+    "schema_version": "provider_cli_version_contract_v1",
+    "updated_at": "2026-07-30",
+    "semantics": {
+      "minimum_version": "suelo validado; no demuestra por sí solo health, catálogo ni calidad",
+      "validated_version": "versión exacta con evidencia local vigente al actualizar el contrato",
+      "accepted_channels": "canales permitidos; toda prerelease debe figurar explícitamente",
+      "optional_absence": "solo pasa si setup_class y este contrato coinciden en que es opcional"
+    },
+    "entries": [
+      {
+        "id": "codex",
+        "adapter_id": "codex_subscription",
+        "requirement": "primary_option",
+        "minimum_version": "0.146.0-alpha.6",
+        "validated_version": "0.146.0-alpha.6",
+        "accepted_channels": ["prerelease", "stable"],
+        "declared_prereleases": ["0.146.0-alpha.6"],
+        "catalog_guard": "installed_version_matches_catalog_client_and_cache"
+      },
+      {
+        "id": "agy",
+        "adapter_id": "antigravity_subscription",
+        "requirement": "primary_option",
+        "minimum_version": "1.1.8",
+        "validated_version": "1.1.8",
+        "accepted_channels": ["stable"],
+        "declared_prereleases": [],
+        "catalog_guard": "authenticated_catalog_observed_with_same_cli_version"
+      },
+      {
+        "id": "opencode",
+        "adapter_id": "opencode_zen_free",
+        "requirement": "optional_economy",
+        "minimum_version": "1.18.4",
+        "validated_version": "1.18.4",
+        "accepted_channels": ["stable"],
+        "declared_prereleases": [],
+        "catalog_guard": "catalog_and_structured_output_probe_are_independent_gates"
+      }
     ]
   },
   "adapters": [

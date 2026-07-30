@@ -1,0 +1,30 @@
+{
+  "checks": {
+    "action_never_grants_ready": true,
+    "all_actions_are_manual": true,
+    "all_actions_require_confirmation": true,
+    "authenticated_api_returns_guidance": true,
+    "cli_versions_are_explicit": true,
+    "local_guidance_requires_opt_in": true,
+    "opencode_free_auth_and_data_policy_are_visible": true,
+    "personal_api_keeps_secret_reference_only": true,
+    "remote_install_risk_is_visible": true,
+    "requested_channels_only": true
+  },
+  "contract_version": "guided_setup_provider_guidance_v1",
+  "schema_version": "guided_setup_provider_guidance_audit_v1",
+  "scope": {
+    "commands_executed": false,
+    "fixture_only": true,
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "secrets_read": false,
+    "terms_accepted": false,
+    "user_configuration_mutated": false
+  },
+  "summary": {
+    "check_count": 10,
+    "passed_count": 10,
+    "provider_guidance_ready": true
+  }
+}

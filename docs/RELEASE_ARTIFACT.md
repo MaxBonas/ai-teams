@@ -102,8 +102,9 @@ sigue bloqueando técnicamente la candidata v0.1.0 mientras I.8.4 esté pendient
 Antes del job `publish`, la matriz `release-acceptance` descarga exactamente el
 mismo artifact de CI en Windows, Linux y macOS. El wrapper elige el harness
 nativo, conserva un recibo redacted por sistema y exige en las tres celdas los
-17 gates canónicos: verificación/extracción, bootstrap idempotente, auditoría,
-tests mínimos, start/health/stop, fixture, backup y restauración SQLite,
+18 gates canónicos: verificación/extracción, bootstrap idempotente, auditoría,
+gate redacted de versiones CLI, tests mínimos, start/health/stop, fixture,
+backup y restauración SQLite,
 liberación de puertos y retirada externa de instalación y fixture. En PR y
 ejecución manual acepta previews sin convertirlos en promocionables; en tag
 exige metadatos promocionables.

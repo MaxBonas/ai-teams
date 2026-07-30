@@ -1,23 +1,18 @@
 import json
 import contextlib
-import logging
 import mimetypes
 import os
 import shutil
 import sqlite3
-import uuid
 from pathlib import Path
-from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # Absolute import if possible, but assuming api package exists
 from api.utils import (
     _require_api_auth_request,
     _workspace_from_request,
-    _sanitize_project_name,
-    _allocate_project_path,
     PROJECT_ROOT,
     clear_persisted_workspace,
     get_configured_projects_root,
@@ -28,43 +23,22 @@ from api.utils import (
 from aiteam.db.migration import SCHEMA_PATH
 from aiteam.policies import WORKSPACE_NOISE_DIRS as _WS_SKIP_DIRS
 from aiteam.project_adapters import (
-    available_project_profiles,
     choose_adapter_for_new_slot,
     choose_adapter_for_role,
     ensure_quorum_agents,
     project_profiles,
     reconcile_project_agent_policy,
     is_unresolved_model_default,
-    write_project_adapter_policy,
 )
 from aiteam.run_profiles import FULL_TEAM, LEAD_QUORUM, normalize_run_profile
-from aiteam.user_config import ROLE_CAPABILITY_PROFILES, profile_is_connected
-from aiteam.model_compatibility import compatibility_decision
 from aiteam.model_selection_intent import normalize_owner_explicit_selection
 from aiteam.objective_classification import classify_objective
-from aiteam.db.comments import create_comment
-from aiteam.db.wakeups import enqueue_wakeup
 from aiteam.tools.catalog import default_capabilities_for_role
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 class WorkspacePath(BaseModel):
     path: str
-
-class NewProjectRequest(BaseModel):
-    name: str
-    initial_task: str | None = None
-    adapter_profile_ids: list[str] = Field(default_factory=list)
-    lead_adapter_profile_id: str | None = None
-    lead_model: str | None = None
-    lead_candidate_id: str | None = None
-    run_profile: Literal["solo_lead", "lead_quorum", "full_team"] = FULL_TEAM
-    objective_kind: Literal[
-        "auto", "software", "research", "operations", "mixed", "non_code"
-    ] = "auto"
-    data_class: Literal["", "public", "internal", "confidential", "restricted"] = ""
 
 class DeleteProjectRequest(BaseModel):
     confirmation: str
@@ -112,8 +86,17 @@ async def set_workspace(payload: WorkspacePath, request: Request):
     if allowed_root not in new_path.parents and new_path != allowed_root:
         raise HTTPException(status_code=400, detail="Workspace path is outside the configured projects root.")
 
-    new_path.mkdir(parents=True, exist_ok=True)
-    _initialize_project_runtime(new_path)
+    if not new_path.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail="Workspace does not exist. Create or import it with the guided setup.",
+        )
+    runtime_dir = resolve_runtime_dir(new_path, PROJECT_ROOT)
+    if not (runtime_dir / "aiteam.db").is_file():
+        raise HTTPException(
+            status_code=409,
+            detail="Workspace is not initialized. Import it with the guided setup.",
+        )
     set_current_workspace(new_path, persist=True)
 
     return {"success": True, "workspace": str(get_current_workspace().as_posix()), "configured": True}
@@ -143,157 +126,6 @@ async def list_projects(request: Request):
         })
     return {"projects": projects, "projects_root": str(projects_root.as_posix())}
 
-
-@router.post("/api/projects/new")
-async def create_project(payload: NewProjectRequest, request: Request):
-    _require_api_auth_request(request)
-    projects_root = get_configured_projects_root()
-    projects_root.mkdir(parents=True, exist_ok=True)
-
-    normalized_name = _sanitize_project_name(payload.name)
-
-    # ── Connectivity check ────────────────────────────────────────────────
-    # A project whose selected adapters all lack credentials produces a first
-    # run that dies silently. Warn by default; hard-block when the operator
-    # sets AITEAM_REQUIRE_CONNECTED_ADAPTER=1.
-    selected_profiles = available_project_profiles(payload.adapter_profile_ids)
-    if not selected_profiles:
-        raise HTTPException(status_code=400, detail="Select at least one available adapter profile")
-    if payload.lead_adapter_profile_id and payload.lead_adapter_profile_id not in {
-        str(profile.get("id") or "") for profile in selected_profiles
-    }:
-        raise HTTPException(
-            status_code=400,
-            detail="El perfil elegido para el Lead debe estar entre las conexiones del proyecto",
-        )
-    run_profile = normalize_run_profile(payload.run_profile)
-    resolved_objective = classify_objective(
-        str(payload.initial_task or "")[:160],
-        str(payload.initial_task or ""),
-        explicit_kind=payload.objective_kind,
-    )
-    lead_profiles = (
-        [profile for profile in selected_profiles if str(profile.get("id") or "") == payload.lead_adapter_profile_id]
-        if payload.lead_adapter_profile_id
-        else selected_profiles
-    )
-    lead_selection = choose_adapter_for_role(
-        "lead", "lead", lead_profiles,
-        run_profile=run_profile,
-        criticality="medium",
-        data_class=payload.data_class,
-        preferred_model=payload.lead_model,
-    )
-    if not lead_selection:
-        decisions: list[dict[str, Any]] = []
-        for profile in lead_profiles:
-            options = profile.get("model_options") if isinstance(profile.get("model_options"), list) else []
-            config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
-            configured = str(config.get("model") or "")
-            selected_model = next(
-                (item for item in options if str(item.get("value") or "") == configured),
-                options[0] if options else None,
-            )
-            decisions.append(compatibility_decision(
-                profile=profile,
-                model=selected_model,
-                role="lead",
-                run_profile=run_profile,
-                criticality="medium",
-                data_class=payload.data_class,
-                role_profile=ROLE_CAPABILITY_PROFILES["lead"],
-                candidate_models=options,
-            ))
-        primary = decisions[0] if decisions else {
-            "allowed": False,
-            "code": "model_role_incompatible",
-            "reason": "No hay un perfil/modelo compatible para el Lead.",
-            "alternatives": [],
-        }
-        raise HTTPException(status_code=422, detail={**primary, "evaluated_profiles": decisions})
-    _unconnected = [str(p.get("id") or "") for p in selected_profiles if not profile_is_connected(p)]
-    adapter_warning: str | None = None
-    if selected_profiles and len(_unconnected) == len(selected_profiles):
-        adapter_warning = (
-            "Ningún adapter seleccionado tiene credenciales verificadas "
-            f"({', '.join(_unconnected)}). El primer run fallará hasta que "
-            "guardes la API key o hagas login del CLI y pruebes la conexión."
-        )
-        if os.environ.get("AITEAM_REQUIRE_CONNECTED_ADAPTER", "").strip().lower() in {"1", "true", "yes"}:
-            raise HTTPException(status_code=400, detail=adapter_warning)
-
-    target = _allocate_project_path(projects_root, normalized_name)
-    target.mkdir(parents=True, exist_ok=False)
-    runtime_dir = resolve_runtime_dir(target, PROJECT_ROOT)
-    try:
-        write_project_adapter_policy(runtime_dir, profile_ids=payload.adapter_profile_ids)
-    except ValueError as exc:
-        shutil.rmtree(target, ignore_errors=True)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        _initialize_project_runtime(
-            target,
-            initial_task=payload.initial_task,
-            run_profile=run_profile,
-            lead_adapter_profile_id=payload.lead_adapter_profile_id,
-            lead_model=payload.lead_model,
-            lead_candidate_id=payload.lead_candidate_id,
-            data_class=payload.data_class,
-            objective_kind=payload.objective_kind,
-        )
-    except ValueError as exc:
-        shutil.rmtree(target, ignore_errors=True)
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # VCS del workspace: solo en proyectos RECIÉN creados por la app (un
-    # workspace externo seleccionado a posteriori nunca se toca — sin marker
-    # git_managed tampoco habrá commits automáticos).
-    try:
-        from aiteam.workspace_git import init_managed_repo
-        init_managed_repo(target)
-    except Exception:
-        logger.warning("workspace git init failed for %s", target, exc_info=True)
-    set_current_workspace(target, persist=True)
-
-    # Enqueue the Lead's first wakeup so the HeartbeatLoop can start immediately
-    # without waiting for a manual "Iniciar" click in the frontend.
-    try:
-        _db = resolve_runtime_dir(target, PROJECT_ROOT) / "aiteam.db"
-        enqueue_wakeup(
-            _db,
-            agent_id="role:lead",
-            source="project_bootstrap",
-            reason="new_project",
-            payload={
-                "issue_id": "issue:intake",
-                "wake_reason": "new_project",
-                "profile": run_profile,
-            },
-            idempotency_key="bootstrap:issue:intake:role:lead",
-        )
-    except Exception:
-        pass  # Non-fatal — the user can still click Iniciar manually
-
-    if adapter_warning:
-        try:
-            create_comment(
-                resolve_runtime_dir(target, PROJECT_ROOT) / "aiteam.db",
-                issue_id="issue:intake",
-                author_agent_id=None,
-                body=f"⚠ Sistema: {adapter_warning}",
-                metadata={"source": "project_creation_connectivity_check"},
-            )
-        except Exception:
-            pass  # informational only
-
-    return {
-        "success": True,
-        "workspace": str(target.as_posix()),
-        "project_name": target.name,
-        "configured": True,
-        "run_profile": run_profile,
-        "objective_classification": resolved_objective.to_metadata(),
-        "adapter_warning": adapter_warning,
-    }
 
 @router.delete("/api/projects/current")
 async def delete_current_project(payload: DeleteProjectRequest, request: Request):
@@ -329,40 +161,27 @@ def _delete_current_project(payload: DeleteProjectRequest, request: Request):
     if not (runtime_dir / "aiteam.db").exists():
         raise HTTPException(status_code=400, detail="Workspace does not look like an AI Teams project.")
 
+    outcome = _remove_project_tree(workspace)
     if get_current_workspace().resolve() == workspace:
         set_current_workspace(PROJECT_ROOT)
         clear_persisted_workspace()
-    outcome = _remove_project_tree(workspace, projects_root=projects_root)
     return {"success": True, "workspace": "", "configured": False, **outcome}
 
 
-def _remove_project_tree(workspace: Path, *, projects_root: Path) -> dict[str, object]:
+def _remove_project_tree(workspace: Path) -> dict[str, object]:
     try:
         _rmtree_project_tree(workspace)
         return {"deleted": True}
     except OSError as exc:
-        tombstone = projects_root / f".aiteam-deleted-{workspace.name}-{uuid.uuid4().hex[:8]}"
-        try:
-            workspace.rename(tombstone)
-        except OSError as rename_exc:
-            raise HTTPException(
-                status_code=423,
-                detail=(
-                    "Project folder is locked by Windows or another process. "
-                    "Close terminals/editors using it and retry deletion. "
-                    f"Original error: {exc}; rename error: {rename_exc}"
-                ),
-            ) from rename_exc
-        try:
-            _rmtree_project_tree(tombstone)
-        except OSError:
-            return {
-                "deleted": True,
-                "cleanup_pending": True,
-                "cleanup_path": str(tombstone.as_posix()),
-                "reason": "moved_to_tombstone",
-            }
-        return {"deleted": True, "moved_before_delete": True}
+        raise HTTPException(
+            status_code=423,
+            detail=(
+                "Project folder could not be deleted completely. "
+                "AI Teams will not rename it or schedule cleanup. "
+                "Close terminals/editors using it, inspect the original path "
+                f"and retry explicitly. Original error: {exc}"
+            ),
+        ) from exc
 
 
 def _rmtree_project_tree(path: Path) -> None:

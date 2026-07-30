@@ -1,0 +1,163 @@
+.hygiene-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, #36a269);
+  border-left: 3px solid #36a269;
+  border-radius: var(--radius);
+  background:
+    linear-gradient(110deg, rgba(54, 162, 105, 0.08), transparent 48%),
+    var(--surface-2);
+}
+
+.hygiene-card-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.hygiene-card-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: #65c98f;
+  border: 1px solid rgba(101, 201, 143, 0.28);
+  border-radius: 5px;
+  background: rgba(54, 162, 105, 0.08);
+}
+
+.hygiene-card h3,
+.hygiene-card p {
+  margin: 0;
+}
+
+.hygiene-card h3 {
+  color: var(--text-bright);
+  font-size: 0.79rem;
+  letter-spacing: 0.02em;
+}
+
+.hygiene-card-heading p,
+.hygiene-prompt,
+.hygiene-advice {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+}
+
+.hygiene-status {
+  padding: 3px 7px;
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.hygiene-status.clean {
+  color: #65c98f;
+  border-color: rgba(101, 201, 143, 0.35);
+}
+
+.hygiene-status.warning {
+  color: #e3b341;
+  border-color: rgba(227, 179, 65, 0.4);
+}
+
+.hygiene-root {
+  overflow: hidden;
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 0.69rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.hygiene-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.hygiene-metrics div {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.hygiene-metrics dt {
+  color: var(--text-dim);
+  font-size: 0.59rem;
+  line-height: 1.25;
+}
+
+.hygiene-metrics dd {
+  margin: 3px 0 0;
+  color: var(--text-bright);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+}
+
+.hygiene-advice {
+  padding-left: 8px;
+  border-left: 2px solid #e3b341;
+}
+
+.hygiene-safety {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.hygiene-safety svg {
+  flex: 0 0 auto;
+  color: #65c98f;
+}
+
+.hygiene-safety code {
+  padding: 0 2px;
+}
+
+.hygiene-inspect-button {
+  justify-self: start;
+  padding: 5px 9px;
+  font-size: 0.69rem;
+}
+
+.project-setup-shell > .hygiene-card {
+  width: min(1180px, calc(100vw - 32px));
+  box-sizing: border-box;
+  margin: 22px auto -8px;
+}
+
+.hygiene-save-gate {
+  align-self: center;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+}
+
+@media (max-width: 720px) {
+  .hygiene-card-heading {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .hygiene-status {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .hygiene-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

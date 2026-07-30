@@ -1,0 +1,70 @@
+{
+  "scenarios": {
+    "authentication_missing": {
+      "next_action": "human_login",
+      "passed": true,
+      "state": "blocked"
+    },
+    "catalog_incompatible": {
+      "next_action": "refresh_catalog",
+      "passed": true,
+      "state": "unverified"
+    },
+    "clean_machine": {
+      "next_action": "install_runtime_and_choose_lead_channel",
+      "passed": true,
+      "state": "blocked"
+    },
+    "client_boundary": {
+      "next_action": "ids_only",
+      "passed": true,
+      "state": "server_authoritative"
+    },
+    "durable_resume": {
+      "next_action": "continue_without_reinstall",
+      "passed": true,
+      "state": "resumed"
+    },
+    "local_opt_in": {
+      "next_action": "owner_choice",
+      "passed": true,
+      "state": "optional"
+    },
+    "offline_or_rate_limited": {
+      "next_action": "retry_without_loop",
+      "passed": true,
+      "state": "blocked"
+    },
+    "outdated_cli": {
+      "next_action": "update_cli",
+      "passed": true,
+      "state": "blocked"
+    },
+    "partial_installation": {
+      "next_action": "authenticate_and_verify",
+      "passed": true,
+      "state": "unverified"
+    },
+    "valid_personal_api": {
+      "next_action": "continue",
+      "passed": true,
+      "state": "ready"
+    }
+  },
+  "schema_version": "guided_setup_adapter_repair_acceptance_v1",
+  "scope": {
+    "commands_executed": false,
+    "fixture_only": true,
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "remote_quota_consumed": false,
+    "secrets_read": false,
+    "terms_accepted": false,
+    "user_configuration_mutated": false
+  },
+  "summary": {
+    "passed_count": 10,
+    "repair_acceptance_ready": true,
+    "scenario_count": 10
+  }
+}

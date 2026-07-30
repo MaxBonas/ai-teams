@@ -1,0 +1,324 @@
+{
+  "ci_provenance": null,
+  "database_rollback": {
+    "backup_created": true,
+    "backup_matches_original": true,
+    "backup_removed": true,
+    "footprint_restored": true,
+    "restored_matches_original": true
+  },
+  "environment_class": "local_existing_host",
+  "fixture": {
+    "commit_schema_version": "guided_setup_project_commit_v1",
+    "created": true,
+    "footprint_after": {
+      "entry_count": 2,
+      "sha256": "4e4013dcc8f560087848eddb8b3c9059d17066b8356a6c132da21d83067288a2"
+    },
+    "footprint_before": {
+      "entry_count": 1,
+      "sha256": "9e0fa53e270a9e35c5c898047049ffe5fa8151a2594677a627e9f8b4dfeea11d"
+    },
+    "footprint_verified": true,
+    "goals": 1,
+    "issues": 1,
+    "lead_first": true,
+    "objective_kind": "research",
+    "proposal_hash": "c56d239493c43f61fc3d2af8cfe85a74385a3dbd7b3e7a85f6d71bd5a6c22683",
+    "proposal_schema_version": "guided_setup_project_proposal_v1",
+    "queued_wakeups": 1,
+    "retry_collision_blocked": true,
+    "roles": [
+      "lead"
+    ],
+    "tables": 33
+  },
+  "global_cli_inventory_after": {
+    "antigravity": true,
+    "codex": true,
+    "lmstudio": false,
+    "ollama": false,
+    "opencode": true
+  },
+  "global_cli_inventory_before": {
+    "antigravity": true,
+    "codex": true,
+    "lmstudio": false,
+    "ollama": false,
+    "opencode": true
+  },
+  "host": {
+    "architecture": "amd64",
+    "os": "windows",
+    "python_bootstrap": "3.12.10"
+  },
+  "independent_machine": false,
+  "installation_audit": {
+    "contract_updated_at": "2026-07-23",
+    "control_plane_ready": true,
+    "live_runs_status": "adapter_installed_auth_health_required",
+    "runtimes": [
+      {
+        "id": "python",
+        "minimum_version": "3.10",
+        "ready": true,
+        "version": "3.12.10"
+      },
+      {
+        "id": "node",
+        "minimum_version": "22",
+        "ready": true,
+        "version": "v24.18.0"
+      },
+      {
+        "id": "npm",
+        "minimum_version": "10",
+        "ready": true,
+        "version": "11.16.0"
+      },
+      {
+        "id": "git",
+        "minimum_version": "2.23",
+        "ready": true,
+        "version": "git version 2.49.0.windows.1"
+      },
+      {
+        "id": "powershell",
+        "minimum_version": "5.1",
+        "ready": true,
+        "version": "7.6.3"
+      }
+    ],
+    "schema_version": "installation_support_audit_v1",
+    "support_id": "windows_native_x86_64",
+    "support_status": "verified"
+  },
+  "installation_lifecycle": {
+    "findings": {
+      "scheduled_task": [],
+      "service": [],
+      "startup_registry": []
+    },
+    "runtime_has_explicit_stop": true,
+    "runtime_requires_explicit_start": true,
+    "scheduled_tasks_installed": false,
+    "schema_version": "installation_lifecycle_contract_v1",
+    "services_installed": false,
+    "source_count": 5,
+    "sources_sha256": "ba5536e042e5df912c3b00044c87d2258ac072f31dc5a9d067e80242e115237b",
+    "startup_entries_installed": false
+  },
+  "ok": true,
+  "project_hygiene": {
+    "lifecycle": {
+      "automatic_cleanup_installed": false,
+      "doctor_can_mutate": false,
+      "startup_cleanup_installed": false,
+      "ttl_cleanup_installed": false
+    },
+    "root_footprint_unchanged": true,
+    "schema_version": "project_hygiene_v1"
+  },
+  "promotion_allowed": false,
+  "provider_cli_version_gate": {
+    "fixture_mode": "release_acceptance_v1",
+    "rows": [
+      {
+        "cli_id": "codex",
+        "executable": "codex.cmd",
+        "fingerprint": "75d6bc97e32f35addac660990fbb7722519c301baac4fe48d0149da141e5cde4",
+        "status": "ready",
+        "version": "codex-cli 0.146.0-alpha.6"
+      },
+      {
+        "cli_id": "agy",
+        "executable": "agy.cmd",
+        "fingerprint": "41feed42baeb23376f4882412bb0fb6746c4e97e985ae5f903e390115fd1022a",
+        "status": "ready",
+        "version": "1.1.8"
+      },
+      {
+        "cli_id": "opencode",
+        "executable": "opencode.cmd",
+        "fingerprint": "80a6874b22645f9d01fa81ce2f1147be1ed535e052df73eb833da90e2d80f4fb",
+        "status": "ready",
+        "version": "1.18.4"
+      }
+    ],
+    "schema_version": "provider_cli_version_audit_v1",
+    "summary": {
+      "catalog_ready": true,
+      "documentation_ready": true,
+      "failure_count": 0,
+      "identity_version_ok": true,
+      "primary_option_ready": true,
+      "promotion_ready": true
+    }
+  },
+  "schema_version": "windows_clean_room_acceptance_v1",
+  "source": {
+    "archive_sha256": null,
+    "checkout": "existing_checkout",
+    "harness_sha256": "97ac9b1a69b84759e8a0def83cd7d947b67599432cbea2749ac7ec5ca62c495b",
+    "kind": "git_checkout",
+    "revision": "76915b31fa2e2cca8d9263e301110a2744c79eb2",
+    "working_tree_dirty": true
+  },
+  "steps": [
+    {
+      "duration_seconds": 0.015,
+      "exit_code": 0,
+      "name": "source_revision",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.032,
+      "exit_code": 0,
+      "name": "source_worktree_state",
+      "ok": true
+    },
+    {
+      "duration_seconds": 2.14,
+      "exit_code": 0,
+      "name": "bootstrap_first",
+      "ok": true
+    },
+    {
+      "duration_seconds": 2.188,
+      "exit_code": 0,
+      "name": "bootstrap_second",
+      "ok": true
+    },
+    {
+      "duration_seconds": 1.5,
+      "exit_code": 0,
+      "name": "installation_audit",
+      "ok": true
+    },
+    {
+      "duration_seconds": 10.469,
+      "exit_code": 0,
+      "name": "provider_cli_version_gate",
+      "ok": true
+    },
+    {
+      "duration_seconds": 10.921,
+      "exit_code": 0,
+      "name": "minimum_tests",
+      "ok": true
+    },
+    {
+      "duration_seconds": 3.657,
+      "exit_code": 0,
+      "name": "start_first",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.218,
+      "exit_code": 0,
+      "name": "backend_health",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.157,
+      "exit_code": 0,
+      "name": "frontend_health",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.343,
+      "exit_code": 0,
+      "name": "guided_fixture_project_commit",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "guided_fixture_retry_collision",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.188,
+      "exit_code": 0,
+      "name": "stop_first",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "ports_released",
+      "ok": true
+    },
+    {
+      "duration_seconds": 1.875,
+      "exit_code": 0,
+      "name": "bootstrap_existing_checkout",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.406,
+      "exit_code": 0,
+      "name": "provider_cli_clean_update_equivalence",
+      "ok": true
+    },
+    {
+      "duration_seconds": 3.781,
+      "exit_code": 0,
+      "name": "start_after_update",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.203,
+      "exit_code": 0,
+      "name": "backend_health_after_update",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.157,
+      "exit_code": 0,
+      "name": "frontend_health_after_update",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.14,
+      "exit_code": 0,
+      "name": "stop_after_update",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "ports_released_after_update",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.406,
+      "exit_code": 0,
+      "name": "migration_dry_run",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.407,
+      "exit_code": 0,
+      "name": "migration_apply_with_backup",
+      "ok": true
+    },
+    {
+      "duration_seconds": 0.0,
+      "exit_code": 0,
+      "name": "database_rollback_restore",
+      "ok": true
+    }
+  ],
+  "update_acceptance": {
+    "project_unchanged": true,
+    "root_footprint_unchanged": true,
+    "schema_version": "provider_cli_update_acceptance_v1",
+    "summary": {
+      "equivalence_ready": true,
+      "negative_cases_ready": true,
+      "optional_absence_ready": true,
+      "promotion_ready": true
+    }
+  }
+}

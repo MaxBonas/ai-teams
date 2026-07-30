@@ -1,0 +1,114 @@
+{
+  "checks": {
+    "adapter_repair_matrix_ready": true,
+    "clean_update_contract_equivalent": true,
+    "guided_project_commit_is_atomic_and_resumable": true,
+    "mixed_root_is_read_only_and_conservative": true,
+    "non_programming_project_avoids_test_loops": true,
+    "react_typescript_fixture_passes": true,
+    "receipt_is_redacted_and_secret_free": true,
+    "symlink_or_reparse_is_not_followed": true,
+    "zero_automatic_cleanup_lifecycle": true
+  },
+  "evidence_hash": "865bf7bd544861b5a6a090c3ce68cf9e34657f190030de8683f2b56ae0d2aef2",
+  "schema_version": "project_portability_acceptance_v1",
+  "scope": {
+    "cleanup_jobs_installed": false,
+    "fixtures_only": true,
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "login_attempted": false,
+    "paths_emitted": false,
+    "real_projects_root_read_only": true,
+    "remote_quota_consumed": false,
+    "secrets_read": false,
+    "user_projects_mutated": false
+  },
+  "sources": {
+    "adapter_repair": {
+      "schema_version": "guided_setup_adapter_repair_acceptance_v1",
+      "sha256": "9925368babd2ddffee1dfed77d444a18628dcc194a8135707b7762e6b0edc88a",
+      "summary": {
+        "passed_count": 10,
+        "repair_acceptance_ready": true,
+        "scenario_count": 10
+      }
+    },
+    "guided_project": {
+      "schema_version": "guided_setup_project_acceptance_v1",
+      "sha256": "6bbe7d1fc59193d3714a08f562cae26b33a042a7f72269a4a7ba06a5851c042b",
+      "summary": {
+        "check_count": 13,
+        "passed_count": 13,
+        "project_setup_acceptance_ready": true
+      }
+    },
+    "mixed_root": {
+      "audit_schema_version": "project_artifact_audit_v1",
+      "classification_counts": {
+        "aiteam_disposable_candidate": 2,
+        "aiteam_preserve_or_migrate": 2,
+        "ambiguous_owner_review_required": 2,
+        "personal_protected": 2
+      },
+      "clean_git_observed": true,
+      "cleanup_authorized": false,
+      "corrupt_db_requires_owner_review": true,
+      "dirty_git_preserved": true,
+      "disposable_is_candidate_only": true,
+      "hygiene_schema_version": "project_hygiene_v1",
+      "interrupted_staging_detected": true,
+      "lifecycle": {
+        "automatic_cleanup_installed": false,
+        "doctor_can_mutate": false,
+        "startup_cleanup_installed": false,
+        "ttl_cleanup_installed": false
+      },
+      "link_fixture_kind": "symlink",
+      "personal_protected": true,
+      "project_writes_performed": 0,
+      "protected_bytes_unchanged": true,
+      "remote_git_preserved_and_redacted": true,
+      "reparse_not_followed": true
+    },
+    "project_preflight": {
+      "schema_version": "guided_setup_project_preflight_contract_audit_v1",
+      "sha256": "527123a7ed709aa87120647ef2451d6c5cb58b3ee557607423551417ae962f2b",
+      "summary": {
+        "check_count": 10,
+        "passed_count": 10,
+        "preflight_contract_ready": true
+      }
+    },
+    "provider_update": {
+      "schema_version": "provider_cli_update_acceptance_v1",
+      "sha256": "7684d8fa9e6e5e6250a89b82db6f60caeaef3e314ef732978e4f9bd8855beea7",
+      "summary": {
+        "equivalence_ready": true,
+        "negative_cases_ready": true,
+        "optional_absence_ready": true,
+        "promotion_ready": true
+      }
+    },
+    "react_typescript": {
+      "action_ids": [
+        "npm_build",
+        "npm_test",
+        "npm_lint",
+        "npm_typecheck"
+      ],
+      "case_ids": [
+        "web_vite_react_typescript"
+      ],
+      "schema_version": "ecosystem_validation_receipt_v1",
+      "statuses": [
+        "passed"
+      ]
+    }
+  },
+  "summary": {
+    "check_count": 9,
+    "passed_count": 9,
+    "portability_acceptance_ready": true
+  }
+}

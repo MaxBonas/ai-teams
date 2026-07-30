@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary_aggregate",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-sol",
+  "role": "team_lead",
+  "prompt_version": "v1",
+  "required_cases": [
+    "tenant_queue_migration",
+    "auth_rollout_incident"
+  ],
+  "required_seeds": [
+    1,
+    2,
+    3
+  ],
+  "samples_observed": 6,
+  "samples_passed": 6,
+  "matrix_complete": true,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-auth-rollout-cli-0.146.0-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-auth-rollout-cli-0.146.0-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-auth-rollout-cli-0.146.0-seed-3.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-tenant-queue-cli-0.146.0-seed-1.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-tenant-queue-cli-0.146.0-seed-2.json",
+    "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-tenant-queue-cli-0.146.0-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-auth-rollout-cli-0.146.0-seed-1.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "6edb279084bd2adc37a52b2167f51436b999c7b9e3b1ebb27c0bd691ae66775f"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-auth-rollout-cli-0.146.0-seed-2.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "923fe6ca8cf2b0a3116bbf0f0c749210a6180f87363e622fe8d95a4bf65cf9a5"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-auth-rollout-cli-0.146.0-seed-3.json",
+      "case_id": "auth_rollout_incident",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "6167248dfcc1b096cf6680cf1da61feba82da4f973bdbbe71b2cbb3ecf36239e"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-tenant-queue-cli-0.146.0-seed-1.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 1,
+      "ok": true,
+      "response_sha256": "f032b5f6db594ddd2e63c34d85484bb90ff3d51dc6738478022214a408a5f563"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-tenant-queue-cli-0.146.0-seed-2.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 2,
+      "ok": true,
+      "response_sha256": "8f64b6d672e8dd79d0a52bbd3d0fb4c5caa4550be31f4551f8faf54925dce7eb"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/critical-defaults-codex-sol-team_lead-tenant-queue-cli-0.146.0-seed-3.json",
+      "case_id": "tenant_queue_migration",
+      "seed": 3,
+      "ok": true,
+      "response_sha256": "1087af9aef3d7535be52ef4a615f0906b7089e9fea3a5fcf21b5b729062df907"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "responses_hashed": true,
+    "single_prompt_version": true
+  },
+  "wall_seconds_median": 10.884,
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "reason": "eligible_for_registry_review",
+    "next_gate": "M.7.4 snapshot vivo y promoción gobernada"
+  }
+}

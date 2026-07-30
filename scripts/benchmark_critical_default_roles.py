@@ -22,7 +22,6 @@ from typing import Any
 
 from aiteam.adapters.work_contract import critical_fact_retention_instruction
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROLES = ("architect", "lead", "lead_executor", "quorum_auditor", "team_lead")
 DEFAULT_MODELS = {
@@ -41,7 +40,13 @@ CASES: dict[str, dict[str, Any]] = {
         "anchors": {
             "durable_source": ("sqlite",),
             "tenant_boundary": ("tenant_id", "tenant"),
-            "atomic_checkout": ("atomic", "atóm", "transaction", "transacci"),
+            "atomic_checkout": (
+                "atomic",
+                "atóm",
+                "transaction",
+                "transacci",
+                "indivis",
+            ),
             "rollback": ("rollback", "revert", "flag"),
             "restart_count": (r"\b100\b",),
             "observation_window": (r"\b24\s*(?:h|horas?|hours?)\b",),
@@ -270,16 +275,33 @@ def _run_codex(model: str, prompt: str, timeout: int) -> dict[str, Any]:
     }
 
 
+def _antigravity_command(
+    executable: str, *, model: str, prompt: str, timeout: int,
+) -> list[str]:
+    return [
+        executable,
+        "--new-project",
+        "--sandbox",
+        "--mode",
+        "plan",
+        "--print",
+        prompt,
+        "--print-timeout",
+        f"{timeout}s",
+        "--model",
+        model,
+    ]
+
+
 def _run_antigravity(model: str, prompt: str, timeout: int) -> dict[str, Any]:
     executable = shutil.which("agy") or shutil.which("agy.exe")
     if not executable:
         raise RuntimeError("agy executable not found")
     with tempfile.TemporaryDirectory(prefix="aiteam-critical-role-") as tmp:
         proc = subprocess.run(
-            [
-                executable, "--new-project", "--print", prompt,
-                "--print-timeout", f"{timeout}s", "--model", model,
-            ],
+            _antigravity_command(
+                executable, model=model, prompt=prompt, timeout=timeout,
+            ),
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             cwd=tmp, timeout=timeout + 15, check=False,
         )
@@ -349,7 +371,11 @@ def run_sample(
         "diagnostic": execution["stderr"],
         "harness": {
             "workspace": "isolated_temporary_directory",
-            "tools": "prompt_prohibited_not_transport_enforced",
+            "tools": (
+                "prompt_prohibited_antigravity_plan_sandbox"
+                if profile_id == "antigravity_subscription"
+                else "prompt_prohibited_codex_read_only_sandbox"
+            ),
             "judge": "deterministic_hidden_rubric",
         },
         "ok": status == "completed" and bool(evaluation["contract_passed"]),
@@ -371,10 +397,15 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
     expected_samples = {(case_id, seed) for case_id in CASES for seed in (1, 2, 3)}
     observed_samples = {(report.get("case_id"), report.get("seed")) for report in reports}
     prompt_versions = {str(report.get("prompt_version") or "v1") for report in reports}
+    cli_versions = {
+        str(report.get("cli_version") or "").strip() for report in reports
+    }
+    single_cli_version = len(cli_versions) == 1 and "" not in cli_versions
     exact_pair = len(identities) == 1
     complete = (
         exact_pair
         and len(prompt_versions) == 1
+        and single_cli_version
         and observed_samples == expected_samples
         and len(reports) == len(expected_samples)
     )
@@ -409,10 +440,12 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "benchmark": "critical_default_role_canary_aggregate",
+        "contract_version": "critical_role_aggregate_v2",
         "profile_id": profile_id,
         "model": model,
         "role": role,
         "prompt_version": next(iter(prompt_versions)) if len(prompt_versions) == 1 else None,
+        "cli_version": next(iter(cli_versions)) if single_cli_version else None,
         "required_cases": list(CASES),
         "required_seeds": [1, 2, 3],
         "samples_observed": len(reports),
@@ -424,6 +457,7 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
             "sources_bound": sources_bound,
             "responses_hashed": responses_hashed,
             "single_prompt_version": len(prompt_versions) == 1,
+            "single_cli_version": single_cli_version,
         },
         "wall_seconds_median": round(statistics.median(seconds), 3) if seconds else None,
         "conclusion": {

@@ -4,6 +4,8 @@ from scripts.benchmark_codex_terra_qa import (
     adapter_config,
     aggregate_diverse_family_reports,
     aggregate_reports,
+    benchmark_lead_identity,
+    bootstrap_profile_ids,
     evaluate_adversarial_test,
     evaluate_webhook_test,
     reevaluate_report,
@@ -21,6 +23,9 @@ def test_boundaries():
 '''
     assert evaluate_adversarial_test(text)["contract_passed"] is True
     assert evaluate_adversarial_test(text.replace("tenant-b", "tenant-a"))["contract_passed"] is False
+    assert evaluate_adversarial_test(text.replace("tenant_id", "tenant"))[
+        "contract_passed"
+    ] is False
 
 
 def test_webhook_evaluator_requires_signature_expiry_and_replay() -> None:
@@ -55,13 +60,41 @@ def test_antigravity_config_preserves_profile_and_does_not_invent_effort() -> No
     assert "model_reasoning_effort" not in config
 
 
+def test_gemini_free_config_uses_secret_reference_without_inline_value() -> None:
+    config = adapter_config("gemini_api_free", "gemini-3.6-flash")
+    assert config["profile_id"] == "gemini_api_free"
+    assert config["model"] == "gemini-3.6-flash"
+    assert config["api_key_ref"] == "secret:google-free:default"
+    assert "api_key" not in config
+    assert bootstrap_profile_ids("gemini_api_free") == [
+        "gemini_api_free",
+        "codex_subscription",
+    ]
+
+
+def test_qa_benchmark_uses_explicit_calibrated_support_lead() -> None:
+    assert benchmark_lead_identity("codex_subscription") == (
+        "codex_subscription",
+        "gpt-5.6-sol",
+    )
+    assert benchmark_lead_identity("antigravity_subscription") == (
+        "codex_subscription",
+        "gpt-5.6-sol",
+    )
+    assert bootstrap_profile_ids("antigravity_subscription") == [
+        "antigravity_subscription",
+        "codex_subscription",
+    ]
+
+
 def test_aggregate_requires_three_complete_comparable_samples() -> None:
     reports = [
         {
             "profile_id": "codex_subscription",
             "model": "gpt-5.6-terra",
+            "provider_version": "0.146.0-alpha.6",
             "role": "qa",
-            "contract_version": "adversarial_qa_fix_cycle_v2",
+            "contract_version": "adversarial_qa_fix_cycle_v4",
             "seed": seed,
             "ok": True,
             "checks": {"attack": True, "verify": True},
@@ -69,6 +102,7 @@ def test_aggregate_requires_three_complete_comparable_samples() -> None:
             "usage": {"input_tokens": 100, "output_tokens": 10},
             "attack_evaluation": {"seed": seed},
             "failing_test_run": {"exit_code": 1},
+            "passing_test_run": {"exit_code": 0},
             "_source_receipt": f"qa-seed-{seed}.json",
         }
         for seed in (1, 2, 3)
@@ -90,6 +124,8 @@ def test_diversity_aggregate_requires_two_exact_calibrated_families() -> None:
         {
             "profile_id": "codex_subscription",
             "model": "gpt-5.6-terra",
+            "provider_version": "0.146.0-alpha.6",
+            "contract_version": "adversarial_qa_fix_cycle_v4",
             "case_family": family,
             "matrix_complete": True,
             "samples_passed": 3,
@@ -113,9 +149,40 @@ def test_diversity_aggregate_requires_two_exact_calibrated_families() -> None:
     )
 
 
+def test_qa_aggregates_reject_mixed_provider_versions() -> None:
+    reports = [
+        {
+            "profile_id": "codex_subscription",
+            "model": "gpt-5.6-terra",
+            "provider_version": (
+                "0.146.0-alpha.6" if seed < 3 else "0.145.0"
+            ),
+            "role": "qa",
+            "contract_version": "adversarial_qa_fix_cycle_v4",
+            "case_family": "authorization_boundary",
+            "seed": seed,
+            "ok": True,
+            "checks": {"attack": True, "verify": True},
+            "phases": {
+                "attack": {"seconds": 10},
+                "verify_fix": {"seconds": 20},
+            },
+            "attack_evaluation": {"seed": seed},
+            "failing_test_run": {"exit_code": 1},
+            "passing_test_run": {"exit_code": 0},
+            "_source_receipt": f"qa-seed-{seed}.json",
+        }
+        for seed in (1, 2, 3)
+    ]
+    aggregate = aggregate_reports(reports)
+
+    assert aggregate["same_provider_version"] is False
+    assert aggregate["conclusion"]["exact_pair_calibrated"] is False
+
+
 def test_reevaluation_versions_generalized_transport_without_rerun() -> None:
     updated = reevaluate_report({"checks": {"all": True}, "ok": True})
-    assert updated["contract_version"] == "adversarial_qa_fix_cycle_v2"
+    assert updated["contract_version"] == "adversarial_qa_fix_cycle_v4"
     assert updated["reevaluation"]["provider_rerun"] is False
 
 
@@ -132,7 +199,9 @@ def test_reevaluation_accepts_inactive_constructor_from_persisted_pytest() -> No
             },
         },
         "failing_test_run": {
-            "stdout": "actor = Actor(tenant='tenant-a', active=False, role='admin')"
+            "stdout": (
+                "actor = Actor(tenant_id='tenant-a', active=False, role='admin')"
+            )
         },
         "ok": False,
     }

@@ -12,8 +12,19 @@ import sqlite3
 import subprocess
 import time
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
+
+from aiteam.db.migration import SCHEMA_PATH
+from aiteam.guided_setup_project_commit import materialize_project_proposal
+from aiteam.project_hygiene import (
+    observe_project_hygiene,
+    validate_project_hygiene,
+)
+from aiteam.provider_cli_acceptance_fixture import (
+    build_provider_cli_acceptance_fixture,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_PORT = 8010
@@ -103,7 +114,7 @@ def _wait_for_closed_ports(timeout: float = 20.0) -> bool:
 
 
 def _fixture_summary(db_path: Path) -> dict[str, int]:
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         required_tables = {"agents", "goals", "issues", "runs", "wakeup_requests"}
         observed_tables = {
             str(row[0])
@@ -124,6 +135,268 @@ def _fixture_summary(db_path: Path) -> dict[str, int]:
         "issues": issue_count,
         "goals": goal_count,
         "tables": table_count,
+    }
+
+
+def _json_sha256(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _direct_footprint(root: Path) -> dict[str, str]:
+    if not root.is_dir():
+        return {}
+    result: dict[str, str] = {}
+    for entry in root.iterdir():
+        if entry.is_symlink():
+            kind = "link"
+        elif entry.is_dir():
+            kind = "directory"
+        elif entry.is_file():
+            kind = "file"
+        else:
+            kind = "other"
+        result[entry.name] = kind
+    return result
+
+
+def _footprint_evidence(value: dict[str, str]) -> dict[str, Any]:
+    return {
+        "entry_count": len(value),
+        "sha256": _json_sha256(value),
+    }
+
+
+def _tree_manifest(root: Path) -> dict[str, dict[str, Any]]:
+    manifest: dict[str, dict[str, Any]] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            manifest[relative] = {"kind": "link"}
+        elif path.is_dir():
+            manifest[relative] = {"kind": "directory"}
+        elif path.is_file():
+            manifest[relative] = {
+                "kind": "file",
+                "size": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+        else:
+            manifest[relative] = {"kind": "other"}
+    return manifest
+
+
+def _guided_fixture_contract(db_path: Path) -> dict[str, Any]:
+    with closing(sqlite3.connect(db_path)) as conn:
+        roles = [
+            str(row[0])
+            for row in conn.execute(
+                "SELECT role FROM agents ORDER BY rowid"
+            ).fetchall()
+        ]
+        queued_wakeups = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM wakeup_requests WHERE status = 'queued'"
+            ).fetchone()[0]
+        )
+        metadata = json.loads(
+            conn.execute(
+                "SELECT metadata_json FROM goals WHERE id = 'goal:intake'"
+            ).fetchone()[0]
+        )
+    return {
+        "roles": roles,
+        "queued_wakeups": queued_wakeups,
+        "objective_kind": metadata["objective_classification"]["kind"],
+    }
+
+
+def _guided_fixture_profile() -> dict[str, Any]:
+    return {
+        "id": "clean_room_fixture",
+        "adapter_type": "fixture_no_inference",
+        "channel": "subscription",
+        "supported_roles": ["team_lead"],
+        "config": {},
+        "model_options": [{"value": "fixture-lead"}],
+    }
+
+
+def _guided_fixture_proposal(target: Path) -> dict[str, Any]:
+    source_agent = {
+        "agent_id": "role:team_lead",
+        "role": "team_lead",
+        "name": "Team Lead",
+        "seniority": "lead",
+        "capabilities": ["planning", "supervision"],
+        "supervisor_agent_id": None,
+        "preferred_tier": "senior_cloud",
+        "preferred_channel": "subscription",
+        "assignment_reason": "Owns the acceptance fixture.",
+    }
+    result: dict[str, Any] = {
+        "schema_version": "guided_setup_project_proposal_v1",
+        "scope": {
+            "read_only": True,
+            "filesystem_mutated": False,
+            "database_mutated": False,
+            "project_created": False,
+            "agents_created": False,
+            "wakeups_created": False,
+        },
+        "project": {
+            "mode": "create",
+            "name": target.name,
+            "target": str(target),
+            "target_exists": False,
+            "target_is_dir": False,
+            "instructions_target": ".aiteam/instructions.md",
+            "instructions_preview": (
+                "Conservar evidencia; no ejecutar modelos ni crear tests."
+            ),
+            "objective": (
+                "Documentar la instalación portable de AI Teams sin "
+                "implementar software."
+            ),
+            "objective_kind": "research",
+            "data_class": "public",
+        },
+        "ecosystems": {
+            "schema_version": "ecosystem_registry_v1",
+            "workspace_observed": False,
+            "scan_truncated": False,
+            "files_observed": 0,
+            "detected_ids": [],
+            "ecosystems": [],
+            "support_claims": [],
+            "commands_executed": False,
+            "installation_performed": False,
+            "mutated": False,
+        },
+        "profile": {
+            "recommended": "solo_lead",
+            "selected": "solo_lead",
+            "owner_override": False,
+            "automatic_coverage_ready": True,
+            "coverage_status": "ready",
+            "coverage_blockers": [],
+        },
+        "team": {
+            "lead_first": True,
+            "creation_order": ["role:team_lead"],
+            "blueprint": {
+                "goal_id": "goal:preview",
+                "profile": "solo_lead",
+                "rationale": "Fixture mínimo Lead-first sin inferencia.",
+                "agents": [source_agent],
+                "cost_policy": {"mode": "balanced"},
+                "metadata": {"lead_first": True},
+            },
+            "assignments": [
+                {
+                    "agent_id": "role:team_lead",
+                    "role": "team_lead",
+                    "name": "Team Lead",
+                    "supervisor_agent_id": None,
+                    "assignment_reason": "Owns the acceptance fixture.",
+                    "selection_mode": "automatic",
+                    "candidate": {
+                        "candidate_id": "fixture:lead",
+                        "profile_id": "clean_room_fixture",
+                        "model_id": "fixture-lead",
+                    },
+                    "accountability": {
+                        "reports_to": None,
+                        "acceptance_owner": "owner",
+                        "required_evidence": "agent_report_and_role_contract",
+                    },
+                }
+            ],
+            "quorum_diversity": {
+                "required_count": 0,
+                "assigned_count": 0,
+                "perspective_count": 0,
+                "capacity_pool_count": 0,
+                "ready": True,
+            },
+            "manual_override_count": 0,
+        },
+        "budget": {"mode": "balanced"},
+        "degradations": ["no_ecosystem_detected"],
+        "save_gate": {
+            "allowed": True,
+            "blockers": [],
+            "requires_owner_confirmation": True,
+        },
+    }
+    result["proposal_hash"] = _json_sha256(result)
+    return result
+
+
+def _materialize_guided_fixture(target: Path) -> dict[str, Any]:
+    proposal = _guided_fixture_proposal(target)
+    result = materialize_project_proposal(
+        proposal,
+        profiles=[_guided_fixture_profile()],
+        schema_path=SCHEMA_PATH,
+    )
+    return {
+        "proposal": proposal,
+        "result": result,
+    }
+
+
+def _installation_lifecycle_contract(repo_root: Path = ROOT) -> dict[str, Any]:
+    sources = (
+        "scripts/prepare_dev_env.bat",
+        "scripts/prepare_dev_env.ps1",
+        "scripts/dev_lifecycle.py",
+        "start_ide.bat",
+        "stop_ide.bat",
+    )
+    prohibited = {
+        "scheduled_task": re.compile(
+            r"\b(?:schtasks|register-scheduledtask)\b",
+            re.IGNORECASE,
+        ),
+        "service": re.compile(
+            r"\b(?:new-service|sc(?:\.exe)?\s+create)\b",
+            re.IGNORECASE,
+        ),
+        "startup_registry": re.compile(
+            r"currentversion[\\/]+run(?:once)?\b",
+            re.IGNORECASE,
+        ),
+    }
+    digests: dict[str, str] = {}
+    findings: dict[str, list[str]] = {
+        marker: [] for marker in prohibited
+    }
+    for relative in sources:
+        path = repo_root / relative
+        payload = path.read_text(encoding="utf-8")
+        digests[relative] = hashlib.sha256(
+            payload.encode("utf-8")
+        ).hexdigest()
+        for marker, pattern in prohibited.items():
+            if pattern.search(payload):
+                findings[marker].append(relative)
+    return {
+        "schema_version": "installation_lifecycle_contract_v1",
+        "source_count": len(sources),
+        "sources_sha256": _json_sha256(digests),
+        "scheduled_tasks_installed": bool(findings["scheduled_task"]),
+        "services_installed": bool(findings["service"]),
+        "startup_entries_installed": bool(findings["startup_registry"]),
+        "runtime_requires_explicit_start": True,
+        "runtime_has_explicit_stop": True,
+        "findings": findings,
     }
 
 
@@ -168,6 +441,40 @@ def _github_provenance(revision: str) -> tuple[bool, dict[str, str | None]]:
     return bool(independent), provenance
 
 
+def _installation_state(
+    state: str,
+    *,
+    revision: str,
+    pre_update_revision: str | None,
+) -> dict[str, Any]:
+    if state == "clean_clone":
+        if pre_update_revision:
+            raise ValueError(
+                "clean_clone no admite una revisión pre-update"
+            )
+        return {
+            "kind": state,
+            "pre_update_revision": None,
+            "updated_to_revision": revision,
+            "contract_ready": True,
+        }
+    if state != "existing_checkout_updated":
+        raise ValueError("installation_state no soportado")
+    if (
+        not _is_lower_hex(pre_update_revision, {40, 64})
+        or pre_update_revision == revision
+    ):
+        raise ValueError(
+            "existing_checkout_updated exige una revisión anterior distinta"
+        )
+    return {
+        "kind": state,
+        "pre_update_revision": pre_update_revision,
+        "updated_to_revision": revision,
+        "contract_ready": True,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -189,6 +496,18 @@ def main() -> int:
     parser.add_argument(
         "--archive-sha256",
         help="SHA-256 verificado del ZIP; obligatorio para release_archive.",
+    )
+    parser.add_argument(
+        "--installation-state",
+        choices=("clean_clone", "existing_checkout_updated"),
+        default="clean_clone",
+    )
+    parser.add_argument(
+        "--pre-update-revision",
+        help=(
+            "SHA previo obligatorio cuando installation-state es "
+            "existing_checkout_updated."
+        ),
     )
     args = parser.parse_args()
 
@@ -220,6 +539,8 @@ def main() -> int:
             ),
             "revision": None,
             "archive_sha256": args.archive_sha256,
+            "working_tree_dirty": None,
+            "harness_sha256": _sha256_file(Path(__file__).resolve()),
         },
         "ci_provenance": None,
         "steps": [],
@@ -260,7 +581,8 @@ def main() -> int:
             raise RuntimeError("I.1.4 requiere arquitectura Windows x86_64")
         if not _port_is_free(BACKEND_PORT) or not _port_is_free(FRONTEND_PORT):
             raise RuntimeError(
-                "Los puertos 8010/9490 ya están ocupados; no se detendrán procesos ajenos"
+                "Los puertos 8010/9490 ya están ocupados; no se detendrán "
+                "procesos ajenos"
             )
 
         if args.source_kind == "release_archive":
@@ -288,16 +610,39 @@ def main() -> int:
                 ["git", "rev-parse", "HEAD"],
                 30,
             ).stdout.strip()
+            worktree = step(
+                "source_worktree_state",
+                ["git", "status", "--porcelain", "--untracked-files=normal"],
+                30,
+            )
+            receipt["source"]["working_tree_dirty"] = bool(
+                worktree.stdout.strip()
+            )
         receipt["source"]["revision"] = revision
+        receipt["installation_state"] = _installation_state(
+            args.installation_state,
+            revision=revision,
+            pre_update_revision=args.pre_update_revision,
+        )
         independent, provenance = _github_provenance(revision)
+        if args.source_kind == "git_checkout":
+            independent = independent and (
+                receipt["source"]["working_tree_dirty"] is False
+            )
         receipt["independent_machine"] = independent
         receipt["environment_class"] = (
             "independent_ephemeral_ci" if independent else "local_existing_host"
         )
         receipt["ci_provenance"] = provenance if independent else None
 
-        step("bootstrap_first", ["cmd.exe", "/d", "/c", "scripts\\prepare_dev_env.bat"], 1200)
-        step("bootstrap_second", ["cmd.exe", "/d", "/c", "scripts\\prepare_dev_env.bat"], 1200)
+        bootstrap_command = [
+            "cmd.exe",
+            "/d",
+            "/c",
+            "scripts\\prepare_dev_env.bat",
+        ]
+        step("bootstrap_first", bootstrap_command, 1200)
+        step("bootstrap_second", bootstrap_command, 1200)
 
         audit_proc = step(
             "installation_audit",
@@ -337,6 +682,42 @@ def main() -> int:
         ):
             raise RuntimeError("installation_audit no conservó runtimes listos")
 
+        env.update(
+            build_provider_cli_acceptance_fixture(
+                fixture_root,
+                os_id="windows",
+            )
+        )
+        cli_gate_proc = step(
+            "provider_cli_version_gate",
+            [
+                "cmd.exe",
+                "/d",
+                "/c",
+                "scripts\\python_local.bat",
+                "scripts\\audit_provider_cli_versions.py",
+                "--json",
+                "--strict",
+            ],
+            180,
+        )
+        cli_gate = json.loads(cli_gate_proc.stdout)
+        receipt["provider_cli_version_gate"] = {
+            "schema_version": cli_gate.get("schema_version"),
+            "fixture_mode": env["AITEAM_PROVIDER_CLI_FIXTURE"],
+            "summary": cli_gate.get("summary"),
+            "rows": [
+                {
+                    "cli_id": item.get("cli_id"),
+                    "version": item.get("runtime", {}).get("version"),
+                    "executable": item.get("runtime", {}).get("executable"),
+                    "fingerprint": item.get("runtime", {}).get("fingerprint"),
+                    "status": item.get("status"),
+                }
+                for item in cli_gate.get("rows", [])
+            ],
+        }
+
         step(
             "minimum_tests",
             [
@@ -356,7 +737,7 @@ def main() -> int:
         )
 
         step(
-            "start",
+            "start_first",
             ["cmd.exe", "/d", "/c", "start_ide.bat"],
             180,
             capture_output=False,
@@ -392,39 +773,184 @@ def main() -> int:
         )
 
         fixture_root.mkdir(parents=True, exist_ok=True)
+        footprint_before = _direct_footprint(fixture_root)
+        create_started = time.monotonic()
+        guided = _materialize_guided_fixture(fixture_path)
+        receipt["steps"].append(
+            {
+                "name": "guided_fixture_project_commit",
+                "ok": True,
+                "exit_code": 0,
+                "duration_seconds": round(
+                    time.monotonic() - create_started,
+                    3,
+                ),
+            }
+        )
+        footprint_after = _direct_footprint(fixture_root)
+        expected_footprint = {
+            **footprint_before,
+            fixture_name: "directory",
+        }
+        if footprint_after != expected_footprint:
+            raise RuntimeError(
+                "El commit guiado creó siblings fuera del footprint declarado"
+            )
+        db_path = fixture_path / ".aiteam" / "aiteam.db"
+        if not db_path.is_file():
+            raise RuntimeError("El proyecto fixture no creó .aiteam/aiteam.db")
+        summary = _fixture_summary(db_path)
+        contract = _guided_fixture_contract(db_path)
+        if (
+            summary["issues"] != 1
+            or summary["goals"] != 1
+            or summary["tables"] < 5
+            or contract != {
+                "roles": ["lead"],
+                "queued_wakeups": 1,
+                "objective_kind": "research",
+            }
+        ):
+            raise RuntimeError(f"Fixture incompleto: {summary}")
+        retry_blocked = False
+        try:
+            _materialize_guided_fixture(fixture_path)
+        except FileExistsError as exc:
+            retry_blocked = (
+                "guided_setup_project_target_collision" in str(exc)
+            )
+        if not retry_blocked or _direct_footprint(fixture_root) != footprint_after:
+            raise RuntimeError(
+                "El retry del commit guiado no fue idempotente/fail-closed"
+            )
+        receipt["steps"].append(
+            {
+                "name": "guided_fixture_retry_collision",
+                "ok": True,
+                "exit_code": 0,
+                "duration_seconds": 0.0,
+            }
+        )
+        receipt["fixture"] = {
+            "created": True,
+            **summary,
+            **contract,
+            "proposal_schema_version": guided["proposal"]["schema_version"],
+            "commit_schema_version": guided["result"]["schema_version"],
+            "proposal_hash": guided["proposal"]["proposal_hash"],
+            "lead_first": guided["result"]["lead_first"],
+            "footprint_verified": guided["result"]["footprint_verified"],
+            "retry_collision_blocked": retry_blocked,
+            "footprint_before": _footprint_evidence(footprint_before),
+            "footprint_after": _footprint_evidence(footprint_after),
+        }
+
+        step("stop_first", ["cmd.exe", "/d", "/c", "stop_ide.bat"], 60)
+        started = False
+        if not _wait_for_closed_ports():
+            raise RuntimeError("start/stop no liberó los puertos 8010/9490")
+        receipt["steps"].append(
+            {
+                "name": "ports_released",
+                "ok": True,
+                "exit_code": 0,
+                "duration_seconds": 0.0,
+            }
+        )
+
+        project_before_refresh = _tree_manifest(fixture_path)
         step(
-            "fixture_project_create",
+            "bootstrap_existing_checkout",
+            ["cmd.exe", "/d", "/c", "scripts\\prepare_dev_env.bat"],
+            1200,
+        )
+        update_proc = step(
+            "provider_cli_clean_update_equivalence",
             [
                 "cmd.exe",
                 "/d",
                 "/c",
                 "scripts\\python_local.bat",
-                "-m",
-                "aiteam.cli",
-                "project",
-                "create",
-                fixture_name,
-                "--task",
-                "Validar instalación portable sin ejecutar un modelo",
+                "scripts\\audit_provider_cli_update_acceptance.py",
+                "--json",
+                "--strict",
             ],
             120,
         )
-        db_path = fixture_path / ".aiteam" / "aiteam.db"
-        if not db_path.is_file():
-            raise RuntimeError("El proyecto fixture no creó .aiteam/aiteam.db")
-        summary = _fixture_summary(db_path)
-        if summary["issues"] != 1 or summary["tables"] < 5:
-            raise RuntimeError(f"Fixture incompleto: {summary}")
-        receipt["fixture"] = {"created": True, **summary}
+        update_acceptance = json.loads(update_proc.stdout)
+        if update_acceptance.get("summary", {}).get("promotion_ready") is not True:
+            raise RuntimeError(
+                "La actualización no conservó equivalencia clean/update"
+            )
+        if (
+            _direct_footprint(fixture_root) != footprint_after
+            or _tree_manifest(fixture_path) != project_before_refresh
+        ):
+            raise RuntimeError(
+                "Bootstrap/update mutó el proyecto o su footprint"
+            )
+        receipt["update_acceptance"] = {
+            "schema_version": update_acceptance.get("schema_version"),
+            "summary": update_acceptance.get("summary"),
+            "project_unchanged": True,
+            "root_footprint_unchanged": True,
+        }
 
-        step("stop", ["cmd.exe", "/d", "/c", "stop_ide.bat"], 60)
+        step(
+            "start_after_update",
+            ["cmd.exe", "/d", "/c", "start_ide.bat"],
+            180,
+            capture_output=False,
+        )
+        started = True
+        step(
+            "backend_health_after_update",
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                (
+                    "$r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 "
+                    "-Uri http://127.0.0.1:8010/openapi.json; "
+                    "if($r.StatusCode -ne 200){exit 1}"
+                ),
+            ],
+            30,
+        )
+        step(
+            "frontend_health_after_update",
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                (
+                    "$r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 "
+                    "-Uri http://127.0.0.1:9490; "
+                    "if($r.StatusCode -ne 200){exit 1}"
+                ),
+            ],
+            30,
+        )
+        step(
+            "stop_after_update",
+            ["cmd.exe", "/d", "/c", "stop_ide.bat"],
+            60,
+        )
         started = False
         if not _wait_for_closed_ports():
-            raise RuntimeError("start/stop no liberó los puertos 8010/9490")
+            raise RuntimeError(
+                "El restart posterior a update no liberó los puertos"
+            )
         receipt["steps"].append(
-            {"name": "ports_released", "ok": True, "exit_code": 0, "duration_seconds": 0.0}
+            {
+                "name": "ports_released_after_update",
+                "ok": True,
+                "exit_code": 0,
+                "duration_seconds": 0.0,
+            }
         )
 
+        project_before_migration = _tree_manifest(fixture_path)
         original_hash = _sha256_file(db_path)
         step(
             "migration_dry_run",
@@ -461,7 +987,9 @@ def main() -> int:
             raise RuntimeError("La migración aplicada no produjo backup")
         backup_path = Path(str(backup_value)).resolve()
         if backup_path.parent != db_path.parent or not backup_path.is_file():
-            raise RuntimeError("La migración devolvió un backup fuera del proyecto fixture")
+            raise RuntimeError(
+                "La migración devolvió un backup fuera del proyecto fixture"
+            )
         backup_hash = _sha256_file(backup_path)
         if backup_hash != original_hash:
             raise RuntimeError("El backup no coincide con la base previa a migración")
@@ -477,6 +1005,11 @@ def main() -> int:
         restored_hash = _sha256_file(db_path)
         if restored_hash != original_hash:
             raise RuntimeError("La restauración no recuperó los bytes originales")
+        backup_path.unlink()
+        if _tree_manifest(fixture_path) != project_before_migration:
+            raise RuntimeError(
+                "La prueba de migración dejó artefactos no declarados"
+            )
         receipt["steps"].append(
             {
                 "name": "database_rollback_restore",
@@ -489,6 +1022,29 @@ def main() -> int:
             "backup_created": True,
             "backup_matches_original": True,
             "restored_matches_original": True,
+            "backup_removed": True,
+            "footprint_restored": True,
+        }
+
+        hygiene = observe_project_hygiene(fixture_root, configured=True)
+        validate_project_hygiene(hygiene)
+        expected_lifecycle = {
+            "automatic_cleanup_installed": False,
+            "startup_cleanup_installed": False,
+            "ttl_cleanup_installed": False,
+            "doctor_can_mutate": False,
+        }
+        if (
+            hygiene["lifecycle"] != expected_lifecycle
+            or _direct_footprint(fixture_root) != footprint_after
+        ):
+            raise RuntimeError(
+                "El lifecycle final instaló limpieza o alteró el footprint"
+            )
+        receipt["project_hygiene"] = {
+            "schema_version": hygiene["schema_version"],
+            "lifecycle": hygiene["lifecycle"],
+            "root_footprint_unchanged": True,
         }
 
         receipt["global_cli_inventory_after"] = _cli_inventory()
@@ -499,8 +1055,23 @@ def main() -> int:
         ]
         if introduced:
             raise RuntimeError(
-                "El bootstrap instaló CLIs globales sin permiso: " + ", ".join(introduced)
+                "El bootstrap instaló CLIs globales sin permiso: "
+                + ", ".join(introduced)
             )
+
+        lifecycle_contract = _installation_lifecycle_contract()
+        if any(
+            lifecycle_contract[key] is True
+            for key in (
+                "scheduled_tasks_installed",
+                "services_installed",
+                "startup_entries_installed",
+            )
+        ):
+            raise RuntimeError(
+                "Los entrypoints de instalación registran lifecycle persistente"
+            )
+        receipt["installation_lifecycle"] = lifecycle_contract
 
         receipt["ok"] = True
         receipt["promotion_allowed"] = receipt["independent_machine"]

@@ -79,6 +79,8 @@ def test_release_receipt_requires_every_canonical_step() -> None:
         ).read_text(encoding="utf-8")
     )
     required = contract["release_acceptance_contract"]["required_steps"]
+    assert len(required) == 18
+    assert "provider_cli_version_gate" in required
     receipt = {"steps": [{"name": name, "ok": True} for name in required]}
 
     assert _validate_required_steps(receipt)["ok"] is True
@@ -86,6 +88,18 @@ def test_release_receipt_requires_every_canonical_step() -> None:
     result = _validate_required_steps(receipt)
     assert result["ok"] is False
     assert result["missing_steps"] == [required[-1]]
+
+
+def test_release_inner_harnesses_execute_provider_cli_gate() -> None:
+    root = Path(__file__).resolve().parents[1]
+    for relative_path in (
+        "scripts/accept_windows_clean_room.py",
+        "scripts/accept_posix_clean_room.py",
+    ):
+        source = (root / relative_path).read_text(encoding="utf-8")
+        assert 'step(\n            "provider_cli_version_gate"' in source
+        assert "build_provider_cli_acceptance_fixture" in source
+        assert "AITEAM_PROVIDER_CLI_FIXTURE" in source
 
 
 @pytest.mark.parametrize(

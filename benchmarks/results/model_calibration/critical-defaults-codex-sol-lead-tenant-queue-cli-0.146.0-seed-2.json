@@ -1,0 +1,271 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 27.453,
+  "usage": {
+    "input_tokens": 16699,
+    "cached_input_tokens": 0,
+    "output_tokens": 1667
+  },
+  "response": {
+    "objective": {
+      "name": "tenant_queue_migration",
+      "goal": "Migrar la cola por tenant manteniendo SQLite como única fuente durable, garantizando que cada issue conserve tenant_id y que dos workers no puedan ganar la misma issue.",
+      "constraints": [
+        "La migración no puede detener runs activas.",
+        "Debe mantenerse disponible el flag para volver al camino anterior.",
+        "El checkout debe eliminar la separación vulnerable entre SELECT y UPDATE."
+      ],
+      "accountable_owner": "Lead"
+    },
+    "work_items": [
+      {
+        "id": "WI-1",
+        "task": "Definir la operación indivisible de checkout que seleccione y adjudique una issue a un único worker, respetando tenant_id.",
+        "owner": "Owner de persistencia SQLite",
+        "acceptor": "Lead",
+        "dependencies": [],
+        "acceptance_conditions": [
+          "SQLite sigue siendo la única fuente durable.",
+          "SELECT y UPDATE dejan de constituir pasos separados susceptibles de ser ganados por dos workers.",
+          "Una issue solo puede ser ganada por un worker.",
+          "El límite de tenant_id se conserva en cada checkout."
+        ]
+      },
+      {
+        "id": "WI-2",
+        "task": "Implementar y revisar el checkout indivisible en SQLite.",
+        "owner": "Owner de implementación de cola",
+        "acceptor": "Owner de persistencia SQLite",
+        "dependencies": [
+          "WI-1"
+        ],
+        "acceptance_conditions": [
+          "La adjudicación concurrente de una misma issue a dos workers queda impedida.",
+          "Cada issue mantiene tenant_id.",
+          "No se introduce otra fuente durable."
+        ]
+      },
+      {
+        "id": "WI-3",
+        "task": "Diseñar y ejecutar la migración compatible con runs activas.",
+        "owner": "Owner de migración",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-2"
+        ],
+        "acceptance_conditions": [
+          "Ninguna run activa debe detenerse por la migración.",
+          "El camino migrado puede coexistir durante la transición con las runs ya activas.",
+          "El estado durable permanece exclusivamente en SQLite."
+        ]
+      },
+      {
+        "id": "WI-4",
+        "task": "Validar el flag de retorno al camino anterior y documentar su criterio de activación.",
+        "owner": "Owner de rollback",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-2",
+          "WI-3"
+        ],
+        "acceptance_conditions": [
+          "El flag permite volver al camino anterior.",
+          "El retorno no exige detener runs activas.",
+          "La activación del flag no cambia a SQLite como única fuente durable."
+        ]
+      },
+      {
+        "id": "WI-5",
+        "task": "Ejecutar el gate de estabilidad y registrar sus resultados.",
+        "owner": "Owner de verificación",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-3",
+          "WI-4"
+        ],
+        "acceptance_conditions": [
+          "Se ejecutan exactamente 100 reinicios.",
+          "Se observan cero wakeups perdidos.",
+          "La ventana de observación es de 24 horas.",
+          "El gate solo se acepta si se cumplen simultáneamente las tres condiciones."
+        ]
+      },
+      {
+        "id": "WI-6",
+        "task": "Autorizar o rechazar la migración según evidencias del gate.",
+        "owner": "Lead",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-5"
+        ],
+        "acceptance_conditions": [
+          "La migración se autoriza únicamente tras superar el gate.",
+          "Si el gate falla, se activa el procedimiento de rollback o escalado aplicable."
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "id": "R-1",
+        "risk": "Dos workers ganan la misma issue por el checkout separado entre SELECT y UPDATE.",
+        "owner": "Owner de implementación de cola",
+        "mitigation": "Hacer indivisible la selección y adjudicación en SQLite.",
+        "gate": "Prueba concurrente sin doble ganador.",
+        "escalation_trigger": "Cualquier issue adjudicada a más de un worker."
+      },
+      {
+        "id": "R-2",
+        "risk": "Cruce o pérdida del límite de tenant_id.",
+        "owner": "Owner de persistencia SQLite",
+        "mitigation": "Mantener tenant_id en cada issue y aplicarlo en el checkout.",
+        "gate": "Verificación explícita del aislamiento por tenant_id.",
+        "escalation_trigger": "Cualquier adjudicación que no respete tenant_id."
+      },
+      {
+        "id": "R-3",
+        "risk": "Interrupción de runs activas durante la migración.",
+        "owner": "Owner de migración",
+        "mitigation": "Mantener compatibilidad durante la transición y usar el flag si es necesario.",
+        "gate": "Migración sin detener runs activas.",
+        "escalation_trigger": "Cualquier run activa detenida por la migración."
+      },
+      {
+        "id": "R-4",
+        "risk": "Pérdida de wakeups durante reinicios.",
+        "owner": "Owner de verificación",
+        "mitigation": "Ejecutar el gate completo antes de autorizar.",
+        "gate": "100 reinicios, cero wakeups perdidos durante 24 horas.",
+        "escalation_trigger": "Un wakeup perdido, menos de 100 reinicios o una ventana inferior a 24 horas."
+      },
+      {
+        "id": "R-5",
+        "risk": "El rollback no restaura de forma efectiva el camino anterior.",
+        "owner": "Owner de rollback",
+        "mitigation": "Validar el flag antes del gate final.",
+        "gate": "Retorno comprobado al camino anterior sin detener runs activas.",
+        "escalation_trigger": "El flag no permite volver al camino anterior."
+      },
+      {
+        "id": "R-6",
+        "risk": "Se introduce una fuente durable distinta de SQLite.",
+        "owner": "Owner de persistencia SQLite",
+        "mitigation": "Rechazar cualquier diseño que persista estado durable fuera de SQLite.",
+        "gate": "Revisión de arquitectura y persistencia.",
+        "escalation_trigger": "Cualquier estado durable requerido para la cola fuera de SQLite."
+      }
+    ],
+    "verification": {
+      "owner": "Owner de verificación",
+      "acceptor": "Lead",
+      "dependencies": [
+        "WI-2",
+        "WI-3",
+        "WI-4"
+      ],
+      "checks": [
+        {
+          "name": "checkout_concurrente",
+          "pass_condition": "Dos workers no pueden ganar la misma issue."
+        },
+        {
+          "name": "aislamiento_tenant",
+          "pass_condition": "Cada issue conserva tenant_id y el checkout respeta ese límite."
+        },
+        {
+          "name": "durabilidad",
+          "pass_condition": "SQLite es la única fuente durable."
+        },
+        {
+          "name": "continuidad",
+          "pass_condition": "La migración no detiene runs activas."
+        },
+        {
+          "name": "rollback",
+          "pass_condition": "El flag permite volver al camino anterior sin detener runs activas."
+        },
+        {
+          "name": "gate_final",
+          "pass_condition": "100 reinicios con cero wakeups perdidos durante 24 horas."
+        }
+      ],
+      "release_gate": "El Lead solo acepta la migración cuando todos los checks pasan; cualquier incumplimiento bloquea la autorización."
+    },
+    "escalation": [
+      {
+        "trigger": "Cualquier doble adjudicación de una issue.",
+        "action": "Bloquear la autorización, activar el flag para volver al camino anterior si la migración está activa y escalar al Lead y al Owner de implementación de cola.",
+        "accountable": "Lead"
+      },
+      {
+        "trigger": "Cualquier violación de tenant_id.",
+        "action": "Bloquear la autorización, activar el flag si corresponde y escalar al Lead y al Owner de persistencia SQLite.",
+        "accountable": "Lead"
+      },
+      {
+        "trigger": "Cualquier run activa detenida por la migración.",
+        "action": "Detener el avance de la migración, usar el flag para volver al camino anterior y escalar al Lead y al Owner de migración.",
+        "accountable": "Lead"
+      },
+      {
+        "trigger": "Cualquier estado durable fuera de SQLite.",
+        "action": "Rechazar el diseño o cambio y escalar al Lead y al Owner de persistencia SQLite.",
+        "accountable": "Lead"
+      },
+      {
+        "trigger": "Un wakeup perdido, menos de 100 reinicios o una observación inferior a 24 horas.",
+        "action": "Declarar fallido el gate, no autorizar la migración y escalar al Lead y al Owner de verificación.",
+        "accountable": "Lead"
+      },
+      {
+        "trigger": "El flag no permite volver al camino anterior.",
+        "action": "Bloquear la migración y escalar al Lead y al Owner de rollback.",
+        "accountable": "Lead"
+      }
+    ]
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:40:05.570002Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:05.570028Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:05.570651Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:05.573463Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:05.577970Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:40:06.660552Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:06.660579Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:06.661293Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:06.663935Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true,
+  "reevaluation": {
+    "provider_rerun": false,
+    "reason": "deterministic_evaluator_contract_update"
+  }
+}

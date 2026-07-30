@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 10.125,
+  "usage": {},
+  "response": {
+    "objective": {
+      "role": "lead",
+      "seed": 2,
+      "case_id": "tenant_queue_migration",
+      "summary": "Descomponer el objetivo de migración de cola manteniendo SQLite como única fuente durable, asignando owners/aceptadores, aislando por tenant_id, eliminando la condición de carrera en checkout (separación de SELECT y UPDATE) sin detener runs activas, habilitando un flag de rollback y cumpliendo el gate de 100 reinicios con 0 wakeups perdidos en 24 horas."
+    },
+    "work_items": [
+      {
+        "id": "WI-1",
+        "title": "Unificación atómica del checkout de issues",
+        "owner": "Lead Engineer",
+        "acceptor": "Lead",
+        "dependencies": [],
+        "description": "Eliminar la separación de SELECT y UPDATE para evitar que dos workers ganen la misma issue, asegurando filtrado por tenant_id en SQLite."
+      },
+      {
+        "id": "WI-2",
+        "title": "Migración en caliente de cola",
+        "owner": "DevOps Engineer",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-1"
+        ],
+        "description": "Ejecutar la migración garantizando que no se detengan las runs activas en ningún momento."
+      },
+      {
+        "id": "WI-3",
+        "title": "Implementación y prueba del flag de rollback",
+        "owner": "QA Lead",
+        "acceptor": "Lead",
+        "dependencies": [
+          "WI-1"
+        ],
+        "description": "Validar el flag para poder volver al camino anterior de manera inmediata si la migración falla."
+      }
+    ],
+    "risks": [
+      {
+        "id": "R-1",
+        "description": "Dos workers ganando la misma issue por separación de SELECT y UPDATE.",
+        "mitigation": "Combinar SELECT y UPDATE en una operación atómica sobre SQLite."
+      },
+      {
+        "id": "R-2",
+        "description": "Interrupción o detención de runs activas durante la migración.",
+        "mitigation": "Garantizar migración sin pausa de tareas activas y mantener preparado el flag de rollback."
+      }
+    ],
+    "verification": {
+      "durable_source": "SQLite",
+      "scope_boundary": "tenant_id por issue",
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas",
+      "metrics": [
+        {
+          "name": "wakeups perdidos",
+          "value": 0,
+          "unit": "wakeups",
+          "window": "24 horas",
+          "required_action": "Mantener en 0; cualquier pérdida requiere activación de rollback."
+        },
+        {
+          "name": "reinicios ejecutados",
+          "value": 100,
+          "unit": "reinicios",
+          "window": "24 horas",
+          "required_action": "Completar la totalidad de los 100 reinicios para superar el gate."
+        }
+      ],
+      "rollback_path": "Flag de reversión al camino anterior"
+    },
+    "escalation": {
+      "explicit_triggers": [
+        "Registro de más de 0 wakeups perdidos durante la prueba del gate.",
+        "Detención imprevista de runs activas durante la migración.",
+        "Ocurrencia de duplicación de checkout (dos workers ganando la misma issue)."
+      ],
+      "escalation_conditions": "Notificación inmediata al Lead y ejecución inmediata del rollback mediante el flag al camino anterior.",
+      "accountability": {
+        "lead_owner": "Lead",
+        "action": "Supervisar la ejecución del rollback y la estabilización del entorno."
+      }
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

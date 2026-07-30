@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_independent_test_designer_aggregate",
+  "profile_id": "antigravity_subscription",
+  "model": "gemini-3.5-flash-high",
+  "provider_version": "1.1.8",
+  "same_provider_version": true,
+  "role": "test_designer",
+  "contract_version": "independent_test_designer_mutation_v2",
+  "case_family": "job_state_machine_mutation",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "matrix_complete": true,
+  "samples_passed": 3,
+  "source_receipts": [
+    "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-job-state-cli-1.1.8-seed-1.json",
+    "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-job-state-cli-1.1.8-seed-2.json",
+    "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-job-state-cli-1.1.8-seed-3.json"
+  ],
+  "sample_manifest": [
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-job-state-cli-1.1.8-seed-1.json",
+      "seed": 1,
+      "ok": true,
+      "evidence_sha256": "347c100520e66939a3136ccd0167e0d355d5c95cd0b1195207ea1b42c91dc127"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-job-state-cli-1.1.8-seed-2.json",
+      "seed": 2,
+      "ok": true,
+      "evidence_sha256": "a8304d47e6c053d7b23c2176fb6464a40ed83b2a065549983e7754b7956e8dc6"
+    },
+    {
+      "receipt": "benchmarks/results/model_calibration/p0h2d4-flash-high-test-designer-job-state-cli-1.1.8-seed-3.json",
+      "seed": 3,
+      "ok": true,
+      "evidence_sha256": "ce6f8698c2665e6f0efa387c2c7a1943066258b39e2eb53bb305278aad92219c"
+    }
+  ],
+  "integrity": {
+    "sources_bound": true,
+    "evidence_hashed": true,
+    "same_provider_version": true
+  },
+  "checks_passed": 24,
+  "checks_total": 24,
+  "wall_seconds_median": 58.546,
+  "wall_seconds_range": [
+    55.453,
+    76.156
+  ],
+  "usage": {
+    "marginal_cost_cents": 0,
+    "telemetry_status": "unknown",
+    "note": "Antigravity no expone usage headless comparable"
+  },
+  "conclusion": {
+    "exact_pair_calibrated": true,
+    "default_change_allowed": false,
+    "decision": "calibrate_exact_pair",
+    "unmeasured_constructs": [
+      "integración multi-módulo",
+      "tests de browser",
+      "property-based testing"
+    ]
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "tenant_queue_migration",
+  "seed": 1,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 8.688,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO: La propuesta es inaceptable en su estado actual debido a la falla de atomicidad en el checkout que separa SELECT y UPDATE en SQLite como única fuente durable, permitiendo que dos workers ganen la misma issue por tenant_id.",
+    "challenges": [
+      "Condición de carrera inherente al checkout actual al separar SELECT y UPDATE, lo que permite que dos workers reclamen la misma issue.",
+      "Ejecutar la migración tenant_queue_migration sin detener runs activas teniendo a SQLite como única fuente durable sin provocar bloqueos por contención.",
+      "Cumplir con la restricción de aislar adecuadamente las operaciones respetando la frontera de tenant_id en cada issue durante la migración en vivo."
+    ],
+    "missing_evidence": [
+      "Pruebas de atomicidad transaccional en SQLite (ej. UPDATE ... RETURNING o BEGIN IMMEDIATE) para consolidar el SELECT y UPDATE del checkout.",
+      "Métricas del gate ejecutando 100 reinicios con cero wakeups perdidos durante una ventana continua de 24 horas.",
+      "Evidencia de prueba de estrés y comportamiento del flag de rollback al volver al camino anterior sin afectar runs activas ni perder wakeups."
+    ],
+    "failure_modes": [
+      "Doble procesamiento y conflicto de estado al adjudicar la misma issue a dos workers distintos debido a la separación entre SELECT y UPDATE.",
+      "Fallo del gate por pérdida de wakeups o errores SQLITE_BUSY / contención de escrituras durante los 100 reinicios en el periodo de 24 horas.",
+      "Inconsistencia de datos por tenant_id o interrupción de runs activas durante la conmutación del flag para volver al camino anterior."
+    ],
+    "recommendation": "NO-GO. Corregir el diseño del checkout en SQLite unificando la consulta y actualización en una transacción atómica por tenant_id antes de proceder a la migración tenant_queue_migration sin detener runs activas, y validar formalmente el flag de rollback y el gate de 100 reinicios con cero wakeups perdidos durante 24 horas."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

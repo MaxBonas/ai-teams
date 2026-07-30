@@ -1178,19 +1178,6 @@ dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 0.8rem; color:
 }
 .chip-reco-mini { padding: 0 4px; margin-left: 4px; }
 
-.quorum-ready-note {
-  margin: 6px 0 0; padding: 7px 11px;
-  border: 1px dashed var(--quorum); border-radius: var(--radius);
-  background: var(--quorum-bg); color: var(--quorum-text);
-  font-size: 0.76rem; line-height: 1.45;
-}
-.quorum-ready-note.ok {
-  border-style: solid; border-color: var(--accent-dim);
-  background: var(--accent-bg); color: var(--accent-text);
-}
-
-.start-profile-picker { display: grid; gap: 6px; }
-
 .new-task-quorum-hint {
   margin: 2px 0 0; font-size: 0.68rem; color: var(--text-dim); line-height: 1.4;
 }
@@ -1235,6 +1222,17 @@ summary:focus-visible {
 /* ── Responsive ────────────────────────────────────────────────────────────── */
 @media (max-width: 960px) {
   .workspace-grid { grid-template-columns: 240px minmax(0,1fr); }
+}
+
+.boot-panel {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  min-height: 110px;
+}
+
+.boot-panel svg {
+  color: var(--accent-text);
 }
 @media (max-width: 760px) {
   .workspace-grid { grid-template-columns: 1fr; }

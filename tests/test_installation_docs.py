@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,6 +18,7 @@ def test_documented_windows_entrypoints_and_templates_exist() -> None:
         "scripts/machine_doctor.py",
         "scripts/machine_doctor_receipt.py",
         "scripts/machine_doctor_remediate.py",
+        "scripts/audit_provider_cli_versions.py",
         "start_ide.bat",
         "start_ide.sh",
         "stop_ide.bat",
@@ -56,6 +56,9 @@ def test_installation_guide_is_linked_and_does_not_overclaim_platforms() -> None
     assert "no prueba conectividad, autenticación ni health" in guide
     assert "installation_support.v1.json" in readme
     assert "installation_support.v1.json" in guide
+    assert "provider_cli_version_contract_v1" in guide
+    assert "provider_cli_version_audit_v1" in guide
+    assert "audit_provider_cli_versions.py" in guide
     assert "Ollama y LM Studio son opcionales" in readme
     assert "API key personal" in guide
     assert "windows-clean-room.yml" in guide

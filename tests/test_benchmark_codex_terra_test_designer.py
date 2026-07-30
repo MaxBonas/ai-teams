@@ -8,11 +8,19 @@ from scripts.benchmark_codex_terra_test_designer import (
     adapter_config,
     aggregate_diverse_family_reports,
     aggregate_reports,
+    benchmark_lead_identity,
     bootstrap_profile_ids,
     durable_authored_files,
     evaluate_mutation_suite,
+    provider_version_for_profile,
     reevaluate_report,
 )
+
+
+def test_test_designer_requires_a_trusted_report_before_done() -> None:
+    from aiteam.heartbeat.executor import _REPORT_REQUIRED_CLOSE_ROLES
+
+    assert "test_designer" in _REPORT_REQUIRED_CLOSE_ROLES
 
 
 def test_mutation_evaluator_kills_every_frozen_mutant(tmp_path: Path) -> None:
@@ -97,6 +105,7 @@ def test_aggregate_requires_three_passing_comparable_samples() -> None:
         {
             "profile_id": "codex_subscription",
             "model": "gpt-5.6-terra",
+            "provider_version": "0.146.0-alpha.6",
             "role": "test_designer",
             "contract_version": "independent_test_designer_mutation_v2",
             "seed": seed,
@@ -123,11 +132,39 @@ def test_aggregate_requires_three_passing_comparable_samples() -> None:
     assert aggregate_reports(reports)["conclusion"]["exact_pair_calibrated"] is False
 
 
+def test_aggregate_rejects_mixed_or_missing_provider_versions() -> None:
+    reports = [
+        {
+            "profile_id": "codex_subscription",
+            "model": "gpt-5.6-terra",
+            "provider_version": "0.146.0-alpha.6",
+            "role": "test_designer",
+            "contract_version": "independent_test_designer_mutation_v2",
+            "seed": seed,
+            "ok": True,
+            "seconds": 10,
+            "checks": {"suite": True},
+            "mutation_evaluation": {},
+            "authored_files": ["tests/test_acceptance_pricing.py"],
+            "report": {"result": "done"},
+            "_source_receipt": f"seed-{seed}.json",
+        }
+        for seed in (1, 2, 3)
+    ]
+    assert aggregate_reports(reports)["same_provider_version"] is True
+    reports[-1]["provider_version"] = "0.145.0"
+    assert aggregate_reports(reports)["conclusion"]["exact_pair_calibrated"] is False
+    reports[-1]["provider_version"] = ""
+    assert aggregate_reports(reports)["conclusion"]["exact_pair_calibrated"] is False
+
+
 def test_diversity_aggregate_requires_two_exact_mutation_families() -> None:
     reports = [
         {
             "profile_id": "codex_subscription",
             "model": "gpt-5.6-terra",
+            "provider_version": "0.146.0-alpha.6",
+            "contract_version": "independent_test_designer_mutation_v2",
             "case_family": family,
             "matrix_complete": True,
             "samples_passed": 3,
@@ -150,12 +187,64 @@ def test_diversity_aggregate_requires_two_exact_mutation_families() -> None:
     )
 
 
+def test_diversity_aggregate_rejects_mixed_provider_versions() -> None:
+    reports = [
+        {
+            "profile_id": "antigravity_subscription",
+            "model": "gemini-3.6-flash-high",
+            "provider_version": "1.1.8",
+            "contract_version": "independent_test_designer_mutation_v2",
+            "case_family": family,
+            "matrix_complete": True,
+            "samples_passed": 3,
+            "conclusion": {"exact_pair_calibrated": True},
+            "_source_receipt": f"{family}.json",
+        }
+        for family in ("pricing_boundary_mutation", "job_state_machine_mutation")
+    ]
+    reports[-1]["provider_version"] = "1.1.5"
+    result = aggregate_diverse_family_reports(
+        reports,
+        model="gemini-3.6-flash-high",
+        profile_id="antigravity_subscription",
+    )
+    assert result["integrity"]["same_provider_version"] is False
+    assert result["conclusion"]["case_diversity_passed"] is False
+
+
 def test_antigravity_config_uses_plan_transport_without_fake_usage_settings() -> None:
     config = adapter_config("antigravity_subscription", "gemini-3.5-flash-high")
     assert config["cli_kind"] == "antigravity"
     assert config["command"] == ["agy"]
     assert config["sandbox"] == "workspace-write"
     assert "model_reasoning_effort" not in config
+    assert bootstrap_profile_ids("antigravity_subscription") == [
+        "antigravity_subscription",
+        "codex_subscription",
+    ]
+    assert benchmark_lead_identity("antigravity_subscription") == (
+        "codex_subscription",
+        "gpt-5.6-sol",
+    )
+
+
+def test_provider_versions_are_observed_for_cli_and_api(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scripts.benchmark_codex_terra_test_designer.shutil.which",
+        lambda command: command,
+    )
+
+    class Completed:
+        returncode = 0
+        stdout = "codex-cli 0.146.0-alpha.6"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "scripts.benchmark_codex_terra_test_designer.subprocess.run",
+        lambda *args, **kwargs: Completed(),
+    )
+    assert provider_version_for_profile("codex_subscription") == "0.146.0-alpha.6"
+    assert provider_version_for_profile("gemini_api_free") == "api:google:v1beta"
 
 
 def test_local_test_designer_uses_ollama_without_external_quota() -> None:
@@ -165,6 +254,18 @@ def test_local_test_designer_uses_ollama_without_external_quota() -> None:
     assert config["model_reasoning_effort"] == "none"
     assert bootstrap_profile_ids("local_gemma4_ollama") == [
         "local_gemma4_ollama",
+        "codex_subscription",
+    ]
+
+
+def test_gemini_free_test_designer_uses_api_secret_reference() -> None:
+    config = adapter_config("gemini_api_free", "gemini-3.6-flash")
+    assert config["profile_id"] == "gemini_api_free"
+    assert config["model"] == "gemini-3.6-flash"
+    assert config["api_key_ref"] == "secret:google-free:default"
+    assert "api_key" not in config
+    assert bootstrap_profile_ids("gemini_api_free") == [
+        "gemini_api_free",
         "codex_subscription",
     ]
 

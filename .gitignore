@@ -53,6 +53,7 @@ ide-frontend/tsc_errors.txt
 .aiteam_snapshots/
 .playwright-cli/
 output/
+benchmarks/workspaces/
 
 # Runtime state (local por maquina; no versionable)
 runtime/*

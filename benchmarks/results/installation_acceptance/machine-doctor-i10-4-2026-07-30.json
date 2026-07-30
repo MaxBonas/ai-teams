@@ -1,0 +1,968 @@
+{
+  "contract": {
+    "discovery_entrypoint": "scripts/machine_doctor.py",
+    "inference_allowed": false,
+    "install_commands_allowed": false,
+    "login_commands_allowed": false,
+    "read_only": true,
+    "receipt_write_is_explicit_and_outside_discovery": true,
+    "remediation_entrypoint": "scripts/machine_doctor_remediate.py",
+    "secret_contents_read_by_guard": false
+  },
+  "doctor_schema_version": "machine_doctor_v1",
+  "mutation_guard": {
+    "surfaces": {
+      "checkout": {
+        "entries_after": 1831,
+        "entries_before": 1831,
+        "observation": "metadata_only",
+        "unchanged": true
+      },
+      "known_cli_inventory": {
+        "entries_after": 5,
+        "entries_before": 5,
+        "observation": "path_presence_only",
+        "unchanged": true
+      },
+      "user_config": {
+        "entries_after": 4,
+        "entries_before": 4,
+        "observation": "metadata_only",
+        "unchanged": true
+      }
+    },
+    "verified": true
+  },
+  "receipt_id": "b8e91339fe7e238dd92192839fa70927bd99e30042c1ae9ba9ea5ba7ff7212b9",
+  "report": {
+    "adapters": [
+      {
+        "adapter_type": "anthropic_sonnet",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "api",
+        "cli": null,
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "unverified",
+        "health_source": "adapter_health",
+        "health_status": "ok",
+        "id": "anthropic_api",
+        "primary_candidate": false,
+        "provider": "anthropic",
+        "provider_runtime": null,
+        "setup_class": "unclassified"
+      },
+      {
+        "adapter_type": "subscription_cli",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "subscription",
+        "cli": {
+          "executable": "agy.exe",
+          "fingerprint": "dd88921142922adcdc6a6782895b27d2feae5f6677162ad2ac27a11d3d03bf70",
+          "id": "agy",
+          "installed": true,
+          "source": "path_lookup_version_only",
+          "version": "1.1.8"
+        },
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "unverified",
+        "health_source": "adapter_health",
+        "health_status": "ok",
+        "id": "antigravity_subscription",
+        "primary_candidate": true,
+        "provider": "google-antigravity",
+        "provider_runtime": null,
+        "setup_class": "primary_option"
+      },
+      {
+        "adapter_type": "subscription_cli",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "subscription",
+        "cli": {
+          "executable": null,
+          "fingerprint": null,
+          "id": "claude",
+          "installed": false,
+          "source": "path_lookup_version_only",
+          "version": null
+        },
+        "declared": true,
+        "declared_status": "blocked_by_provider",
+        "diagnostic_state": "incompatible",
+        "health_source": "adapter_health",
+        "health_status": "untested",
+        "id": "claude_subscription_blocked",
+        "primary_candidate": false,
+        "provider": "anthropic-claude",
+        "provider_runtime": null,
+        "setup_class": "unclassified"
+      },
+      {
+        "adapter_type": "subscription_cli",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "subscription",
+        "cli": {
+          "executable": "codex.cmd",
+          "fingerprint": "13ba144b5cd8911c49f7ea2c3b5dee66ad3bd945fda8985bfbaaa96808ec7c56",
+          "id": "codex",
+          "installed": true,
+          "source": "path_lookup_version_only",
+          "version": "codex-cli 0.146.0-alpha.6"
+        },
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "unverified",
+        "health_source": "adapter_health",
+        "health_status": "ok",
+        "id": "codex_subscription",
+        "primary_candidate": true,
+        "provider": "openai-codex",
+        "provider_runtime": null,
+        "setup_class": "primary_option"
+      },
+      {
+        "adapter_type": "gemini_api",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "api",
+        "cli": null,
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "unverified",
+        "health_source": "adapter_health",
+        "health_status": "untested",
+        "id": "gemini_api",
+        "primary_candidate": false,
+        "provider": "google",
+        "provider_runtime": null,
+        "setup_class": "unclassified"
+      },
+      {
+        "adapter_type": "gemini_api",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "api",
+        "cli": null,
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "unverified",
+        "health_source": "adapter_health",
+        "health_status": "ok",
+        "id": "gemini_api_free",
+        "primary_candidate": false,
+        "provider": "google",
+        "provider_runtime": null,
+        "setup_class": "unclassified"
+      },
+      {
+        "adapter_type": "openai_compatible_api",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "api",
+        "cli": null,
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "degraded",
+        "health_source": "adapter_health",
+        "health_status": "failed",
+        "id": "groq_api_free",
+        "primary_candidate": false,
+        "provider": "groq",
+        "provider_runtime": null,
+        "setup_class": "unclassified"
+      },
+      {
+        "adapter_type": "subscription_cli",
+        "authentication_source": "channel_contract",
+        "authentication_status": "not_applicable",
+        "channel": "local",
+        "cli": {
+          "executable": "codex.cmd",
+          "fingerprint": "13ba144b5cd8911c49f7ea2c3b5dee66ad3bd945fda8985bfbaaa96808ec7c56",
+          "id": "codex",
+          "installed": true,
+          "source": "path_lookup_version_only",
+          "version": "codex-cli 0.146.0-alpha.6"
+        },
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "absent",
+        "health_source": "adapter_health",
+        "health_status": "untested",
+        "id": "local_gem4_lmstudio",
+        "primary_candidate": false,
+        "provider": "lmstudio",
+        "provider_runtime": {
+          "executable": null,
+          "fingerprint": null,
+          "id": "lms",
+          "installed": false,
+          "source": "path_lookup_version_only",
+          "version": null
+        },
+        "setup_class": "optional_local"
+      },
+      {
+        "adapter_type": "subscription_cli",
+        "authentication_source": "channel_contract",
+        "authentication_status": "not_applicable",
+        "channel": "local",
+        "cli": {
+          "executable": "codex.cmd",
+          "fingerprint": "13ba144b5cd8911c49f7ea2c3b5dee66ad3bd945fda8985bfbaaa96808ec7c56",
+          "id": "codex",
+          "installed": true,
+          "source": "path_lookup_version_only",
+          "version": "codex-cli 0.146.0-alpha.6"
+        },
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "absent",
+        "health_source": "adapter_health",
+        "health_status": "untested",
+        "id": "local_gemma4_ollama",
+        "primary_candidate": false,
+        "provider": "ollama",
+        "provider_runtime": {
+          "executable": null,
+          "fingerprint": null,
+          "id": "ollama",
+          "installed": false,
+          "source": "path_lookup_version_only",
+          "version": null
+        },
+        "setup_class": "optional_local"
+      },
+      {
+        "adapter_type": "subscription_cli",
+        "authentication_source": "channel_contract",
+        "authentication_status": "not_applicable",
+        "channel": "local",
+        "cli": {
+          "executable": "codex.cmd",
+          "fingerprint": "13ba144b5cd8911c49f7ea2c3b5dee66ad3bd945fda8985bfbaaa96808ec7c56",
+          "id": "codex",
+          "installed": true,
+          "source": "path_lookup_version_only",
+          "version": "codex-cli 0.146.0-alpha.6"
+        },
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "absent",
+        "health_source": "adapter_health",
+        "health_status": "untested",
+        "id": "local_qwen_ollama",
+        "primary_candidate": false,
+        "provider": "ollama",
+        "provider_runtime": {
+          "executable": null,
+          "fingerprint": null,
+          "id": "ollama",
+          "installed": false,
+          "source": "path_lookup_version_only",
+          "version": null
+        },
+        "setup_class": "optional_local"
+      },
+      {
+        "adapter_type": "openai_api",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "api",
+        "cli": null,
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "unverified",
+        "health_source": "adapter_health",
+        "health_status": "untested",
+        "id": "openai_api",
+        "primary_candidate": false,
+        "provider": "openai",
+        "provider_runtime": null,
+        "setup_class": "unclassified"
+      },
+      {
+        "adapter_type": "subscription_cli",
+        "authentication_source": "adapter_health",
+        "authentication_status": "not_checked",
+        "channel": "free_gateway",
+        "cli": {
+          "executable": "opencode.cmd",
+          "fingerprint": "9e973a6eec7a32b6b86843efb3bedfe96b347a644fcd7e4b1232412897619c68",
+          "id": "opencode",
+          "installed": true,
+          "source": "path_lookup_version_only",
+          "version": "1.18.4"
+        },
+        "declared": true,
+        "declared_status": "active",
+        "diagnostic_state": "unverified",
+        "health_source": "adapter_health",
+        "health_status": "untested",
+        "id": "opencode_zen_free",
+        "primary_candidate": false,
+        "provider": "opencode-zen",
+        "provider_runtime": null,
+        "setup_class": "optional_economy"
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "primary_adapter_not_ready",
+        "id": "system:primary_adapter:unverified",
+        "message": "No hay ninguna opción primaria con autenticación y health verificados.",
+        "next_action": {
+          "code": "verify_primary_adapter",
+          "description": "Configura y prueba Codex o Antigravity, o una vía Lead-capable gobernada.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "blocker",
+        "source": "adapter_profile_composition",
+        "state": "unverified",
+        "subject_id": "primary_adapter",
+        "subject_kind": "system"
+      },
+      {
+        "code": "project_toolchain_absent",
+        "id": "toolchain:go:absent",
+        "message": "Hay manifest de go, pero no se encontró su binario.",
+        "next_action": {
+          "code": "install_project_toolchain",
+          "description": "Instala la toolchain detectada por el proyecto y repite el doctor.",
+          "mutates_state": true,
+          "requires_human": true
+        },
+        "severity": "blocker",
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "state": "absent",
+        "subject_id": "go",
+        "subject_kind": "toolchain"
+      },
+      {
+        "code": "project_toolchain_absent",
+        "id": "toolchain:rust:absent",
+        "message": "Hay manifest de rust, pero no se encontró su binario.",
+        "next_action": {
+          "code": "install_project_toolchain",
+          "description": "Instala la toolchain detectada por el proyecto y repite el doctor.",
+          "mutates_state": true,
+          "requires_human": true
+        },
+        "severity": "blocker",
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "state": "absent",
+        "subject_id": "rust",
+        "subject_kind": "toolchain"
+      },
+      {
+        "code": "adapter_unverified",
+        "id": "adapter:antigravity_subscription:unverified",
+        "message": "El perfil antigravity_subscription está no verificado.",
+        "next_action": {
+          "code": "test_adapter_profile",
+          "description": "Prueba explícitamente el perfil; presencia del CLI no demuestra auth ni health.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "warning",
+        "source": "adapter_health",
+        "state": "unverified",
+        "subject_id": "antigravity_subscription",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_unverified",
+        "id": "adapter:codex_subscription:unverified",
+        "message": "El perfil codex_subscription está no verificado.",
+        "next_action": {
+          "code": "test_adapter_profile",
+          "description": "Prueba explícitamente el perfil; presencia del CLI no demuestra auth ni health.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "warning",
+        "source": "adapter_health",
+        "state": "unverified",
+        "subject_id": "codex_subscription",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_unverified",
+        "id": "adapter:anthropic_api:unverified",
+        "message": "El perfil anthropic_api está no verificado.",
+        "next_action": {
+          "code": "test_adapter_profile",
+          "description": "Prueba explícitamente el perfil; presencia del CLI no demuestra auth ni health.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "adapter_health",
+        "state": "unverified",
+        "subject_id": "anthropic_api",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_incompatible",
+        "id": "adapter:claude_subscription_blocked:incompatible",
+        "message": "El perfil claude_subscription_blocked está incompatible.",
+        "next_action": {
+          "code": "review_adapter_compatibility",
+          "description": "Revisa el bloqueo declarado o actualiza el adapter antes de seleccionarlo.",
+          "mutates_state": true,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "profile_and_path_observation",
+        "state": "incompatible",
+        "subject_id": "claude_subscription_blocked",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_unverified",
+        "id": "adapter:gemini_api:unverified",
+        "message": "El perfil gemini_api está no verificado.",
+        "next_action": {
+          "code": "test_adapter_profile",
+          "description": "Prueba explícitamente el perfil; presencia del CLI no demuestra auth ni health.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "adapter_health",
+        "state": "unverified",
+        "subject_id": "gemini_api",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_unverified",
+        "id": "adapter:gemini_api_free:unverified",
+        "message": "El perfil gemini_api_free está no verificado.",
+        "next_action": {
+          "code": "test_adapter_profile",
+          "description": "Prueba explícitamente el perfil; presencia del CLI no demuestra auth ni health.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "adapter_health",
+        "state": "unverified",
+        "subject_id": "gemini_api_free",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_health_degraded",
+        "id": "adapter:groq_api_free:degraded",
+        "message": "El perfil groq_api_free está degradado.",
+        "next_action": {
+          "code": "retest_adapter_health",
+          "description": "Inspecciona el fallo durable y lanza una prueba explícita del perfil.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "adapter_health",
+        "state": "degraded",
+        "subject_id": "groq_api_free",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_cli_absent",
+        "id": "adapter:local_gem4_lmstudio:absent",
+        "message": "El perfil local_gem4_lmstudio está ausente.",
+        "next_action": {
+          "code": "install_adapter_cli",
+          "description": "Instala explícitamente el CLI/runtime del perfil si deseas usarlo.",
+          "mutates_state": true,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "profile_and_path_observation",
+        "state": "absent",
+        "subject_id": "local_gem4_lmstudio",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_cli_absent",
+        "id": "adapter:local_gemma4_ollama:absent",
+        "message": "El perfil local_gemma4_ollama está ausente.",
+        "next_action": {
+          "code": "install_adapter_cli",
+          "description": "Instala explícitamente el CLI/runtime del perfil si deseas usarlo.",
+          "mutates_state": true,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "profile_and_path_observation",
+        "state": "absent",
+        "subject_id": "local_gemma4_ollama",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_cli_absent",
+        "id": "adapter:local_qwen_ollama:absent",
+        "message": "El perfil local_qwen_ollama está ausente.",
+        "next_action": {
+          "code": "install_adapter_cli",
+          "description": "Instala explícitamente el CLI/runtime del perfil si deseas usarlo.",
+          "mutates_state": true,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "profile_and_path_observation",
+        "state": "absent",
+        "subject_id": "local_qwen_ollama",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_unverified",
+        "id": "adapter:openai_api:unverified",
+        "message": "El perfil openai_api está no verificado.",
+        "next_action": {
+          "code": "test_adapter_profile",
+          "description": "Prueba explícitamente el perfil; presencia del CLI no demuestra auth ni health.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "adapter_health",
+        "state": "unverified",
+        "subject_id": "openai_api",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "adapter_unverified",
+        "id": "adapter:opencode_zen_free:unverified",
+        "message": "El perfil opencode_zen_free está no verificado.",
+        "next_action": {
+          "code": "test_adapter_profile",
+          "description": "Prueba explícitamente el perfil; presencia del CLI no demuestra auth ni health.",
+          "mutates_state": false,
+          "requires_human": true
+        },
+        "severity": "info",
+        "source": "adapter_health",
+        "state": "unverified",
+        "subject_id": "opencode_zen_free",
+        "subject_kind": "adapter"
+      },
+      {
+        "code": "project_toolchain_unverified",
+        "id": "toolchain:c_cpp:unverified",
+        "message": "c_cpp está presente, pero discovery no demuestra soporte operativo.",
+        "next_action": {
+          "code": "verify_project_toolchain",
+          "description": "Ejecuta el contrato de build/test específico cuando exista su descriptor versionado.",
+          "mutates_state": false,
+          "requires_human": false
+        },
+        "severity": "info",
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "state": "unverified",
+        "subject_id": "c_cpp",
+        "subject_kind": "toolchain"
+      },
+      {
+        "code": "project_toolchain_unverified",
+        "id": "toolchain:dotnet:unverified",
+        "message": "dotnet está presente, pero discovery no demuestra soporte operativo.",
+        "next_action": {
+          "code": "verify_project_toolchain",
+          "description": "Ejecuta el contrato de build/test específico cuando exista su descriptor versionado.",
+          "mutates_state": false,
+          "requires_human": false
+        },
+        "severity": "info",
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "state": "unverified",
+        "subject_id": "dotnet",
+        "subject_kind": "toolchain"
+      },
+      {
+        "code": "project_toolchain_unverified",
+        "id": "toolchain:java_kotlin:unverified",
+        "message": "java_kotlin está presente, pero discovery no demuestra soporte operativo.",
+        "next_action": {
+          "code": "verify_project_toolchain",
+          "description": "Ejecuta el contrato de build/test específico cuando exista su descriptor versionado.",
+          "mutates_state": false,
+          "requires_human": false
+        },
+        "severity": "info",
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "state": "unverified",
+        "subject_id": "java_kotlin",
+        "subject_kind": "toolchain"
+      },
+      {
+        "code": "project_toolchain_unverified",
+        "id": "toolchain:javascript_typescript:unverified",
+        "message": "javascript_typescript está presente, pero discovery no demuestra soporte operativo.",
+        "next_action": {
+          "code": "verify_project_toolchain",
+          "description": "Ejecuta el contrato de build/test específico cuando exista su descriptor versionado.",
+          "mutates_state": false,
+          "requires_human": false
+        },
+        "severity": "info",
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "state": "unverified",
+        "subject_id": "javascript_typescript",
+        "subject_kind": "toolchain"
+      },
+      {
+        "code": "project_toolchain_unverified",
+        "id": "toolchain:python:unverified",
+        "message": "python está presente, pero discovery no demuestra soporte operativo.",
+        "next_action": {
+          "code": "verify_project_toolchain",
+          "description": "Ejecuta el contrato de build/test específico cuando exista su descriptor versionado.",
+          "mutates_state": false,
+          "requires_human": false
+        },
+        "severity": "info",
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "state": "unverified",
+        "subject_id": "python",
+        "subject_kind": "toolchain"
+      },
+      {
+        "code": "project_toolchain_unverified",
+        "id": "toolchain:web_frontend:unverified",
+        "message": "web_frontend está presente, pero discovery no demuestra soporte operativo.",
+        "next_action": {
+          "code": "verify_project_toolchain",
+          "description": "Ejecuta el contrato de build/test específico cuando exista su descriptor versionado.",
+          "mutates_state": false,
+          "requires_human": false
+        },
+        "severity": "info",
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "state": "unverified",
+        "subject_id": "web_frontend",
+        "subject_kind": "toolchain"
+      }
+    ],
+    "host": {
+      "architecture": "x86_64",
+      "os": "windows",
+      "release": "11",
+      "support_id": "windows_native_x86_64",
+      "support_status": "verified"
+    },
+    "permissions": [
+      {
+        "exists": true,
+        "id": "checkout_root",
+        "readable": true,
+        "searchable": true,
+        "source": "os_access",
+        "writable": true
+      }
+    ],
+    "ports": [
+      {
+        "id": "backend",
+        "interface": "loopback",
+        "port": 8010,
+        "source": "loopback_connect",
+        "state": "not_listening"
+      },
+      {
+        "id": "frontend",
+        "interface": "loopback",
+        "port": 9490,
+        "source": "loopback_connect",
+        "state": "not_listening"
+      }
+    ],
+    "provider_cli_version_gate": {
+      "catalog_ready": true,
+      "documentation_ready": true,
+      "failure_code": null,
+      "identity_version_ok": true,
+      "promotion_ready": true,
+      "report_sha256": "ae282c61c15b7f1616b176894364a01bf3fbcae77086ece4d1822c1c504eb776",
+      "schema_version": "provider_cli_version_audit_v1",
+      "status": "ready"
+    },
+    "runtimes": [
+      {
+        "executable": "python.exe",
+        "id": "python",
+        "installed": true,
+        "minimum_version": "3.10",
+        "ready": true,
+        "requirement": "required",
+        "source": "current_process",
+        "version": "3.12.10"
+      },
+      {
+        "executable": "node.exe",
+        "id": "node",
+        "installed": true,
+        "minimum_version": "22",
+        "ready": true,
+        "requirement": "required",
+        "source": "path_lookup",
+        "version": "v24.18.0"
+      },
+      {
+        "executable": "npm.cmd",
+        "id": "npm",
+        "installed": true,
+        "minimum_version": "10",
+        "ready": true,
+        "requirement": "required",
+        "source": "path_lookup",
+        "version": "11.16.0"
+      },
+      {
+        "executable": "git.exe",
+        "id": "git",
+        "installed": true,
+        "minimum_version": "2.23",
+        "ready": true,
+        "requirement": "required",
+        "source": "path_lookup",
+        "version": "git version 2.49.0.windows.1"
+      },
+      {
+        "executable": "pwsh.exe",
+        "id": "powershell",
+        "installed": true,
+        "minimum_version": "5.1",
+        "ready": true,
+        "requirement": "required_on_windows",
+        "source": "path_lookup",
+        "version": "7.6.3"
+      },
+      {
+        "executable": null,
+        "id": "sqlite",
+        "installed": true,
+        "minimum_version": null,
+        "ready": true,
+        "requirement": "embedded",
+        "source": "stdlib",
+        "version": "3.49.1"
+      }
+    ],
+    "schema_version": "machine_doctor_v1",
+    "scope": {
+      "credentials_probed": false,
+      "personal_paths_emitted": false,
+      "read_only": true,
+      "secrets_read": false
+    },
+    "summary": {
+      "inventory_complete": true,
+      "missing_required": [],
+      "next_action_codes": [
+        "verify_primary_adapter",
+        "install_project_toolchain",
+        "test_adapter_profile",
+        "review_adapter_compatibility",
+        "retest_adapter_health",
+        "install_adapter_cli",
+        "verify_project_toolchain"
+      ],
+      "profiles_observed": 12,
+      "required_runtimes_ready": true,
+      "severity_counts": {
+        "blocker": 3,
+        "info": 16,
+        "warning": 2
+      },
+      "status": "blocked",
+      "strict_pass": false,
+      "toolchains_manifest_detected": [
+        "c_cpp",
+        "dotnet",
+        "go",
+        "java_kotlin",
+        "javascript_typescript",
+        "python",
+        "rust",
+        "web_frontend"
+      ]
+    },
+    "toolchains": [
+      {
+        "binary_installed": true,
+        "diagnostic_state": "unverified",
+        "executable": "python.exe",
+        "id": "python",
+        "manifest_detected": true,
+        "manifests": [
+          "pyproject.toml",
+          "tests/fixtures/ecosystems/polyglot_monorepo/services/api/pyproject.toml",
+          "tests/fixtures/ecosystems/python_minimal/pyproject.toml"
+        ],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": "Python 3.9.13"
+      },
+      {
+        "binary_installed": true,
+        "diagnostic_state": "unverified",
+        "executable": "node.exe",
+        "id": "javascript_typescript",
+        "manifest_detected": true,
+        "manifests": [
+          "ide-frontend/package-lock.json",
+          "ide-frontend/package.json",
+          "ide-frontend/tsconfig.json",
+          "package.json",
+          "runtime/bench/accessible-checkout-seed-1-direct/solo/package.json",
+          "runtime/bench/accessible-checkout-seed-1-full-team/team/package.json",
+          "runtime/bench/accessible-checkout-seed-1-solo-lead-rerun/team/package.json",
+          "runtime/bench/accessible-checkout-seed-1-solo-lead/team/package.json",
+          "runtime/bench/accessible-checkout-seed-2-full-team/team/package.json",
+          "runtime/bench/accessible-checkout-seed-2-solo-lead/team/package.json",
+          "runtime/opencode-sdk-canary/package-lock.json",
+          "runtime/opencode-sdk-canary/package.json",
+          "tests/fixtures/ecosystems/javascript_minimal/package.json",
+          "tests/fixtures/ecosystems/polyglot_monorepo/apps/web/package.json",
+          "tests/fixtures/ecosystems/web_vite_react_typescript/package.json",
+          "tests/fixtures/ecosystems/web_vite_react_typescript/tsconfig.json"
+        ],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": "v24.18.0"
+      },
+      {
+        "binary_installed": true,
+        "diagnostic_state": "unverified",
+        "executable": "java.exe",
+        "id": "java_kotlin",
+        "manifest_detected": true,
+        "manifests": [
+          "tests/fixtures/ecosystems/java_maven_minimal/pom.xml"
+        ],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": "installed_version_unavailable"
+      },
+      {
+        "binary_installed": false,
+        "diagnostic_state": "absent",
+        "executable": null,
+        "id": "go",
+        "manifest_detected": true,
+        "manifests": [
+          "tests/fixtures/ecosystems/go_minimal/go.mod"
+        ],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": null
+      },
+      {
+        "binary_installed": false,
+        "diagnostic_state": "absent",
+        "executable": null,
+        "id": "rust",
+        "manifest_detected": true,
+        "manifests": [
+          "tests/fixtures/ecosystems/rust_minimal/Cargo.lock",
+          "tests/fixtures/ecosystems/rust_minimal/Cargo.toml"
+        ],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": null
+      },
+      {
+        "binary_installed": true,
+        "diagnostic_state": "unverified",
+        "executable": "cmake.cmd",
+        "id": "c_cpp",
+        "manifest_detected": true,
+        "manifests": [
+          "tests/fixtures/ecosystems/c_cpp_cmake_minimal/CMakeLists.txt"
+        ],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": "cmake version 4.4.0"
+      },
+      {
+        "binary_installed": true,
+        "diagnostic_state": "unverified",
+        "executable": "dotnet.exe",
+        "id": "dotnet",
+        "manifest_detected": true,
+        "manifests": [
+          "tests/fixtures/ecosystems/dotnet_minimal/DotnetFixture.csproj"
+        ],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": "8.0.423"
+      },
+      {
+        "binary_installed": false,
+        "diagnostic_state": "not_detected",
+        "executable": null,
+        "id": "php",
+        "manifest_detected": false,
+        "manifests": [],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": null
+      },
+      {
+        "binary_installed": false,
+        "diagnostic_state": "not_detected",
+        "executable": null,
+        "id": "ruby",
+        "manifest_detected": false,
+        "manifests": [],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": null
+      },
+      {
+        "binary_installed": false,
+        "diagnostic_state": "not_detected",
+        "executable": null,
+        "id": "swift",
+        "manifest_detected": false,
+        "manifests": [],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": null
+      },
+      {
+        "binary_installed": true,
+        "diagnostic_state": "unverified",
+        "executable": "node.exe",
+        "id": "web_frontend",
+        "manifest_detected": true,
+        "manifests": [
+          "ide-frontend/vite.config.ts",
+          "tests/fixtures/ecosystems/web_vite_react_typescript/vite.config.ts"
+        ],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": "v24.18.0"
+      },
+      {
+        "binary_installed": false,
+        "diagnostic_state": "not_detected",
+        "executable": null,
+        "id": "containers_devcontainers",
+        "manifest_detected": false,
+        "manifests": [],
+        "source": "ecosystem_registry_v1_and_path_lookup",
+        "support_claim": false,
+        "version": null
+      }
+    ]
+  },
+  "report_sha256": "e60fad6492dd4bb5cfe39e1fc0c3f413d3b29d43425472eb6b62168712e31e71",
+  "schema_version": "machine_doctor_receipt_v1"
+}

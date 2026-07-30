@@ -1,0 +1,29 @@
+{
+  "checks": {
+    "api_is_authenticated_and_server_side": true,
+    "client_cannot_submit_provider_evidence": true,
+    "receipt_has_step_foreign_key": true,
+    "receipt_hashes_are_bound": true,
+    "receipt_is_compact": true,
+    "receipt_is_redacted_and_non_mutating": true,
+    "revision_advanced_once": true,
+    "server_receipt_overrides_client_evidence": true,
+    "sqlite_receipts_are_durable": true,
+    "unready_receipt_blocks_completion": true
+  },
+  "contract_version": "guided_setup_preparation_v1",
+  "schema_version": "guided_setup_preparation_persistence_audit_v1",
+  "scope": {
+    "fixture_database_only": true,
+    "global_installations_mutated": false,
+    "inference_attempted": false,
+    "paths_emitted": false,
+    "secrets_read": false,
+    "user_configuration_mutated": false
+  },
+  "summary": {
+    "check_count": 10,
+    "passed_count": 10,
+    "persistence_ready": true
+  }
+}

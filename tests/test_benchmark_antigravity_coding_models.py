@@ -4,6 +4,7 @@ from scripts.benchmark_antigravity_coding_models import (
     aggregate_diverse_family_reports,
     aggregate_reports,
     aggregate_single_model_reports,
+    benchmark_lead_identity,
     bootstrap_profile_ids,
     model_workspace_name,
 )
@@ -138,6 +139,21 @@ def test_local_coding_bootstrap_keeps_target_profile_and_no_external_quota() -> 
         "codex_subscription",
     ]
     assert model_workspace_name("gemma4:26b") == "gemma4_26b"
+
+
+def test_coding_benchmark_uses_explicit_calibrated_support_lead() -> None:
+    assert benchmark_lead_identity("codex_subscription") == (
+        "codex_subscription",
+        "gpt-5.6-sol",
+    )
+    assert benchmark_lead_identity("antigravity_subscription") == (
+        "antigravity_subscription",
+        "gemini-3.1-pro-high",
+    )
+    assert bootstrap_profile_ids("gemini_api_free") == [
+        "gemini_api_free",
+        "codex_subscription",
+    ]
 
 
 def test_diversity_aggregate_requires_two_exact_distinct_families() -> None:

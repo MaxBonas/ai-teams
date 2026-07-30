@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "benchmark": "codex_terra_adversarial_qa",
+  "profile_id": "codex_subscription",
+  "model": "gpt-5.6-terra",
+  "provider_version": "0.146.0-alpha.6",
+  "contract_version": "adversarial_qa_fix_cycle_v4",
+  "case_family": "authorization_boundary",
+  "role": "qa",
+  "seed": 2,
+  "checks": {
+    "attack_run_completed": true,
+    "attack_report_changes_requested": true,
+    "production_unchanged_during_attack": true,
+    "adversarial_test_contract": true,
+    "adversarial_tests_fail_before_fix": true,
+    "verification_run_completed": true,
+    "adversarial_tests_pass_after_fix": true,
+    "verification_report_approved": true,
+    "verification_issue_done": true,
+    "passing_adversarial_tests_removed": true,
+    "fixed_production_intact": true
+  },
+  "attack_evaluation": {
+    "anchors": {
+      "imports_target": true,
+      "exact_tenant_id_field": true,
+      "cross_tenant": true,
+      "inactive_actor": true,
+      "private_non_admin": true,
+      "negative_assertion": true
+    },
+    "anchors_retained": 6,
+    "anchors_total": 6,
+    "contract_passed": true
+  },
+  "failing_test_run": {
+    "executed": true,
+    "exit_code": 1,
+    "stdout": "authorized_actor[cross_tenant] ___________\n\nactor = {'tenant_id': 'tenant-a', 'active': True, 'role': 'admin'}\nresource = {'tenant_id': 'tenant-b', 'private': False}\n\n    @pytest.mark.parametrize(\n        (\"actor\", \"resource\"),\n        [\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"admin\"},\n                {\"tenant_id\": \"tenant-b\", \"private\": False},\n            ),\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": False, \"role\": \"admin\"},\n                {\"tenant_id\": \"tenant-a\", \"private\": False},\n            ),\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"member\"},\n                {\"tenant_id\": \"tenant-a\", \"private\": True},\n            ),\n        ],\n        ids=[\"cross_tenant\", \"inactive_actor\", \"private_member\"],\n    )\n    def test_can_access_rejects_unauthorized_actor(actor, resource):\n>       assert can_access(actor, resource) is False\nE       AssertionError: assert True is False\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': True, 'role': 'admin'}, {'tenant_id': 'tenant-b', 'private': False})\n\ntests\\test_adversarial_auth.py:25: AssertionError\n_________ test_can_access_rejects_unauthorized_actor[inactive_actor] __________\n\nactor = {'tenant_id': 'tenant-a', 'active': False, 'role': 'admin'}\nresource = {'tenant_id': 'tenant-a', 'private': False}\n\n    @pytest.mark.parametrize(\n        (\"actor\", \"resource\"),\n        [\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"admin\"},\n                {\"tenant_id\": \"tenant-b\", \"private\": False},\n            ),\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": False, \"role\": \"admin\"},\n                {\"tenant_id\": \"tenant-a\", \"private\": False},\n            ),\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"member\"},\n                {\"tenant_id\": \"tenant-a\", \"private\": True},\n            ),\n        ],\n        ids=[\"cross_tenant\", \"inactive_actor\", \"private_member\"],\n    )\n    def test_can_access_rejects_unauthorized_actor(actor, resource):\n>       assert can_access(actor, resource) is False\nE       AssertionError: assert True is False\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': False, 'role': 'admin'}, {'tenant_id': 'tenant-a', 'private': False})\n\ntests\\test_adversarial_auth.py:25: AssertionError\n_________ test_can_access_rejects_unauthorized_actor[private_member] __________\n\nactor = {'tenant_id': 'tenant-a', 'active': True, 'role': 'member'}\nresource = {'tenant_id': 'tenant-a', 'private': True}\n\n    @pytest.mark.parametrize(\n        (\"actor\", \"resource\"),\n        [\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"admin\"},\n                {\"tenant_id\": \"tenant-b\", \"private\": False},\n            ),\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": False, \"role\": \"admin\"},\n                {\"tenant_id\": \"tenant-a\", \"private\": False},\n            ),\n            (\n                {\"tenant_id\": \"tenant-a\", \"active\": True, \"role\": \"member\"},\n                {\"tenant_id\": \"tenant-a\", \"private\": True},\n            ),\n        ],\n        ids=[\"cross_tenant\", \"inactive_actor\", \"private_member\"],\n    )\n    def test_can_access_rejects_unauthorized_actor(actor, resource):\n>       assert can_access(actor, resource) is False\nE       AssertionError: assert True is False\nE        +  where True = can_access({'tenant_id': 'tenant-a', 'active': True, 'role': 'member'}, {'tenant_id': 'tenant-a', 'private': True})\n\ntests\\test_adversarial_auth.py:25: AssertionError\n=========================== short test summary info ===========================\nFAILED tests\\test_adversarial_auth.py::test_can_access_rejects_unauthorized_actor[cross_tenant]\nFAILED tests\\test_adversarial_auth.py::test_can_access_rejects_unauthorized_actor[inactive_actor]\nFAILED tests\\test_adversarial_auth.py::test_can_access_rejects_unauthorized_actor[private_member]\n3 failed in 0.08s\n",
+    "stderr": ""
+  },
+  "passing_test_run": {
+    "executed": true,
+    "exit_code": 0,
+    "stdout": "...                                                                      [100%]\n3 passed in 0.06s\n",
+    "stderr": ""
+  },
+  "phases": {
+    "attack": {
+      "seconds": 57.656,
+      "issue_status": "done",
+      "run": {
+        "id": "run:fa1196a2-f2cd-448e-b897-bcd1fec9b9d8",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gpt-5.6-terra",
+        "provider": "openai-codex",
+        "channel": "subscription",
+        "usage_json": "{\"cached_input_tokens\": 81920, \"input_tokens\": 106406, \"output_tokens\": 1857, \"reasoning_output_tokens\": 172}"
+      },
+      "report": {
+        "id": "5b2c4c3f-066e-4827-a2ca-1c26abbd0556",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:fa1196a2-f2cd-448e-b897-bcd1fec9b9d8",
+        "agent_role": "qa",
+        "result": "changes_requested",
+        "issue_status": "done",
+        "next_owner": "engineer",
+        "tech_match": null,
+        "blocker": "`can_access` autoriza incondicionalmente, permitiendo cruce de tenant, actor inactivo y miembro sobre recurso privado.",
+        "evidence": "tests/test_adversarial_auth.py; intento `pytest tests/test_adversarial_auth.py -q` terminó exit 1 antes de recolectar: No Python at 'C:\\Users\\she__\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'; evidencia determinista por inspección: auth.py contiene `return True` sin evaluar actor ni resource.",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"`can_access` autoriza incondicionalmente, permitiendo cruce de tenant, actor inactivo y miembro sobre recurso privado.\", \"evidence\": \"tests/test_adversarial_auth.py; intento `pytest tests/test_adversarial_auth.py -q` terminó exit 1 antes de recolectar: No Python at 'C:\\\\Users\\\\she__\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe'; evidencia determinista por inspección: auth.py contiene `return True` sin evaluar actor ni resource.\", \"issue_status\": \"done\", \"next_owner\": \"engineer\", \"result\": \"changes_requested\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 21:40:18"
+      },
+      "comments": [
+        {
+          "id": "6af544c4-9380-4d5b-a58a-7935256519e6",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:fa1196a2-f2cd-448e-b897-bcd1fec9b9d8",
+          "body": "Se añadió la prueba adversarial mínima para aislamiento de tenant, actor inactivo y recursos privados. La ejecución local no pudo iniciar por un intérprete Python ausente; la implementación inspeccionada devuelve True incondicionalmente, por lo que los tres casos demuestran el defecto.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 21:40:18",
+          "updated_at": "2026-07-29 21:40:18"
+        },
+        {
+          "id": "7eea3d30-d861-45c7-8ab0-c5d07e65d125",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:fa1196a2-f2cd-448e-b897-bcd1fec9b9d8",
+          "body": "Se mantuvo únicamente `tests/test_adversarial_auth.py`, con los tres límites requeridos y las claves exactas. `auth.can_access()` retorna `True` incondicionalmente, por lo que cada aserción de denegación fallará cuando exista un intérprete funcional.\n\n---AGENT-REPORT---\nrole: qa\nresult: changes_requested\nissue_status: done\nnext_owner: engineer\nblocker: `can_access` autoriza incondicionalmente, permitiendo cruce de tenant, actor inactivo y miembro sobre recurso privado.\nevidence: tests/test_adversarial_auth.py; intento `pytest tests/test_adversarial_auth.py -q` terminó exit 1 antes de recolectar: No Python at 'C:\\Users\\she__\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'; evidencia determinista por inspección: auth.py contiene `return True` sin evaluar actor ni resource.",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 21:40:18",
+          "updated_at": "2026-07-29 21:40:18"
+        }
+      ]
+    },
+    "verify_fix": {
+      "seconds": 46.594,
+      "issue_status": "done",
+      "run": {
+        "id": "run:9058cb32-a884-4dcd-bda3-936abbe9a9f2",
+        "status": "completed",
+        "error_code": null,
+        "error": null,
+        "model": "gpt-5.6-terra",
+        "provider": "openai-codex",
+        "channel": "subscription",
+        "usage_json": "{\"cached_input_tokens\": 98048, \"input_tokens\": 114819, \"output_tokens\": 1597, \"reasoning_output_tokens\": 202}"
+      },
+      "report": {
+        "id": "b5f1bbff-ddb7-463b-989b-248b03cd5d49",
+        "issue_id": "issue:benchmark_qa",
+        "agent_id": "role:benchmark_qa",
+        "run_id": "run:9058cb32-a884-4dcd-bda3-936abbe9a9f2",
+        "agent_role": "qa",
+        "result": "approved",
+        "issue_status": "done",
+        "next_owner": "lead",
+        "tech_match": null,
+        "blocker": "none",
+        "evidence": "límites atacados: tenant-a/tenant-b, actor inactive y private con role member; evidencia determinista del hilo: `tests/test_adversarial_auth.py -q` exit_code=0, 3 passed in 0.06s. Inspección de `auth.py`: deniega inactivo, tenant distinto y privado no-admin.",
+        "valid": 1,
+        "is_assignee": 1,
+        "raw_json": "{\"blocker\": \"none\", \"evidence\": \"límites atacados: tenant-a/tenant-b, actor inactive y private con role member; evidencia determinista del hilo: `tests/test_adversarial_auth.py -q` exit_code=0, 3 passed in 0.06s. Inspección de `auth.py`: deniega inactivo, tenant distinto y privado no-admin.\", \"issue_status\": \"done\", \"next_owner\": \"lead\", \"result\": \"approved\", \"role\": \"qa\"}",
+        "created_at": "2026-07-29 21:41:06"
+      },
+      "comments": [
+        {
+          "id": "83f5d15d-78b2-4d0a-869e-54b60b8ed3ea",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:9058cb32-a884-4dcd-bda3-936abbe9a9f2",
+          "body": "QA aprobado: la corrección rechaza cruce de tenant, actor inactivo y miembro sobre recurso privado. Se eliminó la prueba adversarial que ahora pasa; la evidencia determinista registró 3/3 pruebas aprobadas.",
+          "metadata_json": "{\"event_type\": \"output\", \"source\": \"run_executor\"}",
+          "created_at": "2026-07-29 21:41:06",
+          "updated_at": "2026-07-29 21:41:06"
+        },
+        {
+          "id": "0a6ebba4-e7f7-400a-b49c-33a67b39d83b",
+          "issue_id": "issue:benchmark_qa",
+          "author_agent_id": "role:benchmark_qa",
+          "author_user_id": null,
+          "source_run_id": "run:9058cb32-a884-4dcd-bda3-936abbe9a9f2",
+          "body": "Se revalidó `auth.can_access`: comprueba `active`, igualdad exacta de `tenant_id` y exige `role == \"admin\"` para recursos `private`. La prueba adversarial previa fue retirada porque ya no demuestra un defecto. La ejecución local adicional no fue posible: este workspace no contiene `scripts/pytest_local.bat`; prevalece la ejecución determinista adjunta al hilo (`exit_code=0`, `3 passed in 0.06s`).\n\n---AGENT-REPORT---\nrole: qa\nresult: approved\nissue_status: done\nnext_owner: lead\nblocker: none\nevidence: límites atacados: tenant-a/tenant-b, actor inactive y private con role member; evidencia determinista del hilo: `tests/test_adversarial_auth.py -q` exit_code=0, 3 passed in 0.06s. Inspección de `auth.py`: deniega inactivo, tenant distinto y privado no-admin.",
+          "metadata_json": "{\"source\": \"run_executor_action\"}",
+          "created_at": "2026-07-29 21:41:06",
+          "updated_at": "2026-07-29 21:41:06"
+        }
+      ]
+    }
+  },
+  "usage": {
+    "cached_input_tokens": 179968,
+    "input_tokens": 221225,
+    "output_tokens": 3454,
+    "reasoning_output_tokens": 374
+  },
+  "workspace": "runtime/bench/p0h2d3-terra-auth-v4-s2",
+  "ok": true
+}

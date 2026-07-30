@@ -6,9 +6,18 @@ from dataclasses import replace
 from typing import Any
 
 from aiteam.adapters.http_retry import post_json as _post_json
-from aiteam.adapters.registry import AdapterDescriptor, ExecutionResult, StaticAdapterRuntime
+from aiteam.adapters.registry import (
+    AdapterDescriptor,
+    ExecutionResult,
+    StaticAdapterRuntime,
+)
+from aiteam.adapters.work_contract import (
+    SUBMIT_WORK_SCHEMA,
+    build_execution_contract,
+    ops_to_actions,
+    validate_submit_work,
+)
 from aiteam.pricing import estimate_cost_from_usage
-from aiteam.adapters.work_contract import SUBMIT_WORK_SCHEMA, build_execution_contract, ops_to_actions, validate_submit_work
 
 
 def _to_gemini_schema(node: Any) -> Any:
@@ -16,15 +25,22 @@ def _to_gemini_schema(node: Any) -> Any:
 
     Gemini acepta un subconjunto de OpenAPI 3.0, no JSON Schema completo:
     rechaza ``additionalProperties`` (error real en vivo: "Unknown name
-    'additionalProperties'... Cannot find field"). SUBMIT_WORK_SCHEMA se
-    comparte con el adapter OpenAI (que sí soporta esa keyword), así que se
-    sanea aquí en vez de tener dos schemas paralelos que pueden divergir.
+    'additionalProperties'... Cannot find field") y exige strings en ``enum``
+    incluso cuando el nodo es integer. SUBMIT_WORK_SCHEMA se comparte con el
+    adapter OpenAI, así que se sanea aquí en vez de mantener dos schemas
+    paralelos que pueden divergir. La validación local conserva el enum
+    numérico después de recibir la respuesta.
     """
     if isinstance(node, dict):
         return {
             key: _to_gemini_schema(value)
             for key, value in node.items()
             if key != "additionalProperties"
+            and not (
+                key == "enum"
+                and isinstance(value, list)
+                and any(not isinstance(item, str) for item in value)
+            )
         }
     if isinstance(node, list):
         return [_to_gemini_schema(item) for item in node]
@@ -39,18 +55,21 @@ class GeminiApiRuntime:
         descriptor: AdapterDescriptor,
         *,
         model: str = "gemini-3.6-flash",
+        api_version: str = "v1beta",
         timeout: float = 120.0,
         free_tier: bool = False,
     ) -> None:
         self.descriptor = descriptor
         self._model = model
+        self._api_version = api_version
         self._timeout = timeout
         self._free_tier = free_tier
 
-    def with_config(self, config: dict[str, Any]) -> "GeminiApiRuntime":
+    def with_config(self, config: dict[str, Any]) -> GeminiApiRuntime:
         return GeminiApiRuntime(
             replace(self.descriptor, provider=str(config.get("provider") or self.descriptor.provider)),
             model=str(config.get("model") or self._model),
+            api_version=str(config.get("api_version") or self._api_version),
             timeout=float(config.get("timeout_sec") or self._timeout),
             free_tier=bool(config.get("free_tier", self._free_tier)),
         )
@@ -74,7 +93,8 @@ class GeminiApiRuntime:
         }
         try:
             data = _post_json(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{url_model}:generateContent",
+                "https://generativelanguage.googleapis.com/"
+                f"{self._api_version}/models/{url_model}:generateContent",
                 body,
                 headers={"x-goog-api-key": api_key},
                 timeout=self._timeout,

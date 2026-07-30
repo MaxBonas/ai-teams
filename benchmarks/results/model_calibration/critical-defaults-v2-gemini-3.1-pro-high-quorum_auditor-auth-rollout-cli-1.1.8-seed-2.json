@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "auth_rollout_incident",
+  "seed": 2,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 8.953,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO. Se debe ejecutar un rollback inmediato a auth v1 dado que el rollout de auth v2 al 5 % registra una tasa de error observada del 2,4 %, excediendo el límite del 1,0 % durante 10 minutos, además de contar con la rotación de secrets como una dependencia pendiente.",
+    "challenges": [
+      "Mantener la cohorte del rollout de auth v2 al 5 % violando el umbral de error permitido del 1,0 % durante 10 minutos al alcanzar un 2,4 %.",
+      "Avanzar sin haber resuelto la rotación de secrets, que figura como una dependencia pendiente activa."
+    ],
+    "missing_evidence": [
+      "Logs y métricas que confirmen de manera concluyente la recuperación del sistema para que el Reviewer pueda aceptar.",
+      "Evidencia de la finalización y verificación de la rotación de secrets pendiente."
+    ],
+    "failure_modes": [
+      "Degradación continuada del servicio al mantener el rollout de auth v2 al 5 % en lugar de activar el rollback disponible a auth v1.",
+      "Inestabilidad o fallos de autenticación derivados de operar con la dependencia no resuelta de rotación de secrets.",
+      "Aceptación errónea del cambio por el Reviewer previa a la confirmación explícita mediante logs y métricas de recuperación."
+    ],
+    "recommendation": "Recomendación NO-GO para auth v2. El Release Engineer (owner) debe ejecutar el rollback a auth v1 inmediatamente. El Reviewer solo debe otorgar la aceptación cuando los logs y métricas confirmen plenamente la recuperación y se haya completado la rotación de secrets pendiente."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": true,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

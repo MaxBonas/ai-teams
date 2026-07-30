@@ -1,7 +1,7 @@
 """Proyecciones puras para la API canónica del catálogo de modelos.
 
 Este módulo no calcula compatibilidad ni scores. Filtra y ordena únicamente el
-``model_catalog_read_model_v1`` para que API, Equipo y la futura pestaña Modelos
+``model_catalog_read_model_v2`` para que API, Equipo y la pestaña Modelos
 consuman exactamente los mismos gates y razones.
 """
 
@@ -12,10 +12,13 @@ from typing import Any
 
 from aiteam.model_catalog_projection import MODEL_CATALOG_STATE_NAMES
 from aiteam.model_role_scoring import rank_model_role_scores
+from aiteam.model_tier_coverage import TIER_COVERAGE_POLICY_VERSION
 from aiteam.policies import canonical_role
 
-
 CATALOG_STATE_NAMES = MODEL_CATALOG_STATE_NAMES
+TIER1_AUTHORITY_FILTERS = frozenset(
+    {"enabled", "blocked", "lead_ready", "quorum_ready", "tier1_support"}
+)
 
 
 def catalog_selection_reason(role_row: Mapping[str, Any]) -> str:
@@ -83,6 +86,7 @@ def filter_catalog_candidates(
     channel: str = "",
     tier: str = "",
     state: str = "",
+    tier1_authority: str = "",
     configured: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Filtra sin borrar estados ni convertir unknown en false."""
@@ -95,6 +99,7 @@ def filter_catalog_candidates(
     channel_key = channel.strip().lower()
     tier_key = tier.strip().lower()
     state_key = state.strip().lower()
+    authority_key = tier1_authority.strip().lower()
     output: list[dict[str, Any]] = []
     for candidate in candidates:
         identity = candidate.get("identity") or {}
@@ -114,6 +119,28 @@ def filter_catalog_candidates(
             state_row = states.get(state_key)
             if not isinstance(state_row, Mapping) or state_row.get("value") is not True:
                 continue
+        if authority_key:
+            authority_rows = [
+                (role.get("tier1_authority") or {})
+                for role in candidate.get("roles") or ()
+                if isinstance(role, Mapping)
+            ]
+            if authority_key == "enabled":
+                matches_authority = any(
+                    row.get("enabled") is True for row in authority_rows
+                )
+            elif authority_key == "blocked":
+                matches_authority = any(
+                    row.get("status") == "blocked" for row in authority_rows
+                )
+            else:
+                matches_authority = any(
+                    row.get("lane") == authority_key
+                    and row.get("enabled") is True
+                    for row in authority_rows
+                )
+            if not matches_authority:
+                continue
         if configured is not None:
             configured_row = states.get("configured")
             value = (
@@ -125,6 +152,78 @@ def filter_catalog_candidates(
                 continue
         output.append(candidate)
     return output
+
+
+def summarize_tier1_authority(
+    candidates: list[Mapping[str, Any]],
+    *,
+    target_per_role: int = 2,
+) -> dict[str, Any]:
+    """Resume autoridad ya derivada; no infiere desde tier, score o nombre."""
+    by_role: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        identity = candidate.get("identity") or {}
+        for role in candidate.get("roles") or ():
+            authority = role.get("tier1_authority") or {}
+            if authority.get("lane") is None:
+                continue
+            row = {
+                "candidate_id": candidate.get("candidate_id"),
+                "profile_id": identity.get("profile_id"),
+                "model": identity.get("model_id"),
+                "perspective": identity.get("perspective_key"),
+                "capacity_pool": identity.get("capacity_pool"),
+                "enabled": authority.get("enabled") is True,
+                "reason_code": authority.get("reason_code"),
+            }
+            by_role.setdefault(str(role.get("canonical_role") or ""), []).append(row)
+
+    roles = []
+    for role, rows in sorted(by_role.items()):
+        enabled = [row for row in rows if row["enabled"]]
+        perspectives = sorted(
+            {str(row["perspective"]) for row in enabled if row.get("perspective")}
+        )
+        pools = sorted(
+            {str(row["capacity_pool"]) for row in enabled if row.get("capacity_pool")}
+        )
+        lane = next(
+            (
+                str(
+                    (item.get("tier1_authority") or {}).get("lane")
+                    or ""
+                )
+                for candidate in candidates
+                for item in candidate.get("roles") or ()
+                if item.get("canonical_role") == role
+            ),
+            "",
+        )
+        if len(enabled) == 0:
+            status = "no_eligible"
+        elif len(enabled) < target_per_role:
+            status = "single_point"
+        elif len(perspectives) < 2 or len(pools) < 2:
+            status = "diversity_gap"
+        else:
+            status = "covered"
+        roles.append(
+            {
+                "canonical_role": role,
+                "lane": lane,
+                "target": target_per_role,
+                "enabled_count": len(enabled),
+                "perspective_count": len(perspectives),
+                "capacity_pool_count": len(pools),
+                "status": status,
+                "candidates": enabled,
+            }
+        )
+    return {
+        "policy_version": TIER_COVERAGE_POLICY_VERSION,
+        "target_per_role": target_per_role,
+        "roles": roles,
+    }
 
 
 def summarize_catalog_providers(

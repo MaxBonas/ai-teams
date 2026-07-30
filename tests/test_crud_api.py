@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import api.utils as utils
 from aiteam.db.migration import SCHEMA_PATH
+from aiteam.model_owner_preferences import set_model_owner_preference
 from api.main import app
 from aiteam.user_config import record_model_health
 
@@ -141,12 +142,12 @@ def test_team_api_rejects_tier_3_model_for_lead(client) -> None:
 
 def test_team_api_rejects_incompatible_model_patch(client) -> None:
     created = client.post("/api/agents", json={
-        "role": "lead",
-        "name": "Lead",
+        "role": "reviewer",
+        "name": "Reviewer",
         "adapter_type": "openai_api",
         "adapter_config": {
             "profile_id": "openai_api",
-            "model": "gpt-5.6-sol",
+            "model": "gpt-5.6-terra",
         },
         "run_profile": "full_team",
         "data_class": "internal",
@@ -286,6 +287,32 @@ def test_agent_api_rejects_selection_intent_for_another_candidate(client) -> Non
 
     assert response.status_code == 400
     assert "candidate_id does not match" in response.json()["detail"]
+
+
+def test_team_api_rejects_new_archived_assignment(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AITEAM_USER_CONFIG_DIR", str(tmp_path / "user-config"))
+    set_model_owner_preference(
+        "openai_api",
+        "gpt-5.6-terra",
+        state="archived",
+        reason="no crear nuevas plazas",
+    )
+
+    response = client.post("/api/agents", json={
+        "role": "reviewer",
+        "name": "Reviewer archivado",
+        "adapter_type": "openai_api",
+        "adapter_config": {
+            "profile_id": "openai_api",
+            "model": "gpt-5.6-terra",
+        },
+        "data_class": "internal",
+    })
+
+    assert response.status_code == 400
+    assert "archived by the owner" in response.json()["detail"]
 
 
 def test_agent_patch_rejects_forged_intent_inherited_from_existing_row(

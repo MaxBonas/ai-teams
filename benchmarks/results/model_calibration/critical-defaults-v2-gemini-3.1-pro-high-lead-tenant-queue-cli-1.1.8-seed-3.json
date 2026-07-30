@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "lead",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 8.094,
+  "usage": {},
+  "response": {
+    "objective": "Migrar tenant_queue_migration para consolidar SQLite como la única fuente durable con tenant_id por issue, corrigiendo la separación de SELECT y UPDATE para evitar que dos workers ganen la misma issue, sin detener runs activas, manteniendo un flag para volver al camino anterior y superando el gate de calidad.",
+    "work_items": [
+      {
+        "id": "WI-1",
+        "title": "Atomicidad de Checkout en SQLite",
+        "description": "Refactorizar el checkout de la cola para unificar SELECT y UPDATE por tenant_id en SQLite como única fuente durable, garantizando que dos workers no puedan reclamar la misma issue.",
+        "owner": "Lead Software Engineer",
+        "acceptor": "Principal Architect",
+        "dependencies": []
+      },
+      {
+        "id": "WI-2",
+        "title": "Migración Zero-Downtime y Feature Flag de Rollback",
+        "description": "Implementar la lógica de migración para no detener runs activas e integrar el flag para conmutar al camino anterior en caso de fallo.",
+        "owner": "Senior Backend Developer",
+        "acceptor": "Lead Software Engineer",
+        "dependencies": [
+          "WI-1"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Dos workers ganan la misma issue si el checkout mantiene SELECT y UPDATE separados.",
+        "impact": "Inconsistencia de datos y ejecución duplicada por tenant.",
+        "mitigation": "Combinar la selección y actualización en una única operación o transacción atómica en SQLite."
+      },
+      {
+        "risk": "Interrupción de runs activas durante el proceso de migración.",
+        "impact": "Fallo en ejecuciones en curso para los tenants afectados.",
+        "mitigation": "Diseñar la migración para coexistir de forma no bloqueante con las ejecuciones activas."
+      }
+    ],
+    "verification": {
+      "gate": "Ejecutar 100 reinicios con cero wakeups perdidos durante 24 horas",
+      "durable_storage_check": "Verificar SQLite como única fuente durable con tenant_id por issue",
+      "rollback_mechanism": "Confirmar funcionamiento correcto del flag para volver al camino anterior"
+    },
+    "escalation": {
+      "trigger_conditions": [
+        "Pérdida de 1 o más wakeups durante la ejecución del gate de 100 reinicios en 24 horas",
+        "Detección de doble asignación de issue a múltiples workers",
+        "Interrupción involuntaria o detención de runs activas durante la migración"
+      ],
+      "escalation_path": "Notificación inmediata al Lead, activación del flag para volver al camino anterior y congelamiento del proceso de despliegue."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true,
+      "role.explicit_owner": true,
+      "role.explicit_acceptor": true
+    },
+    "anchors_retained": 9,
+    "anchors_total": 9,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

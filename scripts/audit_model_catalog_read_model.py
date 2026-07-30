@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aiteam.model_catalog_read_model import (  # noqa: E402
+from aiteam.model_catalog_read_model import (
     audit_model_catalog_read_model,
     build_current_model_catalog_read_model,
 )
@@ -27,6 +27,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--output", type=Path, help="Ruta JSON opcional para el recibo")
     parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Guarda metadata, habilitaciones Tier 1 y auditoría sin las 17 celdas completas.",
+    )
+    parser.add_argument(
         "--json", action="store_true", help="Imprime el recibo completo"
     )
     args = parser.parse_args(argv)
@@ -38,10 +43,39 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=ROOT,
     )
     audit = audit_model_catalog_read_model(read_model)
+    tier1_enabled = [
+        {
+            "candidate_id": candidate.get("candidate_id"),
+            "profile_id": (candidate.get("identity") or {}).get("profile_id"),
+            "model": (candidate.get("identity") or {}).get("model_id"),
+            "canonical_role": role.get("canonical_role"),
+            "authority": role.get("tier1_authority"),
+        }
+        for candidate in read_model.get("candidates") or ()
+        for role in candidate.get("roles") or ()
+        if (role.get("tier1_authority") or {}).get("enabled") is True
+    ]
     receipt = {
         "schema_version": "model_catalog_read_model_receipt_v1",
         "observed_at": observed_at.isoformat(),
-        "read_model": read_model,
+        "read_model": (
+            {
+                "schema_version": read_model.get("schema_version"),
+                "score_version": read_model.get("score_version"),
+                "content_hash": read_model.get("content_hash"),
+                "tier1_authority_contract": read_model.get(
+                    "tier1_authority_contract"
+                ),
+                "candidate_count": len(read_model.get("candidates") or ()),
+                "role_score_count": sum(
+                    len(candidate.get("roles") or ())
+                    for candidate in read_model.get("candidates") or ()
+                ),
+                "tier1_enabled": tier1_enabled,
+            }
+            if args.compact
+            else read_model
+        ),
         "audit": audit,
     }
     encoded = json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True)

@@ -1,0 +1,76 @@
+.preflight-console {
+  padding: 18px;
+  border: 1px solid var(--setup-line);
+}
+
+.preflight-layout,
+.preflight-track {
+  display: grid;
+}
+
+.preflight-head,
+.preflight-seal,
+.preflight-track > div {
+  display: flex;
+  gap: 8px;
+}
+
+.preflight-head {
+  justify-content: space-between;
+}
+
+.preflight-seal span,
+.preflight-track span {
+  display: grid;
+}
+
+.preflight-track {
+  grid-template-columns: repeat(3, 1fr);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.preflight-layout {
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.preflight-gate,
+.preflight-action-card {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 8px;
+  padding: 8px;
+  border-block: 1px solid var(--setup-line);
+}
+
+.preflight-gates,
+.preflight-actions {
+  min-width: 0;
+}
+
+.preflight-gate small,
+.preflight-actions small {
+  display: block;
+}
+
+.preflight-consent {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 820px) {
+  .preflight-head,
+  .preflight-layout {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+}
+
+@media (max-width: 520px) {
+  .preflight-track {
+    grid-template-columns: 1fr;
+  }
+}

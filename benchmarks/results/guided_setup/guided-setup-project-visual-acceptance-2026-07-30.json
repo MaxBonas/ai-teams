@@ -1,0 +1,124 @@
+{
+  "checks": {
+    "accessibility_is_rechecked_after_execution": true,
+    "authority_hashes_are_bound_per_state": true,
+    "durable_go_requires_complete_hash_chain": true,
+    "durable_no_go_cannot_enter": true,
+    "durable_no_go_routes_to_resources": true,
+    "pending_cannot_enter": true,
+    "post_execution_preflight_is_projected": true,
+    "screenshots_are_content_hashed": true,
+    "tampered_go_fails_closed": true,
+    "visual_state_matrix_complete": true
+  },
+  "evidence": {
+    "authority_boundary": "React solo habilita entrada cuando plan, execution receipt y preflight posterior coinciden con el receipt durable GO.",
+    "source_hashes": {
+      "ide-frontend/e2e/project-preflight.spec.ts": "e066456239082618d182908674c075e44b9896bd66c4207d5cb9a8b751762355",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectPreflightPanel.test.tsx": "b48bc5de92904966f4ae14bec940d6942937b36594e16d23f1901d1920ab6d0e",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectPreflightPanel.tsx": "cd2fe2fae44133589c6b86ebdda39a724cc493c49d17fa79dd9a36534c2e9dda",
+      "ide-frontend/src/components/ProjectSetupWizard/ProjectSetupWizard.tsx": "ca59ce65ea71a5977e60998eba0657dd2c432d48a1756e338bf4564dbb8df11e",
+      "ide-frontend/src/components/ProjectSetupWizard/projectPreflightApi.ts": "17bb3b70211740b0a041ea41e82576aa70872d23712fe1434ff38bbfee52160c",
+      "scripts/audit_guided_setup_project_visual_acceptance.py": "23abeed363f4eda0581c07e8ad3a7ecb9561fb99e4de584240accaf17625b135",
+      "tests/test_audit_guided_setup_project_visual_acceptance.py": "777f082585e1207caf4010aad19a33800eef983582fc6b8d9172cbfd427e2824"
+    },
+    "visual": {
+      "evidence_sha256": "810fc43994ac49b8e7545942158dcc9867de6c18e1588d822ba39a4e745cdba5",
+      "schema_version": "guided_setup_project_visual_evidence_v1",
+      "screenshots": [
+        {
+          "authority_hashes": {
+            "durable_receipt_hash": null,
+            "execution_plan_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "preflight_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "file": "preflight-desktop.png",
+          "sha256": "e7ffb2602edca08242c0d5dcdeb244f686fdbcb3a10146dcdff0da84ad5cc688",
+          "state": "pending-desktop"
+        },
+        {
+          "authority_hashes": {
+            "durable_receipt_hash": null,
+            "execution_plan_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "preflight_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "file": "preflight-tablet.png",
+          "sha256": "337f9037a1af490b91952ae38960c62b3d3d0bb5279ba7eb9ca7ebdf22cdd6b9",
+          "state": "pending-tablet"
+        },
+        {
+          "authority_hashes": {
+            "durable_receipt_hash": null,
+            "execution_plan_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "preflight_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "file": "preflight-mobile.png",
+          "sha256": "655a0caf245d7c3acc0bfde5d5e642043c7e11bd90f6b876369875fbd3f64da0",
+          "state": "pending-mobile"
+        },
+        {
+          "authority_hashes": {
+            "durable_receipt_hash": null,
+            "execution_plan_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "preflight_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "file": "preflight-reflow-320.png",
+          "sha256": "b643a6a6ca5bb2878b7cea52d5b6b95277b63573fe0b71bb40ace14a8f8dc064",
+          "state": "pending-reflow-320"
+        },
+        {
+          "authority_hashes": {
+            "durable_receipt_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "execution_plan_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "execution_receipt_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "preflight_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "file": "preflight-no-go.png",
+          "sha256": "d0fd1e3622cf5f5f987964bb44df909ac805cedebb3972360c7b4f7206ff1dfd",
+          "state": "durable-no-go"
+        },
+        {
+          "authority_hashes": {
+            "durable_receipt_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+            "execution_plan_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "execution_receipt_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "preflight_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "file": "preflight-go.png",
+          "sha256": "fb873ac66cf8bb28453930679a729b47999ec7c96f850a5fd0b950e753bbd9f9",
+          "state": "durable-go"
+        }
+      ],
+      "states": [
+        "durable-go",
+        "durable-no-go",
+        "pending-desktop",
+        "pending-mobile",
+        "pending-reflow-320",
+        "pending-tablet"
+      ]
+    }
+  },
+  "evidence_hash": "6cddca95abb3d6e4be8d94cb7a69607cf0a057bc089815cba3aea3e20fe5d57f",
+  "report_hash": "3cce823b9af247c855df1eb801bece12171a038c87b0fdcef172678400072a53",
+  "schema_version": "guided_setup_project_visual_acceptance_audit_v1",
+  "scope": {
+    "inference_attempted": false,
+    "quota_consumed": false,
+    "remote_calls": false,
+    "source_files_mutated": false,
+    "user_projects_mutated": false
+  },
+  "summary": {
+    "check_count": 10,
+    "passed_count": 10,
+    "ready": true,
+    "visual_state_count": 6
+  }
+}

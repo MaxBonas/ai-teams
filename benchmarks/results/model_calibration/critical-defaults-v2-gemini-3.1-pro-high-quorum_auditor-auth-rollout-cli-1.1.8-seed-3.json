@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "antigravity_subscription",
+  "channel": "subscription",
+  "cli_version": "1.1.8",
+  "model": "gemini-3.1-pro-high",
+  "role": "quorum_auditor",
+  "case_id": "auth_rollout_incident",
+  "seed": 3,
+  "prompt_version": "v2",
+  "status": "completed",
+  "wall_seconds": 7.953,
+  "usage": {},
+  "response": {
+    "verdict": "NO-GO. La propuesta implícita de continuar o mantener el rollout de auth v2 al 5 % debe ser rechazada inmediatamente debido a que la tasa de error observada (2,4 %) supera el límite permitido (1,0 %) durante una ventana de 10 minutos, sumado a la existencia de la rotación de secrets como dependencia pendiente.",
+    "challenges": [
+      "Impacto continuado en el cohorte del 5 % al mantener auth v2 activo tras superar el umbral de error de 1,0 % durante 10 minutos.",
+      "Intento de validación o avance en el despliegue sin haber resuelto previamente la dependencia pendiente de rotación de secrets.",
+      "Riesgo de omisión del criterio estricto de aceptación del Reviewer, quien únicamente autoriza la resolución previa confirmación en logs y métricas."
+    ],
+    "missing_evidence": [
+      "Métricas y logs verificados por el Reviewer que confirmen la recuperación del servicio por debajo del límite de error del 1,0 %.",
+      "Confirmación de ejecución y validación exitosa de la rotación de secrets pendiente."
+    ],
+    "failure_modes": [
+      "Degradación continuada de la autenticación de usuarios en el cohorte del 5 % debido a la tasa de error no mitigada de 2,4 %.",
+      "Fallo de autenticación generalizado provocado por incompatibilidad o falta de rotación de secrets.",
+      "Ejecución tardía o no coordinada del rollback a auth v1 por parte del Release Engineer (owner)."
+    ],
+    "recommendation": "NO-GO. El Release Engineer debe ejecutar inmediatamente el rollback hacia auth v1, la cual se encuentra disponible. El despliegue de auth v2 debe permanecer bloqueado hasta completar la rotación de secrets y obtener la aceptación del Reviewer mediante logs y métricas que confirmen la recuperación y el cumplimiento del límite de error del 1,0 %."
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.rollout_percent": true,
+      "case.observed_error": true,
+      "case.error_limit": true,
+      "case.observation_window": true,
+      "case.rollback_version": true,
+      "case.owner": true,
+      "case.acceptor": true,
+      "case.evidence_logs": true,
+      "case.evidence_metrics": true,
+      "case.secret_dependency": true,
+      "role.go_no_go": true,
+      "role.adversarial_challenge": true
+    },
+    "anchors_retained": 12,
+    "anchors_total": 12,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {},
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_antigravity_plan_sandbox",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

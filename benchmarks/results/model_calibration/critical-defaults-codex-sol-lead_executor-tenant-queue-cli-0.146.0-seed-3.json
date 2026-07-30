@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "benchmark": "critical_default_role_canary",
+  "profile_id": "codex_subscription",
+  "channel": "subscription",
+  "cli_version": "codex-cli 0.146.0-alpha.6",
+  "model": "gpt-5.6-sol",
+  "role": "lead_executor",
+  "case_id": "tenant_queue_migration",
+  "seed": 3,
+  "prompt_version": "v1",
+  "status": "completed",
+  "wall_seconds": 31.562,
+  "usage": {
+    "input_tokens": 16607,
+    "cached_input_tokens": 0,
+    "output_tokens": 885
+  },
+  "response": {
+    "objective": "Migrar el checkout de issues multi-tenant a una operación atómica en SQLite, sin interrumpir runs activas y conservando el flag de retorno al camino anterior.",
+    "execution_steps": [
+      {
+        "order": 1,
+        "change": "Añadir tenant_id e índices necesarios mediante una migración compatible con lecturas y escrituras activas; completar tenant_id por lotes y validar que ninguna issue quede sin tenant."
+      },
+      {
+        "order": 2,
+        "change": "Implementar el checkout atómico dentro de una transacción SQLite: seleccionar una issue elegible por tenant y actualizar su estado con una condición que confirme que sigue disponible; considerar adquirido el trabajo únicamente si exactamente una fila fue modificada."
+      },
+      {
+        "order": 3,
+        "change": "Mantener el camino anterior detrás del flag existente y encapsular ambos caminos bajo la misma interfaz, sin cambiar el tratamiento de runs ya activas."
+      },
+      {
+        "order": 4,
+        "change": "Asegurar que enqueue, checkout, wakeup, reintentos y recuperación tras reinicio lean y escriban tenant_id, evitando cruces entre tenants."
+      },
+      {
+        "order": 5,
+        "test": "Crear una prueba concurrente con al menos dos workers compitiendo por la misma issue y comprobar que solo uno obtiene el checkout."
+      },
+      {
+        "order": 6,
+        "test": "Añadir pruebas de aislamiento entre tenants, transición durante runs activas, idempotencia, reinicio entre selección y confirmación, contención de SQLite y retorno mediante el flag."
+      },
+      {
+        "order": 7,
+        "test": "Ejecutar el gate exigido: 100 reinicios, observación continua durante 24 horas y cero wakeups perdidos."
+      },
+      {
+        "order": 8,
+        "change": "Habilitar gradualmente el camino nuevo mediante el flag solo después de superar las pruebas funcionales y el gate completo."
+      }
+    ],
+    "evidence": {
+      "status": "propuesta_no_ejecutada",
+      "required_artifacts": [
+        "Resultado reproducible de la prueba de contención mostrando un único ganador por issue.",
+        "Consultas de integridad que demuestren tenant_id no nulo y ausencia de asignaciones entre tenants.",
+        "Registro de los 100 reinicios con identificadores de wakeups emitidos, reclamados y completados.",
+        "Informe de 24 horas que demuestre cero wakeups perdidos.",
+        "Prueba del rollback mediante el flag sin cancelar ni duplicar runs activas."
+      ]
+    },
+    "risks": [
+      {
+        "risk": "Bloqueos o latencia elevada por contención de escritura en SQLite.",
+        "mitigation": "Mantener transacciones breves, configurar espera ante bloqueo y medir tiempos de checkout."
+      },
+      {
+        "risk": "Issues históricas con tenant_id ausente o incorrecto.",
+        "mitigation": "Realizar backfill por lotes, validar integridad y bloquear la activación si quedan filas inválidas."
+      },
+      {
+        "risk": "Duplicación o pérdida de wakeups durante reinicios.",
+        "mitigation": "Usar transiciones condicionales e idempotentes y reconciliar estados persistidos al arrancar."
+      },
+      {
+        "risk": "Incompatibilidad entre workers antiguos y nuevos durante el despliegue.",
+        "mitigation": "Conservar un esquema compatible y coordinar la activación del flag por versión."
+      }
+    ],
+    "rollback": {
+      "trigger": "Cualquier checkout duplicado, wakeup perdido, cruce de tenant o degradación operativa fuera de los límites aceptados.",
+      "steps": [
+        "Desactivar el camino atómico mediante el flag existente.",
+        "Mantener intacto el esquema y tenant_id para evitar una migración destructiva durante runs activas.",
+        "Dejar que las runs ya adquiridas terminen bajo sus reglas actuales.",
+        "Reconciliar issues en estados intermedios antes de reintentar la activación."
+      ],
+      "data_policy": "No eliminar ni revertir datos durables durante el rollback inmediato."
+    },
+    "escalation": {
+      "required_when": [
+        "No sea posible garantizar compatibilidad entre versiones de workers.",
+        "El backfill no pueda determinar tenant_id de alguna issue de forma inequívoca.",
+        "El gate registre al menos un wakeup perdido o un checkout duplicado.",
+        "La contención de SQLite impida cumplir los objetivos operativos."
+      ],
+      "decision_needed": "Solicitar decisión sobre corrección de datos, límites operativos o coordinación del despliegue antes de ampliar la activación."
+    }
+  },
+  "raw_output_on_failure": null,
+  "evaluation": {
+    "schema_exact": true,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "anchors": {
+      "case.durable_source": true,
+      "case.tenant_boundary": true,
+      "case.atomic_checkout": true,
+      "case.rollback": true,
+      "case.restart_count": true,
+      "case.observation_window": true,
+      "case.durable_wakeup": true
+    },
+    "anchors_retained": 7,
+    "anchors_total": 7,
+    "missing_anchors": [],
+    "forbidden_hits": [],
+    "role_checks": {
+      "execution_steps_nonempty": true,
+      "evidence_nonempty": true
+    },
+    "failed_role_checks": [],
+    "contract_passed": true
+  },
+  "diagnostic": "2026-07-24T15:40:33.163604Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:33.163632Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:33.164171Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:33.166074Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:33.169340Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell\n2026-07-24T15:40:48.386239Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:48.386262Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/\n2026-07-24T15:40:48.386679Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n2026-07-24T15:40:48.388417Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=file:///C:/Users/she__/.codex/plugins/cache/openai-primary-runtime/template-creator/26.723.12215/.codex-plugin/plugin.json\n",
+  "harness": {
+    "workspace": "isolated_temporary_directory",
+    "tools": "prompt_prohibited_not_transport_enforced",
+    "judge": "deterministic_hidden_rubric"
+  },
+  "ok": true
+}

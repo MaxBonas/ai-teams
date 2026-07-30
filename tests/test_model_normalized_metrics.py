@@ -28,10 +28,14 @@ def test_every_calibrated_pair_gets_exact_quality_and_evidence_metadata() -> Non
     report = normalized_metrics_from_evaluation(coverage)
 
     assert report["schema_version"] == NORMALIZED_METRICS_VERSION
-    assert report["pair_count"] == coverage["pair_counts"]["calibrated"] == 25
+    # La fotografía 2026-07-23/Antigravity 1.1.5 no puede consumir ni la
+    # recalibración Gemini Lead/Quorum del día siguiente ni las dos QA
+    # renovadas el 2026-07-29, ni Test Designer/MCP Operator renovados el
+    # 2026-07-30.
+    assert report["pair_count"] == coverage["pair_counts"]["calibrated"] == 12
     assert report["case_diversity_counts"] == {
-        "multi_family": 21,
-        "single_family": 4,
+        "multi_family": 10,
+        "single_family": 2,
     }
     assert report["diagnostics"] == []
     for key, metric in report["metrics"].items():
@@ -92,7 +96,7 @@ def test_stale_or_invalid_calibrated_row_fails_closed() -> None:
 
     report = normalized_metrics_from_evaluation(coverage)
 
-    assert report["pair_count"] == 24
+    assert report["pair_count"] == 11
     assert report["diagnostics"][0]["reason"] == (
         "calibrated_row_not_fresh_or_valid"
     )
@@ -125,22 +129,22 @@ def test_current_read_model_uses_authoritative_drift_fallback(
         repo_root=Path(__file__).resolve().parents[1],
     )
 
-    assert read_model["normalized_metrics"]["pair_count"] == 25
+    assert read_model["normalized_metrics"]["pair_count"] == 12
     known_quality = [
         role
         for candidate in read_model["candidates"]
         for role in candidate["roles"]
         if role["score"]["breakdown"]["quality"]["status"] == "known"
     ]
-    assert len(known_quality) == 25
+    assert len(known_quality) == 12
     diversity_gates = [
         role["score_inputs"]["hard_gates"]["case_diversity"]
         for candidate in read_model["candidates"]
         for role in candidate["roles"]
         if role["score"]["breakdown"]["quality"]["status"] == "known"
     ]
-    assert diversity_gates.count(True) == 21
-    assert diversity_gates.count(False) == 4
+    assert diversity_gates.count(True) == 10
+    assert diversity_gates.count(False) == 2
     assert read_model["evaluation_version_evidence"][
         "codex_subscription"
     ]["source"].startswith("drift_receipt:")
