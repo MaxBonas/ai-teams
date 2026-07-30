@@ -7,7 +7,7 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -316,6 +316,115 @@ def transition_provider_change_case(
                 actor=actor_id,
                 payload=data,
                 now_iso=current_time,
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    return get_provider_change_case(db_path, case_id)
+
+
+def record_provider_change_notification_action(
+    db_path: Path,
+    case_id: str,
+    *,
+    action: str,
+    expected_revision: int,
+    actor: str,
+    snooze_hours: int | None = None,
+    now: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Registra acknowledge/snooze/gestión sin duplicar el workflow en UI."""
+    if action not in {"acknowledge", "snooze", "manage"}:
+        raise ValueError("provider notification action drift")
+    if action == "snooze" and (
+        snooze_hours is None or not 1 <= int(snooze_hours) <= 720
+    ):
+        raise ValueError("provider notification snooze must be 1..720 hours")
+    if action != "snooze" and snooze_hours is not None:
+        raise ValueError("snooze_hours is only valid for snooze")
+    actor_id = str(actor or "").strip()
+    if not actor_id:
+        raise ValueError("provider notification action requires actor")
+    current = _coerce_datetime(now)
+    snoozed_until = (
+        (
+            datetime.fromisoformat(current.replace("Z", "+00:00"))
+            + timedelta(hours=int(snooze_hours or 0))
+        ).isoformat()
+        if action == "snooze"
+        else None
+    )
+    event_status = "snoozed" if action == "snooze" else "acknowledged"
+    ensure_provider_change_workflow_schema(db_path)
+    with contextlib.closing(_connect(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            case = conn.execute(
+                "SELECT * FROM provider_change_cases WHERE id = ?",
+                (case_id,),
+            ).fetchone()
+            if case is None:
+                raise KeyError(case_id)
+            if int(case["revision"]) != int(expected_revision):
+                raise ProviderChangeConflictError(
+                    "provider change case revision is stale"
+                )
+            event = conn.execute(
+                "SELECT status FROM provider_change_events WHERE id = ?",
+                (case["event_id"],),
+            ).fetchone()
+            if event is None:
+                raise KeyError(case["event_id"])
+            if event["status"] == "resolved":
+                raise ValueError("resolved provider notifications are terminal")
+            revision = int(case["revision"]) + 1
+            updated = conn.execute(
+                """
+                UPDATE provider_change_cases
+                SET revision = ?, updated_at = ?
+                WHERE id = ? AND revision = ?
+                RETURNING id
+                """,
+                (revision, current, case_id, int(expected_revision)),
+            ).fetchone()
+            if updated is None:
+                raise ProviderChangeConflictError(
+                    "provider change case changed concurrently"
+                )
+            conn.execute(
+                """
+                UPDATE provider_change_events
+                SET status = ?,
+                    snoozed_until = ?,
+                    acknowledged_at = CASE
+                        WHEN ? = 'acknowledged' THEN ? ELSE acknowledged_at
+                    END,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    event_status,
+                    snoozed_until,
+                    event_status,
+                    current,
+                    current,
+                    case["event_id"],
+                ),
+            )
+            _append_history(
+                conn,
+                case_id=case_id,
+                sequence=revision,
+                action=f"notification_{action}",
+                from_status=str(case["status"]),
+                to_status=str(case["status"]),
+                actor=actor_id,
+                payload={
+                    "event_status": event_status,
+                    "snoozed_until": snoozed_until,
+                },
+                now_iso=current,
             )
             conn.execute("COMMIT")
         except Exception:

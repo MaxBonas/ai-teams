@@ -468,6 +468,12 @@ recalibración y outcome reversible. Su overlay de invalidaciones vuelve stale
 solo perfil+modelo+rol aprobado y puede bloquear nuevas selecciones sin tocar
 assignments. Aceptación o rollback restauran el overlay de forma explícita; el
 control plane nunca ejecuta por sí mismo comandos de update.
+La atención del maintainer se proyecta desde esos mismos expedientes mediante
+un inbox global local. Configuración presenta el centro completo y Modelos un
+banner compacto; acknowledge/snooze conservan revisión e historial durables.
+No se crea una máquina de estados React ni se habilita entrega externa por
+defecto. Los destinos externos requieren una frontera opt-in posterior con
+dedupe, health y referencias de secreto.
 
 P0.g convierte esa evidencia en un recorrido operativo único por
 `(profile_id, model_id, role)`: configuración/auth, catálogo+versión, health,

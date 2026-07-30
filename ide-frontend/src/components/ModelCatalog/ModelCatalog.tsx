@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 
 import { apiFetch } from '../../lib/api';
+import { ProviderChangeInbox } from '../ProviderChangeInbox';
 import {
   OwnerPreferenceControl,
 } from './OwnerPreferenceControl';
@@ -538,6 +539,7 @@ export function ModelCatalog() {
 
   return (
     <section className="model-catalog-view" data-testid="model-catalog-view">
+      <ProviderChangeInbox compact />
       <header className="catalog-hero">
         <div className="catalog-hero-copy">
           <span className="eyebrow"><Layers3 size={13} /> Observatorio de capacidad</span>

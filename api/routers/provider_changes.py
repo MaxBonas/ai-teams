@@ -11,9 +11,11 @@ from aiteam.db.provider_change_workflows import (
     get_provider_change_case,
     list_provider_change_cases,
     reconcile_provider_change_cases,
+    record_provider_change_notification_action,
     transition_provider_change_case,
 )
 from aiteam.model_catalog_service import invalidate_model_catalog_cache
+from aiteam.provider_change_notifications import build_provider_change_inbox
 from aiteam.provider_change_runtime import machine_provider_change_db_path
 from api.utils import _require_api_auth_request
 
@@ -28,6 +30,14 @@ class ProviderChangeTransitionRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProviderChangeNotificationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: str = Field(pattern="^(acknowledge|snooze|manage)$")
+    expected_revision: int = Field(ge=1)
+    snooze_hours: int | None = Field(default=None, ge=1, le=720)
+
+
 @router.post("/reconcile")
 async def reconcile_cases(request: Request) -> dict[str, Any]:
     _require_api_auth_request(request)
@@ -40,6 +50,20 @@ async def reconcile_cases(request: Request) -> dict[str, Any]:
         "created": len(created),
         "cases": created,
     }
+
+
+@router.get("/inbox")
+async def get_inbox(
+    request: Request,
+    include_snoozed: bool = False,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict[str, Any]:
+    _require_api_auth_request(request)
+    return build_provider_change_inbox(
+        machine_provider_change_db_path(),
+        include_snoozed=include_snoozed,
+        limit=limit,
+    )
 
 
 @router.get("/cases")
@@ -113,3 +137,41 @@ async def transition_case(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     invalidate_model_catalog_cache()
     return {"success": True, "case": row}
+
+
+@router.post("/cases/{case_id}/notification")
+async def notification_action(
+    case_id: str,
+    body: ProviderChangeNotificationRequest,
+    request: Request,
+) -> dict[str, Any]:
+    _require_api_auth_request(request)
+    try:
+        row = record_provider_change_notification_action(
+            machine_provider_change_db_path(),
+            case_id,
+            action=body.action,
+            expected_revision=body.expected_revision,
+            actor="owner",
+            snooze_hours=body.snooze_hours,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="provider_change_case_not_found",
+        ) from exc
+    except ProviderChangeConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="provider_change_case_revision_stale",
+        ) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "success": True,
+        "case": row,
+        "inbox": build_provider_change_inbox(
+            machine_provider_change_db_path(),
+            include_snoozed=True,
+        ),
+    }

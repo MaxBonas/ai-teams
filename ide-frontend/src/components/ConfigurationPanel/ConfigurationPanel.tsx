@@ -4,7 +4,7 @@ import './ConfigurationPanel.css';
 
 export type ConfigSection =
   | 'proyecto' | 'autonomia' | 'medicion' | 'skills' | 'mcp' | 'danger'
-  | 'keys' | 'clis' | 'adapters' | 'sistema';
+  | 'provider-changes' | 'keys' | 'clis' | 'adapters' | 'sistema';
 
 interface ConfigurationPanelProps {
   projectDisplayName: string;
@@ -23,6 +23,7 @@ const PROJECT_SECTIONS: Array<{ id: ConfigSection; label: string; danger?: boole
 ];
 
 const GLOBAL_SECTIONS: Array<{ id: ConfigSection; label: string }> = [
+  { id: 'provider-changes', label: 'Cambios de proveedores' },
   { id: 'keys', label: 'Credenciales API' },
   { id: 'clis', label: 'CLIs de suscripción' },
   { id: 'adapters', label: 'Adapters y salud' },

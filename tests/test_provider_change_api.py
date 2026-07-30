@@ -120,3 +120,44 @@ def test_provider_change_api_rejects_unknown_status(
     )
 
     assert response.status_code == 422
+
+
+def test_provider_change_inbox_actions_are_owner_gated(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "guided_setup.db"
+    _seed_trigger(db_path)
+    monkeypatch.setattr(
+        provider_router,
+        "machine_provider_change_db_path",
+        lambda: db_path,
+    )
+    client = TestClient(app)
+    case = client.post("/api/provider-changes/reconcile").json()["cases"][0]
+
+    inbox = client.get("/api/provider-changes/inbox")
+    assert inbox.status_code == 200
+    assert inbox.json()["counts"]["attention"] == 1
+
+    managed = client.post(
+        f"/api/provider-changes/cases/{case['id']}/notification",
+        json={
+            "action": "manage",
+            "expected_revision": case["revision"],
+        },
+    )
+    assert managed.status_code == 200
+    updated = managed.json()["case"]
+    assert updated["revision"] == case["revision"] + 1
+    assert updated["history"][-1]["action"] == "notification_manage"
+
+    stale = client.post(
+        f"/api/provider-changes/cases/{case['id']}/notification",
+        json={
+            "action": "snooze",
+            "expected_revision": case["revision"],
+            "snooze_hours": 24,
+        },
+    )
+    assert stale.status_code == 409

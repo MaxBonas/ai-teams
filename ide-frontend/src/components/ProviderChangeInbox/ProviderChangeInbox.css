@@ -1,0 +1,47 @@
+.provider-change-center {
+  --radar: #d9a441;
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--radar) 45%, var(--border));
+  border-radius: 8px;
+  background: linear-gradient(110deg, rgb(217 164 65 / 8%), transparent 45%), var(--surface);
+}
+.provider-change-center.tone-critical,
+.provider-change-center.tone-error { --radar: #ff6b62; }
+.provider-change-header { display: flex; gap: 8px; align-items: center; }
+.provider-change-kicker { color: var(--radar); font-size: 0.57rem; }
+.provider-change-header h2 { margin: 2px 0; color: var(--text-bright); font-size: 0.86rem; }
+.provider-change-header p,
+.provider-change-list { display: grid; gap: 5px; }
+.provider-change-item {
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr) auto;
+  gap: 7px;
+  padding: 6px 7px 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.provider-change-rail { background: var(--radar); }
+.provider-change-item-main { display: grid; gap: 2px; min-width: 0; }
+.provider-change-item-main > strong { color: var(--text-bright); font-size: 0.73rem; }
+.provider-change-item-main > p,
+.provider-change-item-main > small { margin: 0; color: var(--text-muted); font-size: 0.62rem; }
+.provider-change-item-top { display: flex; gap: 5px; }
+.provider-change-item-top code { color: var(--text-dim); font-size: 0.56rem; }
+.provider-severity { color: var(--radar); font: 700 0.54rem 'JetBrains Mono', monospace; text-transform: uppercase; }
+.provider-age { margin-left: auto; color: var(--text-dim); font-size: 0.55rem; }
+.provider-change-actions { display: flex; gap: 4px; align-items: center; }
+.provider-change-actions button { padding: 3px 5px; font-size: 0.6rem; }
+.provider-change-actions .primary { border-color: var(--radar); }
+.provider-change-actions .rotate { display: inline-block; transform: rotate(180deg); }
+.provider-change-detail { grid-column: 2 / -1; padding-top: 5px; border-top: 1px solid var(--border); }
+.provider-change-detail p { margin: 2px 0; color: var(--text-dim); font-size: 0.59rem; }
+.provider-change-empty { color: #4fc58b; }
+.provider-change-inline-error { color: var(--text-dim); }
+@media (max-width: 760px) {
+  .provider-change-item { grid-template-columns: 3px minmax(0, 1fr); }
+  .provider-change-actions { grid-column: 2; }
+}

@@ -88,10 +88,11 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 8. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próximo bloque ejecutable local: **P0.N.5, avisos al developer y superficie
-UI de cambios de proveedor**. P0.N.1–N.4 ya fijan contrato, detectores,
-persistencia, expedientes owner-gated, invalidación exacta, aceptación y
-rollback; N.5 debe proyectarlos sin recalcular autoridad en React.
+Próximo bloque ejecutable local: **P0.N.5.4, entrega externa opt-in y
+agrupación anti-spam**. P0.N.5.1–N.5.3 ya proyectan el inbox local y sus
+acciones en Configuración y Modelos sin recalcular autoridad en React. Falta
+un contrato provider-agnostic de destinos externos que permanezca desactivado
+hasta configuración y consentimiento explícitos.
 K.8.6.1 ya cierra la matriz hermética, K.8.6.2 deja el
 runner Windows alineado con el commit guiado actual y K.8.6.3a–b prueban en CI
 independiente tanto clon limpio como actualización de checkout, con auditor
@@ -3144,6 +3145,36 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
     Crear actividad e interacción local siempre; notificaciones externas son
     opt-in y configurables, sin secretos ni spam repetido. Alertar de inmediato
     ante retirada, incompatibilidad o seguridad; agrupar novedades informativas.
+    - [x] **P0.N.5.1 Proyección local canónica**:
+      `provider_change_inbox_v1` compone casos y eventos N.3/N.4 read-only,
+      excluye terminales, trata snooze vencido como abierto y publica contador,
+      banner, severidad, edad, proveedor/superficie, diff, impacto, evidencia,
+      siguiente acción y grupos por proveedor. El expediente es la interacción
+      local y su historial append-only es la actividad; no existe una segunda
+      máquina de estados para React.
+    - [x] **P0.N.5.2 Acciones owner-gated**: acknowledge, snooze 1–720 h y
+      gestionar usan revisión optimista del expediente y actualizan
+      caso+evento en una transacción. Cada acción incrementa revisión y añade
+      historia; conflicto stale devuelve 409. Ninguna ejecuta comando, update,
+      inferencia o routing.
+    - [x] **P0.N.5.3 Configuración y Modelos**: el componente reutilizable
+      `ProviderChangeInbox` aparece completo en Configuración → Cambios de
+      proveedores y compacto sobre Modelos. Consume solo la proyección backend,
+      conserva bloqueos/causas y permite reconocer, posponer y abrir el detalle.
+      La remediación se explica como manual y la entrega externa aparece
+      desactivada. Verificación: 46 tests backend y 34 unitarios frontend,
+      TypeScript, ESLint, Stylelint, límites, build y bundle verdes. Bundle:
+      JS 409.595 B raw/118.309 B gzip; CSS 126.949 B raw/22.925 B gzip.
+    - [ ] **P0.N.5.4 Entrega externa opt-in**: definir destinos y política
+      redacted, consentimiento explícito, severidad mínima, digest/urgente,
+      cooldown, dedupe por fingerprint y recibo de entrega. Cero canales
+      habilitados por defecto; un destino sin health/configuración no puede
+      activarse y los secretos viven solo como referencias.
+    - [ ] **P0.N.5.5 Aceptación UI/portable**: fixture de retirada crítica,
+      incompatibilidad, seguridad, novedad informativa agrupada, acknowledge,
+      snooze/expiración, 409 y offline. Validar Config+Modelos, teclado, foco,
+      contraste, móvil, reduced motion, hashes visuales y proceso nuevo sobre
+      SQLite existente.
   - [ ] **P0.N.6 Aceptación portable y auditoría**: fixtures de release,
     downgrade, prerelease, MCP capability drift, auth/schema, adición/retirada/
     alias/cambio de modelo, offline, rate limit, duplicados y rollback. Probar

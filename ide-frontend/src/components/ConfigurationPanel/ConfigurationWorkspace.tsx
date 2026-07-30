@@ -1,4 +1,5 @@
 import type { useConfigurationData } from '../../hooks/useConfigurationData';
+import { ProviderChangeInbox } from '../ProviderChangeInbox';
 import { AdapterSettings } from './AdapterSettings';
 import { ApiKeysSettings } from './ApiKeysSettings';
 import { AutonomySettings } from './AutonomySettings';
@@ -135,6 +136,7 @@ export function ConfigurationWorkspace({
           onDelete={onDeleteProject}
         />
       )}
+      {section === 'provider-changes' && <ProviderChangeInbox />}
       {section === 'keys' && (
         <ApiKeysSettings
           secrets={config.secrets}

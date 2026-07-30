@@ -1924,3 +1924,17 @@ La ampliación también confirma aislado el fallo previo de
 espera cargar capacidades de un issue con SQLite inexistente, mientras el
 contrato productivo hace fail-closed y usa defaults de rol. Debe decidirse el
 contrato API/fixture en una unidad separada; N.4 no atraviesa esa ruta.
+
+P0.N.5.1–N.5.3 quedan cerrados sobre la rama
+`codex/provider-change-notifications`. `provider_change_inbox_v1` proyecta
+casos+eventos read-only con contador, banner, severidad, edad, alcance,
+evidencia, siguiente acción y agrupación. El caso N.4 sigue siendo la
+interacción y su history la actividad. Acknowledge, snooze y gestionar usan
+revisión optimista y una sola transacción; stale devuelve 409. Configuración
+incluye el centro completo y Modelos el banner compacto, sin recalcular
+autoridad ni ejecutar remediaciones. Pasan 46 tests backend y 34 unitarios
+frontend, tipos, linters, límites, build y bundle. Bundle final:
+409.595/118.309 B JS raw/gzip y 126.949/22.925 B CSS. Quedan N.5.4
+(entrega externa opt-in real, redacted y anti-spam) y N.5.5
+(aceptación visual/portable); hasta entonces la UI declara correctamente cero
+canales externos activos.

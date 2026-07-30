@@ -446,6 +446,23 @@ asignaciones existentes. Config y Modelos deben mostrar una inbox local con
 impacto, diff, evidencia y acción recomendada. Canales externos son opt-in y
 agrupados para evitar spam.
 
+P0.N.5.1–N.5.3 materializan esa superficie con
+`provider_change_inbox_v1`. La proyección cruza read-only casos y eventos,
+excluye terminales, calcula edad y snooze efectivo y publica contador, banner,
+severidad, proveedor/superficie, diff, impacto, evidencia, siguiente acción y
+grupos. El caso N.4 continúa siendo la interacción local y su historial
+append-only la actividad: UI no crea otra autoridad. Acknowledge, snooze y
+gestionar usan la revisión del caso; caso, evento e historial cambian en una
+sola transacción y un cliente stale recibe 409.
+
+`ProviderChangeInbox` consume esa respuesta tanto en Configuración como en
+Modelos. React solo abre detalle y envía acciones; no infiere severidad, alcance
+ni transiciones. La vista declara que las remediaciones son manuales y que
+ningún canal externo está activo. La entrega externa sigue abierta en N.5.4:
+deberá ser opt-in, redacted, deduplicada y health-gated antes de que la UI
+permita activarla. Hasta entonces `external_delivery_enabled` permanece falso
+y no se simula una notificación que nadie recibirá.
+
 La cobertura conductual se audita por separado mediante
 `scripts/audit_model_evaluation_coverage.py`. Deduplica aliases a roles
 semánticos, exige calibración fresca exacta para declarar `calibrated`, conserva

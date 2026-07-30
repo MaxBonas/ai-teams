@@ -11,6 +11,7 @@ from aiteam.db.provider_change_workflows import (
     evidence_is_invalidated,
     list_active_provider_change_invalidations,
     reconcile_provider_change_cases,
+    record_provider_change_notification_action,
     transition_provider_change_case,
 )
 from aiteam.db.provider_changes import (
@@ -25,6 +26,7 @@ from aiteam.provider_change_detection import build_provider_snapshot
 from aiteam.provider_change_intelligence import (
     build_provider_change_inventory,
 )
+from aiteam.provider_change_notifications import build_provider_change_inbox
 
 NOW = datetime(2026, 7, 30, 12, tzinfo=timezone.utc)
 SCHEMA_PATH = (
@@ -200,6 +202,104 @@ def test_revision_conflict_and_secret_fields_fail_closed(
                 **_classify_payload(),
                 "nested": {"api_key": "never-store"},
             },
+        )
+
+
+def test_notification_inbox_acknowledge_snooze_and_expiry_are_durable(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "guided_setup.db"
+    case = _case(db_path)
+    inbox = build_provider_change_inbox(
+        db_path,
+        now=NOW + timedelta(hours=3),
+    )
+
+    assert inbox["schema_version"] == "provider_change_inbox_v1"
+    assert inbox["counts"]["attention"] == 1
+    assert inbox["banner"]["visible"] is True
+    notification = inbox["notifications"][0]
+    assert notification["interaction_id"] == case["id"]
+    assert notification["next_action"]["action"] == "confirm"
+    assert inbox["scope"]["external_delivery_enabled"] is False
+
+    acknowledged = record_provider_change_notification_action(
+        db_path,
+        case["id"],
+        action="acknowledge",
+        expected_revision=case["revision"],
+        actor="owner",
+        now=NOW + timedelta(hours=3),
+    )
+    assert acknowledged["revision"] == 2
+    assert acknowledged["history"][-1]["action"] == (
+        "notification_acknowledge"
+    )
+    acknowledged_inbox = build_provider_change_inbox(
+        db_path,
+        now=NOW + timedelta(hours=3),
+    )
+    assert acknowledged_inbox["notifications"][0]["activity"][-1][
+        "action"
+    ] == "notification_acknowledge"
+
+    snoozed = record_provider_change_notification_action(
+        db_path,
+        case["id"],
+        action="snooze",
+        expected_revision=acknowledged["revision"],
+        actor="owner",
+        snooze_hours=24,
+        now=NOW + timedelta(hours=4),
+    )
+    assert build_provider_change_inbox(
+        db_path,
+        now=NOW + timedelta(hours=5),
+    )["counts"]["total"] == 0
+    visible = build_provider_change_inbox(
+        db_path,
+        now=NOW + timedelta(hours=5),
+        include_snoozed=True,
+    )
+    assert visible["notifications"][0]["event_status"] == "snoozed"
+    expired = build_provider_change_inbox(
+        db_path,
+        now=NOW + timedelta(hours=29),
+    )
+    assert expired["notifications"][0]["event_status"] == "open"
+    assert snoozed["history"][-1]["payload"]["snoozed_until"]
+
+
+def test_notification_action_is_revision_gated_and_validates_snooze(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "guided_setup.db"
+    case = _case(db_path)
+    with pytest.raises(ValueError, match="1..720"):
+        record_provider_change_notification_action(
+            db_path,
+            case["id"],
+            action="snooze",
+            expected_revision=case["revision"],
+            actor="owner",
+            snooze_hours=0,
+        )
+    updated = record_provider_change_notification_action(
+        db_path,
+        case["id"],
+        action="manage",
+        expected_revision=case["revision"],
+        actor="owner",
+        now=NOW + timedelta(hours=3),
+    )
+    assert updated["history"][-1]["action"] == "notification_manage"
+    with pytest.raises(ProviderChangeConflictError, match="stale"):
+        record_provider_change_notification_action(
+            db_path,
+            case["id"],
+            action="acknowledge",
+            expected_revision=case["revision"],
+            actor="owner",
         )
 
 
