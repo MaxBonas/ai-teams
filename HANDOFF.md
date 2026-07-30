@@ -1942,3 +1942,27 @@ frontend, tipos, linters, límites, build y bundle. Bundle final:
 (entrega externa opt-in real, redacted y anti-spam) y N.5.5
 (aceptación visual/portable); hasta entonces la UI declara correctamente cero
 canales externos activos.
+
+P0.N.5.4 queda cerrado en la misma rama. El nuevo contrato
+`provider_change_external_delivery_v1` añade destinos webhook HTTPS opt-in,
+URL en vault/`secret_ref` en SQLite, consentimiento, health probe explícito,
+activación revisionada, severidad mínima, urgente/digest, cooldown, outbox
+deduplicado y recibos redacted. El monitor drena solo destinos activos y
+saludables; tres fallos terminales o un secreto inválido desactivan fail-closed.
+Config permite guardar, probar y activar sin mostrar URL/ref. Auditor hermético
+12/12:
+`benchmarks/results/provider_change_delivery/provider-change-delivery-2026-07-30.json`
+(SHA-256
+`92aafc6dd6ceb2d6b51b3b6996a9900bf28f2245baa117ff5cb00229af6b0a44`).
+El budget JS raw se ajusta de 400 a 404 KiB para absorber la configuración
+planificada; gzip conserva 120 KiB. Siguiente unidad: P0.N.5.5, aceptación
+visual/portable completa.
+
+La regresión global descubrió además un SHA stale previo en
+`installation_support.v1.json`: el receipt versionado
+`release-preview-local-f69f8e7.json` produce de forma reproducible
+`cca1158c6482fefec133a8b9bb498d99fec78ae0327639ead583e0bb6c316d3c`.
+Contrato y task ya coinciden con el blob; el test aislado vuelve a verde. El
+único fallo global reproducible restante es la deuda ya registrada de cobertura
+15→13 para Terra/Reviewer y Gemini Free/Reviewer; no se alteró evidencia ni
+expectativa.

@@ -560,7 +560,7 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
       Windows de release precede y bloquea `publish`.
     - Evidencia local redacted:
       `release-preview-local-f69f8e7.json`, SHA-256
-      `c965f5c5c54a16eeacf425d613821db471b9f3fc648c59002a0ea5896e5ced74`;
+      `cca1158c6482fefec133a8b9bb498d99fec78ae0327639ead583e0bb6c316d3c`;
       17/17 gates verdes sobre ZIP de 1164 archivos. Sigue
       `promotion_allowed=false` por preview sucio/máquina no independiente.
       Verificación de código: 50/50 pruebas focalizadas, 1605/1605 backend,
@@ -3169,11 +3169,23 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
       Verificación: 47 tests backend y 34 unitarios frontend,
       TypeScript, ESLint, Stylelint, límites, build y bundle verdes. Bundle:
       JS 409.595 B raw/118.309 B gzip; CSS 126.949 B raw/22.925 B gzip.
-    - [ ] **P0.N.5.4 Entrega externa opt-in**: definir destinos y política
-      redacted, consentimiento explícito, severidad mínima, digest/urgente,
-      cooldown, dedupe por fingerprint y recibo de entrega. Cero canales
-      habilitados por defecto; un destino sin health/configuración no puede
-      activarse y los secretos viven solo como referencias.
+    - [x] **P0.N.5.4 Entrega externa opt-in**:
+      `provider_change_external_delivery_v1` persiste destinos, outbox y
+      recibos en la SQLite global. Cero canales vienen activos. Crear o editar
+      un webhook exige HTTPS y guarda la URL en el vault; DB/API exponen solo
+      `endpoint_configured`. Consentimiento, health explícito y revisión
+      optimista preceden a activar. Severidad mínima, urgente/digest y cooldown
+      son configurables; outbox deduplica por destino+fingerprint, recupera
+      lease, reintenta 3 veces y desactiva fail-closed al agotar fallos o perder
+      secreto. Recibos conservan status/código/error allowlisted/hash, nunca
+      body o endpoint. Monitor, API y Config comparten el contrato; ningún
+      envío cambia workflow, evidencia o routing. Auditor hermético 12/12:
+      `benchmarks/results/provider_change_delivery/provider-change-delivery-2026-07-30.json`
+      (SHA-256
+      `92aafc6dd6ceb2d6b51b3b6996a9900bf28f2245baa117ff5cb00229af6b0a44`).
+      El formulario añadió 3.178 B raw; tras compactarlo a controles nativos,
+      el límite raw JS sube de 400 a 404 KiB de forma acotada y el límite gzip
+      permanece en 120 KiB.
     - [ ] **P0.N.5.5 Aceptación UI/portable**: fixture de retirada crítica,
       incompatibilidad, seguridad, novedad informativa agrupada, acknowledge,
       snooze/expiración, 409 y offline. Validar Config+Modelos, teclado, foco,

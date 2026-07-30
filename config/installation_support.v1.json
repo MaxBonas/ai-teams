@@ -106,7 +106,7 @@
         "test de ausencia de secretos y estado local"
       ],
       "local_preview_evidence": "benchmarks/results/installation_acceptance/release-preview-local-f69f8e7.json",
-      "local_preview_evidence_sha256": "c965f5c5c54a16eeacf425d613821db471b9f3fc648c59002a0ea5896e5ced74",
+      "local_preview_evidence_sha256": "cca1158c6482fefec133a8b9bb498d99fec78ae0327639ead583e0bb6c316d3c",
       "local_preview_artifact_sha256": "a046cb04b2a71fbd8094f832e9ffefd3ea04817de00c299ebec8e790be7beb1b",
       "evidence_date": "2026-07-24",
       "notes": "Preview local aceptado 17/17; falta un tag limpio en runner independiente antes de verified/publicación."

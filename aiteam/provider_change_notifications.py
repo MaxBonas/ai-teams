@@ -109,6 +109,7 @@ def _notification(
         "interaction_id": case["id"],
         "revision": case["revision"],
         "event_id": case["event_id"],
+        "event_fingerprint": case["event_fingerprint"],
         "event_status": event_status,
         "workflow_status": case["status"],
         "severity": str(case.get("severity") or "info"),

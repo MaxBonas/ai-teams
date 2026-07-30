@@ -762,6 +762,82 @@ CREATE INDEX IF NOT EXISTS idx_provider_change_invalidations_active
     ON provider_change_evidence_invalidations(
         status, profile_id, model_id, canonical_role
     );
+
+CREATE TABLE IF NOT EXISTS provider_change_notification_destinations (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    label TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('webhook')),
+    endpoint_secret_ref TEXT NOT NULL,
+    minimum_severity TEXT NOT NULL CHECK (
+        minimum_severity IN ('critical', 'error', 'warning', 'info')
+    ),
+    delivery_mode TEXT NOT NULL CHECK (
+        delivery_mode IN ('urgent_and_digest', 'urgent_only', 'digest_only')
+    ),
+    cooldown_sec INTEGER NOT NULL CHECK (
+        cooldown_sec BETWEEN 60 AND 604800
+    ),
+    explicit_consent INTEGER NOT NULL CHECK (explicit_consent IN (0, 1)),
+    consented_at TEXT,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    health_status TEXT NOT NULL DEFAULT 'unknown' CHECK (
+        health_status IN ('unknown', 'healthy', 'unhealthy')
+    ),
+    health_checked_at TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_change_notification_outbox (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    case_id TEXT NOT NULL,
+    event_fingerprint TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    delivery_class TEXT NOT NULL CHECK (
+        delivery_class IN ('urgent', 'digest')
+    ),
+    payload_json TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'delivering', 'delivered', 'failed', 'suppressed')
+    ),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    lease_until TEXT,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT,
+    FOREIGN KEY(destination_id)
+        REFERENCES provider_change_notification_destinations(id),
+    UNIQUE(destination_id, event_fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_provider_change_outbox_due
+    ON provider_change_notification_outbox(
+        status, next_attempt_at, delivery_class, created_at
+    );
+
+CREATE TABLE IF NOT EXISTS provider_change_notification_receipts (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    outbox_ids_json TEXT NOT NULL,
+    delivery_class TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('health_passed', 'health_failed', 'delivered', 'failed')
+    ),
+    attempt INTEGER NOT NULL,
+    response_code INTEGER,
+    error_code TEXT,
+    content_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(destination_id)
+        REFERENCES provider_change_notification_destinations(id)
+);
+CREATE INDEX IF NOT EXISTS idx_provider_change_receipts_destination
+    ON provider_change_notification_receipts(destination_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_quorum_sessions_issue ON quorum_sessions(issue_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_quorum_contributions_session ON quorum_contributions(session_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_orientation_events_session ON orientation_events(session_id, created_at);

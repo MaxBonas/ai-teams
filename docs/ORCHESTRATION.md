@@ -457,15 +457,30 @@ sola transacción y un cliente stale recibe 409.
 
 `ProviderChangeInbox` consume esa respuesta tanto en Configuración como en
 Modelos. React solo abre detalle y envía acciones; no infiere severidad, alcance
-ni transiciones. La vista declara que las remediaciones son manuales y que
-ningún canal externo está activo. La entrega externa sigue abierta en N.5.4:
-deberá ser opt-in, redacted, deduplicada y health-gated antes de que la UI
-permita activarla. Hasta entonces `external_delivery_enabled` permanece falso
-y no se simula una notificación que nadie recibirá.
+ni transiciones. La vista declara que las remediaciones son manuales.
 El auditor `provider-change-notifications-2026-07-30.json` pasa 10/10 sobre
 SQLite temporal: proyección, agrupación, actividad, acknowledge, snooze,
 expiración y conflicto stale, con cero red, secretos, comandos, inferencia,
 entrega externa o cambio de routing.
+
+P0.N.5.4 añade `provider_change_external_delivery_v1` sin convertir los avisos
+en autoridad de remediación. Cero destinos vienen habilitados. Cada webhook
+exige HTTPS, consentimiento explícito, URL almacenada únicamente en el vault,
+health probe iniciado por el owner y activación posterior con revisión
+optimista. SQLite conserva solo `secret_ref`, política y estado redacted.
+Severidad mínima, modo `urgent_and_digest`/`urgent_only`/`digest_only` y
+cooldown son configurables; `critical`/`error` salen como urgentes y
+`warning`/`info` se agrupan como digest. El outbox deduplica por
+destino+fingerprint, recupera leases, reintenta hasta tres veces y desactiva
+fail-closed un destino que agota reintentos o pierde su secreto/health.
+
+Los recibos guardan IDs de outbox, clase, intento, status, código HTTP, error
+allowlisted y SHA-256 del contenido; nunca body de respuesta, endpoint o
+credencial. El monitor solo sincroniza y drena tras reconciliar casos, y la UI
+no puede activar un destino no saludable. El auditor hermético
+`provider-change-delivery-2026-07-30.json` pasa 12/12 con transporte falso,
+SQLite temporal, dedupe y payload redacted; no usa red, secretos reales,
+inferencia ni routing.
 
 La cobertura conductual se audita por separado mediante
 `scripts/audit_model_evaluation_coverage.py`. Deduplica aliases a roles

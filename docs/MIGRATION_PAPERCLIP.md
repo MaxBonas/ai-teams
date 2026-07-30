@@ -472,8 +472,11 @@ La atención del maintainer se proyecta desde esos mismos expedientes mediante
 un inbox global local. Configuración presenta el centro completo y Modelos un
 banner compacto; acknowledge/snooze conservan revisión e historial durables.
 No se crea una máquina de estados React ni se habilita entrega externa por
-defecto. Los destinos externos requieren una frontera opt-in posterior con
-dedupe, health y referencias de secreto.
+defecto. La frontera externa usa destinos webhook HTTPS opt-in con URL en
+vault, `secret_ref` en SQLite, consentimiento, health previo, revisión
+optimista, severidad mínima, urgente/digest, cooldown, outbox deduplicado y
+recibos redacted. Tres fallos desactivan el destino; ningún envío muta routing,
+evidencia o workflow.
 
 P0.g convierte esa evidencia en un recorrido operativo único por
 `(profile_id, model_id, role)`: configuración/auth, catálogo+versión, health,

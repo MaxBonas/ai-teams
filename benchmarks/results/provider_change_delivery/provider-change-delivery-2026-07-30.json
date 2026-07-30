@@ -1,0 +1,31 @@
+{
+  "schema_version": "provider_change_delivery_audit_v1",
+  "observed_at": "2026-07-30T12:00:00+00:00",
+  "ok": true,
+  "checks": {
+    "zero_destinations_enabled_by_default": true,
+    "database_keeps_only_endpoint_reference": true,
+    "explicit_consent_is_recorded": true,
+    "activation_requires_health": true,
+    "health_probe_is_explicit_and_receipted": true,
+    "healthy_destination_can_be_enabled": true,
+    "fingerprint_is_deduplicated": true,
+    "payload_is_redacted_and_actionable": true,
+    "digest_delivery_completes": true,
+    "delivery_receipt_has_hash_without_body": true,
+    "stale_revision_fails_closed": true,
+    "external_delivery_never_changes_routing": true
+  },
+  "counts": {
+    "passed": 12,
+    "total": 12
+  },
+  "scope": {
+    "temporary_sqlite": true,
+    "network_used": false,
+    "fake_transport_used": true,
+    "real_secrets_read": false,
+    "inference_used": false,
+    "routing_changed": false
+  }
+}

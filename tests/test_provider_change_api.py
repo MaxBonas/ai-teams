@@ -161,3 +161,76 @@ def test_provider_change_inbox_actions_are_owner_gated(
         },
     )
     assert stale.status_code == 409
+
+
+def test_external_delivery_api_starts_disabled_and_never_returns_endpoint(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "guided_setup.db"
+    monkeypatch.setattr(
+        provider_router,
+        "machine_provider_change_db_path",
+        lambda: db_path,
+    )
+    stored: list[str] = []
+
+    def fake_store_secret(**kwargs) -> str:
+        stored.append(str(kwargs["secret"]))
+        return "secret:provider-change-webhook:api-test"
+
+    monkeypatch.setattr(
+        provider_router,
+        "store_secret",
+        fake_store_secret,
+    )
+    client = TestClient(app)
+
+    initial = client.get("/api/provider-changes/inbox")
+    assert initial.status_code == 200
+    assert initial.json()["scope"]["external_delivery_enabled"] is False
+
+    created = client.post(
+        "/api/provider-changes/delivery/destinations",
+        json={
+            "label": "Webhook developer",
+            "endpoint_url": "https://hooks.example.test/private-token",
+            "explicit_consent": True,
+            "minimum_severity": "warning",
+            "delivery_mode": "urgent_and_digest",
+            "cooldown_sec": 3600,
+        },
+    )
+    assert created.status_code == 200
+    destination = created.json()["destination"]
+    assert destination["endpoint_configured"] is True
+    assert "endpoint_url" not in destination
+    assert "secret_ref" not in destination
+
+    enable = client.post(
+        f"/api/provider-changes/delivery/destinations/{destination['id']}/enabled",
+        json={"enabled": True, "expected_revision": destination["revision"]},
+    )
+    assert enable.status_code == 422
+    assert "healthy destination required" in enable.json()["detail"]
+
+    listed = client.get("/api/provider-changes/delivery/destinations")
+    serialized = listed.text
+    assert listed.status_code == 200
+    assert "private-token" not in serialized
+    assert "provider-change-webhook:api-test" not in serialized
+
+    stale = client.put(
+        f"/api/provider-changes/delivery/destinations/{destination['id']}",
+        json={
+            "label": "Webhook stale",
+            "endpoint_url": "https://hooks.example.test/stale-token",
+            "explicit_consent": True,
+            "minimum_severity": "error",
+            "delivery_mode": "urgent_only",
+            "cooldown_sec": 60,
+            "expected_revision": 99,
+        },
+    )
+    assert stale.status_code == 409
+    assert stored == ["https://hooks.example.test/private-token"]

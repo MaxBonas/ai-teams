@@ -19,6 +19,7 @@ const emptyInbox = {
     summary: null,
   },
   notifications: [],
+  delivery: { destinations: [] },
 };
 
 const notification = {
@@ -78,8 +79,7 @@ describe('ProviderChangeInbox', () => {
     render(<ProviderChangeInbox />);
 
     expect(await screen.findByText('Proveedores sin cambios pendientes')).toBeInTheDocument();
-    expect(screen.getByText(/actividad e interacción guardadas/i)).toBeInTheDocument();
-    expect(screen.getByText(/canales externos desactivados/i)).toBeInTheDocument();
+    expect(screen.getByText(/actividad local · entrega externa: desactivada/i)).toBeInTheDocument();
     expect(screen.getByText(/ninguna acción instala/i)).toBeInTheDocument();
   });
 
@@ -115,6 +115,32 @@ describe('ProviderChangeInbox', () => {
       expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
         action: 'acknowledge',
         expected_revision: 3,
+      });
+    });
+  });
+
+  it('configura el destino como opt-in sin mostrar la URL guardada', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      init?.method === 'POST'
+        ? response({ success: true, destination: { id: 'destination-1' } })
+        : response(emptyInbox)
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<ProviderChangeInbox />);
+
+    await screen.findByText('Proveedores sin cambios pendientes');
+    await user.click(screen.getByText(/configurar webhook externo/i));
+    await user.type(screen.getByLabelText(/url https/i), 'https://hooks.example.test/private');
+    await user.click(screen.getByLabelText(/autorizo envíos/i));
+    await user.click(screen.getByRole('button', { name: /guardar destino/i }));
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+        endpoint_url: 'https://hooks.example.test/private',
+        explicit_consent: true,
+        minimum_severity: 'warning',
       });
     });
   });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 
 import { apiFetch } from '../../lib/api';
 import './ProviderChangeInbox.css';
@@ -50,6 +51,21 @@ interface InboxPayload {
   counts: { total: number; attention: number; critical: number; snoozed: number };
   banner: { visible: boolean; tone: string; title: string; summary?: string | null };
   notifications: ProviderNotification[];
+  delivery?: {
+    destinations: DeliveryDestination[];
+  };
+}
+
+interface DeliveryDestination {
+  id: string;
+  label: string;
+  minimum_severity: Severity;
+  delivery_mode: 'urgent_and_digest' | 'urgent_only' | 'digest_only';
+  cooldown_sec: number;
+  explicit_consent: boolean;
+  enabled: boolean;
+  health_status: 'unknown' | 'healthy' | 'unhealthy';
+  revision: number;
 }
 
 interface ProviderChangeInboxProps {
@@ -115,6 +131,67 @@ export function ProviderChangeInbox({ compact = false }: ProviderChangeInboxProp
     }
   };
 
+  const destination = payload?.delivery?.destinations[0];
+  const saveDestination = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    setError('');
+    try {
+      const editing = Boolean(destination);
+      const body = {
+        label: String(form.get('label') || ''),
+        endpoint_url: String(form.get('endpoint_url') || '') || undefined,
+        minimum_severity: String(form.get('minimum_severity') || 'warning'),
+        delivery_mode: String(form.get('delivery_mode') || 'urgent_and_digest'),
+        cooldown_sec: Number(form.get('cooldown_sec') || 3600),
+        explicit_consent: form.get('explicit_consent') === 'on',
+        ...(editing ? { expected_revision: destination?.revision } : {}),
+      };
+      const response = await apiFetch(
+        `/api/provider-changes/delivery/destinations${editing ? `/${destination?.id}` : ''}`,
+        {
+          method: editing ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      );
+      const next = await response.json() as { detail?: string };
+      if (!response.ok) throw new Error(next.detail || `provider_destination_http_${response.status}`);
+      await load();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'provider_destination_failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const destinationAction = async (action: 'test' | 'enabled') => {
+    if (!destination) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await apiFetch(
+        `/api/provider-changes/delivery/destinations/${destination.id}/${action}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            expected_revision: destination.revision,
+            ...(action === 'enabled' ? { enabled: !destination.enabled } : {}),
+          }),
+        },
+      );
+      const next = await response.json() as { detail?: string };
+      if (!response.ok) throw new Error(next.detail || `provider_destination_${action}_failed`);
+      await load();
+    } catch (destinationError) {
+      setError(destinationError instanceof Error ? destinationError.message : 'provider_destination_failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!payload) {
     return (
       <section className={`provider-change-center${compact ? ' compact' : ''}`} aria-busy={!error} role={error ? 'alert' : undefined}>
@@ -149,11 +226,29 @@ export function ProviderChangeInbox({ compact = false }: ProviderChangeInboxProp
       {error && <div className="provider-change-inline-error" role="alert">{humanize(error)}</div>}
 
       {!compact && (
-        <div className="provider-change-policy">
-          <span aria-hidden="true">✓</span>
-          <span>Actividad e interacción guardadas en esta máquina.</span>
-          <span>Canales externos desactivados: {humanize(payload.scope.external_delivery_reason)}.</span>
-        </div>
+        <>
+          <div className="provider-change-policy">
+            <span>Actividad local · Entrega externa: {payload.scope.external_delivery_enabled ? 'activa' : 'desactivada'}.</span>
+          </div>
+          <details className="provider-change-detail" key={destination?.revision}>
+            <summary>Configurar webhook externo</summary>
+            <p>Opt-in: la URL queda en el vault local y nunca aparece en SQLite.</p>
+            <form onSubmit={(event) => void saveDestination(event)}>
+              <label>Nombre<input name="label" required defaultValue={destination?.label || 'Webhook developer'} /></label>
+              <label>URL HTTPS {destination && '(vacía para conservar)'}<input name="endpoint_url" type="password" required={!destination} /></label>
+              <label>Severidad mínima<select name="minimum_severity" defaultValue={destination?.minimum_severity || 'warning'}>{(['critical', 'error', 'warning', 'info'] as Severity[]).map((value) => <option key={value} value={value}>{SEVERITY_LABELS[value]}</option>)}</select></label>
+              <label>Entrega<select name="delivery_mode" defaultValue={destination?.delivery_mode || 'urgent_and_digest'}><option value="urgent_and_digest">Urgente + digest</option><option value="urgent_only">Solo urgente</option><option value="digest_only">Solo digest</option></select></label>
+              <label>Cooldown (s)<input name="cooldown_sec" type="number" min="60" max="604800" defaultValue={destination?.cooldown_sec || 3600} /></label>
+              <label><input name="explicit_consent" type="checkbox" defaultChecked={destination?.explicit_consent} /> Autorizo envíos a este destino.</label>
+              <div className="provider-change-actions">
+                <button type="submit" disabled={busy}>{destination ? 'Guardar política' : 'Guardar destino'}</button>
+                {destination && <button type="button" disabled={busy} onClick={() => void destinationAction('test')}>Probar</button>}
+                {destination && <button type="button" disabled={busy || (!destination.enabled && destination.health_status !== 'healthy')} onClick={() => void destinationAction('enabled')}>{destination.enabled ? 'Desactivar' : 'Activar'}</button>}
+                {destination && <span>{destination.label} · {destination.health_status}</span>}
+              </div>
+            </form>
+          </details>
+        </>
       )}
 
       {visible.length === 0 ? (

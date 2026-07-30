@@ -20,6 +20,10 @@ from aiteam.db.provider_changes import (
 from aiteam.installation_support import load_installation_support_contract
 from aiteam.machine_doctor import _probe_version_command
 from aiteam.platform_runtime import resolve_provider_cli
+from aiteam.provider_change_delivery import (
+    deliver_provider_change_outbox,
+    sync_provider_change_outbox,
+)
 from aiteam.provider_change_intelligence import (
     build_provider_change_inventory,
 )
@@ -91,6 +95,8 @@ async def run_provider_change_monitor(
                 reconcile_provider_change_cases,
                 target,
             )
+            await asyncio.to_thread(sync_provider_change_outbox, target)
+            await asyncio.to_thread(deliver_provider_change_outbox, target)
         except Exception:
             logger.exception(
                 "provider change monitor tick failed; retrying next cadence"

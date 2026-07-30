@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const assetsRoot = fileURLToPath(new URL('../dist/assets/', import.meta.url));
 const budgets = {
-  '.js': { raw: 400 * 1024, gzip: 120 * 1024 },
+  '.js': { raw: 404 * 1024, gzip: 120 * 1024 },
   '.css': { raw: 124 * 1024, gzip: 25 * 1024 },
 };
 const totals = Object.fromEntries(Object.keys(budgets).map((extension) => [
