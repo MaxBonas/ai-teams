@@ -1,0 +1,36 @@
+{
+  "schema_version": "provider_change_persistence_audit_v1",
+  "contract_schema_version": "provider_change_persistence_v1",
+  "counts": {
+    "components": 42,
+    "safe_readers": 23,
+    "scheduled_tick": 3,
+    "events": 1,
+    "triggers": 1
+  },
+  "checks": {
+    "doctor_summary_is_read_only": true,
+    "full_inventory_is_scheduled": true,
+    "automatic_readers_are_local_only": true,
+    "scheduler_is_bounded": true,
+    "baseline_and_duplicate_are_idempotent": true,
+    "material_diff_is_durable_and_exact": true,
+    "event_lifecycle_is_durable": true,
+    "backoff_is_exponential_and_resets": true,
+    "no_automatic_authority_is_granted": true
+  },
+  "summary": {
+    "passed": 9,
+    "total": 9,
+    "persistence_ready": true
+  },
+  "scope": {
+    "temporary_sqlite_only": true,
+    "network_attempted": false,
+    "secrets_read": false,
+    "login_attempted": false,
+    "inference_attempted": false,
+    "updates_attempted": false,
+    "routing_mutated": false
+  }
+}

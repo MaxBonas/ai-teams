@@ -389,8 +389,30 @@ traducción. Catálogo detecta adición, retirada, rename/alias y cambios en
 contexto, tools, structured output, precio, cuota o lifecycle por ID exacto.
 Un modelo añadido queda `owner_unclassified`; no recibe roles ni calibración.
 La matriz fixture `provider-change-detection-2026-07-30.json` pasa 19/19 casos
-y 8/8 gates sin red, secretos, login, inferencias o mutaciones. N.2 no
-persiste ni agenda: esas responsabilidades empiezan en P0.N.3.
+y 8/8 gates sin red, secretos, login, inferencias o mutaciones.
+
+P0.N.3 materializa `provider_change_persistence_v1` en la SQLite de máquina
+`guided_setup.db`, separada de las bases de cada proyecto. Cinco tablas
+conservan snapshots, diffs, eventos, triggers de revalidación y schedules. El
+fingerprint del evento incluye identidad, tipo, dimensión y valores
+before/after: una observación idéntica no duplica, una recurrencia aumenta el
+contador y un evento resuelto se reabre si reaparece. El ciclo durable permite
+`acknowledged`, `snoozed` con caducidad y `resolved`; la recuperación de una
+fuente resuelve su evento de indisponibilidad. Un cambio material crea un
+trigger pendiente con modelo y dimensión exactos. N.3 no consume ese trigger
+ni modifica evidencia: N.4 será el único workflow autorizado para aplicar el
+stale proporcional de M.8/P0.g.
+
+El schedule usa lease transaccional, cadencia, jitter determinista y backoff
+exponencial acotado; éxito reinicia los fallos. Al arrancar el backend se
+registran las 42 superficies del contrato, pero se drenan como máximo tres
+readers seguros por tick. La allowlist inicial contiene 23 lectores: versiones
+de CLI presentes, hashes de contratos internos y la caché local autenticada de
+Codex. No consulta releases remotas, SDK/API, MCP, credenciales, login ni
+inferencia. Una salida inválida sólo registra tipo de error y backoff, nunca el
+payload. El doctor lee el resumen sin crear ni migrar la DB ausente.
+`provider-change-persistence-2026-07-30.json` pasa 9/9 invariantes y sella cero
+red, secretos, login, inferencia, updates o routing.
 
 El workflow es observar → confirmar → clasificar → avisar → aprobar →
 actualizar → doctor/probe → recalibrar solo el alcance afectado → aceptar o

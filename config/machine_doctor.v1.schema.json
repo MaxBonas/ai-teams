@@ -14,6 +14,7 @@
     "toolchains",
     "adapters",
     "provider_cli_version_gate",
+    "provider_change_schedule",
     "diagnostics",
     "summary"
   ],
@@ -100,6 +101,39 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "failure_code": {"type": ["string", "null"]}
+      }
+    },
+    "provider_change_schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "initialized",
+        "status",
+        "counts",
+        "read_only"
+      ],
+      "properties": {
+        "schema_version": {"const": "provider_change_persistence_v1"},
+        "initialized": {"type": "boolean"},
+        "status": {
+          "enum": ["unknown", "current", "due", "attention_required"]
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total", "due", "leased", "backing_off", "never_checked"
+          ],
+          "properties": {
+            "total": {"type": "integer", "minimum": 0},
+            "due": {"type": "integer", "minimum": 0},
+            "leased": {"type": "integer", "minimum": 0},
+            "backing_off": {"type": "integer", "minimum": 0},
+            "never_checked": {"type": "integer", "minimum": 0}
+          }
+        },
+        "read_only": {"const": true}
       }
     },
     "project_hygiene": {

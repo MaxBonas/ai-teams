@@ -1879,3 +1879,20 @@ pasa 19/19 casos y 8/8 gates (SHA-256
 `2789df9e2cfa9bd8f8aa8bf70e37d830db64ee502016b79249f23ca08bac3f56`).
 Pasan 21 tests focalizados y Ruff. Siguiente unidad: P0.N.3, persistencia,
 dedupe y scheduling durable; no saltar todavía a workflow de actualización.
+
+P0.N.3 queda cerrado con `provider_change_persistence_v1` sobre la SQLite de
+máquina `guided_setup.db`. Schema y runtime comparten cinco tablas para
+snapshots, diffs, eventos, triggers exactos y schedules. Los eventos deduplican
+por identidad+dimensión+before/after, conservan primera/última observación,
+contador y ciclo `open/acknowledged/snoozed/resolved`; recurrencia reabre y la
+recuperación resuelve indisponibilidad. Los triggers de M.8/P0.g quedan
+pendientes y acotados al modelo/dimensión, sin invalidar evidencia todavía.
+El scheduler usa lease, cadencia, jitter y backoff, registra 42 componentes y
+sólo ejecuta 23 readers locales seguros. Startup lo mantiene vivo y doctor
+expone un resumen read-only sin crear estado ausente. No hay red, secretos,
+login, inferencias, update ni routing automáticos. Receipt 9/9:
+`benchmarks/results/provider_change_persistence/provider-change-persistence-2026-07-30.json`
+(SHA-256
+`e3ae2f44e288e440217ece58a6b133619fea51621f03f5e7aa23c57fd7ad813d`).
+Pasan 45 tests focalizados y Ruff. Siguiente unidad: P0.N.4, workflow durable
+de gestión y rollback que consume triggers con aprobación explícita.

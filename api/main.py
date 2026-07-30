@@ -36,9 +36,9 @@ from api.routers import model_catalog as model_catalog_router
 from api.routers import orientation as orientation_router
 from api.routers import project_state as project_state_router
 from api.routers import runs as runs_router
+from api.routers import settings as settings_router
 from api.routers import timeline as timeline_router
 from api.routers import tool_access as tool_access_router
-from api.routers import settings as settings_router
 from api.routers import user_adapters as user_adapters_router
 from api.routers import workspace as workspace_router
 from api.utils import PROJECT_ROOT, get_current_workspace, resolve_runtime_dir
@@ -95,11 +95,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from aiteam.db.runs import reconcile_stale_runs
     from aiteam.heartbeat.executor import RunExecutor
     from aiteam.heartbeat.loop import HeartbeatLoop
+    from aiteam.provider_change_runtime import run_provider_change_monitor
 
     db_path = _db_path()
     registry = build_default_registry()
     executor = RunExecutor(db_path, registry)
     task: asyncio.Task[None] | None = None
+    provider_change_task = asyncio.create_task(
+        run_provider_change_monitor()
+    )
 
     # Auto-migrate: schema.sql is fully IF NOT EXISTS — applying it on every
     # startup is idempotent and lets existing DBs pick up newly added tables
@@ -131,6 +135,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         logger.info("HeartbeatLoop stopped")
+    provider_change_task.cancel()
+    await asyncio.gather(provider_change_task, return_exceptions=True)
+    logger.info("Provider change monitor stopped")
 
 
 app = FastAPI(

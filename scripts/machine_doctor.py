@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 
+from aiteam.db.provider_changes import provider_change_schedule_summary
 from aiteam.machine_doctor import build_machine_inventory, render_machine_inventory
 from aiteam.platform_runtime import configure_utf8_stdio
+from aiteam.user_config import user_config_dir
 
 
 def main() -> int:
@@ -23,7 +25,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    report = build_machine_inventory()
+    report = build_machine_inventory(
+        provider_change_schedule=provider_change_schedule_summary(
+            user_config_dir() / "guided_setup.db"
+        )
+    )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     else:

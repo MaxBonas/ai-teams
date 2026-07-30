@@ -76,6 +76,7 @@ def build_machine_inventory(
     host: tuple[str, str, str] | None = None,
     adapter_profiles: list[dict[str, Any]] | None = None,
     provider_cli_version_gate: Mapping[str, Any] | None = None,
+    provider_change_schedule: Mapping[str, Any] | None = None,
     project_hygiene: Mapping[str, Any] | None = None,
     projects_root: Path | None = None,
 ) -> dict[str, Any]:
@@ -222,6 +223,9 @@ def build_machine_inventory(
         "toolchains": toolchains,
         "adapters": adapters,
         "provider_cli_version_gate": {},
+        "provider_change_schedule": dict(
+            provider_change_schedule or _unknown_provider_change_schedule()
+        ),
         "project_hygiene": hygiene,
     }
     report["provider_cli_version_gate"] = dict(
@@ -276,6 +280,7 @@ def validate_machine_inventory(report: Mapping[str, Any]) -> None:
         "toolchains",
         "adapters",
         "provider_cli_version_gate",
+        "provider_change_schedule",
         "diagnostics",
         "summary",
     }
@@ -339,6 +344,37 @@ def validate_machine_inventory(report: Mapping[str, Any]) -> None:
         and cli_gate["documentation_ready"]
     ):
         raise ValueError("machine doctor provider CLI gate summary drift")
+    schedule = report.get("provider_change_schedule")
+    if not isinstance(schedule, dict) or set(schedule) != {
+        "schema_version",
+        "initialized",
+        "status",
+        "counts",
+        "read_only",
+    }:
+        raise ValueError("machine doctor provider schedule fields drift")
+    if schedule["schema_version"] != "provider_change_persistence_v1":
+        raise ValueError("machine doctor provider schedule schema drift")
+    if schedule["status"] not in {
+        "unknown",
+        "current",
+        "due",
+        "attention_required",
+    }:
+        raise ValueError("machine doctor provider schedule status drift")
+    if schedule["read_only"] is not True:
+        raise ValueError("machine doctor provider schedule must be read-only")
+    counts = schedule.get("counts")
+    if not isinstance(counts, dict) or set(counts) != {
+        "total",
+        "due",
+        "leased",
+        "backing_off",
+        "never_checked",
+    }:
+        raise ValueError("machine doctor provider schedule counts drift")
+    if any(not isinstance(value, int) or value < 0 for value in counts.values()):
+        raise ValueError("machine doctor provider schedule count invalid")
     toolchain_ids = [str(item.get("id") or "") for item in report["toolchains"]]
     expected_toolchains = {str(item["id"]) for item in _TOOLCHAIN_PROBES}
     if set(toolchain_ids) != expected_toolchains or len(toolchain_ids) != len(
@@ -426,6 +462,13 @@ def render_machine_inventory(report: Mapping[str, Any]) -> str:
             f"auth={adapter['authentication_status']}; "
             f"health={adapter['health_status']}"
         )
+    schedule = report["provider_change_schedule"]
+    counts = schedule["counts"]
+    lines.append(
+        "[provider-change] "
+        f"{schedule['status']}: {counts['due']} due, "
+        f"{counts['backing_off']} backoff"
+    )
     detected = [item["id"] for item in report["toolchains"] if item["manifest_detected"]]
     lines.append(
         "[toolchains] manifests raíz: " + (", ".join(detected) if detected else "ninguno")
@@ -997,6 +1040,22 @@ def _overall_status(diagnostics: list[dict[str, Any]]) -> str:
     if any(item["state"] == "unverified" for item in diagnostics):
         return "ready_with_unknowns"
     return "ready"
+
+
+def _unknown_provider_change_schedule() -> dict[str, Any]:
+    return {
+        "schema_version": "provider_change_persistence_v1",
+        "initialized": False,
+        "status": "unknown",
+        "counts": {
+            "total": 0,
+            "due": 0,
+            "leased": 0,
+            "backing_off": 0,
+            "never_checked": 0,
+        },
+        "read_only": True,
+    }
 
 
 def _build_provider_cli_version_projection(

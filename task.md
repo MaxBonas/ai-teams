@@ -88,10 +88,10 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 8. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próximo bloque ejecutable local: **P0.N.3, persistencia y scheduling durable de
-cambios de proveedor**. P0.N.1 ya fija el vocabulario y las fuentes admisibles;
-P0.N.2 normaliza probes read-only y emite diffs SHA-bound sobre cinco
-superficies sin actualizar ni conceder routing.
+Próximo bloque ejecutable local: **P0.N.4, workflow de gestión y rollback de
+cambios de proveedor**. P0.N.1–N.3 ya fijan contrato, detectores, persistencia,
+eventos, triggers exactos y scheduler seguro; N.4 debe consumir esos triggers
+sin convertir detección en actualización, routing o calibración automática.
 K.8.6.1 ya cierra la matriz hermética, K.8.6.2 deja el
 runner Windows alineado con el commit guiado actual y K.8.6.3a–b prueban en CI
 independiente tanto clon limpio como actualización de checkout, con auditor
@@ -3074,13 +3074,30 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
     `2789df9e2cfa9bd8f8aa8bf70e37d830db64ee502016b79249f23ca08bac3f56`.
     Verificación focal: 21 tests y Ruff verdes; fixtures sin red, secretos,
     login, inferencias ni mutaciones.
-  - [ ] **P0.N.3 Persistencia y scheduling durable**: almacenar snapshots,
+  - [x] **P0.N.3 Persistencia y scheduling durable**: almacenar snapshots,
     diffs y eventos deduplicados en SQLite con fingerprint, primera/última
     observación, severidad, owner, acknowledge/snooze/resolved y próxima
     comprobación. Ejecutar en doctor/startup y por scheduler con cadencia,
     jitter, backoff y caché; offline, rate limit o auth ausente quedan
     `unknown`, nunca “sin cambios”. Un cambio confirmado dispara M.8/P0.g y
     vuelve stale solo la evidencia afectada.
+    Cerrado con cinco tablas SQLite compartidas por migración y runtime:
+    snapshots, diffs, eventos, triggers y schedules. El fingerprint incluye
+    identidad, dimensión y valores before/after; repeticiones actualizan
+    ocurrencias, un evento resuelto puede reabrirse y la recuperación resuelve
+    indisponibilidad. `acknowledged`, `snoozed` con expiración y `resolved`
+    quedan durables. Los triggers pendientes conservan alcance exacto de
+    modelo/dimensión para que N.4 invalide únicamente M.8/P0.g afectado.
+    Scheduler con lease, cadencia, jitter determinista y backoff exponencial;
+    success reinicia fallos. Startup registra los 42 componentes, pero ejecuta
+    solo 23 readers locales seguros (CLI instalada, contrato interno y caché
+    Codex autenticada): ninguna release remota, SDK, MCP, login, secreto,
+    inferencia o actualización se consulta automáticamente. Doctor muestra el
+    resumen `read_only` y no crea la DB si aún no existe. Receipt 9/9:
+    `benchmarks/results/provider_change_persistence/provider-change-persistence-2026-07-30.json`
+    (SHA-256
+    `e3ae2f44e288e440217ece58a6b133619fea51621f03f5e7aa23c57fd7ad813d`).
+    Verificación focal: 45 tests y Ruff verdes.
   - [ ] **P0.N.4 Workflow de gestión y rollback**: convertir cada cambio
     accionable en issue/interacción durable con diff, impacto,
     perfiles/modelos/roles afectados, recomendación, comandos guiados, riesgo y

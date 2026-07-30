@@ -574,7 +574,7 @@ def _model_catalog_diff(
             changes.append(
                 _change(
                     f"model_{field}_changed",
-                    field,
+                    f"model:{model_id}:{field}",
                     old.get(field),
                     new.get(field),
                     severity=(

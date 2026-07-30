@@ -454,6 +454,13 @@ incompatibilidad y avisa al developer mediante actividad, interacción e inbox.
 La remediación requiere aprobación y rollback: nunca actualiza herramientas,
 credenciales, modelos o defaults automáticamente. Un cambio confirmado vuelve
 stale únicamente el alcance afectado y reabre sus gates M.8/P0.g.
+La persistencia global vive en `guided_setup.db`, no se replica por proyecto:
+cinco tablas guardan snapshots, diffs, eventos, triggers y schedules. Startup
+registra todo el inventario, pero sólo lectores locales allowlisted pueden
+ejecutarse automáticamente; doctor es estrictamente read-only. Los triggers
+exactos son intención durable para el workflow, no autorización para invalidar
+evidencia ni cambiar routing. Cadencia, lease, jitter y backoff evitan bucles y
+duplicados; indisponibilidad permanece `unknown`.
 
 P0.g convierte esa evidencia en un recorrido operativo único por
 `(profile_id, model_id, role)`: configuración/auth, catálogo+versión, health,

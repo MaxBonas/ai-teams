@@ -554,6 +554,103 @@ CREATE TABLE IF NOT EXISTS model_catalog_maintenance_snapshots (
     created_at TEXT NOT NULL
 );
 
+-- Inteligencia durable de cambios de proveedor. La instancia de máquina usa
+-- guided_setup.db; este schema conserva el mismo contrato para portabilidad.
+CREATE TABLE IF NOT EXISTS provider_change_snapshots (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    identity_key TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    profile_id TEXT,
+    channel_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    component_id TEXT NOT NULL,
+    surface TEXT NOT NULL,
+    probe_status TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    snapshot_sha256 TEXT NOT NULL UNIQUE,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_change_diffs (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    identity_key TEXT NOT NULL,
+    previous_snapshot_sha256 TEXT NOT NULL,
+    current_snapshot_sha256 TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    diff_sha256 TEXT NOT NULL UNIQUE,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_change_events (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    fingerprint TEXT NOT NULL UNIQUE,
+    identity_key TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    profile_id TEXT,
+    channel_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    component_id TEXT NOT NULL,
+    surface TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    dimension TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK (status IN ('open', 'acknowledged', 'snoozed', 'resolved')),
+    owner TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    occurrence_count INTEGER NOT NULL DEFAULT 1
+        CHECK (occurrence_count >= 1),
+    snoozed_until TEXT,
+    acknowledged_at TEXT,
+    resolved_at TEXT,
+    source_diff_sha256 TEXT NOT NULL,
+    change_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_change_triggers (
+    id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    event_fingerprint TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'consumed', 'dismissed')),
+    affected_scope_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    consumed_at TEXT,
+    UNIQUE(event_fingerprint, trigger_type)
+);
+
+CREATE TABLE IF NOT EXISTS provider_change_schedules (
+    identity_key TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    profile_id TEXT,
+    channel_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    component_id TEXT NOT NULL,
+    surface TEXT NOT NULL,
+    cadence_sec INTEGER NOT NULL CHECK (cadence_sec >= 60),
+    base_backoff_sec INTEGER NOT NULL CHECK (base_backoff_sec >= 1),
+    max_backoff_sec INTEGER NOT NULL CHECK (max_backoff_sec >= base_backoff_sec),
+    jitter_sec INTEGER NOT NULL CHECK (jitter_sec >= 0),
+    next_check_at TEXT NOT NULL,
+    last_checked_at TEXT,
+    last_probe_status TEXT,
+    last_snapshot_sha256 TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0
+        CHECK (consecutive_failures >= 0),
+    lease_until TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency
     ON wakeup_requests(agent_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
@@ -580,6 +677,18 @@ CREATE INDEX IF NOT EXISTS idx_model_catalog_maintenance_created
     ON model_catalog_maintenance_snapshots(created_at, id);
 CREATE INDEX IF NOT EXISTS idx_model_catalog_maintenance_period
     ON model_catalog_maintenance_snapshots(period, created_at);
+CREATE INDEX IF NOT EXISTS idx_provider_change_snapshots_identity
+    ON provider_change_snapshots(identity_key, observed_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_provider_change_diffs_identity
+    ON provider_change_diffs(identity_key, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_provider_change_events_attention
+    ON provider_change_events(status, severity, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_provider_change_events_identity
+    ON provider_change_events(identity_key, status, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_provider_change_triggers_status
+    ON provider_change_triggers(status, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_provider_change_schedules_due
+    ON provider_change_schedules(next_check_at, lease_until, identity_key);
 CREATE INDEX IF NOT EXISTS idx_quorum_sessions_issue ON quorum_sessions(issue_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_quorum_contributions_session ON quorum_contributions(session_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_orientation_events_session ON orientation_events(session_id, created_at);
