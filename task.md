@@ -88,9 +88,10 @@ proveedor. Los artefactos creados en proyectos externos viven bajo `.aiteam/`.
    entregas, paralelismo, señales de cuota o participantes humanos.
 8. Repetir drift/calibraciones por evento y en la fecha programada.
 
-Próximo bloque ejecutable local: **P0.N.2, detectores y diffs semánticos de
-cambios de proveedor**. P0.N.1 ya fija el vocabulario, las fuentes admisibles y
-la separación de cinco superficies sin ejecutar red ni conceder routing.
+Próximo bloque ejecutable local: **P0.N.3, persistencia y scheduling durable de
+cambios de proveedor**. P0.N.1 ya fija el vocabulario y las fuentes admisibles;
+P0.N.2 normaliza probes read-only y emite diffs SHA-bound sobre cinco
+superficies sin actualizar ni conceder routing.
 K.8.6.1 ya cierra la matriz hermética, K.8.6.2 deja el
 runner Windows alineado con el commit guiado actual y K.8.6.3a–b prueban en CI
 independiente tanto clon limpio como actualización de checkout, con auditor
@@ -3052,7 +3053,7 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
     con inventario SHA-256
     `8efbe929662c159dce37cb6bb7ccd6d8385af7b788a26b15daf75c3c8dc7acd2`.
     Verificación: 10 tests focalizados y Ruff verdes.
-  - [ ] **P0.N.2 Detectores y diffs semánticos**: implementar probes
+  - [x] **P0.N.2 Detectores y diffs semánticos**: implementar probes
     provider-neutral, read-only e idempotentes para release nueva, instalación
     atrasada, prerelease, retirada/deprecación, incompatibilidad con el rango
     soportado, cambio de protocolo/auth/schema, MCP capabilities/tools y modelos
@@ -3060,6 +3061,19 @@ cuatro diagnósticos mono-familia no se repiten hasta cambio material.
     structured output, precio/cuota y lifecycle. `newer_available` es
     informativo; solo evidencia compatible determina `update_recommended`,
     `update_required` o `blocked`.
+    Cerrado con snapshots y diffs canónicos SHA-bound. Los readers se inyectan
+    y ejecutan una vez; solo campos allowlisted entran al snapshot. Offline,
+    timeout, 429, auth o fallo permanecen `unknown`. SemVer distingue
+    upgrade/downgrade/prerelease y las versiones opacas no se ordenan.
+    Compatibilidad explícita gobierna recommend/required/blocked; toda salida
+    conserva routing y actualización automática en falso. Catálogo compara IDs
+    exactos, aliases y siete dimensiones de metadata; MCP/API/adapter comparan
+    contratos separados. Receipt:
+    `benchmarks/results/provider_change_detection/provider-change-detection-2026-07-30.json`
+    con 19/19 escenarios, 8/8 gates y SHA-256 de archivo
+    `2789df9e2cfa9bd8f8aa8bf70e37d830db64ee502016b79249f23ca08bac3f56`.
+    Verificación focal: 21 tests y Ruff verdes; fixtures sin red, secretos,
+    login, inferencias ni mutaciones.
   - [ ] **P0.N.3 Persistencia y scheduling durable**: almacenar snapshots,
     diffs y eventos deduplicados en SQLite con fingerprint, primera/última
     observación, severidad, owner, acknowledge/snooze/resolved y próxima

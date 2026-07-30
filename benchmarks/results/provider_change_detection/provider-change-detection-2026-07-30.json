@@ -1,0 +1,243 @@
+{
+  "schema_version": "provider_change_detection_audit_v1",
+  "contract_schema_version": "provider_change_intelligence_v1",
+  "snapshot_schema_version": "provider_change_snapshot_v1",
+  "diff_schema_version": "provider_change_diff_v1",
+  "rows": [
+    {
+      "id": "no_change",
+      "surface": "cli_package",
+      "expected_decision": "none",
+      "observed_decision": "none",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "fc5226e33873f9a2beac8cb93dc6e430680b9f287265afd8f1fd227de558c8a9",
+      "ok": true
+    },
+    {
+      "id": "newer_available",
+      "surface": "cli_package",
+      "expected_decision": "newer_available",
+      "observed_decision": "newer_available",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "7c22f136d8314f54f2ad214c7123e9ca3a68bf5e46d101d9891f5af880d70bf5",
+      "ok": true
+    },
+    {
+      "id": "update_recommended",
+      "surface": "cli_package",
+      "expected_decision": "update_recommended",
+      "observed_decision": "update_recommended",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "690972999c3b71765678cd86ae7cfcd9616d248ae7e18506b908fb6bd3a661b7",
+      "ok": true
+    },
+    {
+      "id": "update_required",
+      "surface": "cli_package",
+      "expected_decision": "update_required",
+      "observed_decision": "update_required",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "cdc0ca0a313266af7c3f517d5e8a571524ee186d68218846ad35dd05462a9f34",
+      "ok": true
+    },
+    {
+      "id": "installed_incompatible",
+      "surface": "cli_package",
+      "expected_decision": "blocked",
+      "observed_decision": "blocked",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "b0d5c54606135f24570d59cd0614a438b50cd47614674583df26684c1f160a7e",
+      "ok": true
+    },
+    {
+      "id": "installed_deprecated",
+      "surface": "cli_package",
+      "expected_decision": "update_required",
+      "observed_decision": "update_required",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "dcba2226709436bde4ecc59bff1352e5ebc76081a9e79c84663e4dfd03efa7ad",
+      "ok": true
+    },
+    {
+      "id": "installed_retired",
+      "surface": "cli_package",
+      "expected_decision": "blocked",
+      "observed_decision": "blocked",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "a699a365dedda7a771e095d71b51561d7062b94035528b164ca0d13b079ea79f",
+      "ok": true
+    },
+    {
+      "id": "prerelease",
+      "surface": "cli_package",
+      "expected_decision": "newer_available",
+      "observed_decision": "newer_available",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "4e39bbeb50eb5034c76f2626ef1ca4844bcebd48ea046d50c8dc268fb0809411",
+      "ok": true
+    },
+    {
+      "id": "downgrade",
+      "surface": "cli_package",
+      "expected_decision": "newer_available",
+      "observed_decision": "newer_available",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "a3a2514cb120ec5592c1f723f9eb1a2cc0e565c8d3f370cb09cbe3a7a9887764",
+      "ok": true
+    },
+    {
+      "id": "offline",
+      "surface": "cli_package",
+      "expected_decision": "unknown",
+      "observed_decision": "unknown",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "192b0ae0bb86436436c447c14421845146810ef60e66f163a0feeb6662245b7c",
+      "ok": true
+    },
+    {
+      "id": "rate_limited",
+      "surface": "sdk_api",
+      "expected_decision": "unknown",
+      "observed_decision": "unknown",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "886555e6ea32d926f8c86f499729c2e6e89731aca85169d415da63726a932122",
+      "ok": true
+    },
+    {
+      "id": "auth_required",
+      "surface": "model_catalog",
+      "expected_decision": "unknown",
+      "observed_decision": "unknown",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "481b7a418d2b3e49838e582bdc06577e926ef2fc2b3846d2d0877b88cb543199",
+      "ok": true
+    },
+    {
+      "id": "mcp_tools",
+      "surface": "mcp_server",
+      "expected_decision": "blocked",
+      "observed_decision": "blocked",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "5ad8656165145b3935265b56e5f24add569fed196a06120a76aee4e72f5e300d",
+      "ok": true
+    },
+    {
+      "id": "api_schema",
+      "surface": "sdk_api",
+      "expected_decision": "blocked",
+      "observed_decision": "blocked",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "43957ed640f400287fe886abfd1c58d1f46371aa475d114da4b7880eab131cfb",
+      "ok": true
+    },
+    {
+      "id": "adapter_contract",
+      "surface": "internal_adapter",
+      "expected_decision": "update_required",
+      "observed_decision": "update_required",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "04c5335b28149af5ce053e913f6e9d7bfda2b1fd3f83ec6431a63e2005e11f6e",
+      "ok": true
+    },
+    {
+      "id": "model_added",
+      "surface": "model_catalog",
+      "expected_decision": "newer_available",
+      "observed_decision": "newer_available",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "8f17444a094b73695e2b607294931cb4b64df825924c07178a793cd5f14b9ba7",
+      "ok": true
+    },
+    {
+      "id": "model_removed",
+      "surface": "model_catalog",
+      "expected_decision": "blocked",
+      "observed_decision": "blocked",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "6d39594b20964d216630b91a7c9ac3ceec3354bf1807a521a9ce3dc9fdf7474f",
+      "ok": true
+    },
+    {
+      "id": "model_renamed",
+      "surface": "model_catalog",
+      "expected_decision": "newer_available",
+      "observed_decision": "newer_available",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "6883c62c6e5fe881b855595a7178eb63cbf0272f1a3e5fd5041c638494f13076",
+      "ok": true
+    },
+    {
+      "id": "model_metadata",
+      "surface": "model_catalog",
+      "expected_decision": "blocked",
+      "observed_decision": "blocked",
+      "expected_kinds_present": true,
+      "routing_change_allowed": false,
+      "automatic_update_allowed": false,
+      "diff_sha256": "29d227cfbf2ca747eb04b562205dfc087942add2e46437550b5e6d1defa2807c",
+      "ok": true
+    }
+  ],
+  "checks": {
+    "fixture_matrix_green": true,
+    "all_surfaces_exercised": true,
+    "unavailable_is_unknown": true,
+    "release_is_not_automatic": true,
+    "discovery_never_changes_routing": true,
+    "model_lifecycle_coverage": true,
+    "protocol_and_schema_coverage": true,
+    "diffs_are_sha_bound": true
+  },
+  "summary": {
+    "cases": 19,
+    "passed": 19,
+    "checks_passed": 8,
+    "checks_total": 8,
+    "detectors_ready": true
+  },
+  "scope": {
+    "fixtures_only": true,
+    "read_only": true,
+    "network_attempted": false,
+    "secrets_read": false,
+    "login_attempted": false,
+    "inference_attempted": false,
+    "updates_attempted": false
+  }
+}

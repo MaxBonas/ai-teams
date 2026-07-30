@@ -1862,3 +1862,20 @@ pasa 7/7 y sella el inventario
 Pasan 10 tests focalizados. Siguiente unidad: P0.N.2, probes read-only y diff
 semántico sobre este contrato; no implementar todavía persistencia/scheduling
 de N.3 ni actualizaciones automáticas.
+
+P0.N.2 queda cerrado con `provider_change_snapshot_v1` y
+`provider_change_diff_v1`. Los readers provider-specific se inyectan en un
+probe neutral de una sola llamada; la normalización rechaza campos secretos o
+fuera de dimensión. Timeout/offline/429/auth/fallo quedan `unknown`.
+La comparación distingue upgrade, downgrade, prerelease, incompatibilidad,
+deprecación/retirada y release; una versión opaca no se ordena artificialmente.
+MCP, API/schema, adapter y catálogo tienen diffs propios. Catálogo detecta
+alta, baja, rename/alias y cambios de contexto, tools, structured output,
+precio, cuota y lifecycle. `newer_available` no recomienda por sí solo y toda
+salida conserva `automatic_update_allowed=false` y
+`routing_change_allowed=false`. El receipt
+`benchmarks/results/provider_change_detection/provider-change-detection-2026-07-30.json`
+pasa 19/19 casos y 8/8 gates (SHA-256
+`2789df9e2cfa9bd8f8aa8bf70e37d830db64ee502016b79249f23ca08bac3f56`).
+Pasan 21 tests focalizados y Ruff. Siguiente unidad: P0.N.3, persistencia,
+dedupe y scheduling durable; no saltar todavía a workflow de actualización.

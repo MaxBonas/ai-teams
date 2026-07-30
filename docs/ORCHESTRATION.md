@@ -371,6 +371,27 @@ fuente no equivale a haberla consultado. Su scope sella cero red, secretos,
 login, inferencia o autoridad de routing. El receipt reproducible
 `provider-change-contract-2026-07-30.json` pasa 7/7 invariantes.
 
+P0.N.2 añade `provider_change_snapshot_v1` y `provider_change_diff_v1` en
+`aiteam/provider_change_detection.py`. Un reader específico se inyecta en el
+probe neutral y se ejecuta una vez; solo su observación allowlisted entra al
+snapshot SHA-bound. Timeout, offline, rate limit, auth ausente o fallo quedan
+`unknown`, nunca `no_change`. La comparación distingue upgrade, downgrade,
+prerelease, incompatibilidad, deprecación/retirada y release nueva. Una versión
+opaca no se ordena como SemVer. `newer_available` es solo informativo;
+`update_recommended` exige compatibilidad explícita, `update_required` además
+un requisito/lifecycle verificable, y una instalación incompatible o retirada
+queda `blocked`. Todos los estados conservan
+`automatic_update_allowed=false` y `routing_change_allowed=false`.
+
+Los diffs de MCP separan protocolo, `serverInfo`, capabilities y tools; API
+separa versión, endpoint, auth y schemas; adapter interno separa config y
+traducción. Catálogo detecta adición, retirada, rename/alias y cambios en
+contexto, tools, structured output, precio, cuota o lifecycle por ID exacto.
+Un modelo añadido queda `owner_unclassified`; no recibe roles ni calibración.
+La matriz fixture `provider-change-detection-2026-07-30.json` pasa 19/19 casos
+y 8/8 gates sin red, secretos, login, inferencias o mutaciones. N.2 no
+persiste ni agenda: esas responsabilidades empiezan en P0.N.3.
+
 El workflow es observar → confirmar → clasificar → avisar → aprobar →
 actualizar → doctor/probe → recalibrar solo el alcance afectado → aceptar o
 revertir. Modelos nuevos quedan visibles como `owner_unclassified`; una
