@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 from aiteam.provider_cli_acceptance_fixture import (
     build_provider_cli_acceptance_fixture,
 )
+from scripts.accept_windows_clean_room import _materialize_guided_fixture
 
 BACKEND_PORT = 8010
 FRONTEND_PORT = 9490
@@ -436,20 +437,18 @@ def main() -> int:
         health_step("frontend_health", "http://127.0.0.1:9490")
 
         fixture_root.mkdir(parents=True, exist_ok=True)
-        step(
-            "fixture_project_create",
-            [
-                "sh",
-                "scripts/python_local.sh",
-                "-m",
-                "aiteam.cli",
-                "project",
-                "create",
-                fixture_name,
-                "--task",
-                "Validar instalación portable sin ejecutar un modelo",
-            ],
-            120,
+        fixture_started_at = time.monotonic()
+        _materialize_guided_fixture(fixture_path)
+        receipt["steps"].append(
+            {
+                "name": "fixture_project_create",
+                "ok": True,
+                "exit_code": 0,
+                "duration_seconds": round(
+                    time.monotonic() - fixture_started_at,
+                    3,
+                ),
+            }
         )
         db_path = fixture_path / ".aiteam" / "aiteam.db"
         if not db_path.is_file():

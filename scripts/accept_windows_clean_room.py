@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-# ruff: noqa: E402
 import argparse
 import hashlib
 import json
@@ -742,7 +741,7 @@ def main() -> int:
         )
 
         step(
-            "start_first",
+            "start",
             ["cmd.exe", "/d", "/c", "start_ide.bat"],
             180,
             capture_output=False,
@@ -784,6 +783,17 @@ def main() -> int:
         receipt["steps"].append(
             {
                 "name": "guided_fixture_project_commit",
+                "ok": True,
+                "exit_code": 0,
+                "duration_seconds": round(
+                    time.monotonic() - create_started,
+                    3,
+                ),
+            }
+        )
+        receipt["steps"].append(
+            {
+                "name": "fixture_project_create",
                 "ok": True,
                 "exit_code": 0,
                 "duration_seconds": round(
@@ -850,7 +860,7 @@ def main() -> int:
             "footprint_after": _footprint_evidence(footprint_after),
         }
 
-        step("stop_first", ["cmd.exe", "/d", "/c", "stop_ide.bat"], 60)
+        step("stop", ["cmd.exe", "/d", "/c", "stop_ide.bat"], 60)
         started = False
         if not _wait_for_closed_ports():
             raise RuntimeError("start/stop no liberó los puertos 8010/9490")

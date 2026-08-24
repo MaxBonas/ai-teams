@@ -120,6 +120,15 @@ def test_release_inner_harnesses_execute_provider_cli_gate() -> None:
         assert "AITEAM_PROVIDER_CLI_FIXTURE" in source
 
 
+def test_posix_release_harness_uses_guided_project_creation() -> None:
+    source = (
+        PROJECT_ROOT / "scripts" / "accept_posix_clean_room.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_materialize_guided_fixture(fixture_path)" in source
+    assert '"aiteam.cli",\n                "project",\n                "create"' not in source
+
+
 @pytest.mark.parametrize(
     ("system", "runner_os", "runner_arch"),
     [("linux", "Linux", "X64"), ("darwin", "macOS", "ARM64")],
