@@ -129,6 +129,9 @@ def test_clean_room_source_does_not_reintroduce_legacy_project_create() -> None:
     assert '"project",\n                "create"' not in source
     assert "-m aiteam.cli project create" not in source
     assert "guided_fixture_project_commit" in source
+    assert '"name": "fixture_project_create"' in source
+    assert '"start"' in source
+    assert 'step("stop"' in source
     assert "provider_cli_clean_update_equivalence" in source
     assert "start_after_update" in source
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,20 @@ from scripts.accept_release_archive import (
     _validate_required_steps,
 )
 from scripts.accept_windows_clean_room import _is_lower_hex
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_release_acceptance_cli_imports_project_from_checkout() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/accept_release_archive.py", "--help"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_release_workspace_only_allows_direct_children(tmp_path: Path) -> None:
@@ -40,7 +56,9 @@ def test_release_cleanup_rejects_outside_and_removes_exact_child(
 ) -> None:
     child = tmp_path / "candidate"
     child.mkdir()
-    (child / "state.txt").write_text("temporary", encoding="utf-8")
+    state = child / "state.txt"
+    state.write_text("temporary", encoding="utf-8")
+    state.chmod(0o444)
 
     assert _remove_tree(child, parent=tmp_path) is True
     assert not child.exists()
@@ -100,6 +118,15 @@ def test_release_inner_harnesses_execute_provider_cli_gate() -> None:
         assert 'step(\n            "provider_cli_version_gate"' in source
         assert "build_provider_cli_acceptance_fixture" in source
         assert "AITEAM_PROVIDER_CLI_FIXTURE" in source
+
+
+def test_posix_release_harness_uses_guided_project_creation() -> None:
+    source = (
+        PROJECT_ROOT / "scripts" / "accept_posix_clean_room.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_materialize_guided_fixture(fixture_path)" in source
+    assert '"aiteam.cli",\n                "project",\n                "create"' not in source
 
 
 @pytest.mark.parametrize(
