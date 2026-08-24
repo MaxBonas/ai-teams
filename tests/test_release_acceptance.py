@@ -56,7 +56,9 @@ def test_release_cleanup_rejects_outside_and_removes_exact_child(
 ) -> None:
     child = tmp_path / "candidate"
     child.mkdir()
-    (child / "state.txt").write_text("temporary", encoding="utf-8")
+    state = child / "state.txt"
+    state.write_text("temporary", encoding="utf-8")
+    state.chmod(0o444)
 
     assert _remove_tree(child, parent=tmp_path) is True
     assert not child.exists()

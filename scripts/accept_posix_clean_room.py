@@ -10,6 +10,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -17,11 +18,14 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from aiteam.provider_cli_acceptance_fixture import (
     build_provider_cli_acceptance_fixture,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
 BACKEND_PORT = 8010
 FRONTEND_PORT = 9490
 CLI_COMMANDS = {
