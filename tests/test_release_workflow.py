@@ -30,6 +30,7 @@ def test_release_workflow_separates_read_build_from_write_publish() -> None:
     assert "scripts/accept_release_archive.py" in acceptance
     assert "--allow-preview" in acceptance
     assert "release-acceptance-receipt.json" in acceptance
+    assert "${{ runner.temp }}/release-acceptance-receipt.json" in acceptance
     assert "${{ matrix.os }}" in acceptance
 
 

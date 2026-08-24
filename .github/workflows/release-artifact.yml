@@ -195,7 +195,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: release-acceptance-${{ needs.artifact.outputs.version }}-${{ matrix.os }}
-          path: ${{ runner.temp }}\release-acceptance-receipt.json
+          path: ${{ runner.temp }}/release-acceptance-receipt.json
           if-no-files-found: error
           retention-days: 30
 

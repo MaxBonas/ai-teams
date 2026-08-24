@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -13,9 +14,14 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from aiteam.release_artifact import ReleaseArtifactError, verify_release_artifact
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from aiteam.release_artifact import (
+    ReleaseArtifactError,
+    verify_release_artifact,
+)
 
 
 def _acceptance_script_name(platform_name: str = os.name) -> str:
@@ -41,9 +47,16 @@ def _remove_tree(path: Path, *, parent: Path) -> bool:
     if not resolved.exists():
         return True
     last_error: OSError | None = None
+
+    def remove_readonly(
+        function: Any, blocked_path: str, error_info: tuple[type[BaseException], BaseException, Any]
+    ) -> None:
+        os.chmod(blocked_path, stat.S_IWRITE)
+        function(blocked_path)
+
     for _ in range(5):
         try:
-            shutil.rmtree(resolved)
+            shutil.rmtree(resolved, onerror=remove_readonly)
             return True
         except OSError as exc:
             last_error = exc
