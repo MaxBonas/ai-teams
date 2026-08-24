@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,20 @@ from scripts.accept_release_archive import (
     _validate_required_steps,
 )
 from scripts.accept_windows_clean_room import _is_lower_hex
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_release_acceptance_cli_imports_project_from_checkout() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/accept_release_archive.py", "--help"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_release_workspace_only_allows_direct_children(tmp_path: Path) -> None:

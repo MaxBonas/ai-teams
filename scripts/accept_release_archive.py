@@ -13,9 +13,14 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from aiteam.release_artifact import ReleaseArtifactError, verify_release_artifact
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from aiteam.release_artifact import (
+    ReleaseArtifactError,
+    verify_release_artifact,
+)
 
 
 def _acceptance_script_name(platform_name: str = os.name) -> str:
